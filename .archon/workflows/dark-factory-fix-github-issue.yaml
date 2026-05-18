@@ -23,8 +23,10 @@ description: |
   - All other nodes still reference the language-agnostic bundled `archon-*` commands.
     Fork them later if they drift.
 
-provider: claude
-model: sonnet
+# Provider routing: Pi (Kimi K2.6) is the workhorse for every node; the plan
+# node overrides to Claude/Opus for deep reasoning. See the `plan` node below.
+provider: pi
+model: kimi-coding/kimi-for-coding
 
 nodes:
   # ═══════════════════════════════════════════════════════════════
@@ -50,7 +52,6 @@ nodes:
   - id: classify-issue
     command: dark-factory-classify-issue
     depends_on: [fetch-issue]
-    model: haiku
     allowed_tools: []
     output_format:
       type: object
@@ -83,8 +84,12 @@ nodes:
     when: "$classify-issue.output.issue_type == 'bug'"
     context: fresh
 
+  # Opus reasoning node — the one node that routes to Claude/Anthropic instead
+  # of Pi/Kimi. Planning is where stronger reasoning changes the outcome.
   - id: plan
     command: archon-create-plan
+    provider: claude
+    model: opus
     depends_on: [classify-issue, web-research]
     when: "$classify-issue.output.issue_type != 'bug'"
     context: fresh
@@ -172,7 +177,6 @@ nodes:
   - id: review-classify
     command: dark-factory-review-classify
     depends_on: [review-scope]
-    model: haiku
     allowed_tools: []
     context: fresh
     output_format:
