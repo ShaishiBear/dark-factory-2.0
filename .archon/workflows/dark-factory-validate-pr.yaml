@@ -939,14 +939,33 @@ nodes:
   - id: teardown-app
     bash: |
       set +e
-      if [ -f "$ARTIFACTS_DIR/.backend-pid" ]; then
-        BACKEND_PID=$(cat "$ARTIFACTS_DIR/.backend-pid")
-        kill "$BACKEND_PID" 2>/dev/null && echo "killed backend PID $BACKEND_PID" || echo "backend already dead"
-      fi
-      if [ -f "$ARTIFACTS_DIR/.frontend-pid" ]; then
-        FRONTEND_PID=$(cat "$ARTIFACTS_DIR/.frontend-pid")
-        kill "$FRONTEND_PID" 2>/dev/null && echo "killed frontend PID $FRONTEND_PID" || echo "frontend already dead"
-      fi
+      # `uv run uvicorn` and `bun run dev` spawn the real server as a CHILD of
+      # the recorded wrapper PID. A plain `kill <wrapper>` can leave that child
+      # orphaned and still bound to its port — a leaked uvicorn squatting :8000
+      # is what silently broke validation runs for weeks. So: kill the children
+      # too, then free the recorded ports outright as a PID-independent backstop.
+      for pidfile in .backend-pid .frontend-pid; do
+        if [ -f "$ARTIFACTS_DIR/$pidfile" ]; then
+          PID=$(cat "$ARTIFACTS_DIR/$pidfile")
+          pkill -TERM -P "$PID" 2>/dev/null
+          kill -TERM "$PID" 2>/dev/null && echo "SIGTERM -> $pidfile ($PID)" || echo "$pidfile already dead"
+        fi
+      done
+      sleep 2
+      # Port-based backstop: free whatever still holds the ports allocate-ports
+      # recorded, regardless of PID bookkeeping. SIGTERM first, then SIGKILL any
+      # straggler. Safe — these ports are exclusive to this run's app.
+      for portfile in .backend-port .frontend-port; do
+        [ -f "$ARTIFACTS_DIR/$portfile" ] || continue
+        PORT=$(cat "$ARTIFACTS_DIR/$portfile")
+        fuser -k -TERM "${PORT}/tcp" 2>/dev/null && echo "freed port $PORT (TERM)"
+      done
+      sleep 2
+      for portfile in .backend-port .frontend-port; do
+        [ -f "$ARTIFACTS_DIR/$portfile" ] || continue
+        PORT=$(cat "$ARTIFACTS_DIR/$portfile")
+        fuser -k -KILL "${PORT}/tcp" 2>/dev/null && echo "freed port $PORT (KILL)"
+      done
       # Best-effort close any lingering agent-browser session
       agent-browser close 2>/dev/null || true
       echo "TEARDOWN_COMPLETE"
