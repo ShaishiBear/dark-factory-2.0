@@ -35,8 +35,9 @@
       "id": "lock-key-is-constant",
       "file": "app/backend/rate_limit.py",
       "find": "    key = hi ^ lo",
-      "replace": "    key = 0",
-      "why": "An output made constant. Every user now serialises on ONE advisory lock: the limiter still works for a single user and still passes its unit tests, but under concurrency unrelated users block each other, and a shared lock is one refactor away from a shared COUNT."
+      "replace": "    key = (hi ^ lo) % 1",
+      "why": "An output made constant. Every user now serialises on ONE advisory lock: the limiter still works for a single user and still passes its unit tests, but under concurrency unrelated users block each other, and a shared lock is one refactor away from a shared COUNT.",
+      "_why_this_shape": "`% 1` rather than `= 0` ON PURPOSE. The obvious mutation leaves `hi` and `lo` unused, so ruff flags it and STATIC catches a defect that was meant to probe the holdout. This version still reads both halves and still type-checks, so it is invisible to every rung below the independence line - which is the only way this defect measures the thing it was written to measure."
     },
     {
       "id": "uuid-normaliser-dropped",
