@@ -78,3 +78,15 @@ app/screenshots/test-*
 # (`reverse_proxy app-blue:8000`) when the file is absent; the
 # upstream.conf.example next to it is the human-readable reference shape.
 deploy/upstream.conf
+
+# The stop button's local half. Presence halts the factory; never commit one.
+.factory-stop
+
+# Credential-shaped paths. The danger is the file that appears for the first time
+# inside a `git add -A` in a workflow nobody is watching - on a public repo that is
+# publication, and rotating afterwards is the cleanup, not the fix.
+credentials.json
+service-account.json
+config/secrets.yml
+*.pem
+*.key

@@ -215,6 +215,26 @@ Escalation means: apply the `factory:needs-human` label, post a comment summariz
 - **PR size: 500 lines.** See section 2.
 - **Flood protection.** Non-owner GitHub accounts are capped at 3 issues per UTC calendar day. Excess issues get labeled `factory:rate-limited` and skipped until the next UTC day, when the triage workflow removes the label and re-evaluates them. The repository owner (`coleam00`) is exempt. See section 3.
 
+### The stop button
+
+Two mechanisms, checked by `scripts/factory-stop.sh` before the orchestrator reads
+anything else. The orchestrator lives on the VPS; the **check** lives in this repo so it
+is versioned, readable, and reviewable alongside everything else it governs.
+
+1. **A local kill file** — `touch .factory-stop` in the orchestrator's working copy.
+   Works with the network down, which is when you most want it.
+2. **A remote label** — open any issue and label it `factory:stop`. Reachable from a
+   phone, which is the entire reason it exists at 2am.
+
+**The remote half fails closed.** Any error listing the label counts as stopped. The
+obvious design — "run while the label is absent" — is the wrong polarity: an absent
+label cannot be distinguished from an API call that failed to return it, so a network
+blip reads as "carry on" and the stop button works only while the network does.
+
+**Tested on purpose 2026-08-12:** the kill file halts it, an unreadable stop state halts
+it, and removing both resumes it. A stop button that has never been used is a stop
+button nobody knows works.
+
 ### Orchestrator priority order
 
 When the orchestrator runs and nothing is already in flight, it picks exactly one action in this order:
