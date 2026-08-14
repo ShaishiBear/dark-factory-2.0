@@ -44,19 +44,29 @@ report its version, and MISSION hard invariant 2 (no anonymous access to chat) h
 against a live process rather than against a mock. Five assertions. Real, worth having,
 and **a smaller claim than section 4.**
 
-Also absent, and named rather than quietly missing:
+## What exists above the independence line
 
-- **No holdout.** `.factory/holdout/` does not exist. Everything this harness runs is
-  something the builder can read, which means everything here sits inside its
-  optimisation loop. The independence property in FACTORY_RULES section 9 is enforced
-  today by the *workflow* - fresh contexts, base-branch governance, the artifact
-  tripwire - not by read-blocked assertion files.
-- **No mutation set.** Nothing here has ever been shown to fail on purpose. A gate that
-  has never gone red is a gate nobody has tested.
-- **No ratchet.** Nothing stops 549 becoming 400 one deleted assertion at a time.
+```
+python .factory/holdout/run.py     HOLDOUT_PASSED scenarios=3 assertions=9
+python harness/mutations/run.py    MUTATIONS_TOTAL=4 CAUGHT=4 NOT_INJECTED=0
+```
 
-`ci.py` prints `HOLDOUT_ABSENT` and `MUTATIONS_ABSENT` on a full run for exactly this
-reason: an absent rung is a fact in the log, never a silent pass.
+- **Holdout** - `.factory/holdout/run.py`, three composed scenarios aimed at MISSION
+  hard invariants 1 and 2. Read its header before citing a green result: **it was
+  written 2026-08-13, after the code it judges.** That makes it a floor from today
+  forward, with authority over future diffs and none over the 390 PRs already in `main`.
+- **Mutation set** - `harness/mutations/`, four defects, all four caught.
+- **Ratchet** - `.factory/locks/floor.json`, floors set equal to what is observed today
+  so the slack is zero.
+
+**The number that matters is 1.** Of four mutations, exactly one is caught *above* the
+independence line - `lock-key-is-constant`, by the holdout. The other three are caught by
+static or unit, which the builder can read and edit. The cause is the shape of those
+defects rather than a weakness in the holdout: they break type-checking rather than
+behaviour, and the compiler finds those. See `.factory/decisions.md` D-003.
+
+Re-run the mutation set after any harness change. If nothing is caught above the line,
+the gate has become entirely dependent on checks the builder controls.
 
 ## The validation env
 

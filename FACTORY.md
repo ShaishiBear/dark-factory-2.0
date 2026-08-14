@@ -73,18 +73,31 @@ Real, measured, and reproducible: 390 backend tests + 159 frontend, ruff + ruff-
 mypy + tsc + biome. The full run additionally starts the backend and asserts five
 HTTP-level checks, including MISSION hard invariant 2 against a live process.
 
+Above the independence line, added the same day:
+
+```
+python .factory/holdout/run.py     HOLDOUT_PASSED scenarios=3 assertions=9
+python harness/mutations/run.py    MUTATIONS_TOTAL=4 CAUGHT=4 NOT_INJECTED=0
+```
+
+`.factory/holdout/` holds three composed scenarios aimed at MISSION hard invariants 1
+and 2, `harness/mutations/` holds four defects that all go red, and
+`.factory/locks/floor.json` is the ratchet with zero slack.
+
+**Read the holdout's header before citing it.** It was written 2026-08-13, after the
+code it judges - so it is a floor from today forward, with authority over future diffs
+and none over the 390 PRs already in `main`. A holdout's first rule is that it precedes
+the work; stating plainly that this one does not is the difference between a holdout and
+a directory named like one.
+
 **What is still missing, named rather than quietly absent:**
 
-| Gap | Consequence |
-|---|---|
-| Section 4's journey is in the workflow, not in `harness/e2e.py` | Two definitions of "the app works". The workflow's is authoritative; the harness's is a floor |
-| No `.factory/holdout/` | Every check `harness/` runs is one the builder can read. Independence here comes from the *workflow* - fresh contexts, base-branch governance, the artifact tripwire - not from read-blocked files |
-| No mutation set | This gate has never been shown to fail on purpose |
-| No ratchet | Nothing stops 549 becoming 400 one deleted assertion at a time |
-
-`ci.py` prints `HOLDOUT_ABSENT` and `MUTATIONS_ABSENT` on every full run, because an
-absent rung has to be a fact in the log rather than a silent pass. That is the same rule
-this repo has filed three of its own incidents under.
+| Gap | Consequence | Tracked |
+|---|---|---|
+| Section 4's journey is in the workflow, not in `harness/e2e.py` | Two definitions of "the app works". The workflow's is authoritative; the harness's is a floor | D-002 |
+| Only **1 of 4** mutations is caught above the independence line | The gate depends mostly on checks the builder can read and edit | D-003 |
+| No e2e floor in the ratchet | The number has never been observed - it needs the validation env, so measure it on the VPS | D-001 |
+| No mutation probes the RAG or citation path | The product's actual value is unexercised by the thing that measures the harness | D-003 |
 
 ## Incident log
 
