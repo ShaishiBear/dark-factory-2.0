@@ -90,3 +90,7 @@ service-account.json
 config/secrets.yml
 *.pem
 *.key
+
+# Factory run artifacts. Per-run scratch; the durable record is the PR and the issue.
+.factory/runs/
+.factory/locks-runtime/
