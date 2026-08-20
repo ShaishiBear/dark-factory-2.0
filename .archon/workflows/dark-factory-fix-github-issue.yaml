@@ -3,25 +3,22 @@ description: |
   Use when: Dark Factory orchestrator wants to implement an accepted issue in DynaChat
             (Python/FastAPI backend + React/TypeScript frontend).
   Triggers: Orchestrator dispatch when an issue is labeled `factory:accepted`.
-  Does: Classifies the issue, researches context, investigates (bugs) or plans (features),
-        implements the fix with Python + Bun-aware tooling, runs the Dark Factory validator
-        (ruff/mypy/pytest + tsc/biome/vitest), creates a draft PR, runs smart review,
-        self-fixes findings, simplifies, and reports back to the issue.
+  Does: Keeps Cole's orchestration/validation control plane, but runs research,
+        investigation/specification, implementation/TDD, review, self-fix, and simplification
+        through Matt Pocock's pinned engineering skills. The independent validator remains
+        unchanged and judges only the resulting PR.
   NOT for: Triage (use dark-factory-triage), PR validation (use dark-factory-validate-pr),
            PR fix-up from failed validation (use dark-factory-fix-pr).
 
   This is a fork of the bundled `archon-fix-github-issue` that the Dark Factory owns.
   It can evolve independently from the bundled default. The key divergences:
   - Every AI node references a `.md` command file (no inline prompts — Dark Factory rule).
-  - Implementation uses `dark-factory-fix-issue` (Python + Bun dep install, DynaChat-specific
-    sanity checks).
-  - Validation uses `dark-factory-validate` (ruff/mypy/pytest + tsc/biome/vitest per CLAUDE.md
-    + RAG invariant guard) instead of the bundled JS-only `archon-validate`.
-  - The four prompts that were inline in the bundled workflow (extract-issue-number,
-    classify, create-pr, review-classify) are now separate command files under
-    `.archon/commands/dark-factory-*.md`.
-  - All other nodes still reference the language-agnostic bundled `archon-*` commands.
-    Fork them later if they drift.
+  - Builder engineering nodes use the pinned `mattpocock-skills` plugin as their operating
+    procedure; project-specific commands only adapt artifacts and Dark Factory constraints.
+  - Validation remains `dark-factory-validate`; PR validation/holdout/mutations/ratchet are
+    intentionally outside this workflow and unchanged.
+  - The factory still owns worktrees, GitHub state, model routing, draft PRs, review synthesis,
+    self-fix, simplification, reporting, and cleanup.
 
 provider: claude
 model: sonnet
@@ -64,13 +61,28 @@ nodes:
           type: string
       required: [issue_type, title, reasoning]
 
+  - id: engineering-preflight
+    bash: |
+      set -euo pipefail
+      test -f docs/agents/issue-tracker.md
+      test -f docs/agents/domain.md
+      test -f docs/agents/matt-skills.md
+      claude plugin list --json | python -c 'import json,sys; data=json.load(sys.stdin); assert "mattpocock-skills" in str(data)' || {
+        echo "Pinned Matt Pocock skills plugin is not installed. See docs/agents/matt-skills.md." >&2
+        exit 1
+      }
+    depends_on: [classify-issue]
+    timeout: 20000
+
   # ═══════════════════════════════════════════════════════════════
   # PHASE 2: RESEARCH
   # ═══════════════════════════════════════════════════════════════
 
   - id: web-research
-    command: archon-web-research
-    depends_on: [classify-issue]
+    command: dark-factory-engineering-research
+    depends_on: [engineering-preflight]
+    skills:
+      - mattpocock-skills:research
     context: fresh
 
   # ═══════════════════════════════════════════════════════════════
@@ -78,20 +90,28 @@ nodes:
   # ═══════════════════════════════════════════════════════════════
 
   - id: investigate
-    command: archon-investigate-issue
+    command: dark-factory-engineering-investigate
     depends_on: [classify-issue, web-research]
     when: "$classify-issue.output.issue_type == 'bug'"
+    skills:
+      - mattpocock-skills:diagnosing-bugs
+      - mattpocock-skills:domain-modeling
+      - mattpocock-skills:codebase-design
     context: fresh
 
   - id: plan
-    command: archon-create-plan
+    command: dark-factory-engineering-plan
     depends_on: [classify-issue, web-research]
     when: "$classify-issue.output.issue_type != 'bug'"
+    skills:
+      - mattpocock-skills:to-spec
+      - mattpocock-skills:domain-modeling
+      - mattpocock-skills:codebase-design
     context: fresh
 
   # Bridge: ensure investigation.md exists for the implement step
-  # dark-factory-fix-issue reads from $ARTIFACTS_DIR/investigation.md
-  # archon-create-plan writes to $ARTIFACTS_DIR/plan.md
+  # engineering implementation reads investigation.md or plan.md
+  # engineering plan writes plan.md
   # This node copies plan.md → investigation.md when the plan path was taken.
   - id: bridge-artifacts
     bash: |
@@ -108,13 +128,47 @@ nodes:
     trigger_rule: one_success
     timeout: 10000
 
+  - id: scope
+    command: dark-factory-engineering-scope
+    depends_on: [bridge-artifacts]
+    skills:
+      - mattpocock-skills:to-tickets
+      - mattpocock-skills:codebase-design
+    context: fresh
+    output_format:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["implement", "decompose"]
+        reason:
+          type: string
+        estimated_change_lines:
+          type: integer
+          minimum: 0
+      required: [action, reason, estimated_change_lines]
+
+  - id: decompose
+    command: dark-factory-engineering-decompose
+    depends_on: [scope]
+    when: "$scope.output.action == 'decompose'"
+    skills:
+      - mattpocock-skills:to-tickets
+    context: fresh
+
   # ═══════════════════════════════════════════════════════════════
   # PHASE 4: IMPLEMENT (Dark Factory fork — Python + Bun-aware)
   # ═══════════════════════════════════════════════════════════════
 
   - id: implement
-    command: dark-factory-fix-issue
-    depends_on: [bridge-artifacts]
+    command: dark-factory-engineering-implement
+    depends_on: [scope]
+    when: "$scope.output.action == 'implement'"
+    skills:
+      - mattpocock-skills:implement
+      - mattpocock-skills:tdd
+      - mattpocock-skills:codebase-design
+      - mattpocock-skills:domain-modeling
     context: fresh
 
   # ═══════════════════════════════════════════════════════════════
@@ -205,8 +259,12 @@ nodes:
 
   # Code review always runs — mandatory
   - id: code-review
-    command: archon-code-review-agent
+    command: dark-factory-engineering-review
     depends_on: [review-classify]
+    skills:
+      - mattpocock-skills:code-review
+      - mattpocock-skills:domain-modeling
+      - mattpocock-skills:codebase-design
     context: fresh
 
   - id: error-handling
@@ -244,8 +302,12 @@ nodes:
     context: fresh
 
   - id: self-fix
-    command: archon-self-fix-all
+    command: dark-factory-engineering-self-fix
     depends_on: [synthesize]
+    skills:
+      - mattpocock-skills:diagnosing-bugs
+      - mattpocock-skills:tdd
+      - mattpocock-skills:implement
     context: fresh
 
   # ═══════════════════════════════════════════════════════════════
@@ -255,6 +317,8 @@ nodes:
   - id: simplify
     command: archon-simplify-changes
     depends_on: [self-fix]
+    skills:
+      - mattpocock-skills:codebase-design
     context: fresh
 
   # ═══════════════════════════════════════════════════════════════
