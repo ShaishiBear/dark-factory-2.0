@@ -1091,6 +1091,25 @@ nodes:
 
       case "$DECISION" in
         approve)
+          # FINAL MERGE AUTHORITY: an AI approve verdict is necessary but not sufficient.
+          # Execute verifier bytes from current main outside the PR worktree, restore
+          # validator-only infra overlays, then require exact-head RED/GREEN replay,
+          # the full harness, ratchet floors, holdout and all mutation probes.
+          REPO_ROOT=$(git rev-parse --show-toplevel)
+          git fetch origin main --quiet
+          git reset -- .archon/ .claude/ 2>/dev/null || true
+          git checkout -- .archon/ .claude/ 2>/dev/null || true
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "EVIDENCE_GATE_REFUSED: worktree is dirty before authoritative harness" >&2
+            git status --short >&2
+            exit 1
+          fi
+          git show origin/main:scripts/factory_evidence.py > "$ARTIFACTS_DIR/factory_evidence.py"
+          FACTORY_REPO_ROOT="$REPO_ROOT" python3 "$ARTIFACTS_DIR/factory_evidence.py" \
+            --pr "$PR_NUMBER" --verdict "$VERDICT_FILE" \
+            --output "$ARTIFACTS_DIR/evidence-bundle.json"
+          EVIDENCE_SHA=$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$ARTIFACTS_DIR/evidence-bundle.json")
+
           BODY=$(printf '%s\n' \
             "**Dark Factory Validation**: APPROVED (${PASS_LABEL})" \
             "" \
@@ -1103,6 +1122,7 @@ nodes:
             "- Static checks: pass" \
             "- Tests: pass or legitimately skipped" \
             "- Code review: no critical/high findings" \
+            "- Exact-head evidence bundle SHA-256: ${EVIDENCE_SHA}" \
             "" \
             "Auto-merging via squash.")
           post_review --approve "$BODY"
@@ -1240,4 +1260,4 @@ nodes:
           ;;
       esac
     depends_on: [teardown-app]
-    timeout: 30000
+    timeout: 3600000
