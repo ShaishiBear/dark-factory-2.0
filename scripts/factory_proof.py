@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, hashlib, json, re, subprocess, sys
+import argparse, hashlib, json, os, re, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +40,22 @@ def changed(parent='HEAD^',head='HEAD'):
     return sorted(x for x in out.splitlines() if x)
 def write(path,obj): Path(path).write_text(canonical(obj),encoding='utf-8')
 
+def impact_check(output):
+    artifacts=os.environ.get('ARTIFACTS_DIR','').strip()
+    if not artifacts: return None
+    context=Path(artifacts)/'context.json'
+    if not context.is_file(): die('factory context missing before GREEN impact check')
+    target=Path(output).with_suffix('.impact.json')
+    argv=[sys.executable,str(ROOT/'scripts'/'factory_impact.py'),'diff','--context',str(context),'--output',str(target)]
+    base=os.environ.get('FACTORY_BASE_REF','').strip()
+    if base: argv.extend(['--base-ref',base])
+    p=subprocess.run(argv,cwd=ROOT,text=True,capture_output=True)
+    text=(p.stdout or '')+(p.stderr or '')
+    if p.returncode: die('impact gate failed: '+text[-1200:])
+    if p.stdout.strip(): print(p.stdout.strip())
+    value=load(str(target))
+    return {'sha256':digest(value),'risk':value.get('risk'),'artifact':str(target)}
+
 def red(a):
     clean(); s=spec(a.spec); actual=changed(); declared=sorted(s['files'])
     if actual!=declared: die(f'test checkpoint changed {actual}; declared test files are {declared}')
@@ -61,7 +77,9 @@ def green(a):
     after=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(); clean()
     if before!=after: die('GREEN command moved HEAD')
     if rc!=0: die('GREEN command failed: '+out[-1200:])
+    impact=impact_check(a.output)
     result=dict(p,green_commit=before,green_exit=rc,green_output_sha256=hashlib.sha256(out.encode()).hexdigest())
+    if impact: result['change_impact']=impact
     write(a.output,result); print(f"GREEN_PROVED tests={len(p['files'])} commit={before}")
 
 def attach(a):
