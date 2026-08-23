@@ -24,14 +24,15 @@ Append only. Newest at the bottom.
 **Status:** open · **Raised:** 2026-08-13 · **Blocks:** nothing today
 
 `.factory/locks/floor.json` carries floors for unit, static, holdout and mutations, and
-deliberately none for e2e. `harness/e2e.py` asserts five HTTP-level checks, but running
-them requires the validation env that lives outside the repo, so the number has never
-been observed on a real run.
+deliberately none for e2e. The canonical `harness/e2e.py` journey now includes the live
+API floor plus the browser login → conversation → streaming → citation → exact YouTube
+timestamp path, but that expanded journey has not yet been observed on the validation
+host.
 
 **Recommendation:** run `python harness/ci.py` on the VPS, where
-`/opt/dark-factory/validation.env` exists, and add `e2e_steps` to the lock at whatever it
-actually reports. Not before - a floor nobody has watched the harness clear is the same
-kind of claim this directory exists to refuse.
+`/opt/dark-factory/validation.env` and the dedicated validation account exist, and add
+`e2e_steps` to the lock at whatever it actually reports. Not before - a floor nobody has
+watched the harness clear is the same kind of claim this directory exists to refuse.
 
 This is a **judgement** value, so the factory may not set it. That is the correct
 behaviour and it is why this entry exists rather than a number.
@@ -40,19 +41,21 @@ behaviour and it is why this entry exists rather than a number.
 
 ## D-002 · Section 4's journey lives in two places
 
-**Status:** open · **Raised:** 2026-08-13 · **Blocks:** nothing today, everything eventually
+**Status:** implemented, pending validation-host observation · **Raised:** 2026-08-13 · **Structural fix:** 2026-08-23
 
-`FACTORY_RULES.md` §4 defines the eleven-step agent-browser journey. It runs in the
-validate-pr workflow's `behavioral-e2e` node, and it is the check with real authority
-over a merge. `harness/e2e.py` asserts a much smaller HTTP-level floor.
+Originally, `FACTORY_RULES.md` §4's agent-browser journey lived only in the validate-pr
+workflow while `harness/e2e.py` asserted a smaller HTTP-level floor. That gave "the app
+works" two definitions.
 
-So "the app works" has two definitions, and only one of them is in the harness the
-`build-dark-factory` skill expects to be authoritative.
+The canonical regression now lives in `harness/e2e.py` and is consumed by the full
+`harness/ci.py` ladder. It deterministically drives login, a locked RAG question,
+streaming, citation metadata, transcript evidence, the citation modal, and the exact
+YouTube video/timestamp link. The issue-specific `behavioral-e2e` workflow reviewer is
+kept as an additional adversarial holdout rather than as a second canonical definition.
 
-**Recommendation:** port §4 into `harness/e2e.py` and have the workflow node call the
-harness rather than reimplement it, so there is one definition. Until then the workflow's
-version is authoritative and the harness's is a floor - stated in `harness/README.md` so
-nobody reads a green `GATE_OK` as the journey having passed.
+**Remaining evidence:** this code path still has to complete on the validation VPS before
+D-001 can gain an observed E2E floor. Structural implementation is not evidence that the
+host has successfully run it.
 
 ---
 
