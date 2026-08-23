@@ -198,7 +198,11 @@ def reap(active_ttl: int, legacy_ttl: int) -> int:
     for issue in issues:
         number = int(issue["number"])
         labels = {str(label.get("name")) for label in issue.get("labels", [])}
-        comments = run_gh(["api", f"repos/{repo}/issues/{number}/comments?per_page=100"])
+        pages = run_gh([
+            "api", "--paginate", "--slurp",
+            f"repos/{repo}/issues/{number}/comments?per_page=100",
+        ])
+        comments = [comment for page in pages for comment in page]
         lease, marker_seen, comment_id = latest_lease(comments)
         handoff = pr_handoff(number, prs)
         action, reason = decide_reap(
@@ -209,6 +213,7 @@ def reap(active_ttl: int, legacy_ttl: int) -> int:
             protected += action == "protect"
             print(f"STALL_{action.upper()} issue=#{number} reason={reason!r} handoff={handoff}")
             continue
+        run_gh(["issue", "edit", str(number), "--remove-label", "factory:in-progress"], False)
         if lease is not None and comment_id is not None:
             lease = dict(lease)
             lease.update({"heartbeat_at": iso(current), "stage": "reaped", "state": "reaped"})
@@ -216,7 +221,6 @@ def reap(active_ttl: int, legacy_ttl: int) -> int:
                 "api", "--method", "PATCH", f"repos/{repo}/issues/comments/{comment_id}",
                 "-f", f"body={render(lease)}",
             ])
-        run_gh(["issue", "edit", str(number), "--remove-label", "factory:in-progress"], False)
         next_step = "PR validation has priority" if handoff == "ready" else "issue is eligible for redispatch"
         run_gh([
             "api", "--method", "POST", f"repos/{repo}/issues/{number}/comments",
