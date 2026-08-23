@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, hashlib, json, subprocess, sys
+import argparse, hashlib, json, re, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PROOF_BLOCK = re.compile(r"\n?<!-- factory-proof:start -->.*?<!-- factory-proof:end -->\n?", re.S)
 
 def die(msg): print(f"PROOF_FAIL: {msg}", file=sys.stderr); raise SystemExit(1)
 def run(argv, cwd):
     p=subprocess.run(argv,cwd=ROOT/cwd,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)
     return p.returncode,(p.stdout or '')+(p.stderr or '')
 def sha(p): return hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
+def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False)+'\n'
+def digest(v): return hashlib.sha256(canonical(v).encode()).hexdigest()
 def load(p):
     try: v=json.loads(Path(p).read_text(encoding='utf-8'))
     except Exception as e: die(f"cannot read {p}: {e}")
@@ -35,7 +38,7 @@ def clean():
 def changed(parent='HEAD^',head='HEAD'):
     out=subprocess.check_output(['git','diff','--name-only',parent,head],cwd=ROOT,text=True)
     return sorted(x for x in out.splitlines() if x)
-def write(path,obj): Path(path).write_text(json.dumps(obj,sort_keys=True,separators=(',',':'))+'\n',encoding='utf-8')
+def write(path,obj): Path(path).write_text(canonical(obj),encoding='utf-8')
 
 def red(a):
     clean(); s=spec(a.spec); actual=changed(); declared=sorted(s['files'])
@@ -61,9 +64,24 @@ def green(a):
     result=dict(p,green_commit=before,green_exit=rc,green_output_sha256=hashlib.sha256(out.encode()).hexdigest())
     write(a.output,result); print(f"GREEN_PROVED tests={len(p['files'])} commit={before}")
 
+def attach(a):
+    clean(); p=load(a.proof)
+    if p.get('green_exit')!=0 or not p.get('green_commit'): die('only a final GREEN proof can be attached')
+    raw=subprocess.check_output(['gh','pr','view',str(a.pr),'--json','body,headRefOid'],cwd=ROOT,text=True)
+    info=json.loads(raw); head=info['headRefOid']
+    local=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+    if p['green_commit']!=head or local!=head: die('final GREEN proof is not bound to current PR head')
+    block=(f"\n<!-- factory-proof:start -->\n```factory-proof\n{canonical(p).strip()}\n```\n"
+           f"proof-sha256: {digest(p)}\n<!-- factory-proof:end -->\n")
+    body=PROOF_BLOCK.sub('\n',info.get('body') or '').rstrip()+block
+    q=subprocess.run(['gh','pr','edit',str(a.pr),'--body',body],cwd=ROOT,text=True,capture_output=True)
+    if q.returncode: die('could not attach proof: '+q.stderr[-1000:])
+    print(f"PROOF_ATTACHED pr={a.pr} head={head} sha256={digest(p)}")
+
 def main():
     p=argparse.ArgumentParser(); sub=p.add_subparsers(dest='cmd',required=True)
     x=sub.add_parser('red'); x.add_argument('--spec',required=True); x.add_argument('--output',required=True); x.set_defaults(fn=red)
     x=sub.add_parser('green'); x.add_argument('--proof',required=True); x.add_argument('--output',required=True); x.set_defaults(fn=green)
+    x=sub.add_parser('attach'); x.add_argument('--proof',required=True); x.add_argument('--pr',required=True); x.set_defaults(fn=attach)
     a=p.parse_args(); a.fn(a)
 if __name__=='__main__': main()
