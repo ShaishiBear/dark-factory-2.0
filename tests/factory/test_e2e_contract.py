@@ -41,6 +41,25 @@ class E2EContractTests(unittest.TestCase):
         raw = '"Video at 12:34\\nQuoted transcript evidence"'
         self.assertEqual(factory_e2e._scalar(raw), "Video at 12:34\nQuoted transcript evidence")
 
+    def test_validator_delegates_to_one_base_branch_browser_authority(self) -> None:
+        command = (
+            ROOT / ".archon" / "commands" / "dark-factory-behavioral-e2e.md"
+        ).read_text(encoding="utf-8")
+        harness_source = (HARNESS / "e2e.py").read_text(encoding="utf-8")
+
+        self.assertIn("git archive origin/main harness", command)
+        self.assertIn('python "$HOLDOUT_ROOT/harness/e2e.py"', command)
+        self.assertIn("--backend-port", harness_source)
+        self.assertIn("--frontend-port", harness_source)
+        self.assertIn("E2E_PASSED steps=", harness_source)
+
+        for competing_procedure in (
+            "agent-browser open",
+            "agent-browser snapshot",
+            "agent-browser screenshot",
+        ):
+            self.assertNotIn(competing_procedure, command)
+
 
 if __name__ == "__main__":
     unittest.main()
