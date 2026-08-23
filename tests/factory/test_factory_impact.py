@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "factory_impact.py"
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "scripts" / "factory_impact.py"
 spec = importlib.util.spec_from_file_location("factory_impact", SCRIPT)
 assert spec and spec.loader
 impact = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(impact)
+
+proof_spec = importlib.util.spec_from_file_location("factory_proof", ROOT / "scripts" / "factory_proof.py")
+assert proof_spec and proof_spec.loader
+proof = importlib.util.module_from_spec(proof_spec)
+proof_spec.loader.exec_module(proof)
 
 
 class ImpactTests(unittest.TestCase):
@@ -43,6 +51,12 @@ class ImpactTests(unittest.TestCase):
             finally:
                 impact.ROOT = old_root
             self.assertTrue(symbols[0]["public"])
+
+    def test_green_impact_fails_closed_when_factory_context_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.dict(os.environ, {"ARTIFACTS_DIR": td}, clear=False):
+                with self.assertRaises(SystemExit):
+                    proof.impact_check(Path(td) / "green-proof.json")
 
     def test_canonical_is_stable(self) -> None:
         self.assertEqual(impact.canonical({"b": 1, "a": 2}), '{"a":2,"b":1}')
