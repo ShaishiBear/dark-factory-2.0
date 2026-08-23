@@ -1,56 +1,39 @@
 {
   "_what_this_is": [
-    "The stack-specific half of DynaChat's harness. `ci.py` is the ladder and is",
-    "identical to the one the build-dark-factory skill ships; everything that makes it",
-    "about THIS repo is in here.",
+    "The stack-specific half of DynaChat's harness. `ci.py` owns the ladder; this file",
+    "owns the repo-specific commands and the locked browser regression fixture.",
     "",
-    "Both rungs point at a small runner in harness/ rather than at a single tool,",
-    "because DynaChat is two stacks and `ci.py` runs one command per rung. The ladder",
-    "stays the same in every factory; the split lives in static.py and unit.py.",
-    "",
-    "Every command here is lifted from .archon/workflows/dark-factory-validate-pr.yaml",
-    "so there is ONE definition of a green build. Change one, change the other."
+    "The numerical floors are observed values, not aspirations. Adding checks does not",
+    "raise a floor until the validation host has actually measured the new total."
   ],
 
   "static": "python harness/static.py",
-
   "unit": "python harness/unit.py",
   "_unit_count_pattern": [
-    "unit.py sums both halves and refuses to report a number when either half fails or",
-    "reports zero. ci.py then re-emits it as the UNIT_PASSED marker the gate asserts.",
-    "Measured 2026-08-13: backend 390 + frontend 159 = 549."
+    "unit.py requires backend, frontend, and factory trust-boundary suites to run.",
+    "Measured floor remains 549 until the validation host records the expanded suite."
   ],
   "unit_count_pattern": "UNIT_PASSED tests=(\\d+)",
 
-  "_driver": [
-    "http: the FastAPI backend. /api/health, NOT /health - pointing at the wrong path",
-    "is a real incident in this repo's history (c4997c4, 2026-04-15), and it fails in",
-    "the worst way: every run dies identically, which masks whatever you were debugging.",
-    "",
-    "The backend hard-requires DATABASE_URL and friends at IMPORT time. That is why the",
-    "start command sources a validation env file that lives OUTSIDE the repo. Without",
-    "it uvicorn crashes before the health check ever answers - which is exactly the",
-    "3fc03a0 incident, where a crashed backend was scored as 'not e2e testable' and a",
-    "PR auto-merged having never been driven through a browser."
-  ],
   "driver": "http",
-  "e2e_timeout_s": 300,
+  "e2e_timeout_s": 180,
   "http": {
-    "start": "python harness/serve.py --port {port}",
+    "start": "python harness/serve.py --port {port} --with-frontend",
     "health_path": "/api/health",
     "health_contains": "ok",
-    "boot_timeout_s": 60
+    "boot_timeout_s": 90
   },
 
   "browser": {
-    "_note": [
-      "EMPTY ON PURPOSE, and this is the honest gap. The real DynaChat journey is the",
-      "11-step agent-browser path in FACTORY_RULES.md section 4, and today it lives in",
-      "the validate-pr workflow's behavioral-e2e node rather than in this harness.",
-      "harness/e2e.py asserts a genuine but much smaller HTTP-level floor.",
-      "Porting section 4 into e2e.py is the remaining work. See FACTORY.md."
-    ],
-    "install_check": "",
-    "install_hint": "npm i -g agent-browser && agent-browser install"
+    "install_check": "agent-browser --help",
+    "install_hint": "npm i -g agent-browser && agent-browser install",
+    "fixture_video_id": "pjF-0dliYhg",
+    "question": "Based on the video I just added, summarize its main topic and cite the source.",
+    "response_timeout_s": 90,
+    "_credentials": [
+      "DARK_FACTORY_E2E_EMAIL and DARK_FACTORY_E2E_PASSWORD live only in the external",
+      "validation environment. Signup is rate-limited, so the gate uses a dedicated",
+      "seeded validation account instead of manufacturing a new user on every run."
+    ]
   }
 }
