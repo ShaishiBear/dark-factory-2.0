@@ -94,6 +94,11 @@ def trust_root_touched(paths: list[str]) -> list[str]:
     return [p for p in paths if any(p == x or p.startswith(x) for x in TRUST_ROOT)]
 
 
+def trust_root_drift(head: str) -> list[str]:
+    out = run(["git", "diff", "--name-only", "origin/main", head, "--", *TRUST_ROOT]).stdout
+    return sorted(x for x in out.splitlines() if x)
+
+
 def ancestor(old: str, head: str) -> bool:
     return run(["git", "merge-base", "--is-ancestor", old, head], check=False).returncode == 0
 
@@ -144,6 +149,9 @@ def main() -> None:
     touched = trust_root_touched(changed(base, head))
     if touched:
         die("autonomous PR touched factory trust root: " + ", ".join(touched))
+    drift = trust_root_drift(head)
+    if drift:
+        die("PR trust root is not current with origin/main; rebase required: " + ", ".join(drift))
 
     contract, contract_hash = extract(body, "contract")
     proof, proof_hash = extract(body, "proof")
