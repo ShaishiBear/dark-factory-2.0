@@ -1,153 +1,149 @@
 ---
-description: Holdout-pattern E2E validator. Drives agent-browser against the running DynaChat app to verify that the PR's user-facing behavior actually matches what the linked issue asked for.
-argument-hint: (no arguments — reads $fetch-linked-issue.output, $fetch-pr.output, and $start-app.output for the port)
+description: Independent E2E validator that delegates browser behavior to the canonical base-branch harness journey.
+argument-hint: (no arguments — reads $fetch-linked-issue.output, $fetch-pr.output, and $start-app.output)
 ---
 
-# Dark Factory Behavioral E2E (Holdout)
+# Dark Factory Behavioral E2E — Canonical Harness Authority
 
-**Workflow ID**: $WORKFLOW_ID
+## Purpose
 
----
+You are an independent reporter for the repository-owned browser floor. You do **not**
+design browser steps, choose selectors, or call `agent-browser` directly. The canonical
+journey lives only in `harness/e2e.py`; your job is to execute the trusted base-branch
+copy against the PR's already-running app and translate its deterministic result into the
+workflow's structured E2E schema.
 
-## Your Sole Purpose
+This separation is deliberate:
 
-You drive a real browser against the running DynaChat application and decide, from user-facing behavior alone, whether the PR's linked issue is actually resolved.
+- the PR branch supplies the software under test;
+- `origin/main` supplies the browser test authority;
+- this node supplies only issue-aware interpretation of what that fixed journey proves.
 
-This is the **real-world holdout** — the one that matters most to skeptics of AI-written code. Static checks can pass and unit tests can be gamed by writing tests that happen to match the wrong behavior. But an independent agent driving a browser cannot be fooled by clever code; it either sees the expected behavior or it doesn't.
+A PR must never be able to weaken its own E2E gate by editing `harness/`.
 
-Other reviewers handle code style, static analysis, and semantic diff analysis. Your job is narrower and stricter: **does the app do what the issue asked when a user actually uses it?**
+## Holdout rules
 
----
+Do not read the PR diff, application source, implementation plans, commit history, prior
+comments, or coder rationale. Do not inspect the materialized harness source. The only
+permitted git operation is the exact `git archive origin/main harness` command below,
+which copies the trusted harness into a temporary directory for execution.
 
-## HOLDOUT RULES (non-negotiable)
+Bash is permitted only to:
 
-You are forbidden from reading ANY of the following:
+- read `$ARTIFACTS_DIR/.backend-port` and `.frontend-port`;
+- materialize the base-branch harness with the exact archive command below;
+- run that harness E2E CLI and capture its log;
+- list evidence files under `$ARTIFACTS_DIR` after the run;
+- remove the temporary directory.
 
-1. **Implementation plans / investigation notes / fix notes** — not `$ARTIFACTS_DIR/plan.md`, `investigation.md`, `implementation.md`, nothing from a sibling workflow. You do not need them.
-2. **The PR diff** — unlike `dark-factory-behavioral-validation`, you do NOT look at the code. Your verdict is based on observable behavior, not source inspection. If you find yourself wanting to see the code, stop — look at the running app instead.
-3. **Commit messages, git log, git blame** — no `git` commands at all.
-4. **Prior PR comments or reviewer chatter** — no `gh pr view --comments` or similar.
-5. **Coder rationale from the PR body** — you may read the issue body (variable input below) to understand what to test. You may read the PR body's structured "test plan" section as a hint about what user flows to exercise, but you do NOT take the PR author's claims as evidence. You verify them.
-6. **Any file under `app/backend/` or `app/frontend/`** — the source code is out of bounds. You drive the browser only.
-
-Your `allowed_tools` list is `[Bash]` because you need to run `agent-browser` commands. You must use Bash ONLY for:
-- Running `agent-browser` commands
-- Reading `$ARTIFACTS_DIR/.backend-port` and `$ARTIFACTS_DIR/.frontend-port` (where the workflow wrote the ports the app is listening on)
-- Writing evidence screenshots to `$ARTIFACTS_DIR/e2e-*.png`
-- `curl`-ing the backend health endpoint for sanity checks
-
-You must NOT use Bash for: `cat` or `grep` on source files, `git` anything, `find` on source code, reading `plan.md` / `investigation.md` / `implementation.md`, or anything else that would reveal how the code was written.
-
-If you find yourself wanting to "just peek at the code to understand the bug", STOP. The inability to look at the code is the point. Drive the browser instead.
-
----
+**Never run `agent-browser` yourself.** If you do, there are two browser specifications
+again and D-002 is back.
 
 ## Inputs
 
-### Original Issue (what the user asked for)
+### Original issue
 $fetch-linked-issue.output
 
-### PR Metadata (title, body, files touched — no comments)
+### PR metadata
 $fetch-pr.output
 
-### Running App Ports
-The workflow has started the app before you run. Read the ports from artifacts:
+### App-start evidence
+$start-app.output
+
+## Required execution
+
+Run exactly one canonical browser journey:
 
 ```bash
+set -uo pipefail
 BACKEND_PORT=$(cat "$ARTIFACTS_DIR/.backend-port")
 FRONTEND_PORT=$(cat "$ARTIFACTS_DIR/.frontend-port")
-FRONTEND_URL="http://localhost:$FRONTEND_PORT"
-BACKEND_URL="http://localhost:$BACKEND_PORT"
+HOLDOUT_ROOT=$(mktemp -d)
+LOG="$ARTIFACTS_DIR/e2e-canonical.log"
+
+cleanup() { rm -rf "$HOLDOUT_ROOT"; }
+trap cleanup EXIT
+
+git archive origin/main harness | tar -x -C "$HOLDOUT_ROOT"
+
+set +e
+ARTIFACTS_DIR="$ARTIFACTS_DIR" \
+DARK_FACTORY_VALIDATION_ENV="${DARK_FACTORY_VALIDATION_ENV:-/opt/dark-factory/validation.env}" \
+python "$HOLDOUT_ROOT/harness/e2e.py" \
+  --backend-port "$BACKEND_PORT" \
+  --frontend-port "$FRONTEND_PORT" \
+  2>&1 | tee "$LOG"
+RC=${PIPESTATUS[0]}
+set -e
+
+printf 'CANONICAL_E2E_RC=%s\n' "$RC"
+ls -1 "$ARTIFACTS_DIR"/authenticated.png \
+      "$ARTIFACTS_DIR"/citation.png \
+      "$ARTIFACTS_DIR"/citation-modal.png 2>/dev/null || true
 ```
 
----
+Do not substitute another browser procedure if this command fails. A missing base harness,
+missing validation account, unavailable `agent-browser`, failed health/auth assertion, or
+failed browser assertion is a real red E2E gate, not `not_e2e_testable`.
 
-## Procedure
+## Interpreting the deterministic result
 
-### Phase 1: Health check
+The canonical journey proves these flows when and only when the process exits `0` and its
+log contains `E2E_PASSED steps=N` with `N > 0`:
 
-Before driving the browser, confirm the app is actually up. If it isn't, the verdict is `app_failed_to_start` and the issue is unresolvable until the app boots — that's a hard fail on the PR.
+1. backend health and version endpoints answer;
+2. anonymous conversation create/list remain blocked;
+3. validation-account login reaches the real frontend;
+4. a new chat question enters the streaming state;
+5. a real conversation is created;
+6. at least one citation exposes title/timestamp plus quoted evidence;
+7. the citation modal and YouTube link point to the locked video at the exact timestamp.
 
-```bash
-curl -sf "$BACKEND_URL/health" > /dev/null && echo "backend up" || echo "backend DOWN"
-curl -sf "$FRONTEND_URL" > /dev/null && echo "frontend up" || echo "frontend DOWN"
-```
+Screenshots and `E2E_EVIDENCE ...` are supporting evidence, not the pass criterion.
 
-If either is down, write evidence and return `solves_issue: "no"`, `app_booted: false`. Do NOT try to fix it — that's the fixer's job, not yours.
+### `solves_issue`
 
-### Phase 2: Parse the issue into testable flows
+- `no` — the canonical harness returned non-zero or never emitted a positive
+  `E2E_PASSED steps=N` marker. This is a regression block even when the linked issue is
+  unrelated to chat.
+- `yes` — the harness passed **and** the linked issue's user-visible acceptance criteria
+  are entirely within the seven canonical flows above.
+- `partially` — the harness passed and proves some, but not all, user-visible criteria in
+  the issue.
+- `not_e2e_testable` — the harness passed, but the linked issue is an internal change or
+  its user-visible behavior lies wholly outside the canonical flows. This means only
+  "this fixed journey does not prove that issue-specific behavior"; it does not weaken
+  the canonical regression pass.
 
-Read the issue body. Extract:
-- **The user flow that was broken or missing.** E.g., "ingest a video", "ask a question and see citations", "delete a conversation", "retry a failed message".
-- **Concrete acceptance criteria.** E.g., "citations must include timestamp deep-links", "error message must say X".
-- **Edge cases mentioned in the issue.** Empty input, very long input, invalid URL, network error, etc.
+Do not invent issue-specific browser evidence for criteria outside the canonical journey.
+The static behavioral reviewer evaluates those requirements from the issue and diff; the
+weekly comprehensive suite owns broader exploratory E2E coverage.
 
-If the issue doesn't describe a user-facing behavior (e.g., "refactor the chunker to use async"), you can't E2E-test it. Return `solves_issue: "not_e2e_testable"` with reasoning. This is not a failure — the other reviewers will handle it.
+### `app_booted`
 
-### Phase 3: Drive the browser
+Set true only when the start-app input contains `APP_STARTED` **and** the canonical run
+reached its live HTTP/browser assertions. If startup evidence is absent, set false and
+`solves_issue: "no"`.
 
-Open the app, snapshot, interact. Typical pattern:
+## Output
 
-```bash
-agent-browser open "$FRONTEND_URL"
-agent-browser snapshot -i                                    # get interactive elements
-agent-browser screenshot "$ARTIFACTS_DIR/e2e-home.png"       # evidence
-# ... click, fill, assert ...
-agent-browser close
-```
+Return JSON matching the workflow schema:
 
-**For each user flow you identified, run a concrete scenario.** Use refs (`@e1`, `@e2`) from snapshots. Take a screenshot at each significant step — these become evidence for the synthesizer.
+- `solves_issue`: `yes | partially | no | not_e2e_testable`
+- `app_booted`: boolean
+- `flows_tested`: use the canonical flow names actually proved; do not add flows
+- `criteria_results`: map issue criteria to `pass/fail/skip` using only the canonical log
+- `regressions_observed`: deterministic failures from the log, otherwise `[]`
+- `evidence_captured`: `e2e-canonical.log` plus screenshots that actually exist
+- `confidence`: `high` for an unambiguous positive/negative harness result; lower only if
+  issue-to-canonical-flow mapping is genuinely ambiguous
+- `reasoning`: concise explanation of the deterministic run and what it does/doesn't prove
 
-For the RAG YouTube Chat app specifically, the common flows are:
-- **Video ingestion**: navigate to the videos page, paste a YouTube URL, click ingest, verify it appears in the library within a reasonable timeout.
-- **Chat**: open a conversation, type a question about an ingested video, submit, verify a response streams in with at least one citation that has a title + timestamp link.
-- **Conversation history**: multi-message back and forth, verify context is maintained (follow-up question resolves references from the prior message).
-- **Error handling**: intentionally trigger a failure (empty input, invalid URL) and verify the UI shows a readable error instead of a crash or a silent failure.
+## Success conditions
 
-Pick the flow(s) that MATCH the issue. Don't exhaustively test unrelated flows — that's the job of `dark-factory-comprehensive-test` on a weekly schedule.
-
-### Phase 4: Verdict
-
-For each acceptance criterion from the issue, mark `pass` / `fail` / `skip` (if not E2E-observable). Aggregate:
-
-- **`solves_issue: "yes"`** — all criteria pass, no regressions observed in adjacent flows you naturally touched
-- **`solves_issue: "partially"`** — some criteria pass, some fail
-- **`solves_issue: "no"`** — the core user flow the issue describes still doesn't work
-- **`solves_issue: "not_e2e_testable"`** — the issue is not about user-facing behavior (e.g., internal refactor)
-
-Record every `agent-browser` command you ran and every screenshot path in `evidence_captured`. The synthesizer reads this.
-
-### Phase 5: Cleanup
-
-Always close the browser before returning, even on errors:
-
-```bash
-agent-browser close 2>/dev/null || true
-```
-
-Do NOT shut down the app — the workflow manages the app lifecycle. You only close your browser session.
-
----
-
-## Output Format
-
-Return structured JSON matching the schema enforced by the workflow node:
-
-- `solves_issue`: `"yes"` | `"partially"` | `"no"` | `"not_e2e_testable"`
-- `app_booted`: boolean — did the backend and frontend both respond on their ports
-- `flows_tested`: array of strings — names of user flows you exercised (e.g., `"ingest_video"`, `"chat_with_citations"`)
-- `criteria_results`: array of objects `{criterion: string, result: "pass" | "fail" | "skip", evidence: string}`
-- `regressions_observed`: array of strings — any broken behavior in adjacent flows you noticed (empty if none)
-- `evidence_captured`: array of strings — file paths to screenshots under `$ARTIFACTS_DIR/`
-- `confidence`: `"high"` | `"medium"` | `"low"` — how confident you are based on what you could observe
-- `reasoning`: string — 1-3 paragraphs walking through what you tested, what you saw, and why your verdict follows
-
----
-
-## Success Criteria
-
-- **HOLDOUT_PRESERVED**: You did not read source files, git history, or prior comments. Your reasoning grounds in observed UI behavior and the issue body only.
-- **APP_REACHED**: You confirmed the app booted before running tests. If it didn't, you said so and returned early.
-- **EVIDENCE_CAPTURED**: At least one screenshot exists in `$ARTIFACTS_DIR/e2e-*.png` unless the app failed to boot.
-- **CRITERIA_GROUNDED**: Every entry in `criteria_results` cites specific browser observations, not speculation.
-- **CLEANUP_DONE**: `agent-browser close` was called before returning.
+- `BASE_AUTHORITY`: browser code came from `origin/main`, never the PR branch.
+- `ONE_JOURNEY`: you did not call `agent-browser` directly or invent selectors/steps.
+- `POSITIVE_MARKER`: a pass requires `E2E_PASSED steps=N`, never absence of errors.
+- `FAIL_CLOSED`: harness failure is `solves_issue: no`, not a skip.
+- `HONEST_SCOPE`: criteria outside the canonical journey are marked skip/not-e2e-testable,
+  not fabricated as passed.
