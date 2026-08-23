@@ -1,0 +1,355 @@
+name: dark-factory-fix-github-issue
+description: |
+  Use when: Dark Factory orchestrator wants to implement an accepted issue in DynaChat
+            (Python/FastAPI backend + React/TypeScript frontend).
+  Triggers: Orchestrator dispatch when an issue is labeled `factory:accepted`.
+  Does: Keeps Cole's orchestration/validation control plane, but runs research,
+        investigation/specification, implementation/TDD, review, self-fix, and simplification
+        through Matt Pocock's pinned engineering skills. The independent validator remains
+        unchanged and judges only the resulting PR.
+  NOT for: Triage (use dark-factory-triage), PR validation (use dark-factory-validate-pr),
+           PR fix-up from failed validation (use dark-factory-fix-pr).
+
+  This is a fork of the bundled `archon-fix-github-issue` that the Dark Factory owns.
+  It can evolve independently from the bundled default. The key divergences:
+  - Every AI node references a `.md` command file (no inline prompts — Dark Factory rule).
+  - Builder engineering nodes use the pinned `mattpocock-skills` plugin as their operating
+    procedure; project-specific commands only adapt artifacts and Dark Factory constraints.
+  - Validation remains `dark-factory-validate`; PR validation/holdout/mutations/ratchet are
+    intentionally outside this workflow and unchanged.
+  - The factory still owns worktrees, GitHub state, model routing, draft PRs, review synthesis,
+    self-fix, simplification, reporting, and cleanup.
+
+provider: claude
+model: sonnet
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 1: FETCH & CLASSIFY
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: extract-issue-number
+    command: dark-factory-extract-issue-number
+
+  - id: fetch-issue
+    bash: |
+      set -euo pipefail
+      # Strip quotes, whitespace, markdown backticks from AI output
+      ISSUE_NUM=$(echo "$extract-issue-number.output" | tr -d "'\"\`\n " | grep -oE '[0-9]+' | head -1)
+      if [ -z "$ISSUE_NUM" ]; then
+        echo "Failed to extract issue number from: $extract-issue-number.output" >&2
+        exit 1
+      fi
+      gh issue view "$ISSUE_NUM" --json title,body,labels,comments,state,url,author
+    depends_on: [extract-issue-number]
+    timeout: 20000
+
+  - id: classify-issue
+    command: dark-factory-classify-issue
+    depends_on: [fetch-issue]
+    model: haiku
+    allowed_tools: []
+    output_format:
+      type: object
+      properties:
+        issue_type:
+          type: string
+          enum: ["bug", "feature", "enhancement", "refactor", "chore", "documentation"]
+        title:
+          type: string
+        reasoning:
+          type: string
+      required: [issue_type, title, reasoning]
+
+  - id: engineering-preflight
+    bash: |
+      set -euo pipefail
+      test -f docs/agents/issue-tracker.md
+      test -f docs/agents/domain.md
+      test -f docs/agents/matt-skills.md
+      claude plugin list --json | python -c 'import json,sys; data=json.load(sys.stdin); assert "mattpocock-skills" in str(data)' || {
+        echo "Pinned Matt Pocock skills plugin is not installed. See docs/agents/matt-skills.md." >&2
+        exit 1
+      }
+    depends_on: [classify-issue]
+    timeout: 20000
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 2: RESEARCH
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: web-research
+    command: dark-factory-engineering-research
+    depends_on: [engineering-preflight]
+    skills:
+      - mattpocock-skills:research
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 3: INVESTIGATE (bugs) / PLAN (features)
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: investigate
+    command: dark-factory-engineering-investigate
+    depends_on: [classify-issue, web-research]
+    when: "$classify-issue.output.issue_type == 'bug'"
+    skills:
+      - mattpocock-skills:diagnosing-bugs
+      - mattpocock-skills:domain-modeling
+      - mattpocock-skills:codebase-design
+    context: fresh
+
+  - id: plan
+    command: dark-factory-engineering-plan
+    depends_on: [classify-issue, web-research]
+    when: "$classify-issue.output.issue_type != 'bug'"
+    skills:
+      - mattpocock-skills:to-spec
+      - mattpocock-skills:domain-modeling
+      - mattpocock-skills:codebase-design
+    context: fresh
+
+  # Bridge: ensure investigation.md exists for the implement step
+  # engineering implementation reads investigation.md or plan.md
+  # engineering plan writes plan.md
+  # This node copies plan.md → investigation.md when the plan path was taken.
+  - id: bridge-artifacts
+    bash: |
+      set -euo pipefail
+      if [ -f "$ARTIFACTS_DIR/plan.md" ] && [ ! -f "$ARTIFACTS_DIR/investigation.md" ]; then
+        cp "$ARTIFACTS_DIR/plan.md" "$ARTIFACTS_DIR/investigation.md"
+        echo "Bridged plan.md to investigation.md for implement step"
+      elif [ -f "$ARTIFACTS_DIR/investigation.md" ]; then
+        echo "investigation.md exists from investigate step"
+      else
+        echo "WARNING: No investigation.md or plan.md found — implement may fail" >&2
+      fi
+    depends_on: [investigate, plan]
+    trigger_rule: one_success
+    timeout: 10000
+
+  - id: scope
+    command: dark-factory-engineering-scope
+    depends_on: [bridge-artifacts]
+    skills:
+      - mattpocock-skills:to-tickets
+      - mattpocock-skills:codebase-design
+    context: fresh
+    output_format:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["implement", "decompose"]
+        reason:
+          type: string
+        estimated_change_lines:
+          type: integer
+          minimum: 0
+      required: [action, reason, estimated_change_lines]
+
+  - id: decompose
+    command: dark-factory-engineering-decompose
+    depends_on: [scope]
+    when: "$scope.output.action == 'decompose'"
+    skills:
+      - mattpocock-skills:to-tickets
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 4: IMPLEMENT (Dark Factory fork — Python + Bun-aware)
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: implement
+    command: dark-factory-engineering-implement
+    depends_on: [scope]
+    when: "$scope.output.action == 'implement'"
+    skills:
+      - mattpocock-skills:implement
+      - mattpocock-skills:tdd
+      - mattpocock-skills:codebase-design
+      - mattpocock-skills:domain-modeling
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 5: VALIDATE (Dark Factory fork — ruff/mypy/pytest + tsc/biome/vitest)
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: validate
+    command: dark-factory-validate
+    depends_on: [implement]
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 6: CREATE DRAFT PR
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: create-pr
+    command: dark-factory-create-pr
+    depends_on: [validate]
+    context: fresh
+
+  # Deterministic PR number capture: reads .pr-number if the AI wrote it,
+  # otherwise extracts via gh pr view. Outputs ONLY the number so
+  # downstream nodes can use $capture-pr-number.output as the PR ref.
+  # This fixes #13 where review-scope received the issue number instead.
+  - id: capture-pr-number
+    bash: |
+      set -euo pipefail
+      if [ -f "$ARTIFACTS_DIR/.pr-number" ]; then
+        PR=$(cat "$ARTIFACTS_DIR/.pr-number" | tr -d ' \n\r')
+        if echo "$PR" | grep -qE '^[0-9]+$'; then
+          echo "$PR"
+          exit 0
+        fi
+      fi
+      PR=$(gh pr view --json number -q '.number' 2>/dev/null || true)
+      if [ -n "$PR" ]; then
+        echo "$PR" > "$ARTIFACTS_DIR/.pr-number"
+        echo "$PR"
+      else
+        echo "WARNING: could not determine PR number" >&2
+        echo "0"
+      fi
+    depends_on: [create-pr]
+    timeout: 15000
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 7: REVIEW
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: review-scope
+    command: dark-factory-pr-review-scope
+    depends_on: [capture-pr-number]
+    context: fresh
+
+  - id: review-classify
+    command: dark-factory-review-classify
+    depends_on: [review-scope]
+    model: haiku
+    allowed_tools: []
+    context: fresh
+    output_format:
+      type: object
+      properties:
+        run_code_review:
+          type: string
+          enum: ["true", "false"]
+        run_error_handling:
+          type: string
+          enum: ["true", "false"]
+        run_test_coverage:
+          type: string
+          enum: ["true", "false"]
+        run_comment_quality:
+          type: string
+          enum: ["true", "false"]
+        run_docs_impact:
+          type: string
+          enum: ["true", "false"]
+        reasoning:
+          type: string
+      required:
+        - run_code_review
+        - run_error_handling
+        - run_test_coverage
+        - run_comment_quality
+        - run_docs_impact
+        - reasoning
+
+  # Code review always runs — mandatory
+  - id: code-review
+    command: dark-factory-engineering-review
+    depends_on: [review-classify]
+    skills:
+      - mattpocock-skills:code-review
+      - mattpocock-skills:domain-modeling
+      - mattpocock-skills:codebase-design
+    context: fresh
+
+  - id: error-handling
+    command: archon-error-handling-agent
+    depends_on: [review-classify]
+    when: "$review-classify.output.run_error_handling == 'true'"
+    context: fresh
+
+  - id: test-coverage
+    command: archon-test-coverage-agent
+    depends_on: [review-classify]
+    when: "$review-classify.output.run_test_coverage == 'true'"
+    context: fresh
+
+  - id: comment-quality
+    command: archon-comment-quality-agent
+    depends_on: [review-classify]
+    when: "$review-classify.output.run_comment_quality == 'true'"
+    context: fresh
+
+  - id: docs-impact
+    command: archon-docs-impact-agent
+    depends_on: [review-classify]
+    when: "$review-classify.output.run_docs_impact == 'true'"
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 8: SYNTHESIZE + SELF-FIX
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: synthesize
+    command: archon-synthesize-review
+    depends_on: [code-review, error-handling, test-coverage, comment-quality, docs-impact]
+    trigger_rule: one_success
+    context: fresh
+
+  - id: self-fix
+    command: dark-factory-engineering-self-fix
+    depends_on: [synthesize]
+    skills:
+      - mattpocock-skills:diagnosing-bugs
+      - mattpocock-skills:tdd
+      - mattpocock-skills:implement
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 9: SIMPLIFY
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: simplify
+    command: archon-simplify-changes
+    depends_on: [self-fix]
+    skills:
+      - mattpocock-skills:codebase-design
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 10: REPORT
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: report
+    command: archon-issue-completion-report
+    depends_on: [simplify]
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 11: CLEANUP ISSUE LABEL
+  # ═══════════════════════════════════════════════════════════════
+  # The orchestrator stamps `factory:in-progress` on the issue when it
+  # dispatches this workflow. Once the PR exists, the work-in-progress
+  # state lives on the PR (via factory:needs-review) and the issue's
+  # label is stale. Runs with trigger_rule: all_done so a late-stage
+  # failure (self-fix, simplify, report) can't leave the issue stuck
+  # on in-progress forever.
+  - id: cleanup-issue-label
+    bash: |
+      set -euo pipefail
+      ISSUE_NUM=$(echo "$extract-issue-number.output" | tr -d "'\"\`\n " | grep -oE '[0-9]+' | head -1)
+      if [ -z "$ISSUE_NUM" ]; then
+        echo "No issue number parsed — nothing to clean up"
+        exit 0
+      fi
+      # --remove-label is idempotent (succeeds if the label isn't present)
+      gh issue edit "$ISSUE_NUM" --remove-label "factory:in-progress" 2>&1 || true
+      echo "Cleared factory:in-progress from issue #$ISSUE_NUM"
+    depends_on: [report]
+    trigger_rule: all_done
+    timeout: 15000
