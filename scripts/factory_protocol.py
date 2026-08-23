@@ -77,7 +77,12 @@ def run_contract(args: argparse.Namespace) -> None:
 
 def run_context(args: argparse.Namespace) -> None:
     c = load(args.contract); h = validate_contract(c)
-    m = validate_context(load(args.input), h)
+    enriched = Path(args.output).with_name("context.enriched.json")
+    subprocess.check_call([
+        sys.executable, str(ROOT / "scripts" / "factory_impact.py"), "context",
+        "--input", args.input, "--output", str(enriched),
+    ], cwd=ROOT)
+    m = validate_context(load(str(enriched)), h)
     Path(args.output).write_bytes(canonical(m))
     print(f"CONTEXT_OK files={len(m['files'])} sha256={hashlib.sha256(canonical(m)).hexdigest()}")
 
