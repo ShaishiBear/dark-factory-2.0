@@ -260,7 +260,7 @@ nodes:
     context: fresh
 
   - id: simplify
-    command: archon-simplify-changes
+    command: dark-factory-engineering-simplify
     depends_on: [self-fix]
     skills: [mattpocock-skills:codebase-design]
     context: fresh
