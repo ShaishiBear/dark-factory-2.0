@@ -1,42 +1,47 @@
 #!/usr/bin/env python3
-"""Start the backend for a validation run, or fail with a diagnosable reason.
+"""Start validation services, or fail with a diagnosable reason.
 
     python harness/serve.py --port 8123
+    python harness/serve.py --port 8123 --with-frontend
 
-**This exists because of 3fc03a0 (2026-04-18).** The backend hard-requires DATABASE_URL
-and friends at import time. The validate-pr workflow's start-app node once launched
-uvicorn without loading any of them, so the process crashed at import with
-`RuntimeError: DATABASE_URL is not set`, the health poll failed, and the synthesizer
-scored that as `e2e_status: "not_e2e_testable"`. PR #80 auto-merged having never been
-driven through a browser.
+The validation environment lives OUTSIDE the repo because it contains secrets. The
+browser form also starts a Vite frontend on its own dynamic port, writes that port to a
+temporary rendezvous file keyed by the backend port, and supervises both children until
+this process is terminated by the harness driver.
 
-So this refuses to start rather than starting into a crash, and it says which variable
-is missing. **A step that cannot run must be loud, not absent** - the whole argument of
-this harness, applied to the thing that starts the software.
-
-The env file lives OUTSIDE the repo because it holds secrets. Path is overridable with
-DARK_FACTORY_VALIDATION_ENV; on the VPS it is /opt/dark-factory/validation.env. Point it
-at a DEDICATED validation database - an E2E against production data is a data-loss
-incident waiting for a slow afternoon.
+No validation process may silently degrade to "not testable". Missing env, a dead
+frontend, or a dead backend is a hard non-zero exit.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import signal
+import socket
 import subprocess
 import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-BACKEND = Path(__file__).resolve().parent.parent / "app" / "backend"
+ROOT = Path(__file__).resolve().parent.parent
+BACKEND = ROOT / "app" / "backend"
+FRONTEND = ROOT / "app" / "frontend"
 
-REQUIRED = ["DATABASE_URL", "OPENROUTER_API_KEY", "JWT_SECRET",
-            "SUPADATA_API_KEY", "YOUTUBE_CHANNEL_ID"]
+CORE_REQUIRED = [
+    "DATABASE_URL",
+    "OPENROUTER_API_KEY",
+    "JWT_SECRET",
+    "SUPADATA_API_KEY",
+    "YOUTUBE_CHANNEL_ID",
+]
+BROWSER_REQUIRED = ["DARK_FACTORY_E2E_EMAIL", "DARK_FACTORY_E2E_PASSWORD"]
 
 
 def load_env_file(path: Path) -> int:
-    """Minimal KEY=VALUE loader. Deliberately not python-dotenv: this runs before the
-    backend's dependencies are guaranteed importable, and a harness that needs the app's
-    venv to tell you the app cannot start is not much of a harness."""
+    """Minimal KEY=VALUE loader, intentionally independent of app dependencies."""
     loaded = 0
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
@@ -52,9 +57,48 @@ def load_env_file(path: Path) -> int:
     return loaded
 
 
+def frontend_port_file(backend_port: int) -> Path:
+    return Path(tempfile.gettempdir()) / f"dark-factory-frontend-{backend_port}.port"
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def _wait_http(url: str, proc: subprocess.Popen[str], timeout: int = 60) -> None:
+    deadline = time.time() + timeout
+    last = "never answered"
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(f"process exited early rc={proc.returncode}")
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if 200 <= response.status < 500:
+                    return
+                last = f"HTTP {response.status}"
+        except (urllib.error.URLError, OSError) as exc:
+            last = str(exc)
+        time.sleep(0.2)
+    raise RuntimeError(f"never became reachable: {last}")
+
+
+def _terminate(proc: subprocess.Popen[str] | None) -> None:
+    if proc is None or proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, required=True)
+    ap.add_argument("--with-frontend", action="store_true")
     args = ap.parse_args()
 
     env_path = Path(os.environ.get("DARK_FACTORY_VALIDATION_ENV",
@@ -64,21 +108,71 @@ def main() -> int:
     else:
         print(f"WARN: no validation env at {env_path}", file=sys.stderr, flush=True)
 
-    missing = [v for v in REQUIRED if not os.environ.get(v)]
+    required = CORE_REQUIRED + (BROWSER_REQUIRED if args.with_frontend else [])
+    missing = [name for name in required if not os.environ.get(name)]
     if missing:
-        # NON-ZERO, and named. appproc's health poll would otherwise report a generic
-        # boot timeout, which sends you to look at the app instead of at the env file.
         print(f"APP_START_REFUSED missing={','.join(missing)}", file=sys.stderr, flush=True)
-        print(f"Populate {env_path} (outside the repo) or set "
-              f"DARK_FACTORY_VALIDATION_ENV. Use a DEDICATED validation database.",
+        print(f"Populate {env_path} (outside the repo) or set DARK_FACTORY_VALIDATION_ENV. "
+              "Use a DEDICATED validation database and validation account.",
               file=sys.stderr, flush=True)
         return 1
 
-    return subprocess.call(
-        [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1",
-         "--port", str(args.port)],
-        cwd=BACKEND,
-    )
+    backend: subprocess.Popen[str] | None = None
+    frontend: subprocess.Popen[str] | None = None
+    rendezvous = frontend_port_file(args.port)
+    stopping = False
+
+    def stop(_signum=None, _frame=None) -> None:
+        nonlocal stopping
+        stopping = True
+        _terminate(backend)
+        _terminate(frontend)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    try:
+        if args.with_frontend:
+            frontend_port = _free_port()
+            frontend_env = dict(os.environ)
+            frontend_env["VITE_API_TARGET"] = f"http://127.0.0.1:{args.port}"
+            frontend = subprocess.Popen(
+                ["bun", "run", "dev", "--", "--host", "127.0.0.1",
+                 "--port", str(frontend_port), "--strictPort"],
+                cwd=FRONTEND, env=frontend_env, stdout=sys.stdout, stderr=sys.stderr,
+                text=True,
+            )
+            _wait_http(f"http://127.0.0.1:{frontend_port}/", frontend, timeout=60)
+            rendezvous.write_text(str(frontend_port), encoding="utf-8")
+            print(f"FRONTEND_STARTED port={frontend_port}", flush=True)
+
+        backend = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1",
+             "--port", str(args.port)],
+            cwd=BACKEND, env=dict(os.environ), stdout=sys.stdout, stderr=sys.stderr, text=True,
+        )
+
+        while not stopping:
+            backend_rc = backend.poll()
+            frontend_rc = frontend.poll() if frontend is not None else None
+            if backend_rc is not None:
+                print(f"BACKEND_EXITED rc={backend_rc}", file=sys.stderr, flush=True)
+                return backend_rc or 1
+            if frontend is not None and frontend_rc is not None:
+                print(f"FRONTEND_EXITED rc={frontend_rc}", file=sys.stderr, flush=True)
+                return frontend_rc or 1
+            time.sleep(0.25)
+        return 0
+    except (OSError, RuntimeError) as exc:
+        print(f"APP_START_REFUSED {exc}", file=sys.stderr, flush=True)
+        return 1
+    finally:
+        _terminate(backend)
+        _terminate(frontend)
+        try:
+            rendezvous.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
