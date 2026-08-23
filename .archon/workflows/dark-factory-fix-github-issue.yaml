@@ -141,16 +141,36 @@ nodes:
     skills: [mattpocock-skills:to-tickets]
     context: fresh
 
-  - id: implement
-    command: dark-factory-engineering-implement
+  - id: test-author
+    command: dark-factory-engineering-test-author
     depends_on: [scope]
     when: "$scope.output.action == 'implement'"
+    skills: [mattpocock-skills:tdd]
+    context: fresh
+
+  - id: red-proof
+    bash: |
+      set -euo pipefail
+      python scripts/factory_proof.py red --spec "$ARTIFACTS_DIR/test-spec.json" --output "$ARTIFACTS_DIR/red-proof.json"
+    depends_on: [test-author]
+    timeout: 360000
+
+  - id: implement
+    command: dark-factory-engineering-implement-proof
+    depends_on: [red-proof]
     skills: [mattpocock-skills:implement, mattpocock-skills:tdd, mattpocock-skills:codebase-design, mattpocock-skills:domain-modeling]
     context: fresh
 
+  - id: green-proof
+    bash: |
+      set -euo pipefail
+      python scripts/factory_proof.py green --proof "$ARTIFACTS_DIR/red-proof.json" --output "$ARTIFACTS_DIR/green-proof.json"
+    depends_on: [implement]
+    timeout: 360000
+
   - id: validate
     command: dark-factory-validate
-    depends_on: [implement]
+    depends_on: [green-proof]
     context: fresh
 
   - id: create-pr
@@ -245,9 +265,16 @@ nodes:
     skills: [mattpocock-skills:codebase-design]
     context: fresh
 
+  - id: final-green-proof
+    bash: |
+      set -euo pipefail
+      python scripts/factory_proof.py green --proof "$ARTIFACTS_DIR/red-proof.json" --output "$ARTIFACTS_DIR/final-green-proof.json"
+    depends_on: [simplify]
+    timeout: 360000
+
   - id: report
     command: archon-issue-completion-report
-    depends_on: [simplify]
+    depends_on: [final-green-proof]
     context: fresh
 
   - id: cleanup-issue-label
