@@ -8,9 +8,15 @@ link/modal for the locked validation fixture.
 
 Screenshots are evidence only. Every pass/fail decision below is deterministic text/URL
 state, not an AI interpretation of pixels.
+
+The normal full harness owns process startup and calls ``run_e2e(app)`` in-process. The
+standalone CLI exists only so the independent PR validator can run this SAME journey
+against an app it already started. That prevents a second browser specification from
+drifting in the workflow.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -18,6 +24,8 @@ import shutil
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -30,6 +38,41 @@ CITATION = re.compile(r'button\s+"(?P<label>\d+:\d{2}\s+—\s+[^\"]+)".*\[ref=(?
 
 class E2EFailure(RuntimeError):
     pass
+
+
+class ExistingApp:
+    """Small network adapter for validator-owned app processes.
+
+    The full harness passes its richer appproc driver instead. Keeping this adapter here
+    means the behavioral assertions still have exactly one implementation: ``run_e2e``.
+    """
+
+    def __init__(self, port: int):
+        self.port = port
+
+    def _request(self, method: str, path: str, body: str | None = None):
+        data = body.encode("utf-8") if body is not None else None
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            data=data,
+            method=method,
+            headers={"Content-Type": "application/json"} if data is not None else {},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                text = response.read().decode("utf-8", errors="replace")
+                return response.status, text, dict(response.headers.items())
+        except urllib.error.HTTPError as exc:
+            text = exc.read().decode("utf-8", errors="replace")
+            return exc.code, text, dict(exc.headers.items())
+        except (urllib.error.URLError, OSError) as exc:
+            raise E2EFailure(f"{method} {path} could not reach backend: {exc}") from exc
+
+    def get(self, path: str):
+        return self._request("GET", path)
+
+    def post(self, path: str, body: str):
+        return self._request("POST", path, body)
 
 
 def _ref(snapshot: str, contains: str) -> str:
@@ -140,7 +183,7 @@ def _load_validation_env() -> tuple[str, str]:
     return email, password
 
 
-def run_e2e(app) -> int | None:
+def run_e2e(app, frontend_url: str | None = None) -> int | None:
     """Return the number of deterministic assertions, or None on any broken journey."""
     steps = 0
 
@@ -168,12 +211,23 @@ def run_e2e(app) -> int | None:
         response_timeout = int(browser_cfg.get("response_timeout_s", 90))
         require("locked browser fixture configured", bool(video_id and question))
 
-        from serve import frontend_port_file
+        if frontend_url is None:
+            from serve import frontend_port_file
 
-        port_file = frontend_port_file(app.port)
-        require("frontend rendezvous exists", port_file.is_file(), str(port_file))
-        frontend_port = int(port_file.read_text(encoding="utf-8").strip())
-        frontend_url = f"http://127.0.0.1:{frontend_port}"
+            port_file = frontend_port_file(app.port)
+            require("frontend rendezvous exists", port_file.is_file(), str(port_file))
+            frontend_port = int(port_file.read_text(encoding="utf-8").strip())
+            frontend_url = f"http://127.0.0.1:{frontend_port}"
+        else:
+            parsed_frontend = urlparse(frontend_url)
+            require(
+                "frontend URL is an explicit local HTTP endpoint",
+                parsed_frontend.scheme == "http"
+                and parsed_frontend.hostname in {"127.0.0.1", "localhost"}
+                and parsed_frontend.port is not None,
+                frontend_url,
+            )
+
         email, password = _load_validation_env()
 
         session = f"df-{os.getpid()}-{app.port}"
@@ -243,3 +297,32 @@ def run_e2e(app) -> int | None:
     except (E2EFailure, OSError, ValueError) as exc:
         print(f"  E2E_FAIL  {exc}", flush=True)
         return None
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run canonical E2E against an existing app")
+    parser.add_argument("--backend-port", type=int, required=True)
+    parser.add_argument("--frontend-port", type=int, required=True)
+    args = parser.parse_args()
+
+    for name, value in (("backend", args.backend_port), ("frontend", args.frontend_port)):
+        if not 1 <= value <= 65535:
+            print(f"E2E_ATTACH_REFUSED invalid {name} port={value}", flush=True)
+            return 2
+
+    app = ExistingApp(args.backend_port)
+    frontend_url = f"http://127.0.0.1:{args.frontend_port}"
+    print(
+        f"E2E_ATTACH backend={args.backend_port} frontend={args.frontend_port} authority=canonical-harness",
+        flush=True,
+    )
+    steps = run_e2e(app, frontend_url=frontend_url)
+    if steps is None:
+        print("GATE_FAILED: e2e", flush=True)
+        return 1
+    print(f"E2E_PASSED steps={steps}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
