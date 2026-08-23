@@ -1,123 +1,66 @@
 #!/usr/bin/env python3
-"""Deterministic authority split and RED/GREEN proof for one Dark Factory tracer bullet."""
+"""Deterministic test-author/coder authority split with RED/GREEN proof."""
 from __future__ import annotations
-import argparse, hashlib, json, subprocess, sys
+import argparse,hashlib,json,subprocess,sys
 from pathlib import Path
+R=Path(__file__).resolve().parent.parent
 
-ROOT=Path(__file__).resolve().parent.parent
-
-def run(argv:list[str], check:bool=False, timeout:int=600)->subprocess.CompletedProcess[str]:
-    p=subprocess.run(argv,cwd=ROOT,text=True,capture_output=True,timeout=timeout)
-    if check and p.returncode:
-        raise RuntimeError((p.stderr or p.stdout).strip() or f"{argv!r} failed")
-    return p
-
-def git(*args:str, check:bool=True)->str:
-    return run(["git",*args],check=check).stdout.strip()
-
-def load(path:str)->dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-def dump(path:str,obj:dict)->None:
-    Path(path).write_text(json.dumps(obj,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-
-def canonical(obj:object)->str:
-    return json.dumps(obj,sort_keys=True,separators=(",",":"),ensure_ascii=False)
-
-def sha_text(s:str)->str:
-    return hashlib.sha256(s.encode()).hexdigest()
-
-def clean()->bool:
-    return not git("status","--porcelain").strip()
-
-def test_path(path:str)->bool:
-    p=path.replace("\\","/").lower()
-    name=p.rsplit("/",1)[-1]
-    return ("/tests/" in f"/{p}/" or "/test/" in f"/{p}/" or "/__tests__/" in f"/{p}/"
-            or name.startswith("test_") or ".test." in name or ".spec." in name)
-
-def diff_files(a:str,b:str)->list[str]:
-    return [x for x in git("diff","--name-only",f"{a}..{b}").splitlines() if x.strip()]
-
-def file_hash(path:str)->str:
-    return hashlib.sha256((ROOT/path).read_bytes()).hexdigest()
-
-def execute(command:str)->dict:
-    before=git("rev-parse","HEAD")
-    if not clean(): raise ValueError("proof command requires a clean worktree")
-    p=subprocess.run(command,cwd=ROOT,shell=True,text=True,capture_output=True,timeout=900)
-    after=git("rev-parse","HEAD")
-    if before!=after: raise ValueError("test command changed HEAD")
-    if not clean(): raise ValueError("test command dirtied the worktree")
-    return {"returncode":p.returncode,"stdout":(p.stdout or "")[-6000:],
-            "stderr":(p.stderr or "")[-6000:]}
-
-def capture(contract_path:str,state_path:str)->None:
-    c=load(contract_path)
-    state={"schema_version":"1.0","contract_sha256":sha_text(canonical(c)),
-           "base_sha":git("rev-parse","HEAD"),"command":c["test_seam"]["command"],
-           "expected_red":c["test_seam"]["expected_red"]}
-    dump(state_path,state)
-    print(f"TDD_BASE_CAPTURED {state['base_sha']}")
-
-def prove_red(contract_path:str,state_path:str,proof_path:str)->None:
-    c=load(contract_path); state=load(state_path)
-    if sha_text(canonical(c))!=state["contract_sha256"]: raise ValueError("contract changed after capture")
-    if not clean(): raise ValueError("test-author must finish with a clean committed worktree")
-    test_sha=git("rev-parse","HEAD")
-    files=diff_files(state["base_sha"],test_sha)
-    if not files: raise ValueError("test author created no committed change")
-    bad=[p for p in files if not test_path(p)]
-    if bad: raise ValueError(f"test-author changed non-test paths: {bad}")
-    result=execute(state["command"])
-    output=result["stdout"]+"\n"+result["stderr"]
-    if result["returncode"]==0: raise ValueError("RED gate failed: command passed before production change")
-    expected=state["expected_red"]
-    if expected not in output: raise ValueError("RED gate failed for an unexpected reason/signature")
-    hashes={p:file_hash(p) for p in files if (ROOT/p).is_file()}
-    state.update({"test_sha":test_sha,"test_files":files,"test_hashes":hashes})
-    dump(state_path,state)
-    proof={"schema_version":"1.0","phase":"red","contract_sha256":state["contract_sha256"],
-           "base_sha":state["base_sha"],"test_sha":test_sha,"test_files":files,
-           "test_hashes":hashes,"command":state["command"],"expected_red":expected,
-           "returncode":result["returncode"],"head_after":git("rev-parse","HEAD")}
-    proof["proof_sha256"]=sha_text(canonical(proof)); dump(proof_path,proof)
-    print(f"RED_PROVED sha256={proof['proof_sha256']}")
-
-def prove_green(contract_path:str,state_path:str,proof_path:str)->None:
-    c=load(contract_path); state=load(state_path)
-    if sha_text(canonical(c))!=state["contract_sha256"]: raise ValueError("contract changed after RED")
-    if "test_sha" not in state: raise ValueError("RED proof missing")
-    if run(["git","merge-base","--is-ancestor",state["test_sha"],"HEAD"]).returncode:
-        raise ValueError("test-only commit is not an ancestor of final HEAD")
-    if not clean(): raise ValueError("coder must finish with a clean committed worktree")
-    head=git("rev-parse","HEAD")
-    changed=diff_files(state["test_sha"],head)
-    if not changed: raise ValueError("coder created no production commit")
-    bad=[p for p in changed if test_path(p)]
-    if bad: raise ValueError(f"coder changed tests after RED: {bad}")
-    for p,h in state["test_hashes"].items():
-        if not (ROOT/p).is_file() or file_hash(p)!=h: raise ValueError(f"frozen test changed: {p}")
-    result=execute(state["command"])
-    if result["returncode"]!=0: raise ValueError("GREEN gate failed: exact RED command is not green")
-    proof={"schema_version":"1.0","phase":"green","contract_sha256":state["contract_sha256"],
-           "base_sha":state["base_sha"],"test_sha":state["test_sha"],"head_sha":head,
-           "test_files":state["test_files"],"test_hashes":state["test_hashes"],
-           "production_files":changed,"command":state["command"],"returncode":0}
-    proof["proof_sha256"]=sha_text(canonical(proof)); dump(proof_path,proof)
-    print(f"GREEN_PROVED head={head} sha256={proof['proof_sha256']}")
-
-def main()->int:
-    ap=argparse.ArgumentParser(); sub=ap.add_subparsers(dest="cmd",required=True)
-    for name in ("capture","red","green"):
-        p=sub.add_parser(name); p.add_argument("contract"); p.add_argument("state")
-        if name!="capture": p.add_argument("proof")
-    a=ap.parse_args()
-    try:
-        if a.cmd=="capture": capture(a.contract,a.state)
-        elif a.cmd=="red": prove_red(a.contract,a.state,a.proof)
-        else: prove_green(a.contract,a.state,a.proof)
-        return 0
-    except Exception as e:
-        print(f"TDD_PROOF_ERROR: {e}",file=sys.stderr); return 1
+def sh(a,check=False,t=900):
+ p=subprocess.run(a,cwd=R,text=True,capture_output=True,timeout=t)
+ if check and p.returncode: raise RuntimeError((p.stderr or p.stdout).strip())
+ return p
+def git(*a): return sh(["git",*a],True).stdout.strip()
+def load(p): return json.loads(Path(p).read_text())
+def dump(p,x): Path(p).write_text(json.dumps(x,sort_keys=True,indent=2)+"\n")
+def canon(x): return json.dumps(x,sort_keys=True,separators=(",",":"),ensure_ascii=False)
+def digest(x): return hashlib.sha256(x if isinstance(x,bytes) else x.encode()).hexdigest()
+def clean(): return not git("status","--porcelain")
+def istest(x):
+ p=x.replace("\\","/").lower(); n=p.rsplit("/",1)[-1]
+ return any(z in f"/{p}/" for z in ("/tests/","/test/","/__tests__/")) or n.startswith("test_") or ".test." in n or ".spec." in n
+def diff(a,b): return [x for x in git("diff","--name-only",f"{a}..{b}").splitlines() if x]
+def fh(p): return digest((R/p).read_bytes())
+def execute(cmd):
+ h=git("rev-parse","HEAD")
+ if not clean(): raise ValueError("proof command requires clean worktree")
+ p=subprocess.run(cmd,cwd=R,shell=True,text=True,capture_output=True,timeout=900)
+ if git("rev-parse","HEAD")!=h or not clean(): raise ValueError("proof command mutated repository")
+ return p
+def capture(cpath,state):
+ c=load(cpath); x={"schema_version":"1.0","contract_sha256":digest(canon(c)),"base_sha":git("rev-parse","HEAD"),
+ "command":c["test_seam"]["command"],"expected_red":c["test_seam"]["expected_red"]}
+ dump(state,x); print("TDD_BASE_CAPTURED",x["base_sha"])
+def red(cpath,state,out):
+ c,x=load(cpath),load(state)
+ if digest(canon(c))!=x["contract_sha256"]: raise ValueError("contract changed")
+ if not clean(): raise ValueError("test-author left dirty worktree")
+ ts=git("rev-parse","HEAD"); fs=diff(x["base_sha"],ts)
+ if not fs or (bad:=[p for p in fs if not istest(p)]): raise ValueError(f"test-only authority violated: {bad if fs else 'no change'}")
+ r=execute(x["command"]); text=(r.stdout or "")+"\n"+(r.stderr or "")
+ if r.returncode==0 or x["expected_red"] not in text: raise ValueError("RED not proven for expected reason")
+ hs={p:fh(p) for p in fs if (R/p).is_file()}; x.update(test_sha=ts,test_files=fs,test_hashes=hs); dump(state,x)
+ proof={"phase":"red","contract_sha256":x["contract_sha256"],"base_sha":x["base_sha"],"test_sha":ts,
+ "test_files":fs,"test_hashes":hs,"command":x["command"],"expected_red":x["expected_red"],"returncode":r.returncode}
+ proof["proof_sha256"]=digest(canon(proof)); dump(out,proof); print("RED_PROVED",proof["proof_sha256"])
+def green(cpath,state,out):
+ c,x=load(cpath),load(state)
+ if digest(canon(c))!=x["contract_sha256"] or "test_sha" not in x: raise ValueError("RED chain invalid")
+ if sh(["git","merge-base","--is-ancestor",x["test_sha"],"HEAD"]).returncode or not clean(): raise ValueError("test commit ancestry/worktree invalid")
+ h=git("rev-parse","HEAD"); fs=diff(x["test_sha"],h)
+ if not fs or (bad:=[p for p in fs if istest(p)]): raise ValueError(f"coder authority violated: {bad if fs else 'no production change'}")
+ if any(not (R/p).is_file() or fh(p)!=v for p,v in x["test_hashes"].items()): raise ValueError("frozen test hash changed")
+ r=execute(x["command"])
+ if r.returncode: raise ValueError("GREEN not proven by exact RED command")
+ proof={"phase":"green","contract_sha256":x["contract_sha256"],"base_sha":x["base_sha"],"test_sha":x["test_sha"],
+ "head_sha":h,"test_files":x["test_files"],"test_hashes":x["test_hashes"],"production_files":fs,"command":x["command"],"returncode":0}
+ proof["proof_sha256"]=digest(canon(proof)); dump(out,proof); print("GREEN_PROVED",proof["proof_sha256"])
+def main():
+ a=argparse.ArgumentParser(); s=a.add_subparsers(dest="cmd",required=True)
+ for n in ("capture","red","green"):
+  q=s.add_parser(n); q.add_argument("contract"); q.add_argument("state")
+  if n!="capture": q.add_argument("proof")
+ z=a.parse_args()
+ try:
+  {"capture":lambda:capture(z.contract,z.state),"red":lambda:red(z.contract,z.state,z.proof),"green":lambda:green(z.contract,z.state,z.proof)}[z.cmd](); return 0
+ except Exception as e: print("TDD_PROOF_ERROR:",e,file=sys.stderr); return 1
 if __name__=="__main__": raise SystemExit(main())
