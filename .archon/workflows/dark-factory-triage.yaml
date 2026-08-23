@@ -35,11 +35,6 @@ nodes:
       TODAY_UTC=$(date -u '+%Y-%m-%d')
 
       # ── Step 1: Unstick yesterday's rate-limited issues ─────────
-      # Any open issue labeled factory:rate-limited whose createdAt
-      # is on a prior UTC date gets the label removed so this cycle
-      # re-evaluates it. A fresh triage classification will then
-      # either accept, reject, or re-rate-limit it based on today's
-      # author count.
       gh issue list --state open --label "factory:rate-limited" --limit 100 \
         --json number,createdAt \
         | jq -r --arg today "$TODAY_UTC" '.[] | select((.createdAt | split("T")[0]) < $today) | .number' \
@@ -51,8 +46,6 @@ nodes:
         done
 
       # ── Step 2: Count today's issues per non-owner author ───────
-      # Pull all issues (open + closed) created today so we count the
-      # author's full daily footprint, not just what's still open.
       TODAY_ISSUES=$(gh issue list --state all --limit 200 \
         --json number,author,createdAt,labels \
         | jq --arg today "$TODAY_UTC" --arg owner "$OWNER" '
@@ -63,10 +56,6 @@ nodes:
           ')
 
       # ── Step 3: Apply factory:rate-limited to over-cap authors ──
-      # For each author with > DAILY_CAP issues today, sort by
-      # createdAt and rate-limit everything past the first DAILY_CAP.
-      # We only add the label if it's not already present, so re-runs
-      # are idempotent.
       echo "$TODAY_ISSUES" | jq -r --argjson cap "$DAILY_CAP" '
         group_by(.author.login)
         | map(select(length > $cap))
@@ -88,14 +77,17 @@ nodes:
       # ════════════════════════════════════════════════════════════
       # Fetch the actual triage batch
       # ════════════════════════════════════════════════════════════
-      # Open issues with NO factory:* label (which excludes anything
-      # we just rate-limited). Cap at 10, truncate bodies to ~2KB.
+      # Open issues with NO factory:* label. Before the classifier sees
+      # them, deterministically remove any issue whose canonical
+      # `Blocked by: #N` dependencies are not all CLOSED.
       gh issue list \
         --state open \
         --limit 30 \
         --json number,title,body,author,createdAt,labels \
         --search "-label:factory:triaging -label:factory:accepted -label:factory:rejected -label:factory:needs-human -label:factory:in-progress -label:factory:rate-limited" \
-        | jq '[.[] | select(([.labels[].name] | any(startswith("factory:"))) | not)] | .[0:10] | map(.body = (.body // "" | .[0:2000]))'
+        | jq '[.[] | select(([.labels[].name] | any(startswith("factory:"))) | not)]' \
+        | python scripts/frontier_filter.py \
+        | jq '.[0:10] | map(.body = (.body // "" | .[0:2000]))'
     timeout: 60000
 
   - id: fetch-rules
@@ -111,12 +103,9 @@ nodes:
   - id: fetch-open-prs
     bash: |
       set -euo pipefail
-      # Used by the classifier to detect issues already addressed by in-flight PRs.
       gh pr list --state open --limit 20 --json number,title,body,headRefName \
         | jq 'map(.body = (.body // "" | .[0:800]))'
     timeout: 15000
-
-  # --- Layer 1: single AI classification call ---
 
   - id: classify
     command: dark-factory-triage-classify
@@ -124,35 +113,22 @@ nodes:
     model: sonnet
     allowed_tools: [Write]
 
-  # --- Layer 2: apply decisions deterministically ---
-
   - id: apply-decisions
     depends_on: [classify]
     bash: |
       set -euo pipefail
-
       DECISIONS_FILE="$ARTIFACTS_DIR/decisions.json"
-
       if [ ! -f "$DECISIONS_FILE" ]; then
         echo "ERROR: decisions.json not found at $DECISIONS_FILE" >&2
         exit 1
       fi
-
-      # Validate JSON structure before touching GitHub.
       if ! jq -e '.decisions | type == "array"' "$DECISIONS_FILE" > /dev/null; then
         echo "ERROR: decisions.json does not contain a 'decisions' array" >&2
         cat "$DECISIONS_FILE" >&2
         exit 1
       fi
-
       COUNT=$(jq '.decisions | length' "$DECISIONS_FILE")
       echo "Applying $COUNT triage decisions..."
-
-      # Iterate by index and pull each field with jq -r. This avoids base64
-      # streaming (which breaks on Git Bash for Windows due to CRLF handling)
-      # and avoids any shell-quoting issues with multi-line reason strings:
-      # jq -r emits raw strings directly into the command substitution, so
-      # newlines, quotes, and emoji are preserved untouched.
       i=0
       while [ "$i" -lt "$COUNT" ]; do
         num=$(jq -r ".decisions[$i].issue_number" "$DECISIONS_FILE")
@@ -161,65 +137,33 @@ nodes:
         classification=$(jq -r ".decisions[$i].classification // \"enhancement\"" "$DECISIONS_FILE")
         reason=$(jq -r ".decisions[$i].reason" "$DECISIONS_FILE")
         dup_of=$(jq -r ".decisions[$i].duplicate_of // empty" "$DECISIONS_FILE")
-
         echo ""
         echo "--- Issue #$num: $verdict ($priority, $classification) ---"
-
         case "$verdict" in
           accept)
             body="**Dark Factory triage:** accepted"$'\n\n'"${reason}"$'\n\n'"_Priority: ${priority} | Type: ${classification}_"
-
-            # Strip stale priority:* / type:* labels so triage's verdict is
-            # authoritative. Without this, a label already on the issue (from
-            # the author pre-tagging, or a prior triage run that disagreed)
-            # lingers alongside the new one and the issue ends up with two
-            # conflicting classifications. Query first because
-            # `gh issue edit --remove-label` errors on labels that aren't
-            # currently applied.
             current_labels=$(gh issue view "$num" --json labels --jq '.labels[].name')
             REMOVE_ARGS=()
             while IFS= read -r lbl; do
               case "$lbl" in
-                priority:*)
-                  if [ "$lbl" != "priority:$priority" ]; then
-                    REMOVE_ARGS+=(--remove-label "$lbl")
-                  fi
-                  ;;
-                type:*)
-                  if [ "$lbl" != "type:$classification" ]; then
-                    REMOVE_ARGS+=(--remove-label "$lbl")
-                  fi
-                  ;;
+                priority:*) if [ "$lbl" != "priority:$priority" ]; then REMOVE_ARGS+=(--remove-label "$lbl"); fi ;;
+                type:*) if [ "$lbl" != "type:$classification" ]; then REMOVE_ARGS+=(--remove-label "$lbl"); fi ;;
               esac
             done <<< "$current_labels"
-
-            gh issue edit "$num" \
-              "${REMOVE_ARGS[@]}" \
-              --add-label "factory:accepted" \
-              --add-label "priority:$priority" \
-              --add-label "type:$classification"
+            gh issue edit "$num" "${REMOVE_ARGS[@]}" --add-label "factory:accepted" --add-label "priority:$priority" --add-label "type:$classification"
             gh issue comment "$num" --body "$body"
             ;;
-
           reject)
-            if [ -n "$dup_of" ]; then
-              body="**Dark Factory triage:** rejected as duplicate of #$dup_of"$'\n\n'"$reason"
-            else
-              body="**Dark Factory triage:** rejected"$'\n\n'"$reason"$'\n\n'"_If you disagree, please reopen this issue with additional context and it will be re-triaged._"
-            fi
+            if [ -n "$dup_of" ]; then body="**Dark Factory triage:** rejected as duplicate of #$dup_of"$'\n\n'"$reason";
+            else body="**Dark Factory triage:** rejected"$'\n\n'"$reason"$'\n\n'"_If you disagree, please reopen this issue with additional context and it will be re-triaged._"; fi
             gh issue comment "$num" --body "$body"
             gh issue edit "$num" --add-label "factory:rejected"
             gh issue close "$num" --reason "not planned"
             ;;
-
-          *)
-            echo "WARNING: unknown verdict '$verdict' for issue #$num -- skipping" >&2
-            ;;
+          *) echo "WARNING: unknown verdict '$verdict' for issue #$num -- skipping" >&2 ;;
         esac
-
         i=$((i + 1))
       done
-
       echo ""
       echo "Triage complete: $COUNT decisions applied."
     timeout: 180000
