@@ -1,0 +1,15 @@
+name: dark-factory-reap-stalls
+description: |
+  Deterministically release stale factory:in-progress issue claims. Run once per
+  orchestrator cycle after the stop check and before label-based dispatch selection.
+  No model is involved. Fresh leases and ambiguous PR handoffs fail closed.
+
+provider: claude
+model: haiku
+
+nodes:
+  - id: reap-stalls
+    bash: |
+      set -euo pipefail
+      python scripts/factory_lease.py reap --active-ttl 21600 --legacy-ttl 86400
+    timeout: 120000
