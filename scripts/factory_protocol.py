@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse, hashlib, json, re, subprocess, sys
+import argparse, hashlib, json, os, re, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +25,20 @@ def load(path: str) -> dict:
 
 def canonical(value: dict) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+
+
+def lease(action: str, issue: int, stage: str, pr: str | None = None) -> None:
+    artifacts = os.environ.get("ARTIFACTS_DIR", "").strip()
+    if not artifacts:
+        return
+    lease_file = Path(artifacts) / "factory-lease.json"
+    argv = [
+        sys.executable, str(ROOT / "scripts" / "factory_lease.py"), action,
+        "--issue", str(issue), "--stage", stage, "--lease-file", str(lease_file),
+    ]
+    if pr is not None and action != "start":
+        argv.extend(["--pr", str(pr)])
+    subprocess.check_call(argv, cwd=ROOT)
 
 
 def validate_contract(c: dict, issue: int | None = None) -> str:
@@ -72,6 +86,7 @@ def validate_context(m: dict, contract_hash: str) -> dict:
 def run_contract(args: argparse.Namespace) -> None:
     c = load(args.input); h = validate_contract(c, args.issue)
     Path(args.output).write_bytes(canonical(c)); Path(args.hash_output).write_text(h + "\n", encoding="utf-8")
+    lease("start", c["issue"]["number"], "contract")
     print(f"CONTRACT_OK sha256={h} criteria={len(c['behaviors'])}")
 
 
@@ -84,6 +99,7 @@ def run_context(args: argparse.Namespace) -> None:
     ], cwd=ROOT)
     m = validate_context(load(str(enriched)), h)
     Path(args.output).write_bytes(canonical(m))
+    lease("touch", c["issue"]["number"], "context")
     print(f"CONTEXT_OK files={len(m['files'])} sha256={hashlib.sha256(canonical(m)).hexdigest()}")
 
 
@@ -94,6 +110,7 @@ def run_attach(args: argparse.Namespace) -> None:
     block = "\n\n<!-- factory-contract:start -->\n```factory-contract\n" + canonical(c).decode().rstrip() + "\n```\ncontract-sha256: " + h + "\n<!-- factory-contract:end -->\n"
     tmp = Path(args.contract).with_suffix(".pr-body.md"); tmp.write_text(body + block, encoding="utf-8")
     subprocess.check_call(["gh", "pr", "edit", str(args.pr), "--body-file", str(tmp)])
+    lease("touch", c["issue"]["number"], "pr-handoff", str(args.pr))
     print(f"CONTRACT_ATTACHED pr={args.pr} sha256={h}")
 
 
