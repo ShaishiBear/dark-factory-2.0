@@ -1,41 +1,20 @@
 #!/usr/bin/env python3
-"""MUTATION TESTING. Break the software on purpose and require the gate to notice.
+"""Mutation testing: break real source and require independent gates to notice.
 
-    python harness/mutations/run.py
+Mutations run in place and are restored with git because copying app/backend/.venv and
+app/frontend/node_modules is prohibitively expensive. The tree must therefore be clean.
 
-THE ONLY THING IN THIS GATE THAT MEASURES THE HARNESS RATHER THAN THE CODE. Everything
-else answers "is this build good?". This answers "would this gate know if it were not?",
-and they are completely different questions. Until one of these has been injected and
-caught there is no evidence any check here can fail at all.
+Every mutation is evaluated by ALL available non-E2E channels:
+  - harness/ci.py --quick         builder-visible static/unit gate
+  - .factory/holdout/run.py       independent core holdout
+  - .factory/holdout/citations.py independent citation-composition probe
 
-═══════════════════════════════════════════════════════════════════════════════════════
-TWO DELIBERATE DEVIATIONS FROM THE SKILL'S TEMPLATE, both forced by this repo.
-═══════════════════════════════════════════════════════════════════════════════════════
+The clean baseline must pass all three before any defect is injected. This prevents an
+already-broken gate from being credited with "catching" every mutation.
 
-**1. It mutates IN PLACE and restores with git, instead of copying the tree.**
-The template copies `["app", "tests", "harness", ".factory"]` into a temp dir per defect.
-Here `app/` contains `app/backend/.venv` and `app/frontend/node_modules` - gigabytes, and
-several minutes per defect. Excluding them instead breaks the copy, because the checks
-need that venv to run at all.
-
-So: apply the mutation to the real file, run the checks, and restore with
-`git checkout --`. The tree must be CLEAN before this starts, which is asserted below,
-and every path restores in a `finally`. If this process is killed mid-defect, `git status`
-shows exactly one modified file and `git checkout -- <file>` is the fix.
-
-**2. It runs `ci.py --quick` PLUS the holdout, not the full `ci.py`.**
-The full gate starts the backend, which requires a validation env that holds secrets and
-lives outside the repo. On any machine without it the app refuses to start and the gate
-exits non-zero - which would mark every single defect CAUGHT, for a reason that has
-nothing to do with the defect. A mutation suite that passes because the app cannot boot
-is worse than no mutation suite, so the E2E rung is excluded rather than faked.
-
-The consequence is stated rather than hidden: **these four defects are caught by static,
-unit and holdout only.** A defect that only the browser journey could catch would escape
-here and this file would not know. That is a real hole and it is the same hole
-`harness/README.md` names - section 4 lives in the workflow, not in this harness yet.
-
-Emits `MUTATIONS_TOTAL=N` and `MUTATIONS_CAUGHT=N`. The gate requires them equal.
+The full browser journey is still excluded because it requires the external validation
+environment. That gap remains explicit rather than turning missing infrastructure into
+a false mutation catch.
 """
 from __future__ import annotations
 
@@ -47,6 +26,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DEFECTS = Path(__file__).resolve().parent / "defects.json"
+CHANNELS = (
+    ("quick", [sys.executable, "harness/ci.py", "--quick"]),
+    ("holdout", [sys.executable, ".factory/holdout/run.py"]),
+    ("citation", [sys.executable, ".factory/holdout/citations.py"]),
+)
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -68,25 +52,48 @@ def apply(defect: dict) -> bool:
     return True
 
 
-def run_checks() -> tuple[bool, str]:
-    """Returns (went_red, which_rung). Runs the rungs a mutation build can honestly use."""
+def _quick_rung(stdout: str) -> str:
+    for line in stdout.splitlines():
+        if line.startswith("GATE_FAILED:"):
+            return line.split(":", 1)[1].strip()
+    return "quick"
+
+
+def run_channels() -> dict[str, tuple[bool, str]]:
+    """Return channel -> (went_red, detail), without short-circuiting."""
     env = dict(os.environ, FACTORY_IN_MUTATION="1")
+    results: dict[str, tuple[bool, str]] = {}
+    for name, command in CHANNELS:
+        proc = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        detail = _quick_rung(proc.stdout or "") if name == "quick" else name
+        results[name] = (proc.returncode != 0, detail)
+    return results
 
-    quick = subprocess.run([sys.executable, "harness/ci.py", "--quick"], cwd=ROOT,
-                           env=env, capture_output=True, text=True, timeout=900)
-    if quick.returncode != 0:
-        rung = "gate"
-        for line in (quick.stdout or "").splitlines():
-            if line.startswith("GATE_FAILED:"):
-                rung = line.split(":", 1)[1].strip()
-        return True, rung
 
-    holdout = subprocess.run([sys.executable, ".factory/holdout/run.py"], cwd=ROOT,
-                             env=env, capture_output=True, text=True, timeout=900)
-    if holdout.returncode != 0:
-        return True, "holdout"
-
-    return False, ""
+def baseline_is_green() -> bool:
+    print("MUTATION_BASELINE_START", flush=True)
+    results = run_channels()
+    failed = [name for name, (red, _detail) in results.items() if red]
+    for name, (red, detail) in results.items():
+        state = "RED" if red else "GREEN"
+        print(f"  BASELINE      {name:<10} {state:<5} {detail}", flush=True)
+    if failed:
+        print(
+            "MUTATIONS_REFUSED baseline is already red in "
+            + ", ".join(failed)
+            + "; a broken gate cannot be credited with catching mutations",
+            flush=True,
+        )
+        return False
+    print("MUTATION_BASELINE_OK", flush=True)
+    return True
 
 
 def main() -> int:
@@ -95,53 +102,83 @@ def main() -> int:
         return 0
 
     if not tree_is_clean():
-        # REFUSE. Restoring with `git checkout --` would destroy uncommitted work, and a
-        # mutation runner that eats your changes is a tool nobody runs twice.
-        print("MUTATIONS_REFUSED the working tree is dirty. This runner mutates in place "
-              "and restores with git, so it will not start on an unclean tree. Commit or "
-              "stash first.", flush=True)
+        print(
+            "MUTATIONS_REFUSED the working tree is dirty. This runner mutates in place "
+            "and restores with git, so it will not start on an unclean tree.",
+            flush=True,
+        )
+        return 1
+
+    if not baseline_is_green():
         return 1
 
     defects = json.loads(DEFECTS.read_text(encoding="utf-8"))["defects"]
     total = caught = not_injected = 0
+    quick_caught = independent_caught = citation_caught = 0
 
     print("MUTATION_START", flush=True)
-    for d in defects:
+    for defect in defects:
         total += 1
         injected = False
         try:
-            if not apply(d):
-                # NOT a pass. The anchor moved, so this defect tested nothing - and a
-                # mutation set that silently stops injecting reports a perfect score for
-                # doing nothing at all.
+            if not apply(defect):
                 not_injected += 1
-                print(f"  NOT_INJECTED  {d['id']:<38} anchor not found in {d['file']}",
-                      flush=True)
+                print(
+                    f"  NOT_INJECTED  {defect['id']:<38} "
+                    f"anchor not found in {defect['file']}",
+                    flush=True,
+                )
                 continue
+
             injected = True
-            went_red, rung = run_checks()
-            if went_red:
+            results = run_channels()
+            red_channels = [name for name, (red, _detail) in results.items() if red]
+            if results["quick"][0]:
+                quick_caught += 1
+            if results["holdout"][0] or results["citation"][0]:
+                independent_caught += 1
+            if results["citation"][0]:
+                citation_caught += 1
+
+            if red_channels:
                 caught += 1
-                print(f"  CAUGHT        {d['id']:<38} by {rung}", flush=True)
+                details = ", ".join(results[name][1] for name in red_channels)
+                print(
+                    f"  CAUGHT        {defect['id']:<38} by {details}",
+                    flush=True,
+                )
             else:
-                print(f"  ESCAPED       {d['id']:<38} <-- {d['why']}", flush=True)
+                print(
+                    f"  ESCAPED       {defect['id']:<38} <-- {defect['why']}",
+                    flush=True,
+                )
         finally:
             if injected:
-                git("checkout", "--", d["file"])
+                git("checkout", "--", defect["file"])
 
     if not tree_is_clean():
-        print("MUTATIONS_DIRTY the tree did not restore cleanly - inspect `git status` "
-              "before trusting anything above", flush=True)
+        print(
+            "MUTATIONS_DIRTY the tree did not restore cleanly - inspect `git status`",
+            flush=True,
+        )
         return 1
 
     print(f"MUTATIONS_TOTAL={total}", flush=True)
     print(f"MUTATIONS_CAUGHT={caught}", flush=True)
+    print(f"MUTATIONS_QUICK_CAUGHT={quick_caught}", flush=True)
+    print(f"MUTATIONS_INDEPENDENT_CAUGHT={independent_caught}", flush=True)
+    print(f"MUTATIONS_CITATION_CAUGHT={citation_caught}", flush=True)
     print(f"MUTATIONS_NOT_INJECTED={not_injected}", flush=True)
+
     if caught == total and not_injected == 0:
         print("MUTATIONS_OK", flush=True)
         return 0
-    print("MUTATIONS_FAILED - every escaped defect is a class of bug that can currently "
-          "merge unreviewed", flush=True)
+
+    print(
+        "MUTATIONS_FAILED - every escaped defect is a class of bug that can "
+        "currently merge unreviewed",
+        flush=True,
+    )
     return 1
 
 
