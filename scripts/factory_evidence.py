@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse, hashlib, json, re, subprocess, sys
+import argparse, hashlib, json, os, re, subprocess, sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
 BLOCK = re.compile(
     r"<!-- factory-(contract|proof):start -->\s*```factory-\1\s*(\{.*?\})\s*```\s*"
     r"\1-sha256:\s*([0-9a-f]{64})\s*<!-- factory-\1:end -->", re.S
