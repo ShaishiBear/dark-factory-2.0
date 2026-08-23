@@ -18,6 +18,18 @@ def load(p):
     except Exception as e: die(f"cannot read {p}: {e}")
     return v
 
+def heartbeat(action, stage, pr=None):
+    artifacts=os.environ.get('ARTIFACTS_DIR','').strip()
+    if not artifacts: return
+    contract=Path(artifacts)/'task-contract.json'; lease_file=Path(artifacts)/'factory-lease.json'
+    if not contract.is_file() or not lease_file.is_file(): die('factory lease artifacts missing')
+    issue=load(str(contract)).get('issue',{}).get('number')
+    if not isinstance(issue,int): die('factory contract lacks issue number for lease')
+    argv=[sys.executable,str(ROOT/'scripts'/'factory_lease.py'),action,
+          '--issue',str(issue),'--stage',stage,'--lease-file',str(lease_file)]
+    if pr is not None: argv.extend(['--pr',str(pr)])
+    subprocess.check_call(argv,cwd=ROOT)
+
 def spec(path):
     s=load(path)
     if not isinstance(s,dict) or set(('cwd','argv','files','expected_failure'))-s.keys(): die('test spec missing fields')
@@ -66,7 +78,7 @@ def red(a):
     if rc==0: die('RED command unexpectedly passed')
     if s['expected_failure'].lower() not in out.lower(): die('RED failed, but not for the declared behavioral reason')
     proof={'version':'1.0','test_commit':before,'cwd':s['cwd'],'argv':s['argv'],'files':{f:sha(f) for f in declared},'red_exit':rc,'red_output_sha256':hashlib.sha256(out.encode()).hexdigest(),'expected_failure':s['expected_failure']}
-    write(a.output,proof); print(f"RED_PROVED tests={len(declared)} commit={before}")
+    write(a.output,proof); heartbeat('touch','red'); print(f"RED_PROVED tests={len(declared)} commit={before}")
 
 def green(a):
     clean(); p=load(a.proof)
@@ -80,7 +92,9 @@ def green(a):
     impact=impact_check(a.output)
     result=dict(p,green_commit=before,green_exit=rc,green_output_sha256=hashlib.sha256(out.encode()).hexdigest())
     if impact: result['change_impact']=impact
-    write(a.output,result); print(f"GREEN_PROVED tests={len(p['files'])} commit={before}")
+    write(a.output,result)
+    stage='final-green' if 'final' in Path(a.output).name else 'green'
+    heartbeat('touch',stage); print(f"GREEN_PROVED tests={len(p['files'])} commit={before}")
 
 def attach(a):
     clean(); p=load(a.proof)
@@ -94,6 +108,7 @@ def attach(a):
     body=PROOF_BLOCK.sub('\n',info.get('body') or '').rstrip()+block
     q=subprocess.run(['gh','pr','edit',str(a.pr),'--body',body],cwd=ROOT,text=True,capture_output=True)
     if q.returncode: die('could not attach proof: '+q.stderr[-1000:])
+    heartbeat('finish','proof-attached',a.pr)
     print(f"PROOF_ATTACHED pr={a.pr} head={head} sha256={digest(p)}")
 
 def main():
