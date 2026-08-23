@@ -272,9 +272,16 @@ nodes:
     depends_on: [simplify]
     timeout: 360000
 
+  - id: attach-proof
+    bash: |
+      set -euo pipefail
+      python scripts/factory_proof.py attach --proof "$ARTIFACTS_DIR/final-green-proof.json" --pr "$capture-pr-number.output"
+    depends_on: [final-green-proof]
+    timeout: 20000
+
   - id: report
     command: archon-issue-completion-report
-    depends_on: [final-green-proof]
+    depends_on: [attach-proof]
     context: fresh
 
   - id: cleanup-issue-label
