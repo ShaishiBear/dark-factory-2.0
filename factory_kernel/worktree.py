@@ -44,7 +44,7 @@ def _run(repo: Path, argv: list[str], *, check: bool = True) -> subprocess.Compl
 
 def resolve_commit(repo: str | Path, ref: str) -> str:
     root = Path(repo).resolve()
-    sha = _run(root, ["rev-parse", "--verify", f"{ref}^{{commit}}"] ).stdout.strip()
+    sha = _run(root, ["rev-parse", "--verify", f"{ref}^{{commit}}"]).stdout.strip()
     if not GIT_OID.fullmatch(sha):
         raise WorktreeError(f"git returned invalid commit id for {ref!r}: {sha!r}")
     return sha
