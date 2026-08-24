@@ -69,7 +69,7 @@ HAPPY_PATH: tuple[Stage, ...] = (
     Stage.COMPLETE,
 )
 
-NEXT = {current: nxt for current, nxt in zip(HAPPY_PATH, HAPPY_PATH[1:], strict=True)}
+NEXT = {current: nxt for current, nxt in zip(HAPPY_PATH, HAPPY_PATH[1:])}
 TERMINAL = {Stage.COMPLETE, Stage.DECOMPOSED, Stage.STOPPED, Stage.NEEDS_HUMAN}
 
 
