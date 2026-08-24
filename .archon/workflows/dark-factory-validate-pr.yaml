@@ -1150,6 +1150,7 @@ nodes:
             exit 1
           fi
           git show origin/main:scripts/factory_evidence.py > "$ARTIFACTS_DIR/factory_evidence.py"
+          git show origin/main:harness/merge_verify.py > "$ARTIFACTS_DIR/merge_verify.py"
           FACTORY_REPO_ROOT="$REPO_ROOT" python3 "$ARTIFACTS_DIR/factory_evidence.py" \
             --pr "$PR_NUMBER" --verdict "$VERDICT_FILE" --architecture-verdict "$ARCHITECTURE_FILE" \
             --output "$ARTIFACTS_DIR/evidence-bundle.json"
@@ -1163,40 +1164,83 @@ nodes:
             "All quality gates passed:" \
             "- Behavioral (static): solves_issue=yes" \
             "- Behavioral (E2E via agent-browser): solves_issue=yes" \
-            "- Security: pass (no governance files modified)" \
+            "- Security: pass (AI holdout + deterministic dependency/secret guard)" \
             "- Architecture holdout: pass" \
             "- Static checks: pass" \
             "- Tests: pass or legitimately skipped" \
             "- Code review: no critical/high findings" \
             "- Exact-head evidence bundle SHA-256: ${EVIDENCE_SHA}" \
             "" \
-            "Auto-merging via squash.")
-          post_review --approve "$BODY"
-          # The PR may have been opened as a draft by the implementer workflow.
-          # Mark it ready before merging — draft PRs cannot be merged at all.
+            "Merge will be bound to the evidenced head and verified after squash.")
+
+          # Draft PRs cannot merge. Ready-state mutation does not alter base/head;
+          # authorize only after this transition so the race window begins as late as possible.
           IS_DRAFT=$(gh pr view "$PR_NUMBER" --json isDraft -q '.isDraft' 2>/dev/null || echo "false")
           if [ "$IS_DRAFT" = "true" ]; then
             echo "PR #$PR_NUMBER is draft — marking ready for review before merge"
             gh pr ready "$PR_NUMBER"
           fi
-          # Plain squash merge (no --auto). The validator IS the gate — by the
-          # time we reach this branch, every quality gate has already passed,
-          # so we don't need GitHub branch-protection rules to hold the merge
-          # until checks finish. Dropping --auto also means we don't need the
-          # repo to have branch protection configured at all.
-          # Don't pass --delete-branch: gh tries to delete the local branch
-          # after merging, which requires switching off it. In a worktree
-          # where main is checked out elsewhere, that switch fails and aborts
-          # apply-verdict (set -e) before the label swap runs. Repos with
-          # "Automatically delete head branches" enabled handle deletion
-          # server-side anyway.
-          if gh pr merge "$PR_NUMBER" --squash; then
-            echo "PR #$PR_NUMBER: merged via squash"
-          else
-            echo "WARN: squash merge failed for PR #$PR_NUMBER — leaving approved for manual merge" >&2
+
+          FACTORY_REPO_ROOT="$REPO_ROOT" python3 "$ARTIFACTS_DIR/merge_verify.py" pre \
+            --pr "$PR_NUMBER" --evidence "$ARTIFACTS_DIR/evidence-bundle.json" \
+            --output "$ARTIFACTS_DIR/merge-authorization.json"
+          AUTH_HEAD=$(jq -r '.head_sha' "$ARTIFACTS_DIR/merge-authorization.json")
+
+          # The visible approval is posted only after deterministic pre-authorization.
+          post_review --approve "$BODY"
+
+          # Use GitHub's merge REST endpoint with the evidenced head SHA as an
+          # atomic head precondition. If the PR head changes, GitHub refuses the merge.
+          REPO_FULL_NAME=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+          MERGE_RESPONSE=$(gh api --method PUT "repos/$REPO_FULL_NAME/pulls/$PR_NUMBER/merge" \
+            -f merge_method=squash -f sha="$AUTH_HEAD")
+          if [ "$(echo "$MERGE_RESPONSE" | jq -r '.merged // false')" != "true" ]; then
+            echo "MERGE_REFUSED: GitHub did not accept the head-bound squash merge" >&2
+            echo "$MERGE_RESPONSE" | jq . >&2 || true
+            exit 1
           fi
+          MERGE_SHA=$(echo "$MERGE_RESPONSE" | jq -r '.sha // empty')
+          echo "PR #$PR_NUMBER: GitHub reports squash merge $MERGE_SHA"
+
+          # Re-prove the actual merged commit. It must be in main history, have
+          # exactly the evidenced base as its sole parent, and have the exact
+          # authorized PR-head tree. A later valid commit on main is allowed.
+          if ! FACTORY_REPO_ROOT="$REPO_ROOT" python3 "$ARTIFACTS_DIR/merge_verify.py" post \
+              --pr "$PR_NUMBER" --evidence "$ARTIFACTS_DIR/evidence-bundle.json" \
+              --authorization "$ARTIFACTS_DIR/merge-authorization.json" \
+              --output "$ARTIFACTS_DIR/merged-verification.json"; then
+            echo "CRITICAL: merged-SHA verification failed after GitHub accepted the merge" >&2
+            KILL_FILE="${FACTORY_KILL_FILE:-${FACTORY_WORKDIR:-$REPO_ROOT}/.factory-stop}"
+            mkdir -p "$(dirname "$KILL_FILE")" 2>/dev/null || true
+            printf '%s\n' "merged-SHA verification failed for PR #$PR_NUMBER after merge $MERGE_SHA" > "$KILL_FILE" 2>/dev/null || true
+            STOP_BODY=$(printf '%s\n' \
+              "Dark Factory automatically stopped after a post-merge verification failure." \
+              "" \
+              "PR: #$PR_NUMBER" \
+              "Merge SHA: $MERGE_SHA" \
+              "Evidence SHA-256: $EVIDENCE_SHA" \
+              "" \
+              "The merged commit did not prove the required parent/tree relationship to the exact-head Evidence Bundle. Investigate main before resuming the factory.")
+            gh issue create --title "Factory stop: merged-SHA verification failure on PR #$PR_NUMBER" \
+              --body "$STOP_BODY" --label "factory:stop" >/dev/null 2>&1 || true
+            gh pr edit "$PR_NUMBER" --remove-label "factory:needs-review" --add-label "factory:needs-human" 2>/dev/null || true
+            exit 1
+          fi
+
+          VERIFIED_MERGE_SHA=$(jq -r '.merge_sha' "$ARTIFACTS_DIR/merged-verification.json")
+          VERIFIED_TREE_SHA=$(jq -r '.tree_sha' "$ARTIFACTS_DIR/merged-verification.json")
+          VERIFY_BODY=$(printf '%s\n' \
+            "**Dark Factory merged-SHA verification**: VERIFIED" \
+            "" \
+            "- Merge SHA: $VERIFIED_MERGE_SHA" \
+            "- Verified tree: $VERIFIED_TREE_SHA" \
+            "- Evidence bundle SHA-256: $EVIDENCE_SHA" \
+            "- Squash parent: exact evidenced base SHA" \
+            "" \
+            "The code tree now in main is byte-identical to the PR head authorized by the Evidence Bundle.")
+          gh pr comment "$PR_NUMBER" --body "$VERIFY_BODY" 2>/dev/null || true
           gh pr edit "$PR_NUMBER" --remove-label "factory:needs-review" --add-label "factory:approved" 2>/dev/null || true
-          echo "PR #$PR_NUMBER: APPROVED (${PASS_LABEL})"
+          echo "PR #$PR_NUMBER: APPROVED + MERGED-SHA VERIFIED (${PASS_LABEL})"
           ;;
 
         request_changes)
