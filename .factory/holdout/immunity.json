@@ -28,6 +28,17 @@
         {"kind": "json_number_min", "path": ".factory/locks/floor.json", "pointer": "/mutations_security_caught", "minimum": 3},
         {"kind": "json_array_match_min", "path": "harness/mutations/defects.json", "pointer": "/defects", "field": "must_catch", "contains": "security", "minimum": 3}
       ]
+    },
+    {
+      "id": "IMM-003",
+      "status": "active",
+      "source": {"kind": "audit", "ref": "2026-08-24-stop-repo-default"},
+      "failure_class": "remote emergency-stop check defaulted to a different repository",
+      "lesson": "The remote stop half must target this repository by default and remain fail-closed when GitHub stop state is unreadable.",
+      "assertions": [
+        {"kind": "text_contains", "path": "scripts/factory-stop.sh", "value": "REPO=\"${FACTORY_REPO:-ShaishiBear/dark-factory-2.0}\""},
+        {"kind": "text_contains", "path": "scripts/factory-stop.sh", "value": "if ! HITS=$(gh issue list -R \"$REPO\" --label \"$STOP_LABEL\" --state open"}
+      ]
     }
   ]
 }
