@@ -10,7 +10,7 @@ from factory_kernel.agents import (
     ProviderRegistration,
     ProviderRegistry,
 )
-from factory_kernel.manifest import ArtifactRef, ClaimRecord, RunManifest
+from factory_kernel.manifest import ArtifactRef, Certification, ClaimRecord, RunManifest
 from factory_kernel.worktree import create_detached, remove
 
 
@@ -53,27 +53,32 @@ class ManifestTests(unittest.TestCase):
     def artifact(self, name: str, sha: str) -> ArtifactRef:
         return ArtifactRef(name=name, path=f"artifacts/{name}.json", sha256=sha)
 
+    def cert(self, kind: str, authority: str, name: str, sha: str) -> Certification:
+        return Certification(kind=kind, authority_id=authority, artifact=self.artifact(name, sha))
+
     def test_material_claim_cannot_self_certify(self):
-        with self.assertRaisesRegex(ValueError, "cannot certify"):
+        with self.assertRaisesRegex(ValueError, "cannot deterministically certify"):
             ClaimRecord(
                 claim_id="contract",
                 stage="spec",
                 producer="specifier-agent",
-                validator="specifier-agent",
                 artifact=self.artifact("contract", HEX_A),
-                validation_artifact=self.artifact("contract-validation", HEX_B),
-                independent_required=True,
+                deterministic=self.cert(
+                    "deterministic", "specifier-agent", "contract-validation", HEX_B
+                ),
             )
 
-    def test_independent_claim_requires_validation_artifact(self):
-        with self.assertRaisesRegex(ValueError, "validation artifact"):
+    def test_independent_authority_must_be_distinct(self):
+        with self.assertRaisesRegex(ValueError, "independent verifier must differ"):
             ClaimRecord(
-                claim_id="contract",
-                stage="spec",
-                producer="specifier-agent",
-                validator="contract-validator",
-                artifact=self.artifact("contract", HEX_A),
-                independent_required=True,
+                claim_id="design",
+                stage="design",
+                producer="architect-agent",
+                artifact=self.artifact("design", HEX_A),
+                deterministic=self.cert("deterministic", "design-validator", "design-det", HEX_B),
+                independent=self.cert(
+                    "independent", "design-validator", "design-independent", "c" * 64
+                ),
             )
 
     def test_manifest_bindings_must_point_to_prior_artifacts(self):
@@ -82,23 +87,25 @@ class ManifestTests(unittest.TestCase):
             claim_id="contract",
             stage="spec",
             producer="specifier-agent",
-            validator="contract-validator",
             artifact=self.artifact("contract", HEX_A),
-            validation_artifact=self.artifact("contract-validation", HEX_B),
-            independent_required=True,
+            deterministic=self.cert(
+                "deterministic", "contract-validator", "contract-validation", HEX_B
+            ),
+            independent=self.cert(
+                "independent", "contract-holdout", "contract-holdout", "c" * 64
+            ),
         )
         manifest.add(first)
-        design_sha = "c" * 64
         manifest.add(
             ClaimRecord(
                 claim_id="design",
                 stage="design",
                 producer="architect-agent",
-                validator="design-validator",
-                artifact=self.artifact("design", design_sha),
-                validation_artifact=self.artifact("design-validation", "d" * 64),
+                artifact=self.artifact("design", "d" * 64),
+                deterministic=self.cert(
+                    "deterministic", "design-validator", "design-validation", "e" * 64
+                ),
                 bindings={"contract_sha256": HEX_A},
-                independent_required=True,
             )
         )
         self.assertEqual(len(manifest.claims), 2)
@@ -109,8 +116,8 @@ class ManifestTests(unittest.TestCase):
                     claim_id="bad",
                     stage="design",
                     producer="agent",
-                    artifact=self.artifact("bad", "e" * 64),
-                    bindings={"missing": "f" * 64},
+                    artifact=self.artifact("bad", "f" * 64),
+                    bindings={"missing": "9" * 64},
                 )
             )
 
@@ -131,6 +138,22 @@ class ManifestTests(unittest.TestCase):
             exact_head_sha=GIT_HEAD,
         )
         self.assertEqual(valid.exact_head_sha, GIT_HEAD)
+
+    def test_manifest_round_trips_with_two_authority_types(self):
+        manifest = RunManifest.create(run_id="run-2", issue=7, base_sha=GIT_BASE)
+        manifest.add(
+            ClaimRecord(
+                claim_id="contract",
+                stage="spec",
+                producer="specifier",
+                artifact=self.artifact("contract", HEX_A),
+                deterministic=self.cert("deterministic", "schema", "schema", HEX_B),
+                independent=self.cert("independent", "spec-holdout", "holdout", "c" * 64),
+            )
+        )
+        rebuilt = RunManifest.from_dict(manifest.to_dict())
+        self.assertEqual(rebuilt.to_dict(), manifest.to_dict())
+        self.assertEqual(rebuilt.version, "2.0")
 
 
 class WorktreeTests(unittest.TestCase):
