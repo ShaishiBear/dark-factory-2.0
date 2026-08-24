@@ -4,4 +4,6 @@ Write `$ARTIFACTS_DIR/context.raw.json` with version `1.0`, exact `contract_sha2
 
 Also write `$ARTIFACTS_DIR/design.raw.json` with version `1.0`, non-empty arrays `modules`, `seams`, `public_interfaces`, `invariants`, `data_flows`, plus `ac_mapping` whose keys are exactly the contract AC IDs and whose values are one-or-more names from `seams`.
 
-Prefer a small, high-signal context and the smallest deep-module design satisfying the contract. Do not edit product code.
+The design must additionally contain `planned_files` and `allowed_new_files`. `planned_files` is the complete repo-relative set of production files the implementation is authorized to change for this design. Every existing planned file must already be in the validated context. `allowed_new_files` is the explicit subset of `planned_files` that does not yet exist and may be created. Do not use broad directories or speculative files: name exact files.
+
+Prefer a small, high-signal context and the smallest deep-module design satisfying the contract. Do not edit product code. A deterministic compiler and post-code architecture guard will reject implementation outside this file envelope.
