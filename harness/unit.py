@@ -8,6 +8,7 @@ without inventing a higher floor.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -24,14 +25,29 @@ FACTORY_PATTERN = re.compile(r"Ran\s+(\d+)\s+tests?")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def run(label: str, cwd: Path, argv: list[str], pattern: re.Pattern[str]) -> int | None:
+def run(
+    label: str,
+    cwd: Path,
+    argv: list[str],
+    pattern: re.Pattern[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> int | None:
     """Return the real test count, or None if a required suite failed or ran nothing."""
     if not cwd.exists():
         print(f"UNIT_MISSING {label}: {cwd} does not exist", flush=True)
         return None
     try:
-        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=900)
+        p = subprocess.run(
+            argv,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=900,
+            env=env,
+        )
     except FileNotFoundError:
         print(f"UNIT_MISSING {label}: {argv[0]} is not on PATH", flush=True)
         return None
@@ -62,9 +78,28 @@ def main() -> int:
                   ["uv", "run", "pytest", "tests", "-q"], BACKEND_PATTERN)
     frontend = run("frontend", FRONTEND,
                    ["bun", "run", "test"], FRONTEND_PATTERN)
-    factory = run("factory", ROOT,
-                  [sys.executable, "-m", "unittest", "discover", "-s", "tests/factory",
-                   "-p", "test_*.py"], FACTORY_PATTERN)
+    factory_env = os.environ.copy()
+    scripts_path = str(ROOT / "scripts")
+    existing_pythonpath = factory_env.get("PYTHONPATH", "")
+    factory_env["PYTHONPATH"] = (
+        scripts_path + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
+    )
+    factory = run(
+        "factory",
+        ROOT,
+        [
+            sys.executable,
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests/factory",
+            "-p",
+            "test_*.py",
+        ],
+        FACTORY_PATTERN,
+        env=factory_env,
+    )
 
     if backend is None or frontend is None or factory is None:
         return 1
