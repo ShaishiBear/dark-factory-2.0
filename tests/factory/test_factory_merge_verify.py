@@ -49,10 +49,10 @@ class MergeVerifyTests(unittest.TestCase):
         values = {
             "evidence_sha256": EVIDENCE,
             "pr_meta": meta or self.meta(),
-            "current_base": MERGE,
             "merge_sha": MERGE,
             "merge_parents": [BASE],
             "merge_tree": TREE,
+            "merge_is_ancestor": True,
         }
         values.update(overrides)
         return m.post_result(bundle, authorization, **values)
@@ -96,6 +96,13 @@ class MergeVerifyTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "verified")
         self.assertEqual(result["merge_sha"], MERGE)
 
+    def test_post_still_passes_when_later_commit_is_on_main(self):
+        self.assertEqual(self.post(merge_is_ancestor=True)["verdict"], "verified")
+
+    def test_post_rejects_merge_missing_from_main_history(self):
+        with self.assertRaises(SystemExit):
+            self.post(merge_is_ancestor=False)
+
     def test_post_rejects_tampered_authorization(self):
         auth = self.authorize()
         auth["head_sha"] = "f" * 40
@@ -119,10 +126,6 @@ class MergeVerifyTests(unittest.TestCase):
     def test_post_rejects_tree_not_identical_to_authorized_head(self):
         with self.assertRaises(SystemExit):
             self.post(merge_tree="f" * 40)
-
-    def test_post_rejects_main_tip_moving_past_merge(self):
-        with self.assertRaises(SystemExit):
-            self.post(current_base="f" * 40)
 
     def test_post_rejects_github_reporting_different_merge_sha(self):
         with self.assertRaises(SystemExit):
