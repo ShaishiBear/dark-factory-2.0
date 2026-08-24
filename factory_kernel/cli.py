@@ -9,6 +9,7 @@ from .config import load_config
 from .manifest import RunManifest
 from .runtime import FactoryStopped, KernelRuntime
 from .state import FactoryState, Outcome, Stage, retry, transition
+from .triage import TriageEngine
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / ".factory" / "kernel.json"
@@ -56,6 +57,7 @@ def main() -> int:
     sub.add_parser("config-check")
     sub.add_parser("stop-check")
     sub.add_parser("reap")
+    sub.add_parser("triage")
 
     dispatch = sub.add_parser("dispatch")
     dispatch.add_argument("--once", action="store_true", help="execute exactly one priority item")
@@ -92,15 +94,23 @@ def main() -> int:
             rt.reap_stale_claims()
             print("KERNEL_REAP_OK")
             return 0
+        if args.command == "triage":
+            count = TriageEngine(rt).run_once()
+            print(f"KERNEL_TRIAGE decisions={count}")
+            return 0
         if args.command == "dispatch":
             if not args.once:
                 parser.error("dispatch currently requires --once; scheduling belongs to systemd")
             decision = rt.dispatch_once(merge=not args.no_merge)
-            print(
-                f"KERNEL_DISPATCH kind={decision.kind} "
-                f"number={decision.number if decision.number is not None else '-'} "
-                f"reason={decision.reason!r}"
-            )
+            if decision.kind == "idle":
+                count = TriageEngine(rt).run_once()
+                print(f"KERNEL_DISPATCH kind=triage decisions={count}")
+            else:
+                print(
+                    f"KERNEL_DISPATCH kind={decision.kind} "
+                    f"number={decision.number if decision.number is not None else '-'} "
+                    f"reason={decision.reason!r}"
+                )
             return 0
         if args.command == "build":
             pr = rt.build_issue(args.issue)
