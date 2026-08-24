@@ -5,12 +5,14 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
-HEX64 = __import__("re").compile(r"^[0-9a-f]{64}$")
+GIT_OID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def die(message: str) -> None:
@@ -50,10 +52,10 @@ def load_json(path: str) -> dict:
     return value
 
 
-def require_sha(value: object, name: str) -> str:
+def require_oid(value: object, name: str) -> str:
     text = str(value or "")
-    if not HEX64.fullmatch(text):
-        die(f"{name} is not a SHA-256-shaped git oid")
+    if not GIT_OID.fullmatch(text):
+        die(f"{name} is not a valid git object id")
     return text
 
 
@@ -63,9 +65,9 @@ def bundle_fields(bundle: dict) -> tuple[str, str, str, str]:
     base_ref = bundle.get("base_ref")
     if base_ref != "main":
         die("factory auto-merge is only authorized onto main")
-    base = require_sha(bundle.get("base_sha"), "bundle base_sha")
-    head = require_sha(bundle.get("head_sha"), "bundle head_sha")
-    tree = require_sha(bundle.get("head_tree_sha"), "bundle head_tree_sha")
+    base = require_oid(bundle.get("base_sha"), "bundle base_sha")
+    head = require_oid(bundle.get("head_sha"), "bundle head_sha")
+    tree = require_oid(bundle.get("head_tree_sha"), "bundle head_tree_sha")
     return base_ref, base, head, tree
 
 
@@ -83,7 +85,7 @@ def pre_authorization(bundle: dict, *, evidence_sha256: str, pr_meta: dict,
         die("current PR head tree disagrees with Evidence Bundle")
     if not base_is_ancestor:
         die("evidenced base is not an ancestor of evidenced head")
-    if not HEX64.fullmatch(evidence_sha256):
+    if not SHA256.fullmatch(evidence_sha256):
         die("evidence bundle byte hash is invalid")
     return {
         "version": "1.0",
@@ -130,7 +132,7 @@ def gh_meta(pr: str) -> dict:
 
 
 def git_oid(rev: str) -> str:
-    return run(["git", "rev-parse", rev], timeout=30).stdout.strip()
+    return require_oid(run(["git", "rev-parse", rev], timeout=30).stdout.strip(), rev)
 
 
 def pre(args: argparse.Namespace) -> None:
@@ -158,8 +160,7 @@ def post(args: argparse.Namespace) -> None:
     bundle = load_json(args.evidence)
     authorization = load_json(args.authorization)
     meta = gh_meta(args.pr)
-    merge_sha = str(meta.get("mergeCommit", {}).get("oid") or "")
-    require_sha(merge_sha, "GitHub merge commit")
+    merge_sha = require_oid(meta.get("mergeCommit", {}).get("oid"), "GitHub merge commit")
     run(["git", "fetch", "origin", "main", "--quiet"], timeout=120)
     parent_line = run(["git", "rev-list", "--parents", "-n", "1", merge_sha], timeout=30).stdout.split()
     if not parent_line or parent_line[0] != merge_sha:
