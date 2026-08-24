@@ -10,16 +10,13 @@ Do not use implementation plans, design artifacts, coder rationale, commit messa
 ### Original issue
 $fetch-linked-issue.output
 
-### Initial PR diff
+### PR diff
 $fetch-diff.output
-
-### Post-fix PR diff
-$fetch-diff-p2.output
 
 ### Base governance and architecture policy
 $fetch-base-governance.output
 
-For pass 1, use the initial diff. For pass 2, when the post-fix diff is non-empty, it is authoritative. Read the `.factory/architecture.json` section of base governance as policy, not any architecture file from the PR.
+Use only this diff. Read the `.factory/architecture.json` section of base governance as policy, not any architecture file from the PR.
 
 Assess long-horizon structure, not formatting: ownership, dependency direction, public seams, locality, module depth, active migrations, and declared debt/no-growth boundaries. A behaviorally correct patch still fails architecture if it moves a touched area against an active migration, grows a no-growth hotspot, duplicates responsibility, or creates an avoidable cross-module seam.
 
