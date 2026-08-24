@@ -902,7 +902,7 @@ nodes:
         - reasoning
 
   - id: architecture-holdout-p2
-    command: dark-factory-architecture-holdout
+    command: dark-factory-architecture-holdout-p2
     depends_on: [fix-issues, fetch-diff-p2, fetch-linked-issue, fetch-base-governance]
     context: fresh
     allowed_tools: []
