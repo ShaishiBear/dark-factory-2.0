@@ -11,9 +11,12 @@
     "normaliser dropped -> uuid-normaliser-dropped",
     "guard removed -> conversations-list-loses-its-guard",
     "citation truth inverted -> citation-marker-membership-inverted",
-    "plausible but wrong deep-link -> citation-collapse-chooses-latest"
+    "plausible but wrong deep-link -> citation-collapse-chooses-latest",
+    "credential inserted -> hardcoded-provider-token",
+    "manifest changed without lock -> dependency-without-lockfile",
+    "trusted policy changed -> governance-file-tampered"
   ],
-  "_written": "Core four written 2026-08-13 with the original holdout. Citation mutations added 2026-08-23 as future-facing probes of the RAG/citation path.",
+  "_written": "Core four written 2026-08-13 with the original holdout. Citation mutations added 2026-08-23. Security/dependency/governance mutations added 2026-08-24 for deterministic guard v2.",
   "defects": [
     {
       "id": "cap-raised-to-100",
@@ -56,6 +59,27 @@
       "find": "            representative = min(cited_in_group, key=lambda c: c.get(\"start_seconds\") or 0.0)",
       "replace": "            representative = max(cited_in_group, key=lambda c: c.get(\"start_seconds\") or 0.0)",
       "why": "The citation stays valid-looking and cited, but deep-links to the wrong cited segment by choosing the latest timestamp instead of the earliest cited evidence."
+    },
+    {
+      "id": "hardcoded-provider-token",
+      "file": "app/backend/rate_limit.py",
+      "find": "DAILY_MESSAGE_CAP: int = 25",
+      "replace": "DAILY_MESSAGE_CAP: int = 25\nMUTATION_TOKEN = \"sk-proj-abcdefghijklmnopqrstuvwxyz123456\"",
+      "why": "A credential-shaped provider token added to otherwise valid source must be rejected deterministically even if lint and behavior still pass."
+    },
+    {
+      "id": "dependency-without-lockfile",
+      "file": "app/backend/pyproject.toml",
+      "find": "    \"httpx\",",
+      "replace": "    \"httpx\",\n    \"factory-mutation-package\",",
+      "why": "A manifest-only dependency change can otherwise use a stale lockfile and evade reproducible dependency review."
+    },
+    {
+      "id": "governance-file-tampered",
+      "file": "MISSION.md",
+      "find": "# Mission",
+      "replace": "# Mission (mutated by adversarial probe)",
+      "why": "A PR that weakens or rewrites trusted governance must go red regardless of whether application tests still pass."
     }
   ]
 }
