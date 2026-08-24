@@ -24,13 +24,17 @@ nodes:
       # Non-owner GitHub accounts are capped at 3 issues per UTC
       # calendar day. Excess issues are labeled `factory:rate-limited`
       # and skipped until the next UTC day, when stale labels are
-      # removed and the excess is re-evaluated. The repository owner
-      # (coleam00) is exempt.
+      # removed and the excess is re-evaluated. The current repository
+      # owner is exempt.
       #
       # Enforcement happens in three steps before the actual batch
       # fetch, so the classifier never sees rate-limited issues.
 
-      OWNER="coleam00"
+      OWNER=$(gh repo view --json owner --jq '.owner.login')
+      if [ -z "$OWNER" ]; then
+        echo "ERROR: could not resolve current repository owner" >&2
+        exit 1
+      fi
       DAILY_CAP=3
       TODAY_UTC=$(date -u '+%Y-%m-%d')
 
