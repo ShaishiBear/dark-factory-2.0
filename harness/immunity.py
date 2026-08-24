@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
 REGISTRY = ".factory/holdout/immunity.json"
-ID = re.compile(r"^IMM-[1-9][0-9]*$")
+ID = re.compile(r"^IMM-0*[1-9][0-9]*$")
 
 
 def die(message: str) -> None:
