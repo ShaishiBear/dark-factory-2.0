@@ -47,10 +47,28 @@ class SecurityGuardTests(unittest.TestCase):
     def test_clean_code_change_passes(self):
         self.assertEqual(self.evaluate()["verdict"], "pass")
 
-    def test_factory_governance_path_is_blocked(self):
-        result = self.evaluate(changed_files=[".archon/workflows/dark-factory-validate-pr.yaml"])
-        self.assertEqual(result["verdict"], "fail")
-        self.assertEqual(result["protected_paths"], [".archon/workflows/dark-factory-validate-pr.yaml"])
+    def test_repo_owned_kernel_paths_are_blocked(self):
+        paths = [
+            "factory_kernel/runtime.py",
+            ".factory/kernel.json",
+            ".factory/evidence-spine.json",
+            ".factory/prompts/implement.md",
+            ".factory/holdout/run.py",
+            "harness/ci.py",
+            "scripts/factory_evidence.py",
+            "deploy/systemd/dark-factory.service",
+        ]
+        for path in paths:
+            with self.subTest(path=path):
+                result = self.evaluate(changed_files=[path])
+                self.assertEqual(result["verdict"], "fail")
+                self.assertEqual(result["protected_paths"], [path])
+
+    def test_legacy_archon_prompt_is_not_an_authority_anymore(self):
+        path = ".archon/commands/dark-factory-engineering-plan.md"
+        result = self.evaluate(changed_files=[path])
+        self.assertEqual(result["verdict"], "pass")
+        self.assertEqual(result["protected_paths"], [])
 
     def test_github_path_is_blocked(self):
         path = ".github/workflows/dark-factory.yml"
