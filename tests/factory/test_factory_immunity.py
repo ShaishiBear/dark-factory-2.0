@@ -74,6 +74,16 @@ class ImmunityTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_zero_id_rejected(self):
+        tmp, root = self.make_root()
+        try:
+            registry = self.registry()
+            registry["entries"][0]["id"] = "IMM-000"
+            with self.assertRaises(SystemExit):
+                m.verify_registry(registry, root)
+        finally:
+            tmp.cleanup()
+
     def test_active_entry_without_assertions_rejected(self):
         tmp, root = self.make_root()
         try:
