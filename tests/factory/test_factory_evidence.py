@@ -101,6 +101,13 @@ class EvidenceTests(unittest.TestCase):
         p["architecture_builder_sha256"] = m.digest(arch)
         return p
 
+    def architecture_holdout(self, **overrides):
+        value = {"version": "1.0", "verdict": "pass", "convergence": "neutral",
+                 "principles": ["P-BACKEND"], "migrations": ["M-RAG"],
+                 "debts": ["D-RAG"], "findings": [], "reasoning": "Independent pass."}
+        value.update(overrides)
+        return value
+
     def assert_rejects_harness(self, text):
         with self.assertRaises(SystemExit):
             m.parse_harness(text, self.floors())
@@ -111,6 +118,10 @@ class EvidenceTests(unittest.TestCase):
             proof, "abc", "base", proof["contract_sha256"], self.policy(),
             files=["app/backend/rag/service.py"], diff_sha256="d" * 64, **kwargs
         )
+
+    def verify_holdout(self, value=None):
+        return m.verify_architecture_holdout(
+            value or self.architecture_holdout(), ["app/backend/rag/service.py"], self.policy())
 
     def test_good_full_harness(self):
         self.assertEqual(m.parse_harness(self.log(), self.floors())["mutations_caught"], 4)
@@ -250,6 +261,22 @@ class EvidenceTests(unittest.TestCase):
         p["architecture_builder_sha256"] = m.digest(p["architecture_builder"])
         with self.assertRaises(SystemExit):
             self.verify_arch(p)
+
+    def test_architecture_holdout_exact_policy_passes(self):
+        self.assertEqual(self.verify_holdout()["verdict"], "pass")
+
+    def test_architecture_holdout_nonpass_rejected(self):
+        with self.assertRaises(SystemExit):
+            self.verify_holdout(self.architecture_holdout(verdict="request_changes"))
+
+    def test_architecture_holdout_omitted_migration_rejected(self):
+        with self.assertRaises(SystemExit):
+            self.verify_holdout(self.architecture_holdout(migrations=[]))
+
+    def test_architecture_holdout_blocking_finding_rejected(self):
+        finding = {"severity": "high", "description": "Wrong dependency direction", "file": "app/backend/rag/service.py"}
+        with self.assertRaises(SystemExit):
+            self.verify_holdout(self.architecture_holdout(findings=[finding]))
 
 
 if __name__ == "__main__":
