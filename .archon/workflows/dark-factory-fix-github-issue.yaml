@@ -295,11 +295,31 @@ nodes:
     skills: [mattpocock-skills:codebase-design]
     context: fresh
 
+  - id: architecture-conformance
+    command: dark-factory-architecture-conformance
+    depends_on: [simplify]
+    skills: [mattpocock-skills:codebase-design, mattpocock-skills:improve-codebase-architecture, mattpocock-skills:code-review]
+    context: fresh
+
+  - id: architecture-conformance-gate
+    bash: |
+      set -euo pipefail
+      python scripts/factory_architecture.py conformance \
+        --policy .factory/architecture.json \
+        --input "$ARTIFACTS_DIR/architecture-conformance.raw.json" \
+        --contract "$ARTIFACTS_DIR/task-contract.json" \
+        --context "$ARTIFACTS_DIR/context.json" \
+        --design "$ARTIFACTS_DIR/design.json" \
+        --governor "$ARTIFACTS_DIR/architecture-governor.json" \
+        --output "$ARTIFACTS_DIR/architecture-conformance.json"
+    depends_on: [architecture-conformance]
+    timeout: 20000
+
   - id: final-green-proof
     bash: |
       set -euo pipefail
       python scripts/factory_proof.py green --proof "$ARTIFACTS_DIR/red-proof.json" --output "$ARTIFACTS_DIR/final-green-proof.json"
-    depends_on: [simplify]
+    depends_on: [architecture-conformance-gate]
     timeout: 360000
 
   - id: attach-proof
