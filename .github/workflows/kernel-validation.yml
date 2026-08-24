@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: 9b4efcff9eddfb574ed574cff1bdba1b76a93359
+  CANDIDATE_SHA: d75de1ab9808a7ed7941156a40b5706034e5e4b0
 
 jobs:
   kernel:
