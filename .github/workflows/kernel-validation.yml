@@ -8,12 +8,20 @@ on:
 permissions:
   contents: read
 
+env:
+  CANDIDATE_SHA: 9b4efcff9eddfb574ed574cff1bdba1b76a93359
+
 jobs:
   kernel:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/df2-factory-kernel-v1
+          fetch-depth: 1
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
