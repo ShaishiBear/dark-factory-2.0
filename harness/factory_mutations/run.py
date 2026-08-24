@@ -11,15 +11,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFECTS = Path(__file__).resolve().parent / "defects.json"
+IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_FILES = (
     "scripts/factory_security.py",
     "scripts/factory_evidence.py",
     "scripts/factory_protocol.py",
     "harness/merge_verify.py",
+    "harness/immunity.py",
     "tests/factory/test_factory_security.py",
     "tests/factory/test_factory_security_evidence.py",
     "tests/factory/test_factory_evidence.py",
     "tests/factory/test_factory_merge_verify.py",
+    "tests/factory/test_factory_immunity.py",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
 
@@ -60,6 +63,26 @@ def inject(root: Path, defect: dict) -> bool:
     return True
 
 
+def immunity_is_green() -> bool:
+    if not IMMUNITY.is_file():
+        print("FACTORY_MUTATIONS_REFUSED harness/immunity.py is missing", flush=True)
+        return False
+    proc = subprocess.run(
+        [sys.executable, str(IMMUNITY)], cwd=ROOT, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=60,
+    )
+    if proc.stdout.strip():
+        print(proc.stdout.strip(), flush=True)
+    if proc.returncode != 0:
+        print((proc.stderr or "")[-2000:], flush=True)
+        print("FACTORY_MUTATIONS_REFUSED active immunity obligation failed", flush=True)
+        return False
+    if "IMMUNITY_OK" not in (proc.stdout or ""):
+        print("FACTORY_MUTATIONS_REFUSED immunity checker emitted no positive marker", flush=True)
+        return False
+    return True
+
+
 def main() -> int:
     if not DEFECTS.is_file():
         print("FACTORY_MUTATIONS_REFUSED defects.json is missing", flush=True)
@@ -67,6 +90,8 @@ def main() -> int:
     defects = json.loads(DEFECTS.read_text(encoding="utf-8")).get("defects")
     if not isinstance(defects, list) or not defects:
         print("FACTORY_MUTATIONS_REFUSED no defects configured", flush=True)
+        return 1
+    if not immunity_is_green():
         return 1
 
     with tempfile.TemporaryDirectory(prefix="dark-factory-meta-baseline-") as tmp:
