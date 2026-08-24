@@ -1,0 +1,42 @@
+name: rewrite-validation
+
+on:
+  push:
+    branches: [validation/df2-rewrite-v1]
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: 4560fc8197a5f77805f6a8f102db7053a95e931d
+
+jobs:
+  rewrite:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - uses: oven-sh/setup-bun@v2
+      - name: Install locked backend dependencies
+        working-directory: app/backend
+        run: uv sync --frozen --all-extras
+      - name: Install locked frontend dependencies
+        working-directory: app/frontend
+        run: bun install --frozen-lockfile
+      - name: Compile repo-owned kernel
+        run: python -m compileall -q factory_kernel
+      - name: Validate kernel configuration
+        run: python -m factory_kernel config-check
+      - name: Factory tests
+        run: python -m unittest discover -s tests/factory -p 'test_*.py'
+      - name: Canonical quick gate
+        run: python harness/ci.py --quick
