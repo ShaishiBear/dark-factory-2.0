@@ -68,6 +68,25 @@ class ArchitectureTests(unittest.TestCase):
         context = context or self.context()
         return m.compile_value(self.policy(), raw or self.raw(), self.contract(), context, self.design(context))
 
+    def conformance_raw(self, **overrides):
+        value = {
+            "version": "1.0", "verdict": "conform", "convergence": "improves",
+            "principles": ["ARCH-BACKEND"], "migrations": ["MIG-REPO"], "debts": ["DEBT-REPO"],
+            "rationale": ["The finished diff keeps persistence behind the governed repository seam."],
+            "findings": [],
+        }
+        value.update(overrides)
+        return value
+
+    def conformance(self, raw=None, governor=None, files=None):
+        context = self.context()
+        return m.compile_conformance_value(
+            self.policy(), raw or self.conformance_raw(), self.contract(), context, self.design(context),
+            governor or self.compile(),
+            head_sha="abcdef1234567890", changed_files=files or ["app/backend/db/repository.py"],
+            diff_sha256="0" * 64,
+        )
+
     def test_good_governor_is_bound_to_policy_and_design(self):
         result = self.compile()
         self.assertEqual(result["decision"], "proceed")
@@ -100,6 +119,36 @@ class ArchitectureTests(unittest.TestCase):
         result = self.compile()
         self.assertEqual(result["principles"], ["ARCH-BACKEND"])
         self.assertNotIn("ARCH-FRONTEND", result["principles"])
+
+    def test_finished_implementation_is_bound_to_governor_and_diff(self):
+        result = self.conformance()
+        self.assertEqual(result["verdict"], "conform")
+        self.assertEqual(result["governor_sha256"], m.digest(self.compile()))
+        self.assertEqual(result["diff_sha256"], "0" * 64)
+        self.assertEqual(result["head_sha"], "abcdef1234567890")
+
+    def test_conformance_recomputes_touched_migrations(self):
+        with self.assertRaises(SystemExit):
+            self.conformance(self.conformance_raw(migrations=[]))
+
+    def test_regressing_implementation_cannot_conform(self):
+        with self.assertRaises(SystemExit):
+            self.conformance(self.conformance_raw(convergence="regresses"))
+
+    def test_deviation_requires_findings(self):
+        with self.assertRaises(SystemExit):
+            self.conformance(self.conformance_raw(verdict="deviates", convergence="neutral", findings=[]))
+
+    def test_conformance_refuses_code_after_architecture_veto(self):
+        governor = self.compile(self.raw(
+            decision="prefactor", convergence="neutral", required_changes=["Extract repository first."]
+        ))
+        with self.assertRaises(SystemExit):
+            self.conformance(governor=governor)
+
+    def test_conforming_result_cannot_hide_findings(self):
+        with self.assertRaises(SystemExit):
+            self.conformance(self.conformance_raw(findings=["A hidden architectural deviation."]))
 
 
 if __name__ == "__main__":
