@@ -1,0 +1,100 @@
+{
+  "_what_this_is": [
+    "Deliberately weaken copied factory trust-root code and require focused anti-bypass tests to go red.",
+    "These mutations NEVER edit the live worktree: every defect runs in a minimal temporary repo-shaped copy.",
+    "A mutation only counts when its exact anchor is unique and the previously-green focused suite fails after injection."
+  ],
+  "defects": [
+    {
+      "id": "security-verdict-forced-pass",
+      "file": "scripts/factory_security.py",
+      "find": "\"verdict\": \"pass\" if not findings else \"fail\",",
+      "replace": "\"verdict\": \"pass\",",
+      "why": "The deterministic security guard could make all findings advisory."
+    },
+    {
+      "id": "security-github-protection-removed",
+      "file": "scripts/factory_security.py",
+      "find": "or path.startswith(\".github/\")",
+      "replace": "or False",
+      "why": "An autonomous PR could rewrite CI without the protected-path veto."
+    },
+    {
+      "id": "security-backend-lock-coupling-removed",
+      "file": "scripts/factory_security.py",
+      "find": "if py_changes and BACKEND_LOCK not in changed_files:",
+      "replace": "if False and py_changes and BACKEND_LOCK not in changed_files:",
+      "why": "A backend manifest could change while its exact lock stayed stale."
+    },
+    {
+      "id": "security-direct-python-source-allowed",
+      "file": "scripts/factory_security.py",
+      "find": "if change[\"ecosystem\"] == \"python\" and DISALLOWED_PY_SOURCE.search(spec):",
+      "replace": "if False and change[\"ecosystem\"] == \"python\" and DISALLOWED_PY_SOURCE.search(spec):",
+      "why": "A mutable or credential-bearing direct dependency URL could bypass provenance."
+    },
+    {
+      "id": "security-secret-scan-disabled",
+      "file": "scripts/factory_security.py",
+      "find": "secrets = secret_findings(added_lines(diff))",
+      "replace": "secrets = []",
+      "why": "High-confidence credentials in added source would no longer veto merge."
+    },
+    {
+      "id": "evidence-security-fail-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if value.get(\"verdict\") != \"pass\":\n        die(\"deterministic security guard did not authorize merge\")",
+      "replace": "if False and value.get(\"verdict\") != \"pass\":\n        die(\"deterministic security guard did not authorize merge\")",
+      "why": "Final merge authority could accept a deterministic security failure."
+    },
+    {
+      "id": "evidence-contradictory-security-pass-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if collections[\"findings\"] or collections[\"protected_paths\"] or collections[\"secret_findings\"]:",
+      "replace": "if False and (collections[\"findings\"] or collections[\"protected_paths\"] or collections[\"secret_findings\"]):",
+      "why": "A forged pass could carry blocking security findings into evidence."
+    },
+    {
+      "id": "evidence-stale-architecture-policy-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if arch.get(\"policy_sha256\") != digest(policy):",
+      "replace": "if False and arch.get(\"policy_sha256\") != digest(policy):",
+      "why": "Architecture evidence could be bound to a stale or substituted policy."
+    },
+    {
+      "id": "evidence-architecture-holdout-nonpass-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if value.get(\"verdict\") != \"pass\" or value.get(\"convergence\") == \"regresses\":",
+      "replace": "if False and (value.get(\"verdict\") != \"pass\" or value.get(\"convergence\") == \"regresses\"):",
+      "why": "A blinded architecture rejection could be ignored by final merge authority."
+    },
+    {
+      "id": "evidence-forged-test-plan-hash-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if digest(plan) != proof[\"test_plan_sha256\"]:",
+      "replace": "if False and digest(plan) != proof[\"test_plan_sha256\"]:",
+      "why": "Acceptance checkpoints could be rewritten without invalidating their proof-plan binding."
+    },
+    {
+      "id": "merge-parent-check-disabled",
+      "file": "harness/merge_verify.py",
+      "find": "if len(merge_parents) != 1 or merge_parents[0] != base:",
+      "replace": "if False and (len(merge_parents) != 1 or merge_parents[0] != base):",
+      "why": "A squash created on a moved or wrong base could be blessed after merge."
+    },
+    {
+      "id": "merge-tree-check-disabled",
+      "file": "harness/merge_verify.py",
+      "find": "if merge_tree != auth_tree:",
+      "replace": "if False and merge_tree != auth_tree:",
+      "why": "The server-created merge tree could differ from the tree that actually passed evidence."
+    },
+    {
+      "id": "merge-main-reachability-check-disabled",
+      "file": "harness/merge_verify.py",
+      "find": "if not merge_is_ancestor:",
+      "replace": "if False and not merge_is_ancestor:",
+      "why": "A reported merge SHA not contained in current main history could be accepted."
+    }
+  ]
+}
