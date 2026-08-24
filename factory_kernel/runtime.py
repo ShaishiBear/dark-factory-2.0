@@ -1,8 +1,8 @@
 """Repo-owned orchestration for Dark Factory.
 
-The runtime may ask model workers to investigate, design, test, implement and review. It never
-accepts a worker's confidence as authority: existing deterministic compilers, replay gates,
-holdouts, the full harness and exact merged-SHA verifier remain authoritative.
+Model workers may investigate, design, test, implement and review. They never become engineering
+or merge authorities: deterministic compilers, replay gates, holdouts, the canonical harness and
+exact merged-tree verification remain the judges.
 """
 from __future__ import annotations
 
@@ -12,10 +12,8 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import tempfile
-import time
 import uuid
 from typing import Any, Mapping
 
@@ -58,6 +56,9 @@ class RunPaths:
 
 
 class KernelRuntime:
+    VALIDATION_FAILURE_MARKER = "<!-- dark-factory-validation-failed -->"
+    PRIORITY = {"priority:critical": 0, "priority:high": 1, "priority:medium": 2, "priority:low": 3}
+
     def __init__(self, *, repo_root: Path, config: KernelConfig):
         self.repo_root = repo_root.resolve()
         self.config = config
@@ -96,20 +97,27 @@ class KernelRuntime:
         )
 
     def choose_dispatch(self) -> DispatchDecision:
-        """Priority is part of the kernel contract: stop -> reap -> review -> build."""
+        """Canonical priority: stop -> reap -> review -> highest-priority accepted issue."""
         self.check_stop()
         self.reap_stale_claims()
 
         review = self.github.list_prs(self.config.labels["needs_review"])
         if review:
-            number = self._oldest_number(review)
-            return DispatchDecision("validate-pr", number, "PR validation has priority")
+            return DispatchDecision(
+                "validate-pr", self._oldest_number(review), "PR validation has priority"
+            )
 
         accepted = self.github.list_issues(self.config.labels["accepted"])
-        for issue in sorted(accepted, key=lambda item: str(item.get("updatedAt") or "")):
-            labels = self.github.labels(issue)
-            if self.config.labels["in_progress"] not in labels:
-                return DispatchDecision("build-issue", int(issue["number"]), "accepted issue is idle")
+        idle = [
+            issue
+            for issue in accepted
+            if self.config.labels["in_progress"] not in self.github.labels(issue)
+        ]
+        if idle:
+            issue = min(idle, key=self._issue_dispatch_key)
+            return DispatchDecision(
+                "build-issue", int(issue["number"]), "highest-priority accepted issue is idle"
+            )
         return DispatchDecision("idle", reason="no review PR or accepted idle issue")
 
     def dispatch_once(self, *, merge: bool = True) -> DispatchDecision:
@@ -130,21 +138,29 @@ class KernelRuntime:
             raise NeedsHuman(f"issue #{issue_number} is not {self.config.labels['accepted']}")
         if self.config.labels["in_progress"] in labels:
             raise NeedsHuman(f"issue #{issue_number} already has an active factory claim")
+        attempt = self._next_build_attempt(issue_number)
+        if attempt > self.config.runtime.max_attempts:
+            self._mark_issue_human(
+                issue_number,
+                f"independent validation failed {attempt - 1} times; retry budget exhausted",
+            )
+            raise NeedsHuman(f"issue #{issue_number} exhausted the autonomous retry budget")
 
         self._fetch_main()
         base_sha = self._git("rev-parse", f"origin/{self.config.default_branch}")
-        run_id = f"issue-{issue_number}-{uuid.uuid4().hex[:12]}"
+        run_id = f"issue-{issue_number}-a{attempt}-{uuid.uuid4().hex[:10]}"
         paths = RunPaths.create(self.config.runtime.work_root, run_id)
         worktree = create_detached(
             self.repo_root,
             base_sha,
             base_dir=self.config.runtime.work_root / "worktrees",
         )
-        branch = f"factory/issue-{issue_number}-{run_id.rsplit('-', 1)[-1]}"
+        branch = f"factory/issue-{issue_number}-a{attempt}-{run_id.rsplit('-', 1)[-1]}"
         handed_off = False
         self.github.add_issue_label(issue_number, self.config.labels["in_progress"])
         try:
             self._git("checkout", "-b", branch, cwd=worktree.path)
+            self._prepare_worktree(worktree.path, paths)
             self._write_json(paths.artifacts / "issue.json", issue)
             env = self._run_env(paths, base_ref=f"origin/{self.config.default_branch}")
             issue_context = self._issue_context(issue)
@@ -160,14 +176,21 @@ class KernelRuntime:
                     "--hash-output", str(paths.artifacts / "task-contract.sha256"),
                     "--issue", str(issue_number),
                 ],
-                cwd=worktree.path, env=env, timeout=120,
+                cwd=worktree.path,
+                env=env,
+                timeout=120,
                 transcript=paths.transcripts / "contract-gate.log",
             )
 
-            contract_hash = (paths.artifacts / "task-contract.sha256").read_text(encoding="utf-8").strip()
+            contract_hash = (paths.artifacts / "task-contract.sha256").read_text(
+                encoding="utf-8"
+            ).strip()
             self._agent(
-                "context", worktree.path, paths,
-                context=f"Validated contract sha256: {contract_hash}", env=env,
+                "context",
+                worktree.path,
+                paths,
+                context=f"Validated contract sha256: {contract_hash}",
+                env=env,
             )
             self._exec(
                 [
@@ -176,7 +199,9 @@ class KernelRuntime:
                     "--contract", str(paths.artifacts / "task-contract.json"),
                     "--output", str(paths.artifacts / "context.json"),
                 ],
-                cwd=worktree.path, env=env, timeout=180,
+                cwd=worktree.path,
+                env=env,
+                timeout=180,
                 transcript=paths.transcripts / "context-gate.log",
             )
 
@@ -191,14 +216,17 @@ class KernelRuntime:
                     "--design", str(paths.artifacts / "design.json"),
                     "--output", str(paths.artifacts / "architecture-governor.json"),
                 ],
-                cwd=worktree.path, env=env, timeout=120,
+                cwd=worktree.path,
+                env=env,
+                timeout=120,
                 transcript=paths.transcripts / "architecture-gate.log",
             )
             governor = self._read_json(paths.artifacts / "architecture-governor.json")
             if governor.get("decision") != "proceed":
+                required = governor.get("required_changes")
+                details = "; ".join(required) if isinstance(required, list) else ""
                 raise NeedsHuman(
-                    f"architecture governor returned {governor.get('decision')}: "
-                    + "; ".join(governor.get("required_changes") or [])
+                    f"architecture governor returned {governor.get('decision')}: {details}"
                 )
             self._exec(
                 [
@@ -206,10 +234,12 @@ class KernelRuntime:
                     "--governor", str(paths.artifacts / "architecture-governor.json"),
                     "--action", "implement",
                 ],
-                cwd=worktree.path, env=env, timeout=60,
+                cwd=worktree.path,
+                env=env,
+                timeout=60,
             )
 
-            # Fresh process = independent test author. The deterministic RED compiler is authority.
+            # A fresh model process authors acceptance checkpoints; deterministic RED is authority.
             self._agent("test_author", worktree.path, paths, env=env)
             self._exec(
                 [
@@ -217,13 +247,18 @@ class KernelRuntime:
                     "--spec", str(paths.artifacts / "test-spec.json"),
                     "--output", str(paths.artifacts / "red-proof.json"),
                 ],
-                cwd=worktree.path, env=env, timeout=600,
+                cwd=worktree.path,
+                env=env,
+                timeout=600,
                 transcript=paths.transcripts / "red-gate.log",
             )
 
             self._agent(
-                "implement", worktree.path, paths,
-                context=f"Dispatched issue number is #{issue_number}.", env=env,
+                "implement",
+                worktree.path,
+                paths,
+                context=f"Dispatched issue number is #{issue_number}. Build attempt is {attempt}.",
+                env=env,
             )
             self._exec(
                 [
@@ -231,7 +266,9 @@ class KernelRuntime:
                     "--proof", str(paths.artifacts / "red-proof.json"),
                     "--output", str(paths.artifacts / "green-proof.json"),
                 ],
-                cwd=worktree.path, env=env, timeout=600,
+                cwd=worktree.path,
+                env=env,
+                timeout=600,
                 transcript=paths.transcripts / "green-gate.log",
             )
 
@@ -249,7 +286,9 @@ class KernelRuntime:
                     "--output", str(paths.artifacts / "architecture-conformance.json"),
                     "--base-ref", f"origin/{self.config.default_branch}",
                 ],
-                cwd=worktree.path, env=env, timeout=180,
+                cwd=worktree.path,
+                env=env,
+                timeout=180,
                 transcript=paths.transcripts / "conformance-gate.log",
             )
             self._exec(
@@ -258,14 +297,17 @@ class KernelRuntime:
                     "--proof", str(paths.artifacts / "red-proof.json"),
                     "--output", str(paths.artifacts / "final-green-proof.json"),
                 ],
-                cwd=worktree.path, env=env, timeout=600,
+                cwd=worktree.path,
+                env=env,
+                timeout=600,
                 transcript=paths.transcripts / "final-green-gate.log",
             )
 
-            # Quick gate before publishing; full/holdout/mutations are validator-owned.
             self._exec(
                 list(self.config.validation.quick_command),
-                cwd=worktree.path, env=env, timeout=900,
+                cwd=worktree.path,
+                env=env,
+                timeout=900,
                 transcript=paths.transcripts / "quick-gate.log",
             )
             self._assert_clean(worktree.path)
@@ -275,8 +317,9 @@ class KernelRuntime:
             body = paths.root / "pr-body.md"
             body.write_text(
                 f"Fixes #{issue_number}\n\n"
+                f"<!-- dark-factory-attempt:{attempt} -->\n\n"
                 "Generated by the repo-owned Dark Factory kernel. Model workers are not merge "
-                "authorities; deterministic and independent validation still follows.\n",
+                "authorities; deterministic and independent validation follows.\n",
                 encoding="utf-8",
             )
             pr = self.github.create_pr(
@@ -292,7 +335,9 @@ class KernelRuntime:
                     "--contract", str(paths.artifacts / "task-contract.json"),
                     "--pr", str(pr_number),
                 ],
-                cwd=worktree.path, env=env, timeout=120,
+                cwd=worktree.path,
+                env=env,
+                timeout=120,
             )
             self._exec(
                 [
@@ -300,12 +345,18 @@ class KernelRuntime:
                     "--proof", str(paths.artifacts / "final-green-proof.json"),
                     "--pr", str(pr_number),
                 ],
-                cwd=worktree.path, env=env, timeout=180,
+                cwd=worktree.path,
+                env=env,
+                timeout=180,
             )
             self.github.add_pr_label(pr_number, self.config.labels["needs_review"])
             self.github.remove_issue_label(issue_number, self.config.labels["in_progress"])
             handed_off = True
-            print(f"FACTORY_BUILD_OK issue=#{issue_number} pr=#{pr_number} head={self._git('rev-parse', 'HEAD', cwd=worktree.path)}")
+            current_head = self._git("rev-parse", "HEAD", cwd=worktree.path)
+            print(
+                f"FACTORY_BUILD_OK issue=#{issue_number} attempt={attempt} "
+                f"pr=#{pr_number} head={current_head}"
+            )
             return pr_number
         except NeedsHuman as exc:
             self._mark_issue_human(issue_number, str(exc))
@@ -318,19 +369,21 @@ class KernelRuntime:
             if handed_off:
                 remove(self.repo_root, worktree)
 
-    def _review_and_repair(self, worktree: Worktree, paths: RunPaths, env: Mapping[str, str]) -> None:
+    def _review_and_repair(
+        self, worktree: Worktree, paths: RunPaths, env: Mapping[str, str]
+    ) -> None:
         self._agent("review", worktree.path, paths, env=env)
         review = self._read_json(paths.artifacts / "code-review.json")
         if review.get("verdict") == "pass":
             return
-        if review.get("verdict") != "fail":
+        if review.get("verdict") != "fail" or not isinstance(review.get("findings"), list):
             raise NeedsHuman("review worker returned an invalid verdict")
-        findings = review.get("findings")
-        if not isinstance(findings, list):
-            raise NeedsHuman("review worker returned malformed findings")
         self._agent(
-            "repair", worktree.path, paths,
-            context="Blocking review JSON:\n" + json.dumps(review, sort_keys=True), env=env,
+            "repair",
+            worktree.path,
+            paths,
+            context="Blocking review JSON:\n" + json.dumps(review, sort_keys=True),
+            env=env,
         )
         self._exec(
             [
@@ -338,9 +391,17 @@ class KernelRuntime:
                 "--proof", str(paths.artifacts / "red-proof.json"),
                 "--output", str(paths.artifacts / "green-after-repair.json"),
             ],
-            cwd=worktree.path, env=env, timeout=600,
+            cwd=worktree.path,
+            env=env,
+            timeout=600,
         )
-        self._agent("review", worktree.path, paths, context="This is the fresh post-repair review.", env=env)
+        self._agent(
+            "review",
+            worktree.path,
+            paths,
+            context="This is the fresh post-repair review.",
+            env=env,
+        )
         second = self._read_json(paths.artifacts / "code-review.json")
         if second.get("verdict") != "pass":
             raise NeedsHuman("fresh post-repair review still contains blockers")
@@ -357,32 +418,46 @@ class KernelRuntime:
             raise NeedsHuman(f"PR #{pr_number} is not marked {self.config.labels['needs_review']}")
         head = str(info.get("headRefOid") or "")
         base = str(info.get("baseRefOid") or "")
-        if not re.fullmatch(r"[0-9a-f]{40,64}", head) or not re.fullmatch(r"[0-9a-f]{40,64}", base):
+        if not re.fullmatch(r"[0-9a-f]{40,64}", head) or not re.fullmatch(
+            r"[0-9a-f]{40,64}", base
+        ):
             raise NeedsHuman("PR lacks exact Git object identities")
 
         self._git("fetch", "origin", str(info["headRefName"]), self.config.default_branch)
         run_id = f"pr-{pr_number}-{uuid.uuid4().hex[:12]}"
         paths = RunPaths.create(self.config.runtime.work_root, run_id)
         worktree = create_detached(
-            self.repo_root, head, base_dir=self.config.runtime.work_root / "validator-worktrees"
+            self.repo_root,
+            head,
+            base_dir=self.config.runtime.work_root / "validator-worktrees",
         )
+        linked_issue = self._linked_issue_number(str(info.get("body") or ""))
         try:
+            self._prepare_worktree(worktree.path, paths)
             env = self._run_env(paths, base_ref=base)
             self._exec(
-                ["python", "scripts/factory_security.py", "--pr", str(pr_number),
-                 "--output", str(paths.artifacts / "security.json")],
-                cwd=worktree.path, env=env, timeout=180,
+                [
+                    "python", "scripts/factory_security.py", "--pr", str(pr_number),
+                    "--output", str(paths.artifacts / "security.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=180,
                 transcript=paths.transcripts / "security.log",
             )
 
-            contract, proof = self._extract_attached(info.get("body") or "")
+            contract, proof = self._extract_attached(str(info.get("body") or ""))
+            contract_issue = contract.get("issue")
+            if isinstance(contract_issue, Mapping) and isinstance(contract_issue.get("number"), int):
+                linked_issue = int(contract_issue["number"])
             self._write_json(paths.artifacts / "attached-contract.json", contract)
             self._write_json(paths.artifacts / "attached-proof.json", proof)
             patch = self._git("diff", "--binary", f"{base}...{head}", cwd=worktree.path)
-            changed = self._git("diff", "--name-only", f"{base}...{head}", cwd=worktree.path).splitlines()
+            changed = self._git(
+                "diff", "--name-only", f"{base}...{head}", cwd=worktree.path
+            ).splitlines()
             policy = self._read_json(worktree.path / ".factory/architecture.json")
 
-            # Blinded code/behavior holdout runs outside the source checkout.
             holdout_context = {
                 "contract": contract,
                 "changed_files": sorted(x for x in changed if x),
@@ -399,13 +474,19 @@ class KernelRuntime:
                 raise NeedsHuman("blinded holdout rejected PR")
 
             architecture_holdout = self._run_architecture_holdout(
-                paths, policy=policy, changed_files=sorted(x for x in changed if x),
-                diff=patch, builder_architecture=proof.get("architecture_builder"),
+                paths,
+                policy=policy,
+                changed_files=sorted(x for x in changed if x),
+                diff=patch,
             )
-            self._write_json(paths.artifacts / "validator-verdict.json", {
-                "version": "1.0", "verdict": "approve",
-                "holdout_sha256": self._json_sha(verdict),
-            })
+            self._write_json(
+                paths.artifacts / "validator-verdict.json",
+                {
+                    "version": "1.0",
+                    "verdict": "approve",
+                    "holdout_sha256": self._json_sha(verdict),
+                },
+            )
 
             self._exec(
                 [
@@ -414,7 +495,9 @@ class KernelRuntime:
                     "--architecture-verdict", str(architecture_holdout),
                     "--output", str(paths.artifacts / "evidence-bundle.json"),
                 ],
-                cwd=worktree.path, env=env, timeout=2400,
+                cwd=worktree.path,
+                env=env,
+                timeout=2400,
                 transcript=paths.transcripts / "evidence.log",
             )
             self._exec(
@@ -423,14 +506,16 @@ class KernelRuntime:
                     "--evidence", str(paths.artifacts / "evidence-bundle.json"),
                     "--output", str(paths.artifacts / "merge-authorization.json"),
                 ],
-                cwd=worktree.path, env=env, timeout=180,
+                cwd=worktree.path,
+                env=env,
+                timeout=180,
                 transcript=paths.transcripts / "merge-pre.log",
             )
             if not merge:
                 print(f"FACTORY_VALIDATED pr=#{pr_number} head={head} merge=disabled")
                 return paths.artifacts / "evidence-bundle.json"
 
-            # One last emergency-stop read immediately before the irreversible action.
+            # Irreversible action: stop state and expected head are both rechecked immediately.
             self.check_stop()
             self.github.cwd = str(worktree.path)
             self.github.merge_squash(pr_number, expected_head=head)
@@ -441,23 +526,15 @@ class KernelRuntime:
                     "--authorization", str(paths.artifacts / "merge-authorization.json"),
                     "--output", str(paths.artifacts / "merge-verification.json"),
                 ],
-                cwd=worktree.path, env=env, timeout=240,
+                cwd=worktree.path,
+                env=env,
+                timeout=240,
                 transcript=paths.transcripts / "merge-post.log",
             )
             print(f"FACTORY_MERGED_VERIFIED pr=#{pr_number} evidenced_head={head}")
             return paths.artifacts / "merge-verification.json"
         except Exception as exc:
-            try:
-                self.github.cwd = str(self.repo_root)
-                self.github.remove_pr_label(pr_number, self.config.labels["needs_review"])
-                self.github.add_pr_label(pr_number, self.config.labels["needs_fix"])
-                self.github.comment_pr(
-                    pr_number,
-                    "Dark Factory validation failed closed. No merge was authorized. "
-                    f"Failure class: `{type(exc).__name__}`. Inspect the validator host transcript.",
-                )
-            except Exception:
-                pass
+            self._record_validation_failure(pr_number, linked_issue, exc)
             raise
         finally:
             self.github.cwd = str(self.repo_root)
@@ -466,11 +543,12 @@ class KernelRuntime:
             except RuntimeError:
                 pass
 
-    # ---------- holdouts ----------
+    # ---------- independent holdouts ----------
 
-    def _run_blinded_holdout(self, paths: RunPaths, context: Mapping[str, Any]) -> Mapping[str, Any]:
+    def _run_blinded_holdout(
+        self, paths: RunPaths, context: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
         with tempfile.TemporaryDirectory(prefix="dark-factory-holdout-") as tmp:
-            cwd = Path(tmp)
             prompt = prompt_text(
                 self.config.prompt_path("holdout", self.repo_root),
                 preamble="This invocation is intentionally isolated from the repository checkout.",
@@ -478,28 +556,34 @@ class KernelRuntime:
             )
             result = self.provider.run(
                 AgentRequest(
-                    role="holdout", prompt=prompt, cwd=str(cwd), model=self.config.provider.model,
-                    environment={}, structured_schema={"type": "object"},
+                    role="holdout",
+                    prompt=prompt,
+                    cwd=tmp,
+                    model=self.config.provider.model,
+                    environment={},
+                    structured_schema={"type": "object"},
                 )
             )
             value = result.structured_output
             if not isinstance(value, Mapping) or value.get("version") != "1.0":
                 raise NeedsHuman("blinded holdout returned invalid JSON")
-            findings = value.get("findings")
-            if not isinstance(findings, list):
+            if not isinstance(value.get("findings"), list):
                 raise NeedsHuman("blinded holdout findings are invalid")
             self._write_json(paths.artifacts / "holdout.json", dict(value))
             return value
 
     def _run_architecture_holdout(
-        self, paths: RunPaths, *, policy: Mapping[str, Any], changed_files: list[str],
-        diff: str, builder_architecture: object,
+        self,
+        paths: RunPaths,
+        *,
+        policy: Mapping[str, Any],
+        changed_files: list[str],
+        diff: str,
     ) -> Path:
         context = {
             "architecture_policy": policy,
             "changed_files": changed_files,
             "diff": diff,
-            "builder_architecture": builder_architecture,
         }
         suffix = (
             "Return ONLY JSON with version 1.0; verdict pass|fail; convergence "
@@ -515,8 +599,11 @@ class KernelRuntime:
             )
             result = self.provider.run(
                 AgentRequest(
-                    role="architecture-holdout", prompt=prompt, cwd=tmp,
-                    model=self.config.provider.model, environment={},
+                    role="architecture-holdout",
+                    prompt=prompt,
+                    cwd=tmp,
+                    model=self.config.provider.model,
+                    environment={},
                     structured_schema={"type": "object"},
                 )
             )
@@ -529,8 +616,28 @@ class KernelRuntime:
 
     # ---------- helpers ----------
 
+    def _prepare_worktree(self, cwd: Path, paths: RunPaths) -> None:
+        """Every isolated worktree gets exact locked dependencies before any model/test work."""
+        self._exec(
+            ["uv", "sync", "--frozen", "--all-extras"],
+            cwd=cwd / "app" / "backend",
+            timeout=600,
+            transcript=paths.transcripts / "backend-sync.log",
+        )
+        self._exec(
+            ["bun", "install", "--frozen-lockfile"],
+            cwd=cwd / "app" / "frontend",
+            timeout=600,
+            transcript=paths.transcripts / "frontend-sync.log",
+        )
+
     def _agent(
-        self, role: str, cwd: Path, paths: RunPaths, *, context: str = "",
+        self,
+        role: str,
+        cwd: Path,
+        paths: RunPaths,
+        *,
+        context: str = "",
         env: Mapping[str, str],
     ) -> None:
         self.check_stop()
@@ -538,7 +645,7 @@ class KernelRuntime:
             self.config.prompt_path(role, cwd),
             preamble=(
                 "You are a replaceable reasoning worker inside Dark Factory. You are not a merge "
-                "authority. Obey the repository and artifact constraints exactly."
+                "authority. Obey repository and artifact constraints exactly."
             ),
             context=context,
         )
@@ -551,7 +658,9 @@ class KernelRuntime:
                 environment=dict(env),
             )
         )
-        (paths.transcripts / f"agent-{role}.log").write_text(result.content + "\n", encoding="utf-8")
+        (paths.transcripts / f"agent-{role}.log").write_text(
+            result.content + "\n", encoding="utf-8"
+        )
 
     def _run_env(self, paths: RunPaths, *, base_ref: str) -> dict[str, str]:
         return {
@@ -565,15 +674,26 @@ class KernelRuntime:
         self._git("fetch", "origin", self.config.default_branch)
 
     def _exec(
-        self, argv: list[str], *, cwd: Path, env: Mapping[str, str] | None = None,
-        timeout: int = 300, transcript: Path | None = None,
+        self,
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+        timeout: int = 300,
+        transcript: Path | None = None,
     ) -> str:
         merged = dict(os.environ)
         if env:
             merged.update(env)
         proc = subprocess.run(
-            argv, cwd=cwd, env=merged, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout,
+            argv,
+            cwd=cwd,
+            env=merged,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
         )
         output = (proc.stdout or "") + (proc.stderr or "")
         if transcript is not None:
@@ -591,10 +711,51 @@ class KernelRuntime:
         if status:
             raise RuntimeError("factory worker left the worktree dirty:\n" + status)
 
+    def _next_build_attempt(self, issue_number: int) -> int:
+        value = self.github.json(
+            [
+                "issue", "view", str(issue_number), "-R", self.config.repository,
+                "--json", "comments",
+            ]
+        )
+        comments = value.get("comments", []) if isinstance(value, Mapping) else []
+        failures = 0
+        if isinstance(comments, list):
+            for comment in comments:
+                if not isinstance(comment, Mapping):
+                    continue
+                body = comment.get("body")
+                if isinstance(body, str) and self.VALIDATION_FAILURE_MARKER in body:
+                    failures += 1
+        return failures + 1
+
+    def _record_validation_failure(
+        self, pr_number: int, linked_issue: int | None, exc: Exception
+    ) -> None:
+        try:
+            self.github.cwd = str(self.repo_root)
+            self.github.remove_pr_label(pr_number, self.config.labels["needs_review"])
+            self.github.add_pr_label(pr_number, self.config.labels["needs_fix"])
+            self.github.comment_pr(
+                pr_number,
+                "Dark Factory validation failed closed. No merge was authorized. "
+                f"Failure class: `{type(exc).__name__}`. The validator transcript remains on the host.",
+            )
+            if linked_issue is not None:
+                self.github.comment_issue(
+                    linked_issue,
+                    self.VALIDATION_FAILURE_MARKER
+                    + "\nDark Factory independent validation rejected the latest build. "
+                    "The issue remains eligible for a bounded fresh rebuild from current main.",
+                )
+        except Exception:
+            pass
+
     def _mark_issue_human(self, issue: int, reason: str) -> None:
         try:
             self.github.cwd = str(self.repo_root)
             self.github.remove_issue_label(issue, self.config.labels["in_progress"])
+            self.github.remove_issue_label(issue, self.config.labels["accepted"])
             self.github.add_issue_label(issue, self.config.labels["needs_human"])
             self.github.comment_issue(
                 issue,
@@ -603,14 +764,24 @@ class KernelRuntime:
         except Exception:
             pass
 
+    def _issue_dispatch_key(self, issue: Mapping[str, Any]) -> tuple[int, str, int]:
+        labels = self.github.labels(issue)
+        priority = min((self.PRIORITY[label] for label in labels if label in self.PRIORITY), default=4)
+        return priority, str(issue.get("updatedAt") or ""), int(issue["number"])
+
     @staticmethod
     def _is_bug(labels: set[str]) -> bool:
         return any(label.lower() in {"bug", "type:bug", "kind:bug"} for label in labels)
 
     @staticmethod
     def _oldest_number(items: list[Mapping[str, Any]]) -> int:
-        item = min(items, key=lambda row: str(row.get("updatedAt") or ""))
+        item = min(items, key=lambda row: (str(row.get("updatedAt") or ""), int(row["number"])))
         return int(item["number"])
+
+    @staticmethod
+    def _linked_issue_number(body: str) -> int | None:
+        match = re.search(r"(?im)^\s*(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+#([1-9][0-9]*)\b", body)
+        return int(match.group(1)) if match else None
 
     @staticmethod
     def _issue_context(issue: Mapping[str, Any]) -> str:
@@ -619,8 +790,10 @@ class KernelRuntime:
             "ORIGINAL ISSUE (source of truth):\n"
             + json.dumps(
                 {
-                    "number": issue.get("number"), "title": issue.get("title"),
-                    "body": issue.get("body"), "labels": labels,
+                    "number": issue.get("number"),
+                    "title": issue.get("title"),
+                    "body": issue.get("body"),
+                    "labels": labels,
                 },
                 sort_keys=True,
             )
@@ -668,4 +841,5 @@ class KernelRuntime:
             if not isinstance(value, Mapping):
                 raise NeedsHuman(f"attached factory-{kind} must be an object")
             return value
+
         return one("contract"), one("proof")
