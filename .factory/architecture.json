@@ -1,0 +1,95 @@
+{
+  "version": "1.0",
+  "principles": [
+    {
+      "id": "ARCH-BACKEND-BOUNDARIES",
+      "scope": ["app/backend"],
+      "rule": "Keep HTTP/request orchestration in routes, durable persistence in db, provider/network concerns behind services/integrations/llm, and retrieval behavior in rag. Do not introduce cross-layer shortcuts when an existing seam can own the behavior."
+    },
+    {
+      "id": "ARCH-FRONTEND-BOUNDARIES",
+      "scope": ["app/frontend/src"],
+      "rule": "Pages compose screens, hooks own state and async orchestration, lib owns transport and pure helpers, and components own UI behavior. Avoid moving network/state orchestration into presentation components when an existing hook or lib seam fits."
+    },
+    {
+      "id": "ARCH-DEEP-MODULES",
+      "scope": ["app"],
+      "rule": "Prefer stable, deep modules and reuse existing seams before adding parallel helpers, one-off abstractions, cross-layer shortcuts, or speculative extension points."
+    },
+    {
+      "id": "ARCH-FACTORY-TRUST",
+      "scope": [".archon", "scripts", "harness", ".factory"],
+      "rule": "Preserve separation between builder reasoning and independent validation. Builder artifacts may propose evidence; authoritative validation must recompute or independently verify security-critical facts."
+    }
+  ],
+  "migrations": [
+    {
+      "id": "MIG-DB-REPOSITORY-SPLIT",
+      "active": true,
+      "paths": ["app/backend/db/repository.py"],
+      "direction": "Move new capability-specific persistence toward focused repository modules. Avoid unrelated growth in the monolithic repository."
+    },
+    {
+      "id": "MIG-LLM-OPENROUTER-SPLIT",
+      "active": true,
+      "paths": ["app/backend/llm/openrouter.py"],
+      "direction": "When materially extending LLM behavior, separate provider transport/client concerns from chat orchestration rather than growing the provider module as a general service hub."
+    },
+    {
+      "id": "MIG-RAG-TOOLS-SPLIT",
+      "active": true,
+      "paths": ["app/backend/rag/tools.py"],
+      "direction": "Keep tool contracts and focused implementations separable. Avoid growing one central tool module with unrelated retrieval/application concerns."
+    },
+    {
+      "id": "MIG-ROUTE-MESSAGES-THIN",
+      "active": true,
+      "paths": ["app/backend/routes/messages.py"],
+      "direction": "Keep the route as the HTTP/SSE boundary and move reusable business or orchestration logic behind service, rag, llm, or persistence seams when new behavior would otherwise enlarge the route."
+    },
+    {
+      "id": "MIG-FRONTEND-LARGE-COMPONENTS",
+      "active": true,
+      "paths": [
+        "app/frontend/src/components/ChatArea.tsx",
+        "app/frontend/src/components/Sidebar.tsx"
+      ],
+      "direction": "Substantial new state, networking, or orchestration behavior should move into focused hooks/lib seams rather than further enlarging the large UI components."
+    }
+  ],
+  "debt": [
+    {
+      "id": "DEBT-DB-REPOSITORY",
+      "paths": ["app/backend/db/repository.py"],
+      "mode": "no-growth",
+      "note": "Large persistence hub; new unrelated capability should prefer a focused repository module."
+    },
+    {
+      "id": "DEBT-LLM-OPENROUTER",
+      "paths": ["app/backend/llm/openrouter.py"],
+      "mode": "no-growth",
+      "note": "Provider transport and orchestration are concentrated; material extension should improve separation."
+    },
+    {
+      "id": "DEBT-RAG-TOOLS",
+      "paths": ["app/backend/rag/tools.py"],
+      "mode": "no-growth",
+      "note": "Tool hub is already broad; avoid unrelated new responsibilities."
+    },
+    {
+      "id": "DEBT-MESSAGES-ROUTE",
+      "paths": ["app/backend/routes/messages.py"],
+      "mode": "no-growth",
+      "note": "Large route; keep new reusable orchestration out of the HTTP boundary."
+    },
+    {
+      "id": "DEBT-LARGE-UI",
+      "paths": [
+        "app/frontend/src/components/ChatArea.tsx",
+        "app/frontend/src/components/Sidebar.tsx"
+      ],
+      "mode": "acknowledge",
+      "note": "Large components are tolerated, but material state/network behavior should converge toward hooks/lib."
+    }
+  ]
+}
