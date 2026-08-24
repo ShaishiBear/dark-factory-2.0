@@ -7,7 +7,8 @@ Archon, or another runner can produce the same evidence.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from pathlib import PurePosixPath
+import json
+from pathlib import Path, PurePosixPath
 import re
 from typing import Mapping
 
@@ -34,6 +35,15 @@ class ArtifactRef:
             raise ValueError(f"artifact sha256 is invalid: {self.sha256!r}")
         if not self.media_type.strip():
             raise ValueError("artifact media_type must be non-empty")
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object]) -> "ArtifactRef":
+        return cls(
+            name=str(raw.get("name") or ""),
+            path=str(raw.get("path") or ""),
+            sha256=str(raw.get("sha256") or ""),
+            media_type=str(raw.get("media_type") or "application/json"),
+        )
 
 
 @dataclass(frozen=True)
@@ -74,6 +84,33 @@ class ClaimRecord:
             if not key.strip() or not SHA256.fullmatch(value):
                 raise ValueError(f"invalid binding {key!r}={value!r}")
 
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object]) -> "ClaimRecord":
+        artifact_raw = raw.get("artifact")
+        if not isinstance(artifact_raw, Mapping):
+            raise ValueError("claim artifact must be an object")
+        validation_raw = raw.get("validation_artifact")
+        if validation_raw is not None and not isinstance(validation_raw, Mapping):
+            raise ValueError("claim validation_artifact must be an object or null")
+        bindings_raw = raw.get("bindings", {})
+        if not isinstance(bindings_raw, Mapping):
+            raise ValueError("claim bindings must be an object")
+        return cls(
+            claim_id=str(raw.get("claim_id") or ""),
+            stage=str(raw.get("stage") or ""),
+            producer=str(raw.get("producer") or ""),
+            artifact=ArtifactRef.from_dict(artifact_raw),
+            validator=str(raw["validator"]) if raw.get("validator") is not None else None,
+            validation_artifact=(
+                ArtifactRef.from_dict(validation_raw) if validation_raw is not None else None
+            ),
+            exact_head_sha=(
+                str(raw["exact_head_sha"]) if raw.get("exact_head_sha") is not None else None
+            ),
+            bindings={str(key): str(value) for key, value in bindings_raw.items()},
+            independent_required=bool(raw.get("independent_required", False)),
+        )
+
     def to_dict(self) -> dict:
         value = asdict(self)
         value["bindings"] = dict(sorted(self.bindings.items()))
@@ -91,6 +128,36 @@ class RunManifest:
     @classmethod
     def create(cls, *, run_id: str, issue: int, base_sha: str) -> "RunManifest":
         return cls(version="1.0", run_id=run_id, issue=issue, base_sha=base_sha)
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object]) -> "RunManifest":
+        claims_raw = raw.get("claims", [])
+        if not isinstance(claims_raw, list):
+            raise ValueError("run manifest claims must be a list")
+        issue = raw.get("issue")
+        if not isinstance(issue, int):
+            raise ValueError("run manifest issue must be an integer")
+        manifest = cls(
+            version=str(raw.get("version") or ""),
+            run_id=str(raw.get("run_id") or ""),
+            issue=issue,
+            base_sha=str(raw.get("base_sha") or ""),
+        )
+        for claim_raw in claims_raw:
+            if not isinstance(claim_raw, Mapping):
+                raise ValueError("run manifest claim must be an object")
+            manifest.add(ClaimRecord.from_dict(claim_raw))
+        return manifest
+
+    @classmethod
+    def load(cls, path: str | Path) -> "RunManifest":
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"cannot read run manifest: {exc}") from exc
+        if not isinstance(raw, Mapping):
+            raise ValueError("run manifest must contain an object")
+        return cls.from_dict(raw)
 
     def __post_init__(self) -> None:
         if self.version != "1.0":
@@ -137,3 +204,6 @@ class RunManifest:
 
     def sha256(self) -> str:
         return sha256_value(self.to_dict())
+
+    def write(self, path: str | Path) -> None:
+        Path(path).write_bytes(self.canonical_bytes())
