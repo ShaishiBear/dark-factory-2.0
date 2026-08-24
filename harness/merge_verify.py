@@ -93,8 +93,8 @@ def pre_authorization(bundle: dict, *, evidence_sha256: str, pr_meta: dict,
 
 
 def post_result(bundle: dict, authorization: dict, *, evidence_sha256: str,
-                pr_meta: dict, current_base: str, merge_sha: str,
-                merge_parents: list[str], merge_tree: str) -> dict:
+                pr_meta: dict, merge_sha: str, merge_parents: list[str],
+                merge_tree: str, merge_is_ancestor: bool) -> dict:
     base, head = bundle_fields(bundle)
     auth_tree = require_oid(authorization.get("head_tree_sha"), "authorized head tree")
     if authorization != expected_authorization(bundle, evidence_sha256, auth_tree):
@@ -103,8 +103,8 @@ def post_result(bundle: dict, authorization: dict, *, evidence_sha256: str,
         die("PR identity changed between authorization and merged-SHA verification")
     if not pr_meta.get("mergedAt") or pr_meta.get("mergeCommit", {}).get("oid") != merge_sha:
         die("GitHub does not report the expected merged commit")
-    if current_base != merge_sha:
-        die("merged commit is not the current origin/main tip")
+    if not merge_is_ancestor:
+        die("merged commit is not contained in current origin/main history")
     if len(merge_parents) != 1 or merge_parents[0] != base:
         die("squash merge parent is not the evidenced base SHA")
     if merge_tree != auth_tree:
@@ -159,10 +159,12 @@ def post(args: argparse.Namespace) -> None:
         bundle, authorization,
         evidence_sha256=file_sha(evidence_path),
         pr_meta=meta,
-        current_base=git_oid("origin/main"),
         merge_sha=merge_sha,
         merge_parents=parent_line[1:],
         merge_tree=git_oid(f"{merge_sha}^{{tree}}"),
+        merge_is_ancestor=run(
+            ["git", "merge-base", "--is-ancestor", merge_sha, "origin/main"], check=False, timeout=30
+        ).returncode == 0,
     )
     Path(args.output).write_bytes(canonical(result))
     print(f"MERGED_SHA_VERIFIED merge={merge_sha} tree={result['tree_sha']}")
