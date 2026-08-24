@@ -32,42 +32,75 @@ def contract() -> dict:
     }
 
 
+def raw_design(**overrides) -> dict:
+    value = {
+        "version": "1.0",
+        "modules": ["service"],
+        "seams": ["api.create", "service.update"],
+        "public_interfaces": [],
+        "invariants": ["preserve auth"],
+        "data_flows": ["request -> service"],
+        "ac_mapping": {"AC-1": ["api.create"], "AC-2": ["service.update"]},
+        "planned_files": ["app/backend/routes/messages.py"],
+        "allowed_new_files": [],
+    }
+    value.update(overrides)
+    return value
+
+
 class ArtifactTests(unittest.TestCase):
+    def compile_design(self, raw_value: dict, context_value: dict | None = None):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        c = root / "contract.json"; c.write_text(json.dumps(contract()))
+        ctx = root / "context.json"; ctx.write_text(json.dumps(
+            context_value or {"files": ["app/backend/routes/messages.py"]}
+        ))
+        raw = root / "design.json"; raw.write_text(json.dumps(raw_value))
+        out = root / "out.json"
+        args = argparse.Namespace(input=str(raw), contract=str(c), context=str(ctx), output=str(out))
+        artifacts.compile_design(args)
+        return json.loads(out.read_text())
+
+    def test_valid_design_compiles_exact_file_envelope(self) -> None:
+        result = self.compile_design(raw_design())
+        self.assertEqual(result["planned_files"], ["app/backend/routes/messages.py"])
+        self.assertEqual(result["allowed_new_files"], [])
+
     def test_design_requires_exact_ac_coverage(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            c = root / "contract.json"; c.write_text(json.dumps(contract()))
-            ctx = root / "context.json"; ctx.write_text(json.dumps({"x": 1}))
-            raw = root / "design.json"; raw.write_text(json.dumps({
-                "version": "1.0",
-                "modules": ["service"],
-                "seams": ["api.create", "service.update"],
-                "public_interfaces": [],
-                "invariants": ["preserve auth"],
-                "data_flows": ["request -> service"],
-                "ac_mapping": {"AC-1": ["api.create"]},
-            }))
-            args = argparse.Namespace(input=str(raw), contract=str(c), context=str(ctx), output=str(root / "out.json"))
-            with self.assertRaises(SystemExit):
-                artifacts.compile_design(args)
+        with self.assertRaises(SystemExit):
+            self.compile_design(raw_design(ac_mapping={"AC-1": ["api.create"]}))
 
     def test_design_rejects_undeclared_seam(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            c = root / "contract.json"; c.write_text(json.dumps(contract()))
-            ctx = root / "context.json"; ctx.write_text(json.dumps({"x": 1}))
-            raw = root / "design.json"; raw.write_text(json.dumps({
-                "version": "1.0",
-                "modules": ["service"],
-                "seams": ["api.create", "service.update"],
-                "public_interfaces": [],
-                "invariants": ["preserve auth"],
-                "data_flows": ["request -> service"],
-                "ac_mapping": {"AC-1": ["missing.seam"], "AC-2": ["service.update"]},
-            }))
-            args = argparse.Namespace(input=str(raw), contract=str(c), context=str(ctx), output=str(root / "out.json"))
-            with self.assertRaises(SystemExit):
-                artifacts.compile_design(args)
+        with self.assertRaises(SystemExit):
+            self.compile_design(raw_design(
+                ac_mapping={"AC-1": ["missing.seam"], "AC-2": ["service.update"]}
+            ))
+
+    def test_existing_planned_file_must_be_in_validated_context(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.compile_design(raw_design(), {"files": ["app/backend/main.py"]})
+
+    def test_allowed_new_file_must_be_planned(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.compile_design(raw_design(
+                allowed_new_files=["app/backend/services/new_service.py"]
+            ))
+
+    def test_nonexistent_planned_file_requires_explicit_new_authorization(self) -> None:
+        new_path = "app/backend/services/dark_factory_test_new_service.py"
+        self.assertFalse((ROOT / new_path).exists())
+        with self.assertRaises(SystemExit):
+            self.compile_design(raw_design(planned_files=[new_path]), {"files": []})
+
+    def test_explicit_nonexistent_file_can_be_authorized(self) -> None:
+        new_path = "app/backend/services/dark_factory_test_new_service.py"
+        result = self.compile_design(
+            raw_design(planned_files=[new_path], allowed_new_files=[new_path]),
+            {"files": []},
+        )
+        self.assertEqual(result["allowed_new_files"], [new_path])
 
     def test_ticket_fails_closed_when_blocker_open(self) -> None:
         with tempfile.TemporaryDirectory() as td:
