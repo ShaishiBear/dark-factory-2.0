@@ -137,7 +137,16 @@ def parse_harness(text: str, floors: dict) -> dict:
         "mutations_caught": number(r"MUTATIONS_CAUGHT=(\d+)", "MUTATIONS_CAUGHT"),
         "mutations_not_injected": number(r"MUTATIONS_NOT_INJECTED=(\d+)", "MUTATIONS_NOT_INJECTED"),
     }
-    for key in ("static_checks", "unit_tests", "holdout_assertions", "mutations_total"):
+    semantic_markers = {
+        "mutations_independent_caught": (r"MUTATIONS_INDEPENDENT_CAUGHT=(\d+)", "MUTATIONS_INDEPENDENT_CAUGHT"),
+        "mutations_security_caught": (r"MUTATIONS_SECURITY_CAUGHT=(\d+)", "MUTATIONS_SECURITY_CAUGHT"),
+    }
+    for key, (pattern, marker) in semantic_markers.items():
+        if key in floors:
+            observed[key] = number(pattern, marker)
+    ratchets = ["static_checks", "unit_tests", "holdout_assertions", "mutations_total"]
+    ratchets.extend(key for key in semantic_markers if key in floors)
+    for key in ratchets:
         if observed[key] < int(floors[key]):
             die(f"{key} regressed below ratchet: {observed[key]} < {floors[key]}")
     if observed["mutations_total"] != observed["mutations_caught"] or observed["mutations_not_injected"] != 0:
