@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+from factory_protocol import canonical, validate_contract
+
+DECISIONS = {"proceed", "prefactor", "decompose"}
+CONVERGENCE = {"improves", "neutral", "regresses"}
+
+
+def die(message: str) -> None:
+    print(f"ARCHITECTURE_FAIL: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def load(path: str) -> dict:
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as exc:
+        die(f"cannot read {path}: {exc}")
+    if not isinstance(value, dict):
+        die(f"{path} must contain an object")
+    return value
+
+
+def digest(value: dict) -> str:
+    return hashlib.sha256(canonical(value)).hexdigest()
+
+
+def strings(value: object, name: str, *, allow_empty: bool = False) -> list[str]:
+    if not isinstance(value, list):
+        die(f"{name} must be a list")
+    if not allow_empty and not value:
+        die(f"{name} must not be empty")
+    if any(not isinstance(x, str) or not x.strip() for x in value):
+        die(f"{name} must contain non-empty strings")
+    if len(set(value)) != len(value):
+        die(f"{name} must not contain duplicates")
+    return list(value)
+
+
+def validate_policy(policy: dict) -> str:
+    if policy.get("version") != "1.0":
+        die("architecture policy version must be 1.0")
+    for key in ("principles", "migrations", "debt"):
+        if not isinstance(policy.get(key), list) or not policy[key]:
+            die(f"architecture policy {key} must be a non-empty list")
+    seen: set[str] = set()
+    for entry in policy["principles"]:
+        if not isinstance(entry, dict) or set(("id", "scope", "rule")) - entry.keys():
+            die("architecture principle requires id/scope/rule")
+        strings(entry["scope"], f"principle {entry.get('id')} scope")
+        if not isinstance(entry["rule"], str) or not entry["rule"].strip():
+            die("architecture principle rule must be non-empty")
+        if not isinstance(entry["id"], str) or not entry["id"].strip() or entry["id"] in seen:
+            die("architecture policy ids must be unique non-empty strings")
+        seen.add(entry["id"])
+    for key in ("migrations", "debt"):
+        for entry in policy[key]:
+            required = {"id", "paths"}
+            if key == "migrations": required |= {"active", "direction"}
+            else: required |= {"mode", "note"}
+            if not isinstance(entry, dict) or required - entry.keys():
+                die(f"architecture {key} entry missing required fields")
+            strings(entry["paths"], f"{key} {entry.get('id')} paths")
+            if not isinstance(entry["id"], str) or not entry["id"].strip() or entry["id"] in seen:
+                die("architecture policy ids must be unique non-empty strings")
+            seen.add(entry["id"])
+            if key == "migrations":
+                if not isinstance(entry["active"], bool) or not isinstance(entry["direction"], str) or not entry["direction"].strip():
+                    die("migration requires boolean active and non-empty direction")
+            else:
+                if entry["mode"] not in {"no-growth", "acknowledge"}:
+                    die("debt mode must be no-growth or acknowledge")
+                if not isinstance(entry["note"], str) or not entry["note"].strip():
+                    die("debt note must be non-empty")
+    return digest(policy)
+
+
+def overlaps(path: str, prefix: str) -> bool:
+    p, q = path.rstrip("/"), prefix.rstrip("/")
+    return p == q or p.startswith(q + "/") or q.startswith(p + "/")
+
+
+def applicable(entries: list[dict], files: list[str], key: str, *, active_only: bool = False) -> list[str]:
+    result = []
+    for entry in entries:
+        if active_only and not entry.get("active", False):
+            continue
+        if any(overlaps(path, prefix) for path in files for prefix in entry[key]):
+            result.append(entry["id"])
+    return sorted(result)
+
+
+def exact_ids(raw: dict, key: str, expected: list[str]) -> list[str]:
+    actual = sorted(strings(raw.get(key), f"governor {key}", allow_empty=True))
+    if actual != expected:
+        die(f"governor {key} must exactly match applicable policy ids: expected {expected}, got {actual}")
+    return actual
+
+
+def compile_value(policy: dict, raw: dict, contract: dict, context: dict, design: dict) -> dict:
+    policy_hash = validate_policy(policy)
+    contract_hash = validate_contract(contract)
+    context_hash = digest(context)
+    design_hash = digest(design)
+    if context.get("contract_sha256") != contract_hash:
+        die("context is not bound to supplied contract")
+    if design.get("contract_sha256") != contract_hash or design.get("context_sha256") != context_hash:
+        die("design is not bound to supplied contract/context")
+    files = strings(context.get("files"), "context files")
+    if raw.get("version") != "1.0":
+        die("governor version must be 1.0")
+    decision = raw.get("decision")
+    convergence = raw.get("convergence")
+    if decision not in DECISIONS or convergence not in CONVERGENCE:
+        die("governor decision/convergence is invalid")
+    expected_principles = applicable(policy["principles"], files, "scope")
+    expected_migrations = applicable(policy["migrations"], files, "paths", active_only=True)
+    expected_debt = applicable(policy["debt"], files, "paths")
+    principles = exact_ids(raw, "principles", expected_principles)
+    migrations = exact_ids(raw, "migrations", expected_migrations)
+    debts = exact_ids(raw, "debts", expected_debt)
+    rationale = strings(raw.get("rationale"), "governor rationale")
+    required_changes = strings(raw.get("required_changes"), "governor required_changes", allow_empty=True)
+    if convergence == "regresses" and decision == "proceed":
+        die("a regressing design cannot proceed")
+    if decision in {"prefactor", "decompose"} and not required_changes:
+        die(f"{decision} requires concrete required_changes")
+    if decision == "proceed" and required_changes:
+        die("proceed must not carry required structural changes")
+    return {
+        "version": "1.0",
+        "policy_sha256": policy_hash,
+        "contract_sha256": contract_hash,
+        "context_sha256": context_hash,
+        "design_sha256": design_hash,
+        "decision": decision,
+        "convergence": convergence,
+        "principles": principles,
+        "migrations": migrations,
+        "debts": debts,
+        "rationale": rationale,
+        "required_changes": required_changes,
+        "source_files": sorted(files),
+    }
+
+
+def enforce_scope_value(governor: dict, action: str) -> None:
+    if governor.get("version") != "1.0" or governor.get("decision") not in DECISIONS:
+        die("compiled governor artifact is invalid")
+    if action not in {"implement", "decompose"}:
+        die("scope action must be implement or decompose")
+    if governor["decision"] != "proceed" and action != "decompose":
+        die(f"architecture decision {governor['decision']} vetoes implementation")
+
+
+def run_compile(args: argparse.Namespace) -> None:
+    result = compile_value(load(args.policy), load(args.input), load(args.contract), load(args.context), load(args.design))
+    Path(args.output).write_bytes(canonical(result))
+    print(
+        f"ARCHITECTURE_OK decision={result['decision']} convergence={result['convergence']} "
+        f"sha256={digest(result)} migrations={len(result['migrations'])} debt={len(result['debts'])}"
+    )
+
+
+def run_scope(args: argparse.Namespace) -> None:
+    governor = load(args.governor)
+    enforce_scope_value(governor, args.action)
+    print(f"ARCHITECTURE_SCOPE_OK decision={governor['decision']} action={args.action}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("compile")
+    p.add_argument("--policy", required=True); p.add_argument("--input", required=True)
+    p.add_argument("--contract", required=True); p.add_argument("--context", required=True)
+    p.add_argument("--design", required=True); p.add_argument("--output", required=True)
+    p.set_defaults(fn=run_compile)
+    p = sub.add_parser("scope")
+    p.add_argument("--governor", required=True); p.add_argument("--action", required=True)
+    p.set_defaults(fn=run_scope)
+    args = parser.parse_args(); args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
