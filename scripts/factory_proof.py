@@ -17,7 +17,6 @@ def load(p):
     try: v=json.loads(Path(p).read_text(encoding='utf-8'))
     except Exception as e: die(f"cannot read {p}: {e}")
     return v
-
 def heartbeat(action, stage, pr=None):
     artifacts=os.environ.get('ARTIFACTS_DIR','').strip()
     if not artifacts: return
@@ -29,7 +28,6 @@ def heartbeat(action, stage, pr=None):
           '--issue',str(issue),'--stage',stage,'--lease-file',str(lease_file)]
     if pr is not None: argv.extend(['--pr',str(pr)])
     subprocess.check_call(argv,cwd=ROOT)
-
 def artifacts():
     root=os.environ.get('ARTIFACTS_DIR','').strip()
     if not root: die('ARTIFACTS_DIR is required for acceptance proof')
@@ -41,7 +39,6 @@ def artifacts():
     mapping=design.get('ac_mapping')
     if not ids or not isinstance(mapping,dict) or set(mapping)!=set(ids): die('design/contract AC mapping is invalid')
     return contract,design,ids
-
 def checkpoint(value):
     required={'acceptance_id','cwd','argv','files','expected_failure'}
     if not isinstance(value,dict) or required-value.keys(): die('test checkpoint missing fields')
@@ -58,7 +55,6 @@ def checkpoint(value):
         low=f.lower()
         if not ('test' in low or '/tests/' in '/'+low or low.endswith('conftest.py')): die(f'{ac} acceptance file is not test-oriented: {f}')
     return dict(value)
-
 def spec(path):
     s=load(path)
     if not isinstance(s,dict) or s.get('version')!='2.0' or not isinstance(s.get('checkpoints'),list) or not s['checkpoints']:
@@ -72,7 +68,6 @@ def spec(path):
         if not isinstance(seams,list) or not seams: die(f"{cp['acceptance_id']} has no compiled design seam")
         cp['seams']=seams
     return {'version':'2.0','contract_sha256':digest(contract),'design_sha256':digest(design),'checkpoints':cps}
-
 def clean():
     if subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip(): die('worktree must be clean')
 def changed(parent='HEAD^',head='HEAD'):
@@ -96,13 +91,34 @@ def impact_check(output):
     value=load(str(target))
     return {'sha256':digest(value),'risk':value.get('risk'),'artifact':str(target)}
 
+def bind_architecture(result, head):
+    root=os.environ.get('ARTIFACTS_DIR','').strip()
+    if not root: die('ARTIFACTS_DIR is required for final architecture proof')
+    path=Path(root)/'architecture-conformance.json'
+    if not path.is_file(): die('final GREEN requires compiled architecture conformance')
+    arch=load(str(path))
+    if not isinstance(arch,dict) or arch.get('version')!='1.0' or arch.get('verdict')!='conform':
+        die('architecture conformance artifact is invalid')
+    if arch.get('head_sha')!=head:
+        die('architecture conformance is not bound to current GREEN head')
+    if arch.get('contract_sha256')!=result.get('contract_sha256') or arch.get('design_sha256')!=result.get('design_sha256'):
+        die('architecture conformance is not bound to proof contract/design')
+    if not isinstance(arch.get('governor_sha256'),str) or len(arch['governor_sha256'])!=64:
+        die('architecture conformance lacks governor hash')
+    if not isinstance(arch.get('diff_sha256'),str) or len(arch['diff_sha256'])!=64:
+        die('architecture conformance lacks diff hash')
+    if not isinstance(arch.get('changed_files'),list) or not arch['changed_files']:
+        die('architecture conformance lacks changed files')
+    result['architecture_builder']=arch
+    result['architecture_builder_sha256']=digest(arch)
+    return result
+
 def plan_from(proof_or_spec,test_commit):
     cps=[]
     for cp in proof_or_spec['checkpoints']:
         cps.append({k:cp[k] for k in ('acceptance_id','seams','cwd','argv','files','expected_failure')})
     return {'version':'1.0','contract_sha256':proof_or_spec['contract_sha256'],
             'design_sha256':proof_or_spec['design_sha256'],'test_commit':test_commit,'checkpoints':cps}
-
 def red(a):
     clean(); s=spec(a.spec)
     declared=sorted({f for cp in s['checkpoints'] for f in cp['files']}); actual=changed()
@@ -124,7 +140,6 @@ def red(a):
     proof=dict(base,test_plan_sha256=digest(plan))
     write(a.output,proof); heartbeat('touch','red')
     print(f"RED_PROVED criteria={len(results)} tests={len(files)} commit={before}")
-
 def green(a):
     clean(); p=load(a.proof)
     if p.get('version')!='2.0' or not isinstance(p.get('checkpoints'),list) or not p['checkpoints']: die('GREEN requires v2 RED proof')
@@ -142,11 +157,11 @@ def green(a):
     impact=impact_check(a.output)
     result=dict(p,green_commit=before,green_results=green_results)
     if impact: result['change_impact']=impact
-    write(a.output,result)
     stage='final-green' if 'final' in Path(a.output).name else 'green'
+    if stage=='final-green': result=bind_architecture(result,before)
+    write(a.output,result)
     heartbeat('touch',stage)
     print(f"GREEN_PROVED criteria={len(green_results)} tests={len(p['files'])} commit={before}")
-
 def attach(a):
     clean(); p=load(a.proof)
     results=p.get('green_results')
@@ -156,6 +171,8 @@ def attach(a):
     info=json.loads(raw); head=info['headRefOid']
     local=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     if p['green_commit']!=head or local!=head: die('final GREEN proof is not bound to current PR head')
+    if not isinstance(p.get('architecture_builder'),dict) or p.get('architecture_builder_sha256')!=digest(p['architecture_builder']):
+        die('final GREEN proof lacks valid architecture provenance')
     block=(f"\n<!-- factory-proof:start -->\n```factory-proof\n{canonical(p).strip()}\n```\n"
            f"proof-sha256: {digest(p)}\n<!-- factory-proof:end -->\n")
     body=PROOF_BLOCK.sub('\n',info.get('body') or '').rstrip()+block
@@ -163,7 +180,6 @@ def attach(a):
     if q.returncode: die('could not attach proof: '+q.stderr[-1000:])
     heartbeat('finish','proof-attached',a.pr)
     print(f"PROOF_ATTACHED pr={a.pr} head={head} sha256={digest(p)}")
-
 def main():
     p=argparse.ArgumentParser(); sub=p.add_subparsers(dest='cmd',required=True)
     x=sub.add_parser('red'); x.add_argument('--spec',required=True); x.add_argument('--output',required=True); x.set_defaults(fn=red)
