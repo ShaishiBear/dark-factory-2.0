@@ -105,7 +105,8 @@ def load_config(path: str | Path) -> KernelConfig:
     validation = _mapping(root.get("validation"), "validation")
 
     required_labels = {
-        "accepted", "in_progress", "needs_review", "needs_fix", "needs_human", "stop"
+        "accepted", "rejected", "rate_limited", "in_progress", "needs_review",
+        "needs_fix", "needs_human", "stop",
     }
     if set(labels) != required_labels:
         missing = sorted(required_labels - set(labels))
@@ -116,8 +117,8 @@ def load_config(path: str | Path) -> KernelConfig:
         raise ValueError("kernel labels must be unique")
 
     required_prompts = {
-        "plan", "investigate", "contract", "context", "architecture", "test_author",
-        "implement", "review", "repair", "conformance", "holdout",
+        "triage", "plan", "investigate", "contract", "context", "architecture",
+        "test_author", "implement", "review", "repair", "conformance", "holdout",
     }
     if set(prompts) != required_prompts:
         missing = sorted(required_prompts - set(prompts))
