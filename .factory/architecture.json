@@ -18,10 +18,77 @@
     },
     {
       "id": "ARCH-FACTORY-TRUST",
-      "scope": [".archon", "scripts", "harness", ".factory"],
+      "scope": ["factory_kernel", ".archon", "scripts", "harness", ".factory"],
       "rule": "Preserve separation between builder reasoning and independent validation. Builder artifacts may propose evidence; authoritative validation must recompute or independently verify security-critical facts."
     }
   ],
+  "layers": [
+    {
+      "id": "backend-routes",
+      "paths": ["app/backend/routes"],
+      "allowed_imports": ["backend-auth", "backend-db", "backend-ingest", "backend-integrations", "backend-llm", "backend-rag", "backend-services"]
+    },
+    {
+      "id": "backend-services",
+      "paths": ["app/backend/services"],
+      "allowed_imports": ["backend-auth", "backend-db", "backend-ingest", "backend-integrations", "backend-llm", "backend-rag"]
+    },
+    {
+      "id": "backend-auth",
+      "paths": ["app/backend/auth"],
+      "allowed_imports": ["backend-db", "backend-integrations", "backend-services"]
+    },
+    {
+      "id": "backend-ingest",
+      "paths": ["app/backend/ingest"],
+      "allowed_imports": ["backend-db", "backend-integrations", "backend-rag", "backend-services"]
+    },
+    {
+      "id": "backend-rag",
+      "paths": ["app/backend/rag"],
+      "allowed_imports": ["backend-db", "backend-integrations", "backend-llm", "backend-services"]
+    },
+    {
+      "id": "backend-llm",
+      "paths": ["app/backend/llm"],
+      "allowed_imports": ["backend-integrations", "backend-services"]
+    },
+    {
+      "id": "backend-db",
+      "paths": ["app/backend/db"],
+      "allowed_imports": ["backend-integrations"]
+    },
+    {
+      "id": "backend-integrations",
+      "paths": ["app/backend/integrations"],
+      "allowed_imports": []
+    },
+    {
+      "id": "frontend-pages",
+      "paths": ["app/frontend/src/pages"],
+      "allowed_imports": ["frontend-components", "frontend-hooks", "frontend-lib"]
+    },
+    {
+      "id": "frontend-components",
+      "paths": ["app/frontend/src/components"],
+      "allowed_imports": ["frontend-hooks", "frontend-lib"]
+    },
+    {
+      "id": "frontend-hooks",
+      "paths": ["app/frontend/src/hooks"],
+      "allowed_imports": ["frontend-lib"]
+    },
+    {
+      "id": "frontend-lib",
+      "paths": ["app/frontend/src/lib"],
+      "allowed_imports": []
+    }
+  ],
+  "graph": {
+    "enforce_new_forbidden_edges": true,
+    "enforce_new_cycles": true,
+    "enforce_no_growth_debt": true
+  },
   "migrations": [
     {
       "id": "MIG-DB-REPOSITORY-SPLIT",
@@ -55,6 +122,12 @@
         "app/frontend/src/components/Sidebar.tsx"
       ],
       "direction": "Substantial new state, networking, or orchestration behavior should move into focused hooks/lib seams rather than further enlarging the large UI components."
+    },
+    {
+      "id": "MIG-FACTORY-RUNTIME-SPLIT",
+      "active": true,
+      "paths": ["factory_kernel/runtime.py"],
+      "direction": "Keep the repo-owned runtime as a thin coordinator. New substantial builder, validator, holdout, or recovery behavior should move into focused kernel modules instead of enlarging runtime.py."
     }
   ],
   "debt": [
@@ -62,25 +135,25 @@
       "id": "DEBT-DB-REPOSITORY",
       "paths": ["app/backend/db/repository.py"],
       "mode": "no-growth",
-      "note": "Large persistence hub; new unrelated capability should prefer a focused repository module."
+      "note": "Large persistence hub; any touched change must not increase its byte footprint and new unrelated capability should prefer a focused repository module."
     },
     {
       "id": "DEBT-LLM-OPENROUTER",
       "paths": ["app/backend/llm/openrouter.py"],
       "mode": "no-growth",
-      "note": "Provider transport and orchestration are concentrated; material extension should improve separation."
+      "note": "Provider transport and orchestration are concentrated; any touched change must not increase the file footprint and material extension should improve separation."
     },
     {
       "id": "DEBT-RAG-TOOLS",
       "paths": ["app/backend/rag/tools.py"],
       "mode": "no-growth",
-      "note": "Tool hub is already broad; avoid unrelated new responsibilities."
+      "note": "Tool hub is already broad; any touched change must not increase its footprint or add unrelated responsibilities."
     },
     {
       "id": "DEBT-MESSAGES-ROUTE",
       "paths": ["app/backend/routes/messages.py"],
       "mode": "no-growth",
-      "note": "Large route; keep new reusable orchestration out of the HTTP boundary."
+      "note": "Large route; any touched change must not increase its footprint and reusable orchestration belongs outside the HTTP boundary."
     },
     {
       "id": "DEBT-LARGE-UI",
@@ -88,8 +161,14 @@
         "app/frontend/src/components/ChatArea.tsx",
         "app/frontend/src/components/Sidebar.tsx"
       ],
-      "mode": "acknowledge",
-      "note": "Large components are tolerated, but material state/network behavior should converge toward hooks/lib."
+      "mode": "no-growth",
+      "note": "Large components are tolerated as inherited debt, but touched changes must not increase their combined footprint; material state/network behavior should converge toward hooks/lib."
+    },
+    {
+      "id": "DEBT-FACTORY-RUNTIME",
+      "paths": ["factory_kernel/runtime.py"],
+      "mode": "no-growth",
+      "note": "The rewritten control plane begins as a cohesive coordinator, but further substantial responsibilities must move into focused builder/validator/recovery modules rather than growing runtime.py."
     }
   ]
 }
