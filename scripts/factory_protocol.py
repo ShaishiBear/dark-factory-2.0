@@ -92,14 +92,26 @@ def run_contract(args: argparse.Namespace) -> None:
 
 def run_context(args: argparse.Namespace) -> None:
     c = load(args.contract); h = validate_contract(c)
-    enriched = Path(args.output).with_name("context.enriched.json")
+    artifacts = Path(args.output).parent
+    enriched = artifacts / "context.enriched.json"
     subprocess.check_call([
         sys.executable, str(ROOT / "scripts" / "factory_impact.py"), "context",
         "--input", args.input, "--output", str(enriched),
     ], cwd=ROOT)
     m = validate_context(load(str(enriched)), h)
     Path(args.output).write_bytes(canonical(m))
-    lease("touch", c["issue"]["number"], "context")
+    subprocess.check_call([
+        sys.executable, str(ROOT / "scripts" / "factory_artifacts.py"), "ticket",
+        "--issue", str(c["issue"]["number"]), "--contract", args.contract,
+        "--ticket-output", str(artifacts / "ticket.json"),
+        "--frontier-output", str(artifacts / "frontier.json"),
+    ], cwd=ROOT)
+    subprocess.check_call([
+        sys.executable, str(ROOT / "scripts" / "factory_artifacts.py"), "design",
+        "--input", str(artifacts / "design.raw.json"), "--contract", args.contract,
+        "--context", args.output, "--output", str(artifacts / "design.json"),
+    ], cwd=ROOT)
+    lease("touch", c["issue"]["number"], "design-context")
     print(f"CONTEXT_OK files={len(m['files'])} sha256={hashlib.sha256(canonical(m)).hexdigest()}")
 
 
