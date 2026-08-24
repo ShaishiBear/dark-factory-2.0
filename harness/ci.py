@@ -65,7 +65,7 @@ def resolve(argv: list[str]) -> list[str]:
     paths alone -- but it also leaves the QUOTES attached to the token. So a perfectly
     reasonable config whose interpreter path contains a space:
 
-        "unit": "\\"C:\\\\Program Files\\\\Python312\\\\python.exe\\" -m pytest"
+        "unit": "\\\"C:\\\\Program Files\\\\Python312\\\\python.exe\\\" -m pytest"
 
     arrived here as argv[0] == '"C:\\Program Files\\Python312\\python.exe"', quotes and
     all. `shutil.which` cannot match that, so it fell through unresolved and subprocess
@@ -176,6 +176,11 @@ def main() -> int:
         rc, out = run("static", static_cmd)
         if rc != 0:
             return fail("static", out)
+        # Preserve the stack-specific rung's positive evidence (including its count).
+        # Discarding successful stdout made STATIC_OK checks=N impossible for the
+        # authoritative evidence bundle to observe even though static.py emitted it.
+        if out.strip():
+            print(out.strip(), flush=True)
         print("STATIC_OK", flush=True)
 
     # --- 2. unit -------------------------------------------------------------
