@@ -1,8 +1,8 @@
 """Canonical provenance spine for one Dark Factory run.
 
-A model may propose a claim; this manifest records only explicit artifacts and the authority
-that certified them. The manifest is intentionally orchestration-agnostic so GitHub Actions,
-Archon, or another runner can produce the same evidence.
+A model may propose a claim; this manifest records explicit artifacts and the authorities that
+certified them. Requirements such as "independent verification is mandatory" live in the
+protected spine policy, never in builder-controlled claim data.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .canonical import canonical_bytes, sha256_value
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_OID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+CERT_KINDS = {"deterministic", "independent"}
 
 
 @dataclass(frozen=True)
@@ -47,18 +48,41 @@ class ArtifactRef:
 
 
 @dataclass(frozen=True)
+class Certification:
+    kind: str
+    authority_id: str
+    artifact: ArtifactRef
+
+    def __post_init__(self) -> None:
+        if self.kind not in CERT_KINDS:
+            raise ValueError(f"unknown certification kind: {self.kind!r}")
+        if not self.authority_id.strip():
+            raise ValueError("certification authority_id must be non-empty")
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object]) -> "Certification":
+        artifact = raw.get("artifact")
+        if not isinstance(artifact, Mapping):
+            raise ValueError("certification artifact must be an object")
+        return cls(
+            kind=str(raw.get("kind") or ""),
+            authority_id=str(raw.get("authority_id") or ""),
+            artifact=ArtifactRef.from_dict(artifact),
+        )
+
+
+@dataclass(frozen=True)
 class ClaimRecord:
-    """One material engineering claim and the authority chain behind it."""
+    """One material engineering claim and its authority chain."""
 
     claim_id: str
     stage: str
     producer: str
     artifact: ArtifactRef
-    validator: str | None = None
-    validation_artifact: ArtifactRef | None = None
+    deterministic: Certification | None = None
+    independent: Certification | None = None
     exact_head_sha: str | None = None
     bindings: Mapping[str, str] = field(default_factory=dict)
-    independent_required: bool = False
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -68,16 +92,21 @@ class ClaimRecord:
         ):
             if not value.strip():
                 raise ValueError(f"{name} must be non-empty")
-        if self.validator is not None and not self.validator.strip():
-            raise ValueError("validator must be non-empty when supplied")
-        if self.validator is not None and self.validator == self.producer:
-            raise ValueError("producer cannot certify its own material claim")
-        if self.independent_required and self.validator is None:
-            raise ValueError("independent claim requires a validator")
-        if self.validator is None and self.validation_artifact is not None:
-            raise ValueError("validation artifact requires a validator")
-        if self.validator is not None and self.validation_artifact is None:
-            raise ValueError("validator requires a validation artifact")
+        if self.deterministic is not None:
+            if self.deterministic.kind != "deterministic":
+                raise ValueError("deterministic slot requires deterministic certification")
+            if self.deterministic.authority_id == self.producer:
+                raise ValueError("producer cannot deterministically certify its own material claim")
+        if self.independent is not None:
+            if self.independent.kind != "independent":
+                raise ValueError("independent slot requires independent certification")
+            if self.independent.authority_id == self.producer:
+                raise ValueError("producer cannot independently certify its own material claim")
+            if (
+                self.deterministic is not None
+                and self.independent.authority_id == self.deterministic.authority_id
+            ):
+                raise ValueError("independent verifier must differ from deterministic validator")
         if self.exact_head_sha is not None and not GIT_OID.fullmatch(self.exact_head_sha):
             raise ValueError("exact_head_sha must be a full git object id")
         for key, value in self.bindings.items():
@@ -89,9 +118,12 @@ class ClaimRecord:
         artifact_raw = raw.get("artifact")
         if not isinstance(artifact_raw, Mapping):
             raise ValueError("claim artifact must be an object")
-        validation_raw = raw.get("validation_artifact")
-        if validation_raw is not None and not isinstance(validation_raw, Mapping):
-            raise ValueError("claim validation_artifact must be an object or null")
+        deterministic_raw = raw.get("deterministic")
+        independent_raw = raw.get("independent")
+        if deterministic_raw is not None and not isinstance(deterministic_raw, Mapping):
+            raise ValueError("claim deterministic certification must be an object or null")
+        if independent_raw is not None and not isinstance(independent_raw, Mapping):
+            raise ValueError("claim independent certification must be an object or null")
         bindings_raw = raw.get("bindings", {})
         if not isinstance(bindings_raw, Mapping):
             raise ValueError("claim bindings must be an object")
@@ -100,21 +132,34 @@ class ClaimRecord:
             stage=str(raw.get("stage") or ""),
             producer=str(raw.get("producer") or ""),
             artifact=ArtifactRef.from_dict(artifact_raw),
-            validator=str(raw["validator"]) if raw.get("validator") is not None else None,
-            validation_artifact=(
-                ArtifactRef.from_dict(validation_raw) if validation_raw is not None else None
+            deterministic=(
+                Certification.from_dict(deterministic_raw)
+                if deterministic_raw is not None
+                else None
+            ),
+            independent=(
+                Certification.from_dict(independent_raw)
+                if independent_raw is not None
+                else None
             ),
             exact_head_sha=(
                 str(raw["exact_head_sha"]) if raw.get("exact_head_sha") is not None else None
             ),
             bindings={str(key): str(value) for key, value in bindings_raw.items()},
-            independent_required=bool(raw.get("independent_required", False)),
         )
 
     def to_dict(self) -> dict:
         value = asdict(self)
         value["bindings"] = dict(sorted(self.bindings.items()))
         return value
+
+    def referenced_artifacts(self) -> tuple[ArtifactRef, ...]:
+        refs = [self.artifact]
+        if self.deterministic is not None:
+            refs.append(self.deterministic.artifact)
+        if self.independent is not None:
+            refs.append(self.independent.artifact)
+        return tuple(refs)
 
 
 @dataclass
@@ -127,7 +172,7 @@ class RunManifest:
 
     @classmethod
     def create(cls, *, run_id: str, issue: int, base_sha: str) -> "RunManifest":
-        return cls(version="1.0", run_id=run_id, issue=issue, base_sha=base_sha)
+        return cls(version="2.0", run_id=run_id, issue=issue, base_sha=base_sha)
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, object]) -> "RunManifest":
@@ -160,8 +205,8 @@ class RunManifest:
         return cls.from_dict(raw)
 
     def __post_init__(self) -> None:
-        if self.version != "1.0":
-            raise ValueError("run manifest version must be 1.0")
+        if self.version != "2.0":
+            raise ValueError("run manifest version must be 2.0")
         if not self.run_id.strip():
             raise ValueError("run_id must be non-empty")
         if self.issue <= 0:
@@ -180,8 +225,7 @@ class RunManifest:
         known_hashes = {
             ref.sha256
             for existing in self.claims
-            for ref in (existing.artifact, existing.validation_artifact)
-            if ref is not None
+            for ref in existing.referenced_artifacts()
         }
         unknown = sorted(set(claim.bindings.values()) - known_hashes)
         if unknown:
@@ -189,6 +233,9 @@ class RunManifest:
                 "claim bindings must reference earlier manifest artifacts: " + ", ".join(unknown)
             )
         self.claims.append(claim)
+
+    def claim(self, claim_id: str) -> ClaimRecord | None:
+        return next((claim for claim in self.claims if claim.claim_id == claim_id), None)
 
     def to_dict(self) -> dict:
         return {
