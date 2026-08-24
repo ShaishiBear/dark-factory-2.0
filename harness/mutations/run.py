@@ -8,8 +8,9 @@ Every mutation is evaluated by ALL available non-E2E channels:
   - harness/ci.py --quick         builder-visible static/unit gate
   - .factory/holdout/run.py       independent core holdout
   - .factory/holdout/citations.py independent citation-composition probe
+  - scripts/factory_security.py   deterministic security/dependency worktree guard
 
-The clean baseline must pass all three before any defect is injected. This prevents an
+The clean baseline must pass all channels before any defect is injected. This prevents an
 already-broken gate from being credited with "catching" every mutation.
 
 The full browser journey is still excluded because it requires the external validation
@@ -30,6 +31,7 @@ CHANNELS = (
     ("quick", [sys.executable, "harness/ci.py", "--quick"]),
     ("holdout", [sys.executable, ".factory/holdout/run.py"]),
     ("citation", [sys.executable, ".factory/holdout/citations.py"]),
+    ("security", [sys.executable, "scripts/factory_security.py", "--worktree"]),
 )
 
 
@@ -114,7 +116,7 @@ def main() -> int:
 
     defects = json.loads(DEFECTS.read_text(encoding="utf-8"))["defects"]
     total = caught = not_injected = 0
-    quick_caught = independent_caught = citation_caught = 0
+    quick_caught = independent_caught = citation_caught = security_caught = 0
 
     print("MUTATION_START", flush=True)
     for defect in defects:
@@ -135,10 +137,12 @@ def main() -> int:
             red_channels = [name for name, (red, _detail) in results.items() if red]
             if results["quick"][0]:
                 quick_caught += 1
-            if results["holdout"][0] or results["citation"][0]:
+            if results["holdout"][0] or results["citation"][0] or results["security"][0]:
                 independent_caught += 1
             if results["citation"][0]:
                 citation_caught += 1
+            if results["security"][0]:
+                security_caught += 1
 
             if red_channels:
                 caught += 1
@@ -168,6 +172,7 @@ def main() -> int:
     print(f"MUTATIONS_QUICK_CAUGHT={quick_caught}", flush=True)
     print(f"MUTATIONS_INDEPENDENT_CAUGHT={independent_caught}", flush=True)
     print(f"MUTATIONS_CITATION_CAUGHT={citation_caught}", flush=True)
+    print(f"MUTATIONS_SECURITY_CAUGHT={security_caught}", flush=True)
     print(f"MUTATIONS_NOT_INJECTED={not_injected}", flush=True)
 
     if caught == total and not_injected == 0:
