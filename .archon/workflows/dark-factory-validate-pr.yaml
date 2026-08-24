@@ -6,8 +6,8 @@ description: |
             re-validate, and render a final verdict.
   Triggers: Orchestrator dispatch for `factory:needs-review`, or manual "validate PR #N".
   Does: Fetches PR + linked issue + base-branch governance -> starts the app on dynamic
-        ports -> runs static checks + unit tests + four parallel HOLDOUT reviewers
-        (behavioral, agent-browser E2E, security, code review) -> synthesizes a verdict.
+        ports -> runs static checks + unit tests + five parallel HOLDOUT reviewers
+        (behavioral, agent-browser E2E, security, architecture, code review) -> synthesizes a verdict.
         If request_changes, runs a fresh-context fix pass, then a second full validation
         pass (all reviewers re-run on the updated diff). Always tears down the app,
         then applies the final verdict (approve / request_changes / reject).
@@ -127,6 +127,9 @@ nodes:
       echo ""
       echo "=== CLAUDE.md (from $BASE_REF) ==="
       git show "$BASE_REF:CLAUDE.md" 2>/dev/null || echo "(CLAUDE.md not present on base branch)"
+      echo ""
+      echo "=== .factory/architecture.json (from $BASE_REF) ==="
+      git show "$BASE_REF:.factory/architecture.json" 2>/dev/null || echo "(.factory/architecture.json not present on base branch)"
     timeout: 15000
 
   # Tripwire: fail loudly if fix-workflow artifacts ever leak into $ARTIFACTS_DIR.
@@ -598,6 +601,32 @@ nodes:
         - verdict
         - reasoning
 
+  - id: architecture-holdout-p1
+    command: dark-factory-architecture-holdout
+    depends_on: [fetch-diff, fetch-linked-issue, fetch-base-governance]
+    context: fresh
+    allowed_tools: []
+    output_format: &architecture_holdout_format
+      type: object
+      properties:
+        version: { type: string, enum: ["1.0"] }
+        verdict: { type: string, enum: ["pass", "request_changes", "reject"] }
+        convergence: { type: string, enum: ["improves", "neutral", "regresses"] }
+        principles: { type: array, items: { type: string } }
+        migrations: { type: array, items: { type: string } }
+        debts: { type: array, items: { type: string } }
+        findings:
+          type: array
+          items:
+            type: object
+            properties:
+              severity: { type: string, enum: ["critical", "high", "medium", "low"] }
+              description: { type: string }
+              file: { type: string }
+            required: [severity, description, file]
+        reasoning: { type: string }
+      required: [version, verdict, convergence, principles, migrations, debts, findings, reasoning]
+
   - id: code-review-p1
     command: archon-code-review-agent
     depends_on: [checkout-pr]
@@ -626,6 +655,7 @@ nodes:
       - behavioral-validation-p1
       - behavioral-e2e-p1
       - security-check-p1
+      - architecture-holdout-p1
       - code-review-p1
       - fetch-base-governance
     trigger_rule: all_done
@@ -871,6 +901,13 @@ nodes:
         - verdict
         - reasoning
 
+  - id: architecture-holdout-p2
+    command: dark-factory-architecture-holdout
+    depends_on: [fix-issues, fetch-diff-p2, fetch-linked-issue, fetch-base-governance]
+    context: fresh
+    allowed_tools: []
+    output_format: *architecture_holdout_format
+
   - id: code-review-p2
     command: archon-code-review-agent
     depends_on: [fix-issues]
@@ -892,6 +929,7 @@ nodes:
       - behavioral-validation-p2
       - behavioral-e2e-p2
       - security-check-p2
+      - architecture-holdout-p2
       - code-review-p2
       - fetch-base-governance
     trigger_rule: all_done
@@ -966,28 +1004,31 @@ nodes:
       set -euo pipefail
       PR_NUMBER=$(cat "$ARTIFACTS_DIR/.pr-number")
 
-      # Capture the synthesizer outputs to disk. Archon substitutes
-      # $node-id.output before bash runs, wrapping the value in single
-      # quotes with '\'' for embedded apostrophes. Heredoc captures the
-      # raw value; Python cleans quote-wrapping and '\'' escaping so jq
-      # can parse it as valid JSON.
+      # Capture synthesizer and blinded architecture outputs to disk.
       cat > "$ARTIFACTS_DIR/p1-verdict.json" <<'__P1_VERDICT_EOF__'
       $synthesize-verdict-pass-1.output
       __P1_VERDICT_EOF__
       cat > "$ARTIFACTS_DIR/p2-verdict.json" <<'__P2_VERDICT_EOF__'
       $synthesize-verdict-pass-2.output
       __P2_VERDICT_EOF__
-      for vf in "$ARTIFACTS_DIR/p1-verdict.json" "$ARTIFACTS_DIR/p2-verdict.json"; do
+      cat > "$ARTIFACTS_DIR/p1-architecture.json" <<'__P1_ARCH_EOF__'
+      $architecture-holdout-p1.output
+      __P1_ARCH_EOF__
+      cat > "$ARTIFACTS_DIR/p2-architecture.json" <<'__P2_ARCH_EOF__'
+      $architecture-holdout-p2.output
+      __P2_ARCH_EOF__
+      for vf in "$ARTIFACTS_DIR/p1-verdict.json" "$ARTIFACTS_DIR/p2-verdict.json" "$ARTIFACTS_DIR/p1-architecture.json" "$ARTIFACTS_DIR/p2-architecture.json"; do
         [ -f "$vf" ] && python3 -c "import sys,pathlib;p=pathlib.Path(sys.argv[1]);t=p.read_text().strip();t=t.strip(chr(39));t=t.replace(chr(39)+chr(92)+chr(39)+chr(39),chr(39));p.write_text(t)" "$vf"
       done
 
-      # Pick the authoritative verdict. If pass-2 ran (i.e., fix happened),
-      # it's authoritative. Otherwise use pass-1.
+      # Pick the authoritative final pass and its matching architecture holdout.
       if [ -s "$ARTIFACTS_DIR/p2-verdict.json" ] && jq -e '.verdict' "$ARTIFACTS_DIR/p2-verdict.json" > /dev/null 2>&1; then
         VERDICT_FILE="$ARTIFACTS_DIR/p2-verdict.json"
+        ARCHITECTURE_FILE="$ARTIFACTS_DIR/p2-architecture.json"
         PASS_LABEL="pass-2"
       else
         VERDICT_FILE="$ARTIFACTS_DIR/p1-verdict.json"
+        ARCHITECTURE_FILE="$ARTIFACTS_DIR/p1-architecture.json"
         PASS_LABEL="pass-1"
       fi
 
@@ -1104,9 +1145,13 @@ nodes:
             git status --short >&2
             exit 1
           fi
+          if [ ! -s "$ARCHITECTURE_FILE" ] || ! jq -e '.verdict' "$ARCHITECTURE_FILE" > /dev/null 2>&1; then
+            echo "EVIDENCE_GATE_REFUSED: selected architecture holdout is empty or invalid" >&2
+            exit 1
+          fi
           git show origin/main:scripts/factory_evidence.py > "$ARTIFACTS_DIR/factory_evidence.py"
           FACTORY_REPO_ROOT="$REPO_ROOT" python3 "$ARTIFACTS_DIR/factory_evidence.py" \
-            --pr "$PR_NUMBER" --verdict "$VERDICT_FILE" \
+            --pr "$PR_NUMBER" --verdict "$VERDICT_FILE" --architecture-verdict "$ARCHITECTURE_FILE" \
             --output "$ARTIFACTS_DIR/evidence-bundle.json"
           EVIDENCE_SHA=$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$ARTIFACTS_DIR/evidence-bundle.json")
 
@@ -1119,6 +1164,7 @@ nodes:
             "- Behavioral (static): solves_issue=yes" \
             "- Behavioral (E2E via agent-browser): solves_issue=yes" \
             "- Security: pass (no governance files modified)" \
+            "- Architecture holdout: pass" \
             "- Static checks: pass" \
             "- Tests: pass or legitimately skipped" \
             "- Code review: no critical/high findings" \
