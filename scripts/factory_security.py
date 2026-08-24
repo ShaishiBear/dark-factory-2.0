@@ -102,10 +102,19 @@ def public_dependency_changes(changes: list[dict[str, str]]) -> list[dict[str, s
 def protected_path(path: str) -> bool:
     name = Path(path).name
     return (
-        path in {"FACTORY_RULES.md", "MISSION.md", "CLAUDE.md", ".archon/config.yaml"}
+        path in {
+            "FACTORY_RULES.md", "MISSION.md", "CLAUDE.md",
+            ".factory/kernel.json", ".factory/evidence-spine.json",
+            ".factory/architecture.json", ".factory/locks/floor.json",
+            "scripts/frontier_filter.py",
+        }
+        or path.startswith("factory_kernel/")
+        or path.startswith(".factory/prompts/")
+        or path.startswith(".factory/holdout/")
         or path.startswith(".github/")
-        or path.startswith(".archon/workflows/")
-        or path.startswith(".archon/commands/")
+        or path.startswith("deploy/systemd/")
+        or path.startswith("harness/")
+        or path.startswith("scripts/factory_")
         or name == "Dockerfile"
         or re.fullmatch(r"docker-compose(?:\.[^.]+)?\.ya?ml", name) is not None
         or name.startswith(".env")
