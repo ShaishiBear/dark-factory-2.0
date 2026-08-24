@@ -23,7 +23,9 @@
 
 set -uo pipefail
 
-REPO="${FACTORY_REPO:-coleam00/dark-factory-experiment}"
+# FACTORY_REPO remains overridable for forks/test hosts, but the safe default must be the
+# repository whose orchestrator and stop issues this script actually governs.
+REPO="${FACTORY_REPO:-ShaishiBear/dark-factory-2.0}"
 KILL_FILE="${FACTORY_KILL_FILE:-${FACTORY_WORKDIR:-.}/.factory-stop}"
 STOP_LABEL="factory:stop"
 
