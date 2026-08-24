@@ -16,6 +16,8 @@
   },
   "labels": {
     "accepted": "factory:accepted",
+    "rejected": "factory:rejected",
+    "rate_limited": "factory:rate-limited",
     "in_progress": "factory:in-progress",
     "needs_review": "factory:needs-review",
     "needs_fix": "factory:needs-fix",
@@ -23,6 +25,7 @@
     "stop": "factory:stop"
   },
   "prompts": {
+    "triage": ".factory/prompts/triage.md",
     "plan": ".factory/prompts/plan.md",
     "investigate": ".factory/prompts/investigate.md",
     "contract": ".factory/prompts/contract.md",
