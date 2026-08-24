@@ -4,16 +4,19 @@
 Mutations run in place and are restored with git because copying app/backend/.venv and
 app/frontend/node_modules is prohibitively expensive. The tree must therefore be clean.
 
-Every mutation is evaluated by ALL available non-E2E channels:
+Every application mutation is evaluated by ALL available non-E2E channels:
   - harness/ci.py --quick         builder-visible static/unit gate
   - .factory/holdout/run.py       independent core holdout
   - .factory/holdout/citations.py independent citation-composition probe
   - scripts/factory_security.py   deterministic security/dependency worktree guard
 
-The clean baseline must pass all channels before any defect is injected. This prevents an
-already-broken gate from being credited with "catching" every mutation. Individual defects
-may also declare `must_catch` channels; those probes only count when the named guard itself
-turns red, even if some unrelated channel also notices the mutation.
+After the application mutations, harness/factory_mutations/run.py separately mutation-tests
+copied factory trust-root code. Factory mutations never edit the live worktree.
+
+The clean baseline must pass all application channels before any defect is injected. This
+prevents an already-broken gate from being credited with "catching" every mutation. Individual
+defects may also declare `must_catch` channels; those probes only count when the named guard
+itself turns red, even if some unrelated channel also notices the mutation.
 
 The full browser journey is still excluded because it requires the external validation
 environment. That gap remains explicit rather than turning missing infrastructure into
@@ -29,6 +32,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DEFECTS = Path(__file__).resolve().parent / "defects.json"
+FACTORY_MUTATIONS = ROOT / "harness" / "factory_mutations" / "run.py"
 CHANNELS = (
     ("quick", [sys.executable, "harness/ci.py", "--quick"]),
     ("holdout", [sys.executable, ".factory/holdout/run.py"]),
@@ -97,6 +101,23 @@ def baseline_is_green() -> bool:
         )
         return False
     print("MUTATION_BASELINE_OK", flush=True)
+    return True
+
+
+def run_factory_mutations() -> bool:
+    if not FACTORY_MUTATIONS.is_file():
+        print("FACTORY_MUTATIONS_ABSENT no harness/factory_mutations/run.py", flush=True)
+        return False
+    proc = subprocess.run(
+        [sys.executable, str(FACTORY_MUTATIONS)], cwd=ROOT, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=900,
+    )
+    if proc.stdout.strip():
+        print(proc.stdout.strip(), flush=True)
+    if proc.returncode != 0:
+        if proc.stderr.strip():
+            print(proc.stderr.strip()[-2000:], flush=True)
+        return False
     return True
 
 
@@ -183,13 +204,14 @@ def main() -> int:
     print(f"MUTATIONS_SECURITY_CAUGHT={security_caught}", flush=True)
     print(f"MUTATIONS_NOT_INJECTED={not_injected}", flush=True)
 
-    if caught == total and not_injected == 0:
+    app_ok = caught == total and not_injected == 0
+    factory_ok = run_factory_mutations()
+    if app_ok and factory_ok:
         print("MUTATIONS_OK", flush=True)
         return 0
 
     print(
-        "MUTATIONS_FAILED - every escaped defect is a class of bug that can "
-        "currently merge unreviewed",
+        "MUTATIONS_FAILED - an application or factory defect can currently escape",
         flush=True,
     )
     return 1
