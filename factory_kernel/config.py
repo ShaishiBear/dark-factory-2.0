@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path, PurePosixPath
 from typing import Mapping
 
@@ -128,9 +129,10 @@ def load_config(path: str | Path) -> KernelConfig:
         key: _relative_prompt(value, f"prompts.{key}") for key, value in prompts.items()
     }
 
-    work_root = Path(_string(runtime.get("work_root"), "runtime.work_root"))
+    configured_work_root = _string(runtime.get("work_root"), "runtime.work_root")
+    work_root = Path(os.environ.get("FACTORY_WORKDIR", configured_work_root)).expanduser()
     if not work_root.is_absolute():
-        raise ValueError("kernel runtime.work_root must be absolute")
+        raise ValueError("kernel runtime work root must be absolute")
 
     return KernelConfig(
         version="1.0",
