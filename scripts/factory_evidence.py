@@ -12,6 +12,7 @@ BLOCK = re.compile(
 TRUST_ROOT = (
     ".archon/workflows/dark-factory-validate-pr.yaml",
     "scripts/factory_protocol.py", "scripts/factory_proof.py", "scripts/factory_evidence.py",
+    "scripts/factory_architecture.py", ".factory/architecture.json",
     "harness/", ".factory/holdout/", ".factory/locks/floor.json",
 )
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -112,6 +113,14 @@ def changed(base: str, head: str) -> list[str]:
     return sorted(x for x in out.splitlines() if x)
 
 
+def binary_diff_sha(base: str, head: str) -> str:
+    p = subprocess.run(["git", "diff", "--binary", f"{base}...{head}"], cwd=ROOT,
+                       capture_output=True, timeout=300)
+    if p.returncode:
+        die("cannot compute authoritative binary diff")
+    return hashlib.sha256(p.stdout).hexdigest()
+
+
 def trust_root_touched(paths: list[str]) -> list[str]:
     return [p for p in paths if any(p == x or p.startswith(x) for x in TRUST_ROOT)]
 
@@ -123,6 +132,76 @@ def trust_root_drift(head: str) -> list[str]:
 
 def ancestor(old: str, head: str) -> bool:
     return run(["git", "merge-base", "--is-ancestor", old, head], check=False).returncode == 0
+
+
+def overlaps(path: str, prefix: str) -> bool:
+    p, q = path.rstrip("/"), prefix.rstrip("/")
+    return p == q or p.startswith(q + "/") or q.startswith(p + "/")
+
+
+def applicable(entries: object, files: list[str], path_key: str, *, active_only: bool = False) -> list[str]:
+    if not isinstance(entries, list):
+        die("architecture policy collection is invalid")
+    result: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+            die("architecture policy entry is invalid")
+        if active_only and entry.get("active") is not True:
+            continue
+        paths = entry.get(path_key)
+        if not isinstance(paths, list) or any(not isinstance(x, str) or not x for x in paths):
+            die("architecture policy path scope is invalid")
+        if any(overlaps(path, prefix) for path in files for prefix in paths):
+            result.append(entry["id"])
+    return sorted(result)
+
+
+def verify_architecture(proof: dict, head: str, base: str, contract_hash: str, policy: dict,
+                        *, files: list[str] | None = None, diff_sha256: str | None = None) -> dict:
+    arch = proof.get("architecture_builder")
+    if not isinstance(arch, dict):
+        die("proof lacks builder architecture conformance")
+    if proof.get("architecture_builder_sha256") != digest(arch):
+        die("builder architecture conformance hash mismatch")
+    if policy.get("version") != "1.0":
+        die("authoritative architecture policy version must be 1.0")
+    if arch.get("version") != "1.0" or arch.get("verdict") != "conform":
+        die("builder architecture verdict is not conform")
+    if arch.get("convergence") == "regresses":
+        die("builder architecture claims conform while regressing")
+    if arch.get("policy_sha256") != digest(policy):
+        die("builder architecture used stale or different policy")
+    if arch.get("head_sha") != head:
+        die("builder architecture is not bound to current PR head")
+    if arch.get("contract_sha256") != contract_hash:
+        die("builder architecture is not bound to attached contract")
+    if arch.get("design_sha256") != proof.get("design_sha256"):
+        die("builder architecture is not bound to proof design")
+    for key in ("context_sha256", "governor_sha256"):
+        if not HEX64.fullmatch(str(arch.get(key, ""))):
+            die(f"builder architecture {key} is invalid")
+    actual_files = sorted(files if files is not None else changed(base, head))
+    if sorted(arch.get("changed_files") or []) != actual_files:
+        die("builder architecture changed-file set is stale or incomplete")
+    actual_diff = diff_sha256 if diff_sha256 is not None else binary_diff_sha(base, head)
+    if arch.get("diff_sha256") != actual_diff:
+        die("builder architecture binary diff hash is stale")
+    expected = {
+        "principles": applicable(policy.get("principles"), actual_files, "scope"),
+        "migrations": applicable(policy.get("migrations"), actual_files, "paths", active_only=True),
+        "debts": applicable(policy.get("debt"), actual_files, "paths"),
+    }
+    for key, ids in expected.items():
+        value = arch.get(key)
+        if not isinstance(value, list) or sorted(value) != ids or len(value) != len(set(value)):
+            die(f"builder architecture {key} does not exactly match authoritative policy applicability")
+    return {
+        "sha256": digest(arch), "policy_sha256": digest(policy),
+        "head_sha": head, "diff_sha256": actual_diff, "changed_files": actual_files,
+        "principles": expected["principles"], "migrations": expected["migrations"],
+        "debts": expected["debts"], "verdict": arch["verdict"],
+        "convergence": arch.get("convergence"),
+    }
 
 
 def contract_ids(contract: dict) -> list[str]:
@@ -319,6 +398,8 @@ def main() -> None:
     if verdict.get("verdict") != "approve":
         die("evidence gate only authorizes an approve verdict")
     proof_result = verify_proof(proof, head, contract, contract_hash)
+    policy = json.loads(run(["git", "show", "origin/main:.factory/architecture.json"]).stdout)
+    architecture_result = verify_architecture(proof, head, base, contract_hash, policy)
 
     floors = json.loads(run(["git", "show", "origin/main:.factory/locks/floor.json"]).stdout)
     harness = run([sys.executable, "harness/ci.py"], timeout=1800, check=False)
@@ -332,10 +413,11 @@ def main() -> None:
         die("PR head changed while evidence was being assembled")
 
     bundle = {
-        "version": "3.0", "pr": int(args.pr), "issue": issue,
+        "version": "4.0", "pr": int(args.pr), "issue": issue,
         "base_sha": base, "head_sha": head,
         "contract_sha256": contract_hash, "contract": contract_result,
         "proof_sha256": proof_hash, "proof": proof_result,
+        "architecture": architecture_result,
         "validator_verdict_sha256": digest(verdict),
         "harness_sha256": hashlib.sha256(transcript.encode()).hexdigest(),
         "observed": observed,
