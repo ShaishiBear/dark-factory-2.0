@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: 4560fc8197a5f77805f6a8f102db7053a95e931d
+  CANDIDATE_SHA: 35ab7b562fcb08a049879a95771ff2313344f20d
 
 jobs:
   rewrite:
@@ -37,6 +37,8 @@ jobs:
       - name: Validate kernel configuration
         run: python -m factory_kernel config-check
       - name: Factory tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/scripts
         run: python -m unittest discover -s tests/factory -p 'test_*.py'
       - name: Canonical quick gate
         run: python harness/ci.py --quick
