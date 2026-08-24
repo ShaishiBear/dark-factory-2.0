@@ -111,13 +111,16 @@ class SecurityGuardTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "fail")
         self.assertTrue(any(x["kind"] == "dependency_justification" for x in result["findings"]))
 
-    def test_direct_python_url_dependency_is_blocked(self):
+    def test_direct_python_url_dependency_is_blocked_and_source_is_redacted(self):
         result = self.evaluate(
             changed_files=[m.BACKEND_MANIFEST, m.BACKEND_LOCK],
-            head_backend=self.backend(deps=["fastapi", "thing @ https://example.com/thing.whl"]),
+            head_backend=self.backend(deps=["fastapi", "thing @ https://user:secret@example.com/thing.whl"]),
             body="## Dependency justification\nthing is required.\n",
         )
         self.assertTrue(any(x["kind"] == "dependency_source" for x in result["findings"]))
+        serialized = json.dumps(result)
+        self.assertNotIn("user:secret", serialized)
+        self.assertNotIn("example.com/thing.whl", serialized)
 
     def test_javascript_git_dependency_is_blocked(self):
         result = self.evaluate(
@@ -126,6 +129,7 @@ class SecurityGuardTests(unittest.TestCase):
             body="## Dependency justification\nthing is required.\n",
         )
         self.assertTrue(any(x["kind"] == "dependency_source" for x in result["findings"]))
+        self.assertNotIn("github.com/x/y.git", json.dumps(result))
 
     def test_private_key_added_line_is_blocked_without_echoing_secret(self):
         diff = "diff --git a/x.py b/x.py\n+++ b/x.py\n+-----BEGIN PRIVATE KEY-----\n"
@@ -138,6 +142,7 @@ class SecurityGuardTests(unittest.TestCase):
         diff = "diff --git a/x.py b/x.py\n+++ b/x.py\n+DB='postgresql://alice:supersecret@db.internal/app'\n"
         result = self.evaluate(diff=diff)
         self.assertTrue(any(x["kind"] == "secret" for x in result["findings"]))
+        self.assertNotIn("alice:supersecret", json.dumps(result))
 
     def test_placeholder_secret_is_not_flagged_by_generic_rule(self):
         diff = "diff --git a/example.py b/example.py\n+++ b/example.py\n+API_KEY='your_api_key_placeholder'\n"
