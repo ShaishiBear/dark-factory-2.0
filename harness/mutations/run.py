@@ -11,7 +11,9 @@ Every mutation is evaluated by ALL available non-E2E channels:
   - scripts/factory_security.py   deterministic security/dependency worktree guard
 
 The clean baseline must pass all channels before any defect is injected. This prevents an
-already-broken gate from being credited with "catching" every mutation.
+already-broken gate from being credited with "catching" every mutation. Individual defects
+may also declare `must_catch` channels; those probes only count when the named guard itself
+turns red, even if some unrelated channel also notices the mutation.
 
 The full browser journey is still excluded because it requires the external validation
 environment. That gap remains explicit rather than turning missing infrastructure into
@@ -135,6 +137,8 @@ def main() -> int:
             injected = True
             results = run_channels()
             red_channels = [name for name, (red, _detail) in results.items() if red]
+            required = defect.get("must_catch", [])
+            missing_required = [name for name in required if name not in results or not results[name][0]]
             if results["quick"][0]:
                 quick_caught += 1
             if results["holdout"][0] or results["citation"][0] or results["security"][0]:
@@ -144,7 +148,7 @@ def main() -> int:
             if results["security"][0]:
                 security_caught += 1
 
-            if red_channels:
+            if red_channels and not missing_required:
                 caught += 1
                 details = ", ".join(results[name][1] for name in red_channels)
                 print(
@@ -152,8 +156,12 @@ def main() -> int:
                     flush=True,
                 )
             else:
+                requirement = (
+                    f" required channel(s) stayed green: {', '.join(missing_required)};"
+                    if missing_required else ""
+                )
                 print(
-                    f"  ESCAPED       {defect['id']:<38} <-- {defect['why']}",
+                    f"  ESCAPED       {defect['id']:<38} <--{requirement} {defect['why']}",
                     flush=True,
                 )
         finally:
