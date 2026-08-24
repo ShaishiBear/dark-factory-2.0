@@ -204,6 +204,36 @@ def verify_architecture(proof: dict, head: str, base: str, contract_hash: str, p
     }
 
 
+def verify_architecture_holdout(value: object, files: list[str], policy: dict) -> dict:
+    if not isinstance(value, dict) or value.get("version") != "1.0":
+        die("architecture holdout is missing or invalid")
+    if value.get("verdict") != "pass" or value.get("convergence") == "regresses":
+        die("architecture holdout did not authorize merge")
+    expected = {
+        "principles": applicable(policy.get("principles"), files, "scope"),
+        "migrations": applicable(policy.get("migrations"), files, "paths", active_only=True),
+        "debts": applicable(policy.get("debt"), files, "paths"),
+    }
+    for key, ids in expected.items():
+        raw = value.get(key)
+        if not isinstance(raw, list) or any(not isinstance(x, str) for x in raw):
+            die(f"architecture holdout {key} is invalid")
+        if sorted(raw) != ids or len(raw) != len(set(raw)):
+            die(f"architecture holdout {key} does not exactly match authoritative policy applicability")
+    findings = value.get("findings")
+    if not isinstance(findings, list):
+        die("architecture holdout findings are invalid")
+    for finding in findings:
+        if not isinstance(finding, dict) or finding.get("severity") not in {"critical", "high", "medium", "low"}:
+            die("architecture holdout finding is malformed")
+        if not isinstance(finding.get("description"), str) or not finding["description"].strip():
+            die("architecture holdout finding lacks description")
+        if finding["severity"] in {"critical", "high"}:
+            die("architecture holdout contains a blocking finding")
+    return {"sha256": digest(value), "verdict": "pass", "convergence": value.get("convergence"),
+            "findings": len(findings), **expected}
+
+
 def contract_ids(contract: dict) -> list[str]:
     return [b["id"] for b in contract["behaviors"]]
 
@@ -370,6 +400,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pr", required=True)
     ap.add_argument("--verdict", required=True)
+    ap.add_argument("--architecture-verdict", required=True)
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
 
@@ -400,6 +431,8 @@ def main() -> None:
     proof_result = verify_proof(proof, head, contract, contract_hash)
     policy = json.loads(run(["git", "show", "origin/main:.factory/architecture.json"]).stdout)
     architecture_result = verify_architecture(proof, head, base, contract_hash, policy)
+    holdout = json.loads(Path(args.architecture_verdict).read_text(encoding="utf-8"))
+    holdout_result = verify_architecture_holdout(holdout, architecture_result["changed_files"], policy)
 
     floors = json.loads(run(["git", "show", "origin/main:.factory/locks/floor.json"]).stdout)
     harness = run([sys.executable, "harness/ci.py"], timeout=1800, check=False)
@@ -417,7 +450,7 @@ def main() -> None:
         "base_sha": base, "head_sha": head,
         "contract_sha256": contract_hash, "contract": contract_result,
         "proof_sha256": proof_hash, "proof": proof_result,
-        "architecture": architecture_result,
+        "architecture": architecture_result, "architecture_holdout": holdout_result,
         "validator_verdict_sha256": digest(verdict),
         "harness_sha256": hashlib.sha256(transcript.encode()).hexdigest(),
         "observed": observed,
