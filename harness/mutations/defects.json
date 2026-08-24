@@ -65,6 +65,7 @@
       "file": "app/backend/rate_limit.py",
       "find": "DAILY_MESSAGE_CAP: int = 25",
       "replace": "DAILY_MESSAGE_CAP: int = 25\nMUTATION_TOKEN = \"sk-proj-abcdefghijklmnopqrstuvwxyz123456\"",
+      "must_catch": ["security"],
       "why": "A credential-shaped provider token added to otherwise valid source must be rejected deterministically even if lint and behavior still pass."
     },
     {
@@ -72,6 +73,7 @@
       "file": "app/backend/pyproject.toml",
       "find": "    \"httpx\",",
       "replace": "    \"httpx\",\n    \"factory-mutation-package\",",
+      "must_catch": ["security"],
       "why": "A manifest-only dependency change can otherwise use a stale lockfile and evade reproducible dependency review."
     },
     {
@@ -79,6 +81,7 @@
       "file": "MISSION.md",
       "find": "# Mission",
       "replace": "# Mission (mutated by adversarial probe)",
+      "must_catch": ["security"],
       "why": "A PR that weakens or rewrites trusted governance must go red regardless of whether application tests still pass."
     }
   ]
