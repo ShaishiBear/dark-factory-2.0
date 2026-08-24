@@ -1,0 +1,55 @@
+name: dark-factory-ci
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: dark-factory-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  quick-authority:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Assert exact head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Validate kernel configuration
+        run: python -m factory_kernel config-check
+
+      - name: Install locked backend dependencies
+        working-directory: app/backend
+        run: uv sync --frozen --all-extras
+
+      - name: Install locked frontend dependencies
+        working-directory: app/frontend
+        run: bun install --frozen-lockfile
+
+      - name: Deterministic security guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/factory_security.py --pr "${{ github.event.pull_request.number }}"
+
+      - name: Canonical quick gate
+        run: python harness/ci.py --quick
