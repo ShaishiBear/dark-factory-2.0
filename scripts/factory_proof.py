@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROOF_BLOCK = re.compile(r"\n?<!-- factory-proof:start -->.*?<!-- factory-proof:end -->\n?", re.S)
+DESIGN_BLOCK = re.compile(r"\n?<!-- factory-design:start -->.*?<!-- factory-design:end -->\n?", re.S)
 
 def die(msg): print(f"PROOF_FAIL: {msg}", file=sys.stderr); raise SystemExit(1)
 def run(argv, cwd):
@@ -28,16 +29,33 @@ def heartbeat(action, stage, pr=None):
           '--issue',str(issue),'--stage',stage,'--lease-file',str(lease_file)]
     if pr is not None: argv.extend(['--pr',str(pr)])
     subprocess.check_call(argv,cwd=ROOT)
+def ensure_design(base):
+    design_path=base/'design.json'
+    if design_path.is_file(): return
+    raw=base/'design.raw.json'; contract=base/'task-contract.json'; context=base/'context.json'
+    if not raw.is_file() or not contract.is_file() or not context.is_file():
+        die('validated contract/context and raw design are required before RED')
+    p=subprocess.run([
+        sys.executable,str(ROOT/'scripts'/'factory_artifacts.py'),'design',
+        '--input',str(raw),'--contract',str(contract),'--context',str(context),
+        '--output',str(design_path),
+    ],cwd=ROOT,text=True,capture_output=True,timeout=120)
+    text=(p.stdout or '')+(p.stderr or '')
+    if p.returncode: die('design compiler failed: '+text[-1200:])
+    if p.stdout.strip(): print(p.stdout.strip())
 def artifacts():
     root=os.environ.get('ARTIFACTS_DIR','').strip()
     if not root: die('ARTIFACTS_DIR is required for acceptance proof')
-    base=Path(root)
+    base=Path(root); ensure_design(base)
     contract_path=base/'task-contract.json'; design_path=base/'design.json'
     if not contract_path.is_file() or not design_path.is_file(): die('validated contract/design artifacts are required before RED')
     contract=load(str(contract_path)); design=load(str(design_path))
     ids=[b.get('id') for b in contract.get('behaviors',[]) if isinstance(b,dict)]
     mapping=design.get('ac_mapping')
     if not ids or not isinstance(mapping,dict) or set(mapping)!=set(ids): die('design/contract AC mapping is invalid')
+    planned=design.get('planned_files'); allowed_new=design.get('allowed_new_files')
+    if not isinstance(planned,list) or not planned or not isinstance(allowed_new,list):
+        die('compiled design lacks implementation file envelope')
     return contract,design,ids
 def checkpoint(value):
     required={'acceptance_id','cwd','argv','files','expected_failure'}
@@ -90,6 +108,33 @@ def impact_check(output):
     if p.stdout.strip(): print(p.stdout.strip())
     value=load(str(target))
     return {'sha256':digest(value),'risk':value.get('risk'),'artifact':str(target)}
+
+def architecture_guard_check(output):
+    root=os.environ.get('ARTIFACTS_DIR','').strip()
+    if not root: die('ARTIFACTS_DIR is required for architecture guard')
+    design=Path(root)/'design.json'
+    if not design.is_file(): die('compiled design missing before architecture guard')
+    target=Path(output).with_suffix('.architecture.json')
+    argv=[
+        sys.executable,str(ROOT/'scripts'/'factory_architecture_guard.py'),
+        '--policy','.factory/architecture.json','--design',str(design),
+        '--head-ref','HEAD','--output',str(target),
+    ]
+    base=os.environ.get('FACTORY_BASE_REF','').strip()
+    if base: argv.extend(['--base-ref',base])
+    p=subprocess.run(argv,cwd=ROOT,text=True,capture_output=True,timeout=300)
+    text=(p.stdout or '')+(p.stderr or '')
+    if p.returncode: die('architecture guard failed: '+text[-2000:])
+    if p.stdout.strip(): print(p.stdout.strip())
+    value=load(str(target))
+    return {
+        'sha256':digest(value),
+        'artifact':str(target),
+        'new_forbidden_edges':len(value.get('forbidden_edges',{}).get('new',[])),
+        'new_cycles':len(value.get('cycles',{}).get('new',[])),
+        'no_growth_regressions':len(value.get('no_growth_regressions',[])),
+        'unplanned_product_files':len(value.get('unplanned_product_files',[])),
+    }
 
 def bind_architecture(result, head):
     root=os.environ.get('ARTIFACTS_DIR','').strip()
@@ -155,7 +200,8 @@ def green(a):
     after=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(); clean()
     if before!=after: die('GREEN commands moved HEAD')
     impact=impact_check(a.output)
-    result=dict(p,green_commit=before,green_results=green_results)
+    architecture_guard=architecture_guard_check(a.output)
+    result=dict(p,green_commit=before,green_results=green_results,architecture_guard=architecture_guard)
     if impact: result['change_impact']=impact
     stage='final-green' if 'final' in Path(a.output).name else 'green'
     if stage=='final-green': result=bind_architecture(result,before)
@@ -173,13 +219,22 @@ def attach(a):
     if p['green_commit']!=head or local!=head: die('final GREEN proof is not bound to current PR head')
     if not isinstance(p.get('architecture_builder'),dict) or p.get('architecture_builder_sha256')!=digest(p['architecture_builder']):
         die('final GREEN proof lacks valid architecture provenance')
-    block=(f"\n<!-- factory-proof:start -->\n```factory-proof\n{canonical(p).strip()}\n```\n"
-           f"proof-sha256: {digest(p)}\n<!-- factory-proof:end -->\n")
-    body=PROOF_BLOCK.sub('\n',info.get('body') or '').rstrip()+block
+    guard=p.get('architecture_guard')
+    if not isinstance(guard,dict) or not isinstance(guard.get('sha256'),str) or len(guard['sha256'])!=64:
+        die('final GREEN proof lacks deterministic architecture guard provenance')
+    root=os.environ.get('ARTIFACTS_DIR','').strip(); design_path=Path(root)/'design.json'
+    if not design_path.is_file(): die('compiled design missing while attaching proof')
+    design=load(str(design_path))
+    if digest(design)!=p.get('design_sha256'): die('attached design does not match final proof design hash')
+    design_block=(f"\n<!-- factory-design:start -->\n```factory-design\n{canonical(design).strip()}\n```\n"
+                  f"design-sha256: {digest(design)}\n<!-- factory-design:end -->\n")
+    proof_block=(f"\n<!-- factory-proof:start -->\n```factory-proof\n{canonical(p).strip()}\n```\n"
+                 f"proof-sha256: {digest(p)}\n<!-- factory-proof:end -->\n")
+    body=DESIGN_BLOCK.sub('\n',PROOF_BLOCK.sub('\n',info.get('body') or '')).rstrip()+design_block+proof_block
     q=subprocess.run(['gh','pr','edit',str(a.pr),'--body',body],cwd=ROOT,text=True,capture_output=True)
-    if q.returncode: die('could not attach proof: '+q.stderr[-1000:])
+    if q.returncode: die('could not attach proof/design: '+q.stderr[-1000:])
     heartbeat('finish','proof-attached',a.pr)
-    print(f"PROOF_ATTACHED pr={a.pr} head={head} sha256={digest(p)}")
+    print(f"PROOF_ATTACHED pr={a.pr} head={head} sha256={digest(p)} design_sha256={digest(design)}")
 def main():
     p=argparse.ArgumentParser(); sub=p.add_subparsers(dest='cmd',required=True)
     x=sub.add_parser('red'); x.add_argument('--spec',required=True); x.add_argument('--output',required=True); x.set_defaults(fn=red)
