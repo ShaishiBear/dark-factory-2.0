@@ -218,6 +218,11 @@ def git_show(ref: str, path: str) -> str:
     return proc.stdout if proc.returncode == 0 else ""
 
 
+def worktree_text(path: str) -> str:
+    target = ROOT / path
+    return target.read_text(encoding="utf-8") if target.is_file() else ""
+
+
 def verify_pr(pr: str) -> dict:
     meta = json.loads(run(["gh", "pr", "view", pr, "--json", "body,baseRefOid,headRefOid"]).stdout)
     base, head = meta["baseRefOid"], meta["headRefOid"]
@@ -234,12 +239,25 @@ def verify_pr(pr: str) -> dict:
     )
 
 
+def verify_worktree() -> dict:
+    changed = sorted(x for x in run(["git", "diff", "--name-only", "HEAD"]).stdout.splitlines() if x)
+    diff = run(["git", "diff", "--unified=0", "--no-ext-diff", "--no-color", "HEAD"]).stdout
+    return evaluate(
+        changed_files=changed,
+        base_backend=git_show("HEAD", BACKEND_MANIFEST), head_backend=worktree_text(BACKEND_MANIFEST),
+        base_frontend=git_show("HEAD", FRONTEND_MANIFEST), head_frontend=worktree_text(FRONTEND_MANIFEST),
+        diff=diff, body="",
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pr", required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--pr")
+    target.add_argument("--worktree", action="store_true")
     parser.add_argument("--output")
     args = parser.parse_args()
-    result = verify_pr(args.pr)
+    result = verify_worktree() if args.worktree else verify_pr(str(args.pr))
     payload = json.dumps(result, sort_keys=True, separators=(",", ":"))
     if args.output:
         Path(args.output).write_text(payload + "\n", encoding="utf-8")
