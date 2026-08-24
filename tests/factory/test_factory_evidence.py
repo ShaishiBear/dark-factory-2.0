@@ -64,9 +64,53 @@ class EvidenceTests(unittest.TestCase):
         p["test_plan_sha256"] = m.digest(m.plan_from_proof(p))
         return p
 
+    def policy(self):
+        return {
+            "version": "1.0",
+            "principles": [
+                {"id": "P-BACKEND", "scope": ["app/backend"], "rule": "Keep backend ownership local."},
+                {"id": "P-FRONTEND", "scope": ["app/frontend"], "rule": "Keep frontend ownership local."},
+            ],
+            "migrations": [
+                {"id": "M-RAG", "paths": ["app/backend/rag"], "active": True,
+                 "direction": "Move RAG dependencies behind one seam."},
+                {"id": "M-OLD", "paths": ["app/backend/rag"], "active": False,
+                 "direction": "Historical migration."},
+            ],
+            "debt": [
+                {"id": "D-RAG", "paths": ["app/backend/rag"], "mode": "no-growth",
+                 "note": "Do not grow this hotspot."},
+            ],
+        }
+
+    def architecture_proof(self, *, head="abc", files=None, diff="d" * 64):
+        p = self.proof(head)
+        policy = self.policy()
+        files = files or ["app/backend/rag/service.py"]
+        arch = {
+            "version": "1.0", "policy_sha256": m.digest(policy),
+            "contract_sha256": p["contract_sha256"], "context_sha256": "7" * 64,
+            "design_sha256": p["design_sha256"], "governor_sha256": "8" * 64,
+            "head_sha": head, "diff_sha256": diff, "verdict": "conform",
+            "convergence": "neutral", "principles": ["P-BACKEND"],
+            "migrations": ["M-RAG"], "debts": ["D-RAG"],
+            "rationale": ["matches governed seams"], "findings": [],
+            "changed_files": files,
+        }
+        p["architecture_builder"] = arch
+        p["architecture_builder_sha256"] = m.digest(arch)
+        return p
+
     def assert_rejects_harness(self, text):
         with self.assertRaises(SystemExit):
             m.parse_harness(text, self.floors())
+
+    def verify_arch(self, proof=None, **kwargs):
+        proof = proof or self.architecture_proof()
+        return m.verify_architecture(
+            proof, "abc", "base", proof["contract_sha256"], self.policy(),
+            files=["app/backend/rag/service.py"], diff_sha256="d" * 64, **kwargs
+        )
 
     def test_good_full_harness(self):
         self.assertEqual(m.parse_harness(self.log(), self.floors())["mutations_caught"], 4)
@@ -87,7 +131,8 @@ class EvidenceTests(unittest.TestCase):
         self.assert_rejects_harness(self.log(not_injected=1))
 
     def test_trust_root_detection(self):
-        self.assertEqual(m.trust_root_touched(["app/x.py", "harness/ci.py"]), ["harness/ci.py"])
+        touched = m.trust_root_touched(["app/x.py", "harness/ci.py", ".factory/architecture.json"])
+        self.assertEqual(touched, ["harness/ci.py", ".factory/architecture.json"])
 
     def test_contract_is_revalidated(self):
         contract = self.contract()
@@ -157,6 +202,54 @@ class EvidenceTests(unittest.TestCase):
 
     def test_red_replay_accepts_declared_failure(self):
         m.validate_red_result(1, "AssertionError: AC-1 EXPECTED BEHAVIOR", "AC-1 expected behavior")
+
+    def test_architecture_exact_current_provenance_passes(self):
+        result = self.verify_arch()
+        self.assertEqual(result["migrations"], ["M-RAG"])
+
+    def test_architecture_forged_conformance_hash_rejected(self):
+        p = self.architecture_proof()
+        p["architecture_builder_sha256"] = "f" * 64
+        with self.assertRaises(SystemExit):
+            self.verify_arch(p)
+
+    def test_architecture_stale_policy_rejected(self):
+        p = self.architecture_proof()
+        p["architecture_builder"]["policy_sha256"] = "f" * 64
+        p["architecture_builder_sha256"] = m.digest(p["architecture_builder"])
+        with self.assertRaises(SystemExit):
+            self.verify_arch(p)
+
+    def test_architecture_omitted_migration_rejected(self):
+        p = self.architecture_proof()
+        p["architecture_builder"]["migrations"] = []
+        p["architecture_builder_sha256"] = m.digest(p["architecture_builder"])
+        with self.assertRaises(SystemExit):
+            self.verify_arch(p)
+
+    def test_architecture_omitted_debt_rejected(self):
+        p = self.architecture_proof()
+        p["architecture_builder"]["debts"] = []
+        p["architecture_builder_sha256"] = m.digest(p["architecture_builder"])
+        with self.assertRaises(SystemExit):
+            self.verify_arch(p)
+
+    def test_architecture_stale_diff_hash_rejected(self):
+        p = self.architecture_proof(diff="e" * 64)
+        with self.assertRaises(SystemExit):
+            self.verify_arch(p)
+
+    def test_architecture_stale_head_rejected(self):
+        p = self.architecture_proof(head="old")
+        with self.assertRaises(SystemExit):
+            self.verify_arch(p)
+
+    def test_architecture_regression_disguised_as_conform_rejected(self):
+        p = self.architecture_proof()
+        p["architecture_builder"]["convergence"] = "regresses"
+        p["architecture_builder_sha256"] = m.digest(p["architecture_builder"])
+        with self.assertRaises(SystemExit):
+            self.verify_arch(p)
 
 
 if __name__ == "__main__":
