@@ -2,7 +2,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-P = Path(__file__).parents[2] / "scripts" / "factory_merge_verify.py"
+P = Path(__file__).parents[2] / "harness" / "merge_verify.py"
 spec = importlib.util.spec_from_file_location("factory_merge_verify", P)
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
@@ -16,13 +16,7 @@ EVIDENCE = "e" * 64
 
 class MergeVerifyTests(unittest.TestCase):
     def bundle(self, **overrides):
-        value = {
-            "version": "6.0",
-            "base_ref": "main",
-            "base_sha": BASE,
-            "head_sha": HEAD,
-            "head_tree_sha": TREE,
-        }
+        value = {"version": "5.0", "base_sha": BASE, "head_sha": HEAD}
         value.update(overrides)
         return value
 
@@ -65,23 +59,33 @@ class MergeVerifyTests(unittest.TestCase):
 
     def test_pre_authorizes_exact_evidenced_base_head_and_tree(self):
         result = self.authorize()
+        self.assertEqual(result["base_sha"], BASE)
+        self.assertEqual(result["head_sha"], HEAD)
         self.assertEqual(result["head_tree_sha"], TREE)
 
     def test_pre_rejects_main_moving_after_evidence(self):
         with self.assertRaises(SystemExit):
             self.authorize(current_base="f" * 40)
 
+    def test_pre_rejects_pr_base_oid_moving_after_evidence(self):
+        with self.assertRaises(SystemExit):
+            self.authorize(meta=self.meta(baseRefOid="f" * 40))
+
     def test_pre_rejects_pr_head_moving_after_evidence(self):
         with self.assertRaises(SystemExit):
             self.authorize(local_head="f" * 40)
 
-    def test_pre_rejects_head_tree_mismatch(self):
+    def test_pre_rejects_wrong_target_branch(self):
         with self.assertRaises(SystemExit):
-            self.authorize(head_tree="f" * 40)
+            self.authorize(meta=self.meta(baseRefName="release"))
 
-    def test_pre_rejects_non_main_target(self):
+    def test_pre_rejects_malformed_head_tree_oid(self):
         with self.assertRaises(SystemExit):
-            self.authorize(bundle=self.bundle(base_ref="release"))
+            self.authorize(head_tree="not-an-oid")
+
+    def test_pre_rejects_wrong_evidence_bundle_version(self):
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(version="4.0"))
 
     def test_pre_requires_base_to_be_head_ancestor(self):
         with self.assertRaises(SystemExit):
@@ -98,6 +102,12 @@ class MergeVerifyTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.post(authorization=auth)
 
+    def test_post_rejects_tampered_authorized_tree(self):
+        auth = self.authorize()
+        auth["head_tree_sha"] = "f" * 40
+        with self.assertRaises(SystemExit):
+            self.post(authorization=auth)
+
     def test_post_rejects_wrong_squash_parent(self):
         with self.assertRaises(SystemExit):
             self.post(merge_parents=["f" * 40])
@@ -106,7 +116,7 @@ class MergeVerifyTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.post(merge_parents=[BASE, "f" * 40])
 
-    def test_post_rejects_tree_not_identical_to_evidenced_head(self):
+    def test_post_rejects_tree_not_identical_to_authorized_head(self):
         with self.assertRaises(SystemExit):
             self.post(merge_tree="f" * 40)
 
