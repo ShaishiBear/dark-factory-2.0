@@ -92,6 +92,13 @@ def dependency_changes(before: dict[str, str], after: dict[str, str], ecosystem:
     return changes
 
 
+def public_dependency_changes(changes: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        {key: change[key] for key in ("ecosystem", "scope", "name", "kind")}
+        for change in changes
+    ]
+
+
 def protected_path(path: str) -> bool:
     name = Path(path).name
     return (
@@ -200,7 +207,7 @@ def evaluate(*, changed_files: list[str], base_backend: str, head_backend: str,
         "version": "1.0",
         "verdict": "pass" if not findings else "fail",
         "protected_paths": protected,
-        "dependency_changes": dep_changes,
+        "dependency_changes": public_dependency_changes(dep_changes),
         "secret_findings": secrets,
         "findings": findings,
     }
