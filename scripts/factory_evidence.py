@@ -12,7 +12,7 @@ BLOCK = re.compile(
 TRUST_ROOT = (
     ".archon/workflows/dark-factory-validate-pr.yaml",
     "scripts/factory_protocol.py", "scripts/factory_proof.py", "scripts/factory_evidence.py",
-    "scripts/factory_architecture.py", ".factory/architecture.json",
+    "scripts/factory_architecture.py", "scripts/factory_security.py", ".factory/architecture.json",
     "harness/", ".factory/holdout/", ".factory/locks/floor.json",
 )
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -70,6 +70,16 @@ def load_protocol():
     return module
 
 
+def load_security():
+    path = ROOT / "scripts" / "factory_security.py"
+    spec = importlib.util.spec_from_file_location("factory_security_authoritative", path)
+    if spec is None or spec.loader is None:
+        die("cannot load authoritative security guard")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def verify_contract(contract: dict, expected_hash: str, issue: int) -> dict:
     validator = load_protocol()
     try:
@@ -79,6 +89,35 @@ def verify_contract(contract: dict, expected_hash: str, issue: int) -> dict:
     if actual != expected_hash:
         die("authoritative contract canonical hash disagrees with attached hash")
     return {"sha256": actual, "criteria": len(contract["behaviors"])}
+
+
+def verify_security_result(value: object) -> dict:
+    if not isinstance(value, dict) or value.get("version") != "1.0":
+        die("deterministic security guard returned invalid evidence")
+    if value.get("verdict") != "pass":
+        die("deterministic security guard did not authorize merge")
+    collections: dict[str, list] = {}
+    for key in ("protected_paths", "dependency_changes", "secret_findings", "findings"):
+        raw = value.get(key)
+        if not isinstance(raw, list):
+            die(f"deterministic security guard {key} is invalid")
+        collections[key] = raw
+    if collections["findings"] or collections["protected_paths"] or collections["secret_findings"]:
+        die("deterministic security guard pass contains contradictory findings")
+    return {
+        "sha256": digest(value), "verdict": "pass",
+        "dependency_changes": len(collections["dependency_changes"]),
+        "protected_paths": 0, "secret_findings": 0, "findings": 0,
+    }
+
+
+def verify_security(pr: str) -> dict:
+    guard = load_security()
+    try:
+        result = guard.verify_pr(pr)
+    except SystemExit:
+        die("deterministic security guard failed while evaluating the current PR")
+    return verify_security_result(result)
 
 
 def parse_harness(text: str, floors: dict) -> dict:
@@ -424,6 +463,7 @@ def main() -> None:
     if not re.search(rf"(?i)\b(?:fixes|closes|resolves)\s+#{issue}\b", body):
         die("contract issue does not match PR linkage")
     contract_result = verify_contract(contract, contract_hash, issue)
+    security_result = verify_security(args.pr)
 
     verdict = json.loads(Path(args.verdict).read_text(encoding="utf-8"))
     if verdict.get("verdict") != "approve":
@@ -446,11 +486,12 @@ def main() -> None:
         die("PR head changed while evidence was being assembled")
 
     bundle = {
-        "version": "4.0", "pr": int(args.pr), "issue": issue,
+        "version": "5.0", "pr": int(args.pr), "issue": issue,
         "base_sha": base, "head_sha": head,
         "contract_sha256": contract_hash, "contract": contract_result,
         "proof_sha256": proof_hash, "proof": proof_result,
         "architecture": architecture_result, "architecture_holdout": holdout_result,
+        "security": security_result,
         "validator_verdict_sha256": digest(verdict),
         "harness_sha256": hashlib.sha256(transcript.encode()).hexdigest(),
         "observed": observed,
