@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
-import hashlib
-import importlib.util
-import json
-import os
-import re
-import subprocess
-import sys
-import tempfile
+import argparse, hashlib, importlib.util, json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
@@ -22,6 +14,7 @@ TRUST_ROOT = (
     "scripts/factory_protocol.py", "scripts/factory_proof.py", "scripts/factory_evidence.py",
     "harness/", ".factory/holdout/", ".factory/locks/floor.json",
 )
+HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def die(msg: str) -> None:
@@ -93,7 +86,6 @@ def parse_harness(text: str, floors: dict) -> dict:
         if not match:
             die(f"harness missing {name} marker")
         return int(match.group(1))
-
     if "GATE_OK mode=full" not in text:
         die("full harness did not reach GATE_OK")
     observed = {
@@ -109,9 +101,7 @@ def parse_harness(text: str, floors: dict) -> dict:
         if observed[key] < int(floors[key]):
             die(f"{key} regressed below ratchet: {observed[key]} < {floors[key]}")
     if observed["mutations_total"] != observed["mutations_caught"] or observed["mutations_not_injected"] != 0:
-        die("mutation gate incomplete: "
-            f"total={observed['mutations_total']} caught={observed['mutations_caught']} "
-            f"not_injected={observed['mutations_not_injected']}")
+        die("mutation gate incomplete")
     if observed["e2e_steps"] < 1:
         die("E2E_PASSED reported zero steps")
     return observed
@@ -135,24 +125,75 @@ def ancestor(old: str, head: str) -> bool:
     return run(["git", "merge-base", "--is-ancestor", old, head], check=False).returncode == 0
 
 
-def validate_proof_fields(proof: dict, head: str) -> None:
+def contract_ids(contract: dict) -> list[str]:
+    return [b["id"] for b in contract["behaviors"]]
+
+
+def plan_from_proof(proof: dict) -> dict:
+    cps = []
+    for cp in proof["checkpoints"]:
+        cps.append({k: cp[k] for k in ("acceptance_id", "seams", "cwd", "argv", "files", "expected_failure")})
+    return {
+        "version": "1.0", "contract_sha256": proof["contract_sha256"],
+        "design_sha256": proof["design_sha256"], "test_commit": proof["test_commit"],
+        "checkpoints": cps,
+    }
+
+
+def validate_checkpoint(cp: object) -> dict:
+    required = {"acceptance_id", "seams", "cwd", "argv", "files", "expected_failure",
+                "red_exit", "red_output_sha256"}
+    if not isinstance(cp, dict) or required - cp.keys():
+        die("proof checkpoint missing required fields")
+    if not re.fullmatch(r"AC-[1-9][0-9]*", str(cp["acceptance_id"])):
+        die("proof checkpoint has invalid acceptance_id")
+    for key in ("seams", "files", "argv"):
+        if not isinstance(cp[key], list) or not cp[key] or any(not isinstance(x, str) or not x for x in cp[key]):
+            die(f"proof checkpoint {cp['acceptance_id']} has invalid {key}")
+    if not isinstance(cp["cwd"], str) or not cp["cwd"]:
+        die("proof checkpoint cwd is invalid")
+    if not isinstance(cp["expected_failure"], str) or len(cp["expected_failure"].strip()) < 3:
+        die("proof checkpoint expected_failure is too weak")
+    if int(cp["red_exit"]) == 0 or not HEX64.fullmatch(str(cp["red_output_sha256"])):
+        die("proof checkpoint does not contain valid RED evidence")
+    return cp
+
+
+def validate_proof_fields(proof: dict, head: str, contract: dict, contract_hash: str) -> None:
     required = {
-        "version", "test_commit", "cwd", "argv", "files", "red_exit", "red_output_sha256",
-        "expected_failure", "green_commit", "green_exit",
+        "version", "test_commit", "contract_sha256", "design_sha256", "files",
+        "checkpoints", "test_plan_sha256", "green_commit", "green_results",
     }
     if not isinstance(proof, dict) or required - proof.keys():
         die("proof is missing required fields")
-    if proof["version"] != "1.0" or int(proof["red_exit"]) == 0 or int(proof["green_exit"]) != 0:
-        die("proof does not contain a valid RED->GREEN transition")
+    if proof["version"] != "2.0":
+        die("proof version must be 2.0")
+    if proof["contract_sha256"] != contract_hash:
+        die("proof is not bound to attached contract")
+    if not HEX64.fullmatch(str(proof["design_sha256"])):
+        die("proof design hash is invalid")
     if str(proof["green_commit"]) != head:
         die("final GREEN proof is not bound to current PR head")
-    if not isinstance(proof["expected_failure"], str) or len(proof["expected_failure"].strip()) < 3:
-        die("proof expected_failure is too weak")
-    argv = proof["argv"]
-    if not isinstance(argv, list) or not argv or any(not isinstance(x, str) or not x for x in argv):
-        die("proof command is invalid")
     if not isinstance(proof["files"], dict) or not proof["files"]:
         die("proof has no immutable acceptance tests")
+    if any(not HEX64.fullmatch(str(v)) for v in proof["files"].values()):
+        die("proof has invalid acceptance-test hashes")
+    cps = [validate_checkpoint(cp) for cp in proof["checkpoints"]] if isinstance(proof["checkpoints"], list) else die("proof checkpoints invalid")
+    ids = [cp["acceptance_id"] for cp in cps]
+    expected = contract_ids(contract)
+    if len(ids) != len(set(ids)) or set(ids) != set(expected):
+        die("proof checkpoints must cover every contract AC exactly once")
+    if any(f not in proof["files"] for cp in cps for f in cp["files"]):
+        die("checkpoint references a test outside immutable proof files")
+    plan = plan_from_proof(proof)
+    if digest(plan) != proof["test_plan_sha256"]:
+        die("proof test-plan hash mismatch")
+    greens = proof["green_results"]
+    if not isinstance(greens, list) or len(greens) != len(cps):
+        die("proof GREEN results do not cover every checkpoint")
+    green_ids = [x.get("acceptance_id") for x in greens if isinstance(x, dict)]
+    if set(green_ids) != set(expected) or any(int(x.get("exit", 1)) != 0 for x in greens):
+        die("proof GREEN results are incomplete or non-green")
 
 
 def validate_red_result(returncode: int, output: str, expected_failure: str) -> None:
@@ -174,7 +215,7 @@ def share_runtime(red_root: Path) -> None:
                 pass
 
 
-def replay_red(proof: dict) -> dict:
+def replay_red(proof: dict) -> list[dict]:
     test_commit = str(proof["test_commit"])
     if not ancestor(test_commit, str(proof["green_commit"])):
         die("test-author commit is not an ancestor of current GREEN head")
@@ -182,7 +223,6 @@ def replay_red(proof: dict) -> dict:
     files = proof["files"]
     if sorted(x for x in diff.splitlines() if x) != sorted(files):
         die("test-author commit does not change exactly the declared acceptance tests")
-
     with tempfile.TemporaryDirectory(prefix="dark-factory-red-") as tmp:
         red_root = Path(tmp) / "worktree"
         run(["git", "worktree", "add", "--detach", str(red_root), test_commit], timeout=120)
@@ -192,54 +232,58 @@ def replay_red(proof: dict) -> dict:
                 path = red_root / rel
                 if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
                     die(f"RED checkpoint test hash mismatch: {rel}")
-            cwd = (red_root / proof["cwd"]).resolve()
-            if red_root not in (cwd, *cwd.parents) or not cwd.is_dir():
-                die("proof RED cwd is unsafe")
-            result = run(list(proof["argv"]), cwd=cwd, timeout=300, check=False)
-            output = (result.stdout or "") + (result.stderr or "")
-            validate_red_result(result.returncode, output, proof["expected_failure"])
-            return {
-                "exit": result.returncode,
-                "output_sha256": hashlib.sha256(output.encode()).hexdigest(),
-                "expected_failure": proof["expected_failure"],
-            }
+            results = []
+            for cp in proof["checkpoints"]:
+                cwd = (red_root / cp["cwd"]).resolve()
+                if red_root not in (cwd, *cwd.parents) or not cwd.is_dir():
+                    die(f"{cp['acceptance_id']} RED cwd is unsafe")
+                result = run(list(cp["argv"]), cwd=cwd, timeout=300, check=False)
+                output = (result.stdout or "") + (result.stderr or "")
+                validate_red_result(result.returncode, output, cp["expected_failure"])
+                results.append({
+                    "acceptance_id": cp["acceptance_id"], "exit": result.returncode,
+                    "output_sha256": hashlib.sha256(output.encode()).hexdigest(),
+                    "expected_failure": cp["expected_failure"],
+                })
+            return results
         finally:
             run(["git", "worktree", "remove", "--force", str(red_root)], timeout=120, check=False)
             run(["git", "worktree", "prune"], timeout=30, check=False)
 
 
-def verify_proof(proof: dict, head: str) -> dict:
-    validate_proof_fields(proof, head)
+def replay_green(proof: dict) -> list[dict]:
+    results = []
+    for cp in proof["checkpoints"]:
+        cwd = (ROOT / cp["cwd"]).resolve()
+        if ROOT not in (cwd, *cwd.parents) or not cwd.is_dir():
+            die(f"{cp['acceptance_id']} GREEN cwd is unsafe")
+        result = run(list(cp["argv"]), cwd=cwd, timeout=300, check=False)
+        output = (result.stdout or "") + (result.stderr or "")
+        if result.returncode:
+            die(f"{cp['acceptance_id']} independent GREEN replay failed")
+        results.append({
+            "acceptance_id": cp["acceptance_id"], "exit": result.returncode,
+            "output_sha256": hashlib.sha256(output.encode()).hexdigest(),
+        })
+    return results
+
+
+def verify_proof(proof: dict, head: str, contract: dict, contract_hash: str) -> dict:
+    validate_proof_fields(proof, head, contract, contract_hash)
     if not ancestor(str(proof["test_commit"]), head):
         die("test-author commit is not an ancestor of current PR head")
-
-    files = proof["files"]
-    for rel, expected in files.items():
+    for rel, expected in proof["files"].items():
         path = ROOT / rel
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             die(f"immutable acceptance test changed: {rel}")
-
     red = replay_red(proof)
-
-    cwd = (ROOT / proof["cwd"]).resolve()
-    if ROOT not in (cwd, *cwd.parents) or not cwd.is_dir():
-        die("proof GREEN cwd is unsafe")
-    green_run = run(list(proof["argv"]), cwd=cwd, timeout=300, check=False)
-    green_output = (green_run.stdout or "") + (green_run.stderr or "")
-    if green_run.returncode:
-        die("independent GREEN replay of acceptance tests failed")
-
+    green = replay_green(proof)
     return {
-        "test_commit": proof["test_commit"],
-        "green_commit": head,
-        "files": files,
-        "command_sha256": hashlib.sha256(canonical(
-            {"cwd": proof["cwd"], "argv": proof["argv"]})).hexdigest(),
-        "red_replay": red,
-        "green_replay": {
-            "exit": green_run.returncode,
-            "output_sha256": hashlib.sha256(green_output.encode()).hexdigest(),
-        },
+        "test_commit": proof["test_commit"], "green_commit": head,
+        "criteria": len(proof["checkpoints"]), "files": proof["files"],
+        "test_plan_sha256": proof["test_plan_sha256"],
+        "design_sha256": proof["design_sha256"],
+        "red_replay": red, "green_replay": green,
     }
 
 
@@ -255,7 +299,6 @@ def main() -> None:
     local = run(["git", "rev-parse", "HEAD"]).stdout.strip()
     if local != head:
         die(f"validator worktree is stale: HEAD={local} PR={head}")
-
     touched = trust_root_touched(changed(base, head))
     if touched:
         die("autonomous PR touched factory trust root: " + ", ".join(touched))
@@ -275,7 +318,7 @@ def main() -> None:
     verdict = json.loads(Path(args.verdict).read_text(encoding="utf-8"))
     if verdict.get("verdict") != "approve":
         die("evidence gate only authorizes an approve verdict")
-    proof_result = verify_proof(proof, head)
+    proof_result = verify_proof(proof, head, contract, contract_hash)
 
     floors = json.loads(run(["git", "show", "origin/main:.factory/locks/floor.json"]).stdout)
     harness = run([sys.executable, "harness/ci.py"], timeout=1800, check=False)
@@ -289,7 +332,7 @@ def main() -> None:
         die("PR head changed while evidence was being assembled")
 
     bundle = {
-        "version": "2.1", "pr": int(args.pr), "issue": issue,
+        "version": "3.0", "pr": int(args.pr), "issue": issue,
         "base_sha": base, "head_sha": head,
         "contract_sha256": contract_hash, "contract": contract_result,
         "proof_sha256": proof_hash, "proof": proof_result,
