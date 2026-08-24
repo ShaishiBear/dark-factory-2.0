@@ -4,8 +4,9 @@ description: |
             (Python/FastAPI backend + React/TypeScript frontend).
   Triggers: Orchestrator dispatch when an issue is labeled `factory:accepted`.
   Does: Keeps Cole's orchestration/validation control plane, but runs research,
-        specification, context assembly, implementation, review, and repair through
-        Matt Pocock's pinned engineering skills. The independent validator remains separate.
+        specification, context assembly, architecture governance, implementation,
+        review, and repair through Matt Pocock's pinned engineering skills.
+        The independent validator remains separate.
   NOT for: Triage (use dark-factory-triage) or PR validation (use dark-factory-validate-pr).
 
 provider: claude
@@ -44,6 +45,7 @@ nodes:
       test -f docs/agents/issue-tracker.md
       test -f docs/agents/domain.md
       test -f docs/agents/matt-skills.md
+      test -f .factory/architecture.json
       claude plugin list --json | python -c 'import json,sys; assert "mattpocock-skills" in str(json.load(sys.stdin))' || {
         echo "Pinned Matt Pocock skills plugin is not installed. See docs/agents/matt-skills.md." >&2; exit 1; }
       BLOCKERS=$(gh issue view "$ISSUE_NUM" --json body -q '.body' | grep -oiE '^Blocked by: #[0-9]+' | grep -oE '[0-9]+' || true)
@@ -121,9 +123,28 @@ nodes:
     depends_on: [context-assemble]
     timeout: 15000
 
+  - id: architecture-governor
+    command: dark-factory-architecture-governor
+    depends_on: [context-gate]
+    skills: [mattpocock-skills:codebase-design, mattpocock-skills:improve-codebase-architecture]
+    context: fresh
+
+  - id: architecture-gate
+    bash: |
+      set -euo pipefail
+      python scripts/factory_architecture.py compile \
+        --policy .factory/architecture.json \
+        --input "$ARTIFACTS_DIR/architecture-governor.raw.json" \
+        --contract "$ARTIFACTS_DIR/task-contract.json" \
+        --context "$ARTIFACTS_DIR/context.json" \
+        --design "$ARTIFACTS_DIR/design.json" \
+        --output "$ARTIFACTS_DIR/architecture-governor.json"
+    depends_on: [architecture-governor]
+    timeout: 15000
+
   - id: scope
     command: dark-factory-engineering-scope
-    depends_on: [context-gate]
+    depends_on: [architecture-gate]
     skills: [mattpocock-skills:to-tickets, mattpocock-skills:codebase-design]
     context: fresh
     output_format:
@@ -134,16 +155,25 @@ nodes:
         estimated_change_lines: {type: integer, minimum: 0}
       required: [action, reason, estimated_change_lines]
 
+  - id: scope-gate
+    bash: |
+      set -euo pipefail
+      python scripts/factory_architecture.py scope \
+        --governor "$ARTIFACTS_DIR/architecture-governor.json" \
+        --action "$scope.output.action"
+    depends_on: [scope]
+    timeout: 10000
+
   - id: decompose
     command: dark-factory-engineering-decompose
-    depends_on: [scope]
+    depends_on: [scope-gate]
     when: "$scope.output.action == 'decompose'"
     skills: [mattpocock-skills:to-tickets]
     context: fresh
 
   - id: test-author
     command: dark-factory-engineering-test-author
-    depends_on: [scope]
+    depends_on: [scope-gate]
     when: "$scope.output.action == 'implement'"
     skills: [mattpocock-skills:tdd]
     context: fresh
