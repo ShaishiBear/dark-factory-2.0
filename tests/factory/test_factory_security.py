@@ -52,6 +52,12 @@ class SecurityGuardTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "fail")
         self.assertEqual(result["protected_paths"], [".archon/workflows/dark-factory-validate-pr.yaml"])
 
+    def test_github_path_is_blocked(self):
+        path = ".github/workflows/dark-factory.yml"
+        result = self.evaluate(changed_files=[path])
+        self.assertEqual(result["verdict"], "fail")
+        self.assertEqual(result["protected_paths"], [path])
+
     def test_env_file_is_blocked(self):
         self.assertEqual(self.evaluate(changed_files=["app/backend/.env.production"])["verdict"], "fail")
 
