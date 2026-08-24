@@ -1,0 +1,23 @@
+name: kernel-validation
+
+on:
+  push:
+    branches:
+      - validation/df2-kernel-v1
+
+permissions:
+  contents: read
+
+jobs:
+  kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile kernel
+        run: python -m compileall -q factory_kernel
+      - name: Run kernel factory tests
+        run: python -m unittest discover -s tests/factory -p 'test_factory_kernel*.py'
