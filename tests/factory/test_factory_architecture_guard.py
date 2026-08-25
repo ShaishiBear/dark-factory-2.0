@@ -136,6 +136,34 @@ class ArchitectureGuardTests(unittest.TestCase):
         self.assertNotIn("base_ref", result)
         self.assertNotIn("head_ref", result)
 
+    def test_no_growth_is_enforced_per_path_not_aggregate(self):
+        policy = self.policy()
+        policy["debt"] = [
+            {
+                "id": "DEBT-LARGE-UI",
+                "paths": [
+                    "app/frontend/src/components/ChatArea.tsx",
+                    "app/frontend/src/components/Sidebar.tsx",
+                ],
+                "mode": "no-growth",
+            }
+        ]
+        with mock.patch.object(m, "scope_bytes", side_effect=[100, 110, 100, 80]):
+            result = m.debt_growth(
+                policy,
+                "base",
+                "head",
+                [
+                    "app/frontend/src/components/ChatArea.tsx",
+                    "app/frontend/src/components/Sidebar.tsx",
+                ],
+            )
+        debt = result["DEBT-LARGE-UI"]
+        self.assertEqual(debt["delta_bytes"], -10)
+        self.assertEqual(
+            debt["regressions"], ["app/frontend/src/components/ChatArea.tsx"]
+        )
+
     def test_touched_no_growth_debt_cannot_increase(self):
         policy = self.policy()
         policy["debt"] = [
@@ -165,6 +193,15 @@ class ArchitectureGuardTests(unittest.TestCase):
                         "head_bytes": 101,
                         "delta_bytes": 1,
                         "touched": True,
+                        "paths": {
+                            "app/backend/db/repository.py": {
+                                "base_bytes": 100,
+                                "head_bytes": 101,
+                                "delta_bytes": 1,
+                                "touched": True,
+                            }
+                        },
+                        "regressions": ["app/backend/db/repository.py"],
                     }
                 },
             ),
