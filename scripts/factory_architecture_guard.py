@@ -332,20 +332,33 @@ def debt_growth(policy: dict, base_ref: str, head_ref: str, changed: list[str]) 
         if not isinstance(entry, dict) or entry.get("mode") != "no-growth":
             continue
         paths = entry.get("paths")
-        if not isinstance(paths, list):
+        if not isinstance(paths, list) or not paths or any(not isinstance(x, str) or not x for x in paths):
             die("no-growth debt paths are invalid")
-        touched = any(
-            path == prefix.rstrip("/") or path.startswith(prefix.rstrip("/") + "/")
-            for path in changed
-            for prefix in paths
-        )
-        base_bytes = scope_bytes(base_ref, paths)
-        head_bytes = scope_bytes(head_ref, paths)
+        per_path: dict[str, dict[str, int | bool]] = {}
+        regressions: list[str] = []
+        for prefix in paths:
+            normalized = prefix.rstrip("/")
+            touched = any(
+                path == normalized or path.startswith(normalized + "/") for path in changed
+            )
+            base_bytes = scope_bytes(base_ref, [prefix])
+            head_bytes = scope_bytes(head_ref, [prefix])
+            delta = head_bytes - base_bytes
+            per_path[prefix] = {
+                "base_bytes": base_bytes,
+                "head_bytes": head_bytes,
+                "delta_bytes": delta,
+                "touched": touched,
+            }
+            if touched and delta > 0:
+                regressions.append(prefix)
         result[str(entry.get("id"))] = {
-            "base_bytes": base_bytes,
-            "head_bytes": head_bytes,
-            "delta_bytes": head_bytes - base_bytes,
-            "touched": touched,
+            "base_bytes": sum(int(values["base_bytes"]) for values in per_path.values()),
+            "head_bytes": sum(int(values["head_bytes"]) for values in per_path.values()),
+            "delta_bytes": sum(int(values["delta_bytes"]) for values in per_path.values()),
+            "touched": any(bool(values["touched"]) for values in per_path.values()),
+            "paths": per_path,
+            "regressions": sorted(regressions),
         }
     return result
 
@@ -376,7 +389,8 @@ def compute(policy: dict, design: dict, base_ref: str, head_ref: str) -> dict:
     growth = sorted(
         debt_id
         for debt_id, values in debt.items()
-        if values["touched"] and values["delta_bytes"] > 0
+        if values.get("regressions")
+        or (values.get("touched") and int(values.get("delta_bytes", 0)) > 0)
     )
 
     result = {
