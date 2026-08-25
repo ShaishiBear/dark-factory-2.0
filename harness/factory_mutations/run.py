@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFECTS = Path(__file__).resolve().parent / "defects.json"
 IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_FILES = (
+    ".factory/architecture.json",
     "scripts/factory_security.py",
     "scripts/factory_evidence.py",
     "scripts/factory_protocol.py",
