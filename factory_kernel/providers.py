@@ -78,6 +78,7 @@ class ClaudeCliProvider:
         tool_names = ",".join(tools)
         argv = [
             self.config.binary,
+            "--bare",
             "-p", request.prompt,
             "--model", model,
             "--permission-mode", "dontAsk",
@@ -88,7 +89,8 @@ class ClaudeCliProvider:
         ]
         # Run artifacts live outside the checkout. Explicitly grant only that one additional
         # directory so workers can emit their requested JSON/Markdown without broad filesystem
-        # access. Claude's normal working-directory boundary still applies to repository files.
+        # write access. Claude's normal working-directory boundary still applies to repository
+        # files; kernel Git authority rejects any repo mutation outside the role's exact envelope.
         artifacts = str(request.environment.get("ARTIFACTS_DIR", "")).strip()
         if artifacts:
             artifact_path = Path(artifacts)
