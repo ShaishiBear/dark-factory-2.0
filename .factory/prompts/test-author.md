@@ -4,4 +4,4 @@ Author the minimum behavioural acceptance checkpoint for every contract AC befor
 
 Write `$ARTIFACTS_DIR/test-spec.json` as version `2.0` with `checkpoints`, one per AC exactly once. Each checkpoint is `{ "acceptance_id": "AC-N", "cwd": "repo/relative/cwd", "argv": ["executable", "arg"], "files": ["repo/relative/test-file"], "expected_failure": "stable output fragment" }`.
 
-Run checkpoints only enough to identify the stable behavioral RED. Commit the union of acceptance-test files in one commit `test(factory): prove acceptance contract red`. Do not change production code. Leave the worktree clean. The deterministic RED gate decides whether the checkpoint is valid.
+Write only the exact acceptance-test files declared by those checkpoints. Do not run commands, stage files or create commits. The repo-owned kernel verifies that the dirty checkout exactly equals the declared test-file union, creates the test-author commit itself, and then runs the deterministic RED authority. If you cannot define a credible behavioural checkpoint from the available evidence, fail the attempt rather than weakening the test.
