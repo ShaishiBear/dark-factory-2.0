@@ -36,6 +36,10 @@ jobs:
       - name: Assert exact candidate head
         run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Probe pinned Claude worker
         run: |
           npm install -g @anthropic-ai/claude-code@2.1.245
@@ -49,17 +53,14 @@ jobs:
           done
           echo "CLAUDE_INTERFACE_OK version=2.1.245"
 
-      - name: Probe GitHub-hosted browser runtime
+      - name: Probe pinned GitHub-hosted browser runtime
         run: |
-          version="$(npm view agent-browser version)"
-          test -n "$version"
-          echo "AGENT_BROWSER_NPM_VERSION=$version"
-          npm install -g "agent-browser@$version"
-          agent-browser install
+          npm install -g agent-browser@0.35.0
+          agent-browser install --with-deps
           agent-browser --help >/dev/null
-          echo "AGENT_BROWSER_INTERFACE_OK version=$version"
+          echo "AGENT_BROWSER_INTERFACE_OK version=0.35.0"
 
-      - name: Check repository issue surface and required secrets
+      - name: Check repository surfaces, labels, and required secrets
         shell: bash
         run: |
           failed=0
@@ -69,6 +70,25 @@ jobs:
           else
             echo "GITHUB_ISSUES_ENABLED"
           fi
+
+          labels="$(gh label list -R "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name')"
+          for label in \
+            factory:accepted \
+            factory:rejected \
+            factory:rate-limited \
+            factory:in-progress \
+            factory:needs-review \
+            factory:needs-fix \
+            factory:needs-human \
+            factory:stop
+          do
+            if grep -Fx -- "$label" <<<"$labels" >/dev/null; then
+              echo "LABEL_PRESENT $label"
+            else
+              echo "LABEL_MISSING $label"
+              failed=1
+            fi
+          done
 
           for name in \
             ANTHROPIC_API_KEY \
