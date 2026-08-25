@@ -186,6 +186,15 @@ def _git(*argv: str, text: bool = True) -> str | bytes:
     return proc.stdout
 
 
+def resolve_ref(ref: str) -> str:
+    out = _git("rev-parse", ref)
+    assert isinstance(out, str)
+    value = out.strip()
+    if not re.fullmatch(r"[0-9a-f]{40,64}", value):
+        die(f"cannot resolve exact git object for {ref}")
+    return value
+
+
 def git_files(ref: str) -> list[str]:
     out = _git("ls-tree", "-r", "--name-only", ref, "--", "app/backend", "app/frontend/src")
     assert isinstance(out, str)
@@ -349,8 +358,10 @@ def compute(policy: dict, design: dict, base_ref: str, head_ref: str) -> dict:
         if not isinstance(graph_cfg.get(key), bool):
             die(f"architecture policy graph.{key} must be boolean")
 
-    base_edges = graph_edges(base_ref)
-    head_edges = graph_edges(head_ref)
+    base_sha = resolve_ref(base_ref)
+    head_sha = resolve_ref(head_ref)
+    base_edges = graph_edges(base_sha)
+    head_edges = graph_edges(head_sha)
     base_forbidden = forbidden_edges(policy, base_edges)
     head_forbidden = forbidden_edges(policy, head_edges)
     new_forbidden = sorted(set(head_forbidden) - set(base_forbidden))
@@ -358,10 +369,10 @@ def compute(policy: dict, design: dict, base_ref: str, head_ref: str) -> dict:
     head_cycles = cycle_sets(head_edges)
     base_cycle_keys = {"|".join(cycle) for cycle in base_cycles}
     new_cycles = [cycle for cycle in head_cycles if "|".join(cycle) not in base_cycle_keys]
-    changed = changed_files(base_ref, head_ref)
-    new_files = new_product_files(base_ref, head_ref)
+    changed = changed_files(base_sha, head_sha)
+    new_files = new_product_files(base_sha, head_sha)
     unplanned, unauthorized_new = authorize_files(design, changed, new_files)
-    debt = debt_growth(policy, base_ref, head_ref, changed)
+    debt = debt_growth(policy, base_sha, head_sha, changed)
     growth = sorted(
         debt_id
         for debt_id, values in debt.items()
@@ -372,8 +383,8 @@ def compute(policy: dict, design: dict, base_ref: str, head_ref: str) -> dict:
         "version": "1.0",
         "policy_sha256": digest(policy),
         "design_sha256": digest(design),
-        "base_ref": base_ref,
-        "head_ref": head_ref,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
         "changed_files": changed,
         "production_changed_files": sorted(path for path in changed if is_product(path)),
         "new_product_files": new_files,
