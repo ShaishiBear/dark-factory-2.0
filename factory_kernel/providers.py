@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from typing import Any
+from typing import Any, Mapping
 
 from .agents import AgentRequest, AgentResult, ProviderCapabilities
 from .config import ProviderConfig
@@ -24,6 +24,9 @@ class ClaudeCliProvider:
         tool_restrictions=True,
         web_search=False,
     )
+    REQUEST_ENV = frozenset(
+        {"ARTIFACTS_DIR", "FACTORY_BASE_REF", "FACTORY_REPO", "FACTORY_WORKDIR"}
+    )
 
     def __init__(self, config: ProviderConfig):
         if config.provider_id != self.provider_id:
@@ -32,13 +35,14 @@ class ClaudeCliProvider:
             )
         self.config = config
 
-    @staticmethod
-    def _worker_env(extra: dict[str, str] | Any) -> dict[str, str]:
+    @classmethod
+    def _worker_env(cls, extra: Mapping[str, str]) -> dict[str, str]:
         """Do not leak GitHub/application validation secrets into model subprocesses.
 
         Claude authentication/provider variables remain available, as do ordinary process/runtime
         variables required to launch the CLI. Repository/GitHub and application credentials stay
-        with deterministic kernel authorities.
+        with deterministic kernel authorities. Request-local environment is separately whitelisted
+        so a future caller cannot accidentally punch a secret through this boundary.
         """
         exact = {
             "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP",
@@ -52,7 +56,13 @@ class ClaudeCliProvider:
             for key, value in os.environ.items()
             if key in exact or key.startswith(prefixes)
         }
-        env.update({str(key): str(value) for key, value in dict(extra).items()})
+        env.update(
+            {
+                str(key): str(value)
+                for key, value in extra.items()
+                if key in cls.REQUEST_ENV
+            }
+        )
         return env
 
     def run(self, request: AgentRequest) -> AgentResult:
