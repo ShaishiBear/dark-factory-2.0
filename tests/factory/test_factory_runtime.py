@@ -18,6 +18,9 @@ class ConfigTests(unittest.TestCase):
         config = load_config(ROOT / ".factory/kernel.json")
         self.assertEqual(config.repository, "ShaishiBear/dark-factory-2.0")
         self.assertEqual(config.provider.provider_id, "claude-cli")
+        self.assertEqual(config.provider.model, "sonnet")
+        self.assertEqual(config.provider.architecture_model, "opus")
+        self.assertNotEqual(config.provider.model, config.provider.architecture_model)
         self.assertEqual(config.validation.full_command, ("python", "harness/ci.py"))
         for role in config.prompts:
             self.assertTrue(config.prompt_path(role, ROOT).is_file())
@@ -49,6 +52,32 @@ class ProviderTests(unittest.TestCase):
         argv = run.call_args.args[0]
         self.assertEqual(argv[:3], ["claude", "-p", "do the task"])
         self.assertIn("--model", argv)
+        self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
+
+    @patch("factory_kernel.providers.subprocess.run")
+    def test_architecture_holdout_routes_to_independent_model(self, run):
+        run.return_value = Mock(returncode=0, stdout='{"version":"1.0"}\n', stderr="")
+        provider = ClaudeCliProvider(
+            ProviderConfig(
+                provider_id="claude-cli",
+                binary="claude",
+                model="sonnet",
+                architecture_model="opus",
+                timeout_seconds=60,
+            )
+        )
+        result = provider.run(
+            AgentRequest(
+                role="architecture-holdout",
+                prompt="judge architecture",
+                cwd="/tmp",
+                model="sonnet",
+                structured_schema={"type": "object"},
+            )
+        )
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[argv.index("--model") + 1], "opus")
+        self.assertEqual(result.model, "opus")
 
     @patch("factory_kernel.providers.subprocess.run")
     def test_worker_failure_fails_closed(self, run):
