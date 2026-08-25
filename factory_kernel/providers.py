@@ -33,7 +33,14 @@ class ClaudeCliProvider:
         self.config = config
 
     def run(self, request: AgentRequest) -> AgentResult:
-        model = request.model or self.config.model
+        # The final semantic architecture holdout deliberately uses a different model family
+        # from ordinary build/review workers. It is still an untrusted model judgment; the
+        # deterministic architecture guard and Evidence Bundle remain authoritative.
+        model = (
+            self.config.architecture_model
+            if request.role == "architecture-holdout" and self.config.architecture_model
+            else request.model or self.config.model
+        )
         argv = [self.config.binary, "-p", request.prompt, "--model", model]
         env = dict(os.environ)
         env.update(request.environment)
