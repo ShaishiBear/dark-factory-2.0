@@ -8,12 +8,12 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: 40bb8ed06598892a91f8800f22f6d6693245d2d4
+  CANDIDATE_SHA: 0a1476560092c750ec9f71d61a29104b2bc3217b
 
 jobs:
   rewrite:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,3 +42,5 @@ jobs:
         run: python -m unittest discover -s tests/factory -p 'test_*.py'
       - name: Canonical quick gate
         run: python harness/ci.py --quick
+      - name: Factory trust-root mutations
+        run: python harness/factory_mutations/run.py
