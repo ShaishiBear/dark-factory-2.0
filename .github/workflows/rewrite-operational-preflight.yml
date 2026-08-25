@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  issues: read
+  issues: write
   pull-requests: read
 
 env:
@@ -60,7 +60,29 @@ jobs:
           agent-browser --help >/dev/null
           echo "AGENT_BROWSER_INTERFACE_OK version=0.35.0"
 
-      - name: Check repository surfaces, labels, and required secrets
+      - name: Ensure factory control labels exist
+        shell: bash
+        run: |
+          labels="$(gh label list -R "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name')"
+          for label in \
+            factory:accepted \
+            factory:rejected \
+            factory:rate-limited \
+            factory:in-progress \
+            factory:needs-review \
+            factory:needs-fix \
+            factory:needs-human \
+            factory:stop
+          do
+            if grep -Fx -- "$label" <<<"$labels" >/dev/null; then
+              echo "LABEL_PRESENT $label"
+            else
+              gh label create "$label" -R "$GITHUB_REPOSITORY" --color 5319E7 --description "Dark Factory control state"
+              echo "LABEL_CREATED $label"
+            fi
+          done
+
+      - name: Check repository surfaces and required secrets
         shell: bash
         run: |
           failed=0
