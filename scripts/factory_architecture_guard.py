@@ -15,6 +15,8 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_PREFIXES = ("app/backend/", "app/frontend/")
+SOURCE_PREFIXES = ("app/backend/", "app/frontend/src/")
+SOURCE_EXTENSIONS = (".py", ".ts", ".tsx", ".js", ".jsx")
 TEST_MARKERS = ("/tests/", "/__tests__/", ".test.", ".spec.")
 TS_IMPORT = re.compile(
     r"(?:import|export)\s+(?:[^'\"]*?\sfrom\s*)?['\"]([^'\"]+)['\"]|"
@@ -53,6 +55,14 @@ def safe_repo_file(path: str) -> bool:
 def is_product(path: str) -> bool:
     value = "/" + path.replace("\\", "/")
     return path.startswith(PRODUCT_PREFIXES) and not any(marker in value for marker in TEST_MARKERS)
+
+
+def is_arch_source(path: str) -> bool:
+    return (
+        path.startswith(SOURCE_PREFIXES)
+        and path.endswith(SOURCE_EXTENSIONS)
+        and is_product(path)
+    )
 
 
 def layer_table(policy: dict) -> tuple[dict[str, tuple[str, ...]], dict[str, frozenset[str]]]:
@@ -97,6 +107,13 @@ def classify(path: str, layer_paths: dict[str, tuple[str, ...]]) -> str | None:
     if len(candidates) > 1 and candidates[0][0] == candidates[1][0]:
         die(f"path {path} matches multiple equally specific architecture layers")
     return candidates[0][1]
+
+
+def unclassified_sources(policy: dict, paths: Iterable[str]) -> list[str]:
+    layer_paths, _allowed = layer_table(policy)
+    return sorted(
+        path for path in paths if is_arch_source(path) and classify(path, layer_paths) is None
+    )
 
 
 def forbidden_edges(policy: dict, edges: Iterable[tuple[str, str]]) -> list[str]:
@@ -385,6 +402,7 @@ def compute(policy: dict, design: dict, base_ref: str, head_ref: str) -> dict:
     changed = changed_files(base_sha, head_sha)
     new_files = new_product_files(base_sha, head_sha)
     unplanned, unauthorized_new = authorize_files(design, changed, new_files)
+    unclassified_new = unclassified_sources(policy, new_files)
     debt = debt_growth(policy, base_sha, head_sha, changed)
     growth = sorted(
         debt_id
@@ -404,6 +422,7 @@ def compute(policy: dict, design: dict, base_ref: str, head_ref: str) -> dict:
         "new_product_files": new_files,
         "unplanned_product_files": unplanned,
         "unauthorized_new_files": unauthorized_new,
+        "unclassified_new_sources": unclassified_new,
         "forbidden_edges": {"base": base_forbidden, "head": head_forbidden, "new": new_forbidden},
         "cycles": {"base": base_cycles, "head": head_cycles, "new": new_cycles},
         "debt_bytes": debt,
@@ -415,6 +434,8 @@ def compute(policy: dict, design: dict, base_ref: str, head_ref: str) -> dict:
         failures.append("production files changed outside compiled design: " + ", ".join(unplanned))
     if unauthorized_new:
         failures.append("new production files were not explicitly authorized: " + ", ".join(unauthorized_new))
+    if unclassified_new:
+        failures.append("new source files are outside declared architecture layers: " + ", ".join(unclassified_new))
     if graph_cfg["enforce_new_forbidden_edges"] and new_forbidden:
         failures.append("new forbidden dependency edges: " + "; ".join(new_forbidden))
     if graph_cfg["enforce_new_cycles"] and new_cycles:
@@ -441,6 +462,7 @@ def main() -> None:
     print(
         "ARCHITECTURE_GUARD_OK "
         f"production_files={len(result['production_changed_files'])} "
+        f"unclassified_new_sources={len(result['unclassified_new_sources'])} "
         f"new_forbidden_edges={len(result['forbidden_edges']['new'])} "
         f"new_cycles={len(result['cycles']['new'])} "
         f"no_growth_regressions={len(result['no_growth_regressions'])} "
