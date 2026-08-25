@@ -103,15 +103,40 @@ class ProviderBoundaryTests(unittest.TestCase):
                 )
         argv = run.call_args.args[0]
         env = run.call_args.kwargs["env"]
+        self.assertIn("--bare", argv)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         self.assertEqual(argv[argv.index("--tools") + 1], "Read,Edit,Write")
         self.assertEqual(argv[argv.index("--allowedTools") + 1], "Read,Edit,Write")
+        self.assertNotIn("Bash", argv[argv.index("--tools") + 1])
         self.assertIn("--strict-mcp-config", argv)
         self.assertIn("--disable-slash-commands", argv)
         self.assertEqual(env["ANTHROPIC_API_KEY"], "model-auth")
         self.assertNotIn("GH_TOKEN", env)
         self.assertNotIn("DATABASE_URL", env)
         self.assertEqual(env["FACTORY_REPO"], "owner/repo")
+
+    @patch("factory_kernel.providers.subprocess.run")
+    def test_no_tool_worker_stays_noninteractive_and_tool_empty(self, run):
+        run.return_value = Mock(returncode=0, stdout='{"version":"1.0"}\n', stderr="")
+        provider = ClaudeCliProvider(
+            ProviderConfig(
+                provider_id="claude-cli", binary="claude", model="sonnet", timeout_seconds=60
+            )
+        )
+        provider.run(
+            AgentRequest(
+                role="architecture-holdout",
+                prompt="judge",
+                cwd="/tmp",
+                structured_schema={"type": "object"},
+                allowed_tools=(),
+            )
+        )
+        argv = run.call_args.args[0]
+        self.assertIn("--bare", argv)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+        self.assertEqual(argv[argv.index("--tools") + 1], "")
+        self.assertNotIn("--allowedTools", argv)
 
 
 class GitAuthorityTests(unittest.TestCase):
