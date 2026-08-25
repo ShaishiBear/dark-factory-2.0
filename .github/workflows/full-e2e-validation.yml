@@ -41,27 +41,6 @@ jobs:
       - name: Assert exact candidate head
         run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
-      - name: Check only external E2E credentials
-        shell: bash
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
-        run: |
-          failed=0
-          for name in OPENROUTER_API_KEY SUPADATA_API_KEY; do
-            if [ -z "${!name:-}" ]; then
-              echo "FULL_E2E_PREFLIGHT_MISSING $name"
-              failed=1
-            else
-              echo "FULL_E2E_PREFLIGHT_PRESENT $name"
-            fi
-          done
-          test "$failed" -eq 0 || {
-            echo "FULL_E2E_PREFLIGHT_INCOMPLETE"
-            exit 1
-          }
-          echo "FULL_E2E_PREFLIGHT_OK"
-
       - name: Setup Python 3.12.14
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -93,6 +72,79 @@ jobs:
       - name: Install locked frontend dependencies
         working-directory: app/frontend
         run: bun install --frozen-lockfile
+
+      - name: Smoke corrected full-gate service startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/dark_factory_validation'
+          export OPENROUTER_API_KEY='startup-smoke-not-used'
+          export JWT_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          export DARK_FACTORY_E2E_EMAIL='dark-factory-e2e@localhost.invalid'
+          export DARK_FACTORY_E2E_PASSWORD='startup-smoke-only'
+          export SEED_ENABLE='false'
+
+          python harness/serve.py --port 8123 --with-frontend > /tmp/full-gate-smoke.log 2>&1 &
+          serve_pid=$!
+          cleanup() {
+            kill "$serve_pid" 2>/dev/null || true
+            wait "$serve_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          healthy=0
+          for _ in $(seq 1 90); do
+            if ! kill -0 "$serve_pid" 2>/dev/null; then
+              cat /tmp/full-gate-smoke.log
+              echo "FULL_RUNTIME_SMOKE_FAILED server exited early"
+              exit 1
+            fi
+            if curl -fsS http://127.0.0.1:8123/api/health | grep -qi 'ok'; then
+              healthy=1
+              break
+            fi
+            sleep 1
+          done
+          test "$healthy" -eq 1 || {
+            cat /tmp/full-gate-smoke.log
+            echo "FULL_RUNTIME_SMOKE_FAILED backend health timeout"
+            exit 1
+          }
+
+          frontend_file='/tmp/dark-factory-frontend-8123.port'
+          test -s "$frontend_file" || {
+            cat /tmp/full-gate-smoke.log
+            echo "FULL_RUNTIME_SMOKE_FAILED frontend rendezvous missing"
+            exit 1
+          }
+          frontend_port="$(cat "$frontend_file")"
+          curl -fsS "http://127.0.0.1:${frontend_port}/" >/dev/null || {
+            cat /tmp/full-gate-smoke.log
+            echo "FULL_RUNTIME_SMOKE_FAILED frontend unreachable"
+            exit 1
+          }
+          echo "FULL_RUNTIME_SMOKE_OK backend=8123 frontend=${frontend_port}"
+
+      - name: Check only external E2E credentials
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+        run: |
+          failed=0
+          for name in OPENROUTER_API_KEY SUPADATA_API_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "FULL_E2E_PREFLIGHT_MISSING $name"
+              failed=1
+            else
+              echo "FULL_E2E_PREFLIGHT_PRESENT $name"
+            fi
+          done
+          test "$failed" -eq 0 || {
+            echo "FULL_E2E_PREFLIGHT_INCOMPLETE"
+            exit 1
+          }
+          echo "FULL_E2E_PREFLIGHT_OK"
 
       - name: Install pinned browser runtime
         run: |
