@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from factory_architecture_guard import layer_table
 from factory_protocol import canonical, validate_contract
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,6 +86,16 @@ def validate_policy(policy: dict) -> str:
                     die("debt mode must be no-growth or acknowledge")
                 if not isinstance(entry["note"], str) or not entry["note"].strip():
                     die("debt note must be non-empty")
+    try:
+        layer_table(policy)
+    except SystemExit:
+        die("architecture layer graph is invalid")
+    graph = policy.get("graph")
+    if not isinstance(graph, dict):
+        die("architecture policy graph configuration is missing")
+    for key in ("enforce_new_forbidden_edges", "enforce_new_cycles", "enforce_no_growth_debt"):
+        if graph.get(key) is not True:
+            die(f"architecture policy must enable graph.{key}")
     return digest(policy)
 
 
@@ -118,13 +129,21 @@ def validate_bindings(contract: dict, context: dict, design: dict) -> tuple[str,
         die("context is not bound to supplied contract")
     if design.get("contract_sha256") != contract_hash or design.get("context_sha256") != context_hash:
         die("design is not bound to supplied contract/context")
+    planned = strings(design.get("planned_files"), "design planned_files")
+    allowed_new = strings(design.get("allowed_new_files"), "design allowed_new_files", allow_empty=True)
+    if not set(allowed_new).issubset(set(planned)):
+        die("design allowed_new_files must be a subset of planned_files")
     return contract_hash, context_hash, design_hash
+
+
+def governed_files(context: dict, design: dict) -> list[str]:
+    return sorted(set(strings(context.get("files"), "context files")) | set(strings(design.get("planned_files"), "design planned_files")))
 
 
 def compile_value(policy: dict, raw: dict, contract: dict, context: dict, design: dict) -> dict:
     policy_hash = validate_policy(policy)
     contract_hash, context_hash, design_hash = validate_bindings(contract, context, design)
-    files = strings(context.get("files"), "context files")
+    files = governed_files(context, design)
     if raw.get("version") != "1.0":
         die("governor version must be 1.0")
     decision = raw.get("decision")
@@ -158,7 +177,7 @@ def compile_value(policy: dict, raw: dict, contract: dict, context: dict, design
         "debts": debts,
         "rationale": rationale,
         "required_changes": required_changes,
-        "source_files": sorted(files),
+        "source_files": files,
     }
 
 
@@ -269,7 +288,29 @@ def git_diff_state(base_ref: str | None = None) -> tuple[str, list[str], str]:
     return head, files, hashlib.sha256(patch).hexdigest()
 
 
+def ensure_compiled_design(args: argparse.Namespace) -> None:
+    target = Path(args.design)
+    if target.is_file():
+        return
+    raw = target.with_name("design.raw.json")
+    if not raw.is_file():
+        die(f"compiled design is missing and raw design was not found at {raw}")
+    proc = subprocess.run(
+        [
+            sys.executable, str(ROOT / "scripts" / "factory_artifacts.py"), "design",
+            "--input", str(raw), "--contract", args.contract,
+            "--context", args.context, "--output", str(target),
+        ],
+        cwd=ROOT, capture_output=True, text=True, timeout=120,
+    )
+    if proc.returncode:
+        die("deterministic design compilation failed: " + ((proc.stdout or "") + (proc.stderr or ""))[-1200:])
+    if proc.stdout.strip():
+        print(proc.stdout.strip())
+
+
 def run_compile(args: argparse.Namespace) -> None:
+    ensure_compiled_design(args)
     result = compile_value(
         load(args.policy), load(args.input), load(args.contract), load(args.context), load(args.design)
     )
