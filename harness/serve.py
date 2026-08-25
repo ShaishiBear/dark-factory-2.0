@@ -4,13 +4,13 @@
     python harness/serve.py --port 8123
     python harness/serve.py --port 8123 --with-frontend
 
-The validation environment lives OUTSIDE the repo because it contains secrets. The
-browser form also starts a Vite frontend on its own dynamic port, writes that port to a
-temporary rendezvous file keyed by the backend port, and supervises both children until
-this process is terminated by the harness driver.
+The validation environment may come from an external env file or directly injected
+process variables. In GitHub-hosted validation the disposable database/account bootstrap
+is explicit via DARK_FACTORY_E2E_BOOTSTRAP=1; production/external validation remains
+unchanged.
 
 No validation process may silently degrade to "not testable". Missing env, a dead
-frontend, or a dead backend is a hard non-zero exit.
+frontend, a failed bootstrap, or a dead backend is a hard non-zero exit.
 """
 from __future__ import annotations
 
@@ -27,17 +27,13 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BACKEND = ROOT / "app" / "backend"
-FRONTEND = ROOT / "app" / "frontend"
+APP = ROOT / "app"
+BACKEND = APP / "backend"
+FRONTEND = APP / "frontend"
 
-CORE_REQUIRED = [
-    "DATABASE_URL",
-    "OPENROUTER_API_KEY",
-    "JWT_SECRET",
-    "SUPADATA_API_KEY",
-    "YOUTUBE_CHANNEL_ID",
-]
+CORE_REQUIRED = ["DATABASE_URL", "OPENROUTER_API_KEY", "JWT_SECRET"]
 BROWSER_REQUIRED = ["DARK_FACTORY_E2E_EMAIL", "DARK_FACTORY_E2E_PASSWORD"]
+BOOTSTRAP_REQUIRED = ["SUPADATA_API_KEY"]
 
 
 def load_env_file(path: Path) -> int:
@@ -65,6 +61,18 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
+
+
+def _backend_python() -> Path:
+    """Use the interpreter that `uv sync` actually populated for the backend."""
+    rel = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
+    python = BACKEND / ".venv" / rel
+    if not python.is_file():
+        raise RuntimeError(
+            f"backend virtualenv interpreter is missing: {python}; "
+            "run `cd app/backend && uv sync --frozen --all-extras` first"
+        )
+    return python
 
 
 def _wait_http(url: str, proc: subprocess.Popen[str], timeout: int = 60) -> None:
@@ -95,6 +103,20 @@ def _terminate(proc: subprocess.Popen[str] | None) -> None:
         proc.wait(timeout=5)
 
 
+def _bootstrap_validation(python: Path) -> None:
+    proc = subprocess.run(
+        [str(python), str(ROOT / "harness" / "bootstrap_e2e.py")],
+        cwd=ROOT,
+        env=dict(os.environ),
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        text=True,
+        timeout=240,
+    )
+    if proc.returncode:
+        raise RuntimeError(f"E2E validation bootstrap failed rc={proc.returncode}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, required=True)
@@ -108,13 +130,22 @@ def main() -> int:
     else:
         print(f"WARN: no validation env at {env_path}", file=sys.stderr, flush=True)
 
-    required = CORE_REQUIRED + (BROWSER_REQUIRED if args.with_frontend else [])
+    bootstrap = os.environ.get("DARK_FACTORY_E2E_BOOTSTRAP") == "1"
+    required = list(CORE_REQUIRED)
+    if args.with_frontend:
+        required.extend(BROWSER_REQUIRED)
+    if bootstrap:
+        required.extend(BOOTSTRAP_REQUIRED)
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
         print(f"APP_START_REFUSED missing={','.join(missing)}", file=sys.stderr, flush=True)
-        print(f"Populate {env_path} (outside the repo) or set DARK_FACTORY_VALIDATION_ENV. "
-              "Use a DEDICATED validation database and validation account.",
-              file=sys.stderr, flush=True)
+        print(
+            f"Populate {env_path} (outside the repo) or inject the required environment. "
+            "External validation must use a dedicated database/account; GitHub-hosted "
+            "bootstrap is permitted only for its disposable loopback database.",
+            file=sys.stderr,
+            flush=True,
+        )
         return 1
 
     backend: subprocess.Popen[str] | None = None
@@ -132,6 +163,10 @@ def main() -> int:
     signal.signal(signal.SIGINT, stop)
 
     try:
+        backend_python = _backend_python()
+        if bootstrap:
+            _bootstrap_validation(backend_python)
+
         if args.with_frontend:
             frontend_port = _free_port()
             frontend_env = dict(os.environ)
@@ -147,9 +182,9 @@ def main() -> int:
             print(f"FRONTEND_STARTED port={frontend_port}", flush=True)
 
         backend = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1",
+            [str(backend_python), "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1",
              "--port", str(args.port)],
-            cwd=BACKEND, env=dict(os.environ), stdout=sys.stdout, stderr=sys.stderr, text=True,
+            cwd=APP, env=dict(os.environ), stdout=sys.stdout, stderr=sys.stderr, text=True,
         )
 
         while not stopping:
@@ -163,7 +198,7 @@ def main() -> int:
                 return frontend_rc or 1
             time.sleep(0.25)
         return 0
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f"APP_START_REFUSED {exc}", file=sys.stderr, flush=True)
         return 1
     finally:
