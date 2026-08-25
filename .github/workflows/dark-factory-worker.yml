@@ -129,6 +129,8 @@ jobs:
             echo "DARK_FACTORY_E2E_BOOTSTRAP=1"
             echo "SEED_ENABLE=false"
           } >> "$GITHUB_ENV"
+          # YOUTUBE_CHANNEL_ID is intentionally unnecessary here: the locked E2E
+          # bootstraps one exact real video rather than synchronizing a channel.
 
       - name: Validate kernel configuration
         run: python -m factory_kernel config-check
