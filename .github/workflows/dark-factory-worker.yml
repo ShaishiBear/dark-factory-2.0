@@ -19,6 +19,21 @@ jobs:
     if: github.repository == 'ShaishiBear/dark-factory-2.0'
     runs-on: ubuntu-24.04
     timeout-minutes: 300
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dark_factory_validation
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dark_factory_validation"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout current main without persisted credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -32,13 +47,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
-          YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
-          DARK_FACTORY_E2E_EMAIL: ${{ secrets.DARK_FACTORY_E2E_EMAIL }}
-          DARK_FACTORY_E2E_PASSWORD: ${{ secrets.DARK_FACTORY_E2E_PASSWORD }}
         run: |
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           test "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues')" = "true" || {
@@ -63,15 +73,7 @@ jobs:
             }
           done
 
-          for name in \
-            ANTHROPIC_API_KEY \
-            DATABASE_URL \
-            OPENROUTER_API_KEY \
-            JWT_SECRET \
-            SUPADATA_API_KEY \
-            YOUTUBE_CHANNEL_ID \
-            DARK_FACTORY_E2E_EMAIL \
-            DARK_FACTORY_E2E_PASSWORD
+          for name in ANTHROPIC_API_KEY OPENROUTER_API_KEY SUPADATA_API_KEY
           do
             test -n "${!name:-}" || {
               echo "FACTORY_PREFLIGHT_REFUSED missing secret $name"
@@ -112,6 +114,22 @@ jobs:
           agent-browser install --with-deps
           agent-browser --help >/dev/null
 
+      - name: Create disposable validation environment
+        shell: bash
+        run: |
+          jwt_secret="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          e2e_password="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$jwt_secret"
+          echo "::add-mask::$e2e_password"
+          {
+            echo "DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/dark_factory_validation"
+            echo "JWT_SECRET=$jwt_secret"
+            echo "DARK_FACTORY_E2E_EMAIL=dark-factory-e2e@localhost.invalid"
+            echo "DARK_FACTORY_E2E_PASSWORD=$e2e_password"
+            echo "DARK_FACTORY_E2E_BOOTSTRAP=1"
+            echo "SEED_ENABLE=false"
+          } >> "$GITHUB_ENV"
+
       - name: Validate kernel configuration
         run: python -m factory_kernel config-check
 
@@ -124,12 +142,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
-          YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
-          DARK_FACTORY_E2E_EMAIL: ${{ secrets.DARK_FACTORY_E2E_EMAIL }}
-          DARK_FACTORY_E2E_PASSWORD: ${{ secrets.DARK_FACTORY_E2E_PASSWORD }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
         run: python -m factory_kernel dispatch --once
