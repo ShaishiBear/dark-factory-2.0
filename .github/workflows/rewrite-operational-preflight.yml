@@ -1,0 +1,95 @@
+name: rewrite-operational-preflight
+
+on:
+  push:
+    branches: [validation/df2-operational-preflight-v1]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+env:
+  CANDIDATE_SHA: 077b0069ca4ae9077b481ee3b6f260a91536f0c1
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+      YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
+      DARK_FACTORY_E2E_EMAIL: ${{ secrets.DARK_FACTORY_E2E_EMAIL }}
+      DARK_FACTORY_E2E_PASSWORD: ${{ secrets.DARK_FACTORY_E2E_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact rewrite candidate
+        uses: actions/checkout@v4
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Probe pinned Claude worker
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.245
+          test "$(claude --version)" = "2.1.245 (Claude Code)"
+          claude --help > /tmp/claude-help.txt
+          for flag in --bare --permission-mode --tools --strict-mcp-config --mcp-config --disable-slash-commands --add-dir --allowedTools; do
+            grep -F -- "$flag" /tmp/claude-help.txt >/dev/null || {
+              echo "CLAUDE_INTERFACE_MISSING $flag"
+              exit 1
+            }
+          done
+          echo "CLAUDE_INTERFACE_OK version=2.1.245"
+
+      - name: Probe GitHub-hosted browser runtime
+        run: |
+          version="$(npm view agent-browser version)"
+          test -n "$version"
+          echo "AGENT_BROWSER_NPM_VERSION=$version"
+          npm install -g "agent-browser@$version"
+          agent-browser install
+          agent-browser --help >/dev/null
+          echo "AGENT_BROWSER_INTERFACE_OK version=$version"
+
+      - name: Check repository issue surface and required secrets
+        shell: bash
+        run: |
+          failed=0
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues')" != "true" ]; then
+            echo "GITHUB_ISSUES_DISABLED"
+            failed=1
+          else
+            echo "GITHUB_ISSUES_ENABLED"
+          fi
+
+          for name in \
+            ANTHROPIC_API_KEY \
+            DATABASE_URL \
+            OPENROUTER_API_KEY \
+            JWT_SECRET \
+            SUPADATA_API_KEY \
+            YOUTUBE_CHANNEL_ID \
+            DARK_FACTORY_E2E_EMAIL \
+            DARK_FACTORY_E2E_PASSWORD
+          do
+            if [ -n "${!name:-}" ]; then
+              echo "SECRET_PRESENT $name"
+            else
+              echo "SECRET_MISSING $name"
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "OPERATIONAL_PREFLIGHT_INCOMPLETE"
+            exit 1
+          fi
+          echo "OPERATIONAL_PREFLIGHT_OK"
