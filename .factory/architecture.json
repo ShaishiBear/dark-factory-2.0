@@ -156,13 +156,16 @@
       "note": "Large route; any touched change must not increase its footprint and reusable orchestration belongs outside the HTTP boundary."
     },
     {
-      "id": "DEBT-LARGE-UI",
-      "paths": [
-        "app/frontend/src/components/ChatArea.tsx",
-        "app/frontend/src/components/Sidebar.tsx"
-      ],
+      "id": "DEBT-CHAT-AREA",
+      "paths": ["app/frontend/src/components/ChatArea.tsx"],
       "mode": "no-growth",
-      "note": "Large components are tolerated as inherited debt, but touched changes must not increase their combined footprint; material state/network behavior should converge toward hooks/lib."
+      "note": "Large UI component; if touched, ChatArea itself must not grow. Material state/network behavior should move toward hooks/lib."
+    },
+    {
+      "id": "DEBT-SIDEBAR",
+      "paths": ["app/frontend/src/components/Sidebar.tsx"],
+      "mode": "no-growth",
+      "note": "Large UI component; if touched, Sidebar itself must not grow. Material state/network behavior should move toward hooks/lib."
     },
     {
       "id": "DEBT-FACTORY-RUNTIME",
