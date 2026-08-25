@@ -12,8 +12,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DEFECTS = Path(__file__).resolve().parent / "defects.json"
 IMMUNITY = ROOT / "harness" / "immunity.py"
+COPY_DIRS = ("factory_kernel",)
 COPY_FILES = (
     ".factory/architecture.json",
+    ".factory/kernel.json",
+    "scripts/frontier_filter.py",
     "scripts/factory_security.py",
     "scripts/factory_evidence.py",
     "scripts/factory_protocol.py",
@@ -24,6 +27,7 @@ COPY_FILES = (
     "tests/factory/test_factory_security_evidence.py",
     "tests/factory/test_factory_evidence.py",
     "tests/factory/test_factory_architecture_guard.py",
+    "tests/factory/test_factory_worker_authority.py",
     "tests/factory/test_factory_merge_verify.py",
     "tests/factory/test_factory_immunity.py",
 )
@@ -32,6 +36,12 @@ TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
 
 def build_copy(parent: Path) -> Path:
     target = parent / "root"
+    for rel in COPY_DIRS:
+        src, dst = ROOT / rel, target / rel
+        if not src.is_dir():
+            raise RuntimeError(f"required factory mutation directory missing: {rel}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dst)
     for rel in COPY_FILES:
         src, dst = ROOT / rel, target / rel
         if not src.is_file():
