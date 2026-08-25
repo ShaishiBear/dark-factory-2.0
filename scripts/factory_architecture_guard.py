@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
-PRODUCT_PREFIXES = ("app/backend/", "app/frontend/src/")
+PRODUCT_PREFIXES = ("app/backend/", "app/frontend/")
 TEST_MARKERS = ("/tests/", "/__tests__/", ".test.", ".spec.")
 TS_IMPORT = re.compile(
     r"(?:import|export)\s+(?:[^'\"]*?\sfrom\s*)?['\"]([^'\"]+)['\"]|"
