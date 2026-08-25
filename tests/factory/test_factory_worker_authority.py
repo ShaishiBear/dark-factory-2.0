@@ -45,6 +45,16 @@ def init_repo(root: Path) -> None:
     )
 
 
+def fixture_layout(tmp: str) -> tuple[Path, Path]:
+    base = Path(tmp)
+    repo = base / "repo"
+    artifacts = base / "artifacts"
+    repo.mkdir()
+    artifacts.mkdir()
+    init_repo(repo)
+    return repo, artifacts
+
+
 class WorkerPolicyTests(unittest.TestCase):
     def test_no_model_role_receives_shell_or_git_authority(self):
         for role, tools in ROLE_TOOLS.items():
@@ -142,10 +152,11 @@ class ProviderBoundaryTests(unittest.TestCase):
 class GitAuthorityTests(unittest.TestCase):
     def test_test_author_commit_is_exact_declared_test_union(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            init_repo(root)
-            (root / "tests/test_value.py").write_text("def test_value():\n    assert False\n", encoding="utf-8")
-            spec = root / "spec.json"
+            repo, artifacts = fixture_layout(tmp)
+            (repo / "tests/test_value.py").write_text(
+                "def test_value():\n    assert False\n", encoding="utf-8"
+            )
+            spec = artifacts / "spec.json"
             spec.write_text(
                 json.dumps(
                     {
@@ -163,75 +174,80 @@ class GitAuthorityTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            commit_acceptance_tests(root, spec)
-            self.assertEqual(git(root, "status", "--porcelain"), "")
-            self.assertEqual(git(root, "diff", "--name-only", "HEAD^", "HEAD"), "tests/test_value.py")
+            commit_acceptance_tests(repo, spec)
+            self.assertEqual(git(repo, "status", "--porcelain"), "")
+            self.assertEqual(
+                git(repo, "diff", "--name-only", "HEAD^", "HEAD"), "tests/test_value.py"
+            )
 
     def test_test_author_cannot_smuggle_product_change(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            init_repo(root)
-            (root / "tests/test_value.py").write_text("def test_value():\n    assert False\n", encoding="utf-8")
-            (root / "app/backend/value.py").write_text("VALUE = 999\n", encoding="utf-8")
-            spec = root / "spec.json"
+            repo, artifacts = fixture_layout(tmp)
+            (repo / "tests/test_value.py").write_text(
+                "def test_value():\n    assert False\n", encoding="utf-8"
+            )
+            (repo / "app/backend/value.py").write_text("VALUE = 999\n", encoding="utf-8")
+            spec = artifacts / "spec.json"
             spec.write_text(
                 json.dumps({"version": "2.0", "checkpoints": [{"files": ["tests/test_value.py"]}]}),
                 encoding="utf-8",
             )
             with self.assertRaises(GitAuthorityError):
-                commit_acceptance_tests(root, spec)
+                commit_acceptance_tests(repo, spec)
 
     def test_implementation_commit_is_limited_to_compiled_design(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            init_repo(root)
-            (root / "app/backend/value.py").write_text("VALUE = 2\n", encoding="utf-8")
-            design = root / "design.json"
+            repo, artifacts = fixture_layout(tmp)
+            (repo / "app/backend/value.py").write_text("VALUE = 2\n", encoding="utf-8")
+            design = artifacts / "design.json"
             design.write_text(
                 json.dumps({"planned_files": ["app/backend/value.py"], "allowed_new_files": []}),
                 encoding="utf-8",
             )
-            proof = root / "red.json"
+            proof = artifacts / "red.json"
             proof.write_text(
                 json.dumps({"files": {"tests/test_value.py": "f" * 64}}), encoding="utf-8"
             )
             commit_planned_changes(
-                root,
+                repo,
                 design_path=design,
                 red_proof_path=proof,
                 subject="fix(factory): satisfy issue #7",
                 issue_number=7,
             )
-            self.assertEqual(git(root, "status", "--porcelain"), "")
-            self.assertEqual(git(root, "diff", "--name-only", "HEAD^", "HEAD"), "app/backend/value.py")
+            self.assertEqual(git(repo, "status", "--porcelain"), "")
+            self.assertEqual(
+                git(repo, "diff", "--name-only", "HEAD^", "HEAD"), "app/backend/value.py"
+            )
 
     def test_implementation_cannot_edit_outside_design_or_immutable_tests(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            init_repo(root)
-            design = root / "design.json"
+            repo, artifacts = fixture_layout(tmp)
+            design = artifacts / "design.json"
             design.write_text(
                 json.dumps({"planned_files": ["app/backend/value.py"], "allowed_new_files": []}),
                 encoding="utf-8",
             )
-            proof = root / "red.json"
+            proof = artifacts / "red.json"
             proof.write_text(
                 json.dumps({"files": {"tests/test_value.py": "f" * 64}}), encoding="utf-8"
             )
-            (root / "README.md").write_text("smuggled\n", encoding="utf-8")
+            (repo / "README.md").write_text("smuggled\n", encoding="utf-8")
             with self.assertRaises(GitAuthorityError):
                 commit_planned_changes(
-                    root,
+                    repo,
                     design_path=design,
                     red_proof_path=proof,
                     subject="fix(factory): satisfy issue #7",
                     issue_number=7,
                 )
-            (root / "README.md").unlink()
-            (root / "tests/test_value.py").write_text("def test_value():\n    assert False\n", encoding="utf-8")
+            (repo / "README.md").unlink()
+            (repo / "tests/test_value.py").write_text(
+                "def test_value():\n    assert False\n", encoding="utf-8"
+            )
             with self.assertRaises(GitAuthorityError):
                 commit_planned_changes(
-                    root,
+                    repo,
                     design_path=design,
                     red_proof_path=proof,
                     subject="fix(factory): satisfy issue #7",
