@@ -16,6 +16,15 @@ class ArchitectureTests(unittest.TestCase):
                 {"id": "ARCH-BACKEND", "scope": ["app/backend"], "rule": "Keep backend seams stable."},
                 {"id": "ARCH-FRONTEND", "scope": ["app/frontend/src"], "rule": "Keep frontend seams stable."},
             ],
+            "layers": [
+                {"id": "backend-db", "paths": ["app/backend/db"], "allowed_imports": []},
+                {"id": "frontend", "paths": ["app/frontend/src"], "allowed_imports": []},
+            ],
+            "graph": {
+                "enforce_new_forbidden_edges": True,
+                "enforce_new_cycles": True,
+                "enforce_no_growth_debt": True,
+            },
             "migrations": [
                 {"id": "MIG-REPO", "active": True, "paths": ["app/backend/db/repository.py"],
                  "direction": "Move capability persistence to focused repositories."},
@@ -52,6 +61,8 @@ class ArchitectureTests(unittest.TestCase):
             "seams": ["repository seam"], "public_interfaces": [],
             "invariants": ["preserve behavior"], "data_flows": ["route -> repository"],
             "ac_mapping": {"AC-1": ["repository seam"]},
+            "planned_files": ["app/backend/db/repository.py"],
+            "allowed_new_files": [],
         }
 
     def raw(self, **overrides):
@@ -92,6 +103,10 @@ class ArchitectureTests(unittest.TestCase):
         self.assertEqual(result["decision"], "proceed")
         self.assertEqual(result["migrations"], ["MIG-REPO"])
         self.assertEqual(result["design_sha256"], m.digest(self.design(self.context())))
+
+    def test_governor_includes_planned_target_files(self):
+        result = self.compile()
+        self.assertIn("app/backend/db/repository.py", result["source_files"])
 
     def test_missing_touched_migration_is_rejected(self):
         with self.assertRaises(SystemExit):
