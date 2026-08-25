@@ -23,6 +23,9 @@ COPY_FILES = (
     "scripts/factory_evidence.py",
     "scripts/factory_protocol.py",
     "scripts/factory_architecture_guard.py",
+    "harness/bootstrap_e2e.py",
+    "harness/harness.config.json",
+    "harness/serve.py",
     "harness/merge_verify.py",
     "harness/immunity.py",
     "tests/factory/test_factory_security.py",
@@ -30,6 +33,7 @@ COPY_FILES = (
     "tests/factory/test_factory_evidence.py",
     "tests/factory/test_factory_architecture_guard.py",
     "tests/factory/test_factory_worker_authority.py",
+    "tests/factory/test_factory_github_e2e_bootstrap.py",
     "tests/factory/test_factory_merge_verify.py",
     "tests/factory/test_factory_immunity.py",
 )
