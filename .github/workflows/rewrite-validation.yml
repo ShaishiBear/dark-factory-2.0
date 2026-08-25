@@ -26,6 +26,19 @@ jobs:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v6
       - uses: oven-sh/setup-bun@v2
+      - name: Probe real Claude Code worker interface
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+          claude --help > /tmp/claude-help.txt
+          for flag in --bare --permission-mode --tools --strict-mcp-config --mcp-config --disable-slash-commands --add-dir --allowedTools; do
+            if ! grep -F -- "$flag" /tmp/claude-help.txt >/dev/null; then
+              echo "CLAUDE_INTERFACE_MISSING $flag"
+              cat /tmp/claude-help.txt
+              exit 1
+            fi
+          done
+          echo "CLAUDE_INTERFACE_OK"
       - name: Install locked backend dependencies
         working-directory: app/backend
         run: uv sync --frozen --all-extras
