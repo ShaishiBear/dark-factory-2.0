@@ -21,7 +21,7 @@ class ClaudeCliProvider:
         structured_output=True,
         session_resume=False,
         session_fork=False,
-        tool_restrictions=False,
+        tool_restrictions=True,
         web_search=False,
     )
 
@@ -32,6 +32,29 @@ class ClaudeCliProvider:
             )
         self.config = config
 
+    @staticmethod
+    def _worker_env(extra: dict[str, str] | Any) -> dict[str, str]:
+        """Do not leak GitHub/application validation secrets into model subprocesses.
+
+        Claude authentication/provider variables remain available, as do ordinary process/runtime
+        variables required to launch the CLI. Repository/GitHub and application credentials stay
+        with deterministic kernel authorities.
+        """
+        exact = {
+            "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP",
+            "LANG", "LC_ALL", "TERM", "CI", "NO_COLOR", "XDG_CONFIG_HOME",
+        }
+        prefixes = (
+            "ANTHROPIC_", "CLAUDE_", "AWS_", "GOOGLE_", "AZURE_",
+        )
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key in exact or key.startswith(prefixes)
+        }
+        env.update({str(key): str(value) for key, value in dict(extra).items()})
+        return env
+
     def run(self, request: AgentRequest) -> AgentResult:
         # The final semantic architecture holdout deliberately uses a different model family
         # from ordinary build/review workers. It is still an untrusted model judgment; the
@@ -41,9 +64,30 @@ class ClaudeCliProvider:
             if request.role == "architecture-holdout" and self.config.architecture_model
             else request.model or self.config.model
         )
-        argv = [self.config.binary, "-p", request.prompt, "--model", model]
-        env = dict(os.environ)
-        env.update(request.environment)
+        tools = tuple(request.allowed_tools or ())
+        tool_names = ",".join(tools)
+        argv = [
+            self.config.binary,
+            "-p", request.prompt,
+            "--model", model,
+            "--permission-mode", "dontAsk",
+            "--tools", tool_names,
+            "--strict-mcp-config",
+            "--mcp-config", '{"mcpServers":{}}',
+            "--disable-slash-commands",
+        ]
+        # Run artifacts live outside the checkout. Explicitly grant only that one additional
+        # directory so workers can emit their requested JSON/Markdown without broad filesystem
+        # access. Claude's normal working-directory boundary still applies to repository files.
+        artifacts = str(request.environment.get("ARTIFACTS_DIR", "")).strip()
+        if artifacts:
+            artifact_path = Path(artifacts)
+            if not artifact_path.is_dir():
+                raise RuntimeError(f"worker artifact directory does not exist: {artifacts}")
+            argv.extend(["--add-dir", str(artifact_path)])
+        if tools:
+            argv.extend(["--allowedTools", tool_names])
+        env = self._worker_env(request.environment)
         proc = subprocess.run(
             argv,
             cwd=request.cwd,
