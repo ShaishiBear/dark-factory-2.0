@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: 08becb82ebc8a0fb812e5d07a3cf0946b682a063
+  CANDIDATE_SHA: f7e19c931da9388cd5a842a2850edcf89e3a2817
 
 jobs:
   rewrite:
