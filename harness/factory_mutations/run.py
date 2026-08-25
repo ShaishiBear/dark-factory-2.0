@@ -16,11 +16,13 @@ COPY_FILES = (
     "scripts/factory_security.py",
     "scripts/factory_evidence.py",
     "scripts/factory_protocol.py",
+    "scripts/factory_architecture_guard.py",
     "harness/merge_verify.py",
     "harness/immunity.py",
     "tests/factory/test_factory_security.py",
     "tests/factory/test_factory_security_evidence.py",
     "tests/factory/test_factory_evidence.py",
+    "tests/factory/test_factory_architecture_guard.py",
     "tests/factory/test_factory_merge_verify.py",
     "tests/factory/test_factory_immunity.py",
 )
