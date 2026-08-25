@@ -104,6 +104,25 @@ class ArchitectureGuardTests(unittest.TestCase):
         self.assertEqual(unplanned, [])
         self.assertEqual(new, [])
 
+    def test_compute_records_exact_git_objects_not_symbolic_refs(self):
+        policy = self.policy()
+        design = {
+            "planned_files": ["app/backend/routes/messages.py"],
+            "allowed_new_files": [],
+        }
+        with (
+            mock.patch.object(m, "resolve_ref", side_effect=["b" * 40, "a" * 40]),
+            mock.patch.object(m, "graph_edges", side_effect=[set(), set()]),
+            mock.patch.object(m, "changed_files", return_value=[]),
+            mock.patch.object(m, "new_product_files", return_value=[]),
+            mock.patch.object(m, "debt_growth", return_value={}),
+        ):
+            result = m.compute(policy, design, "origin/main", "HEAD")
+        self.assertEqual(result["base_sha"], "b" * 40)
+        self.assertEqual(result["head_sha"], "a" * 40)
+        self.assertNotIn("base_ref", result)
+        self.assertNotIn("head_ref", result)
+
     def test_touched_no_growth_debt_cannot_increase(self):
         policy = self.policy()
         policy["debt"] = [
@@ -118,6 +137,7 @@ class ArchitectureGuardTests(unittest.TestCase):
             "allowed_new_files": [],
         }
         with (
+            mock.patch.object(m, "resolve_ref", side_effect=["b" * 40, "a" * 40]),
             mock.patch.object(m, "graph_edges", side_effect=[set(), set()]),
             mock.patch.object(
                 m, "changed_files", return_value=["app/backend/db/repository.py"]
