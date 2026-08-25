@@ -6,6 +6,7 @@
     "id": "claude-cli",
     "binary": "claude",
     "model": "sonnet",
+    "architecture_model": "opus",
     "timeout_seconds": 1200
   },
   "runtime": {
