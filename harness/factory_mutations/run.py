@@ -15,6 +15,7 @@ DEFECTS = Path(__file__).resolve().parent / "defects.json"
 IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_DIRS = ("factory_kernel",)
 COPY_FILES = (
+    ".github/workflows/dark-factory-worker.yml",
     ".factory/architecture.json",
     ".factory/kernel.json",
     "scripts/frontier_filter.py",

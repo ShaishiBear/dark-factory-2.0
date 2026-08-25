@@ -19,6 +19,7 @@ from typing import Any, Mapping
 
 from .agents import AgentRequest
 from .config import KernelConfig
+from .credential_env import scoped_environment
 from .github_cli import GitHubClient
 from .providers import ClaudeCliProvider, prompt_text
 from .worktree import Worktree, create_detached, remove
@@ -68,9 +69,13 @@ class KernelRuntime:
     # ---------- control plane ----------
 
     def check_stop(self) -> None:
-        env = dict(os.environ)
-        env["FACTORY_REPO"] = self.config.repository
-        env.setdefault("FACTORY_WORKDIR", str(self.config.runtime.work_root))
+        env = scoped_environment(
+            {
+                "FACTORY_REPO": self.config.repository,
+                "FACTORY_WORKDIR": str(self.config.runtime.work_root),
+            },
+            scope="github",
+        )
         proc = subprocess.run(
             ["bash", "scripts/factory-stop.sh"],
             cwd=self.repo_root,
@@ -93,6 +98,7 @@ class KernelRuntime:
                 "--legacy-ttl", str(self.config.runtime.legacy_lease_ttl_seconds),
             ],
             cwd=self.repo_root,
+            credential_scope="github",
             timeout=180,
         )
 
@@ -337,6 +343,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=120,
             )
             self._exec(
@@ -347,6 +354,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=180,
             )
             self.github.add_pr_label(pr_number, self.config.labels["needs_review"])
@@ -442,6 +450,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=180,
                 transcript=paths.transcripts / "security.log",
             )
@@ -497,6 +506,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github+validation",
                 timeout=2400,
                 transcript=paths.transcripts / "evidence.log",
             )
@@ -508,6 +518,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=180,
                 transcript=paths.transcripts / "merge-pre.log",
             )
@@ -528,6 +539,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=240,
                 transcript=paths.transcripts / "merge-post.log",
             )
@@ -679,12 +691,11 @@ class KernelRuntime:
         *,
         cwd: Path,
         env: Mapping[str, str] | None = None,
+        credential_scope: str = "none",
         timeout: int = 300,
         transcript: Path | None = None,
     ) -> str:
-        merged = dict(os.environ)
-        if env:
-            merged.update(env)
+        merged = scoped_environment(env, scope=credential_scope)
         proc = subprocess.run(
             argv,
             cwd=cwd,

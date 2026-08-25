@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
+
+from .credential_env import scoped_environment
 
 
 class GitHubClient:
@@ -19,6 +23,7 @@ class GitHubClient:
         proc = subprocess.run(
             ["gh", *args],
             cwd=self.cwd,
+            env=scoped_environment(scope="github"),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -132,15 +137,44 @@ class GitHubClient:
     def push_branch(self, branch: str) -> None:
         if not branch.strip() or branch.startswith("-"):
             raise ValueError("unsafe branch name")
-        proc = subprocess.run(
-            ["git", "push", "-u", "origin", branch],
-            cwd=self.cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=180,
-        )
+        github_env = scoped_environment(scope="github")
+        token = github_env.get("GH_TOKEN") or github_env.get("GITHUB_TOKEN")
+        if not token:
+            raise RuntimeError("git push requires GH_TOKEN or GITHUB_TOKEN")
+        with tempfile.TemporaryDirectory(prefix="dark-factory-git-auth-") as tmp:
+            askpass = Path(tmp) / "askpass.sh"
+            askpass.write_text(
+                "#!/bin/sh\n"
+                "case \"$1\" in\n"
+                "  *Username*) printf '%s\\n' 'x-access-token' ;;\n"
+                "  *Password*) printf '%s\\n' \"$FACTORY_GIT_TOKEN\" ;;\n"
+                "  *) exit 1 ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            askpass.chmod(0o700)
+            env = scoped_environment(scope="none")
+            env.update(
+                {
+                    "GIT_ASKPASS": str(askpass),
+                    "GIT_TERMINAL_PROMPT": "0",
+                    "FACTORY_GIT_TOKEN": token,
+                }
+            )
+            proc = subprocess.run(
+                [
+                    "git", "push",
+                    f"https://github.com/{self.repository}.git",
+                    f"HEAD:refs/heads/{branch}",
+                ],
+                cwd=self.cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=180,
+            )
         if proc.returncode:
             raise RuntimeError(f"git push failed: {((proc.stdout or '') + (proc.stderr or ''))[-3000:]}")
 

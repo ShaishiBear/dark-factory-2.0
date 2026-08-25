@@ -10,6 +10,27 @@ spec.loader.exec_module(m)
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_child_env_separates_github_from_validation_credentials(self):
+        source = {
+            "PATH": "/usr/bin", "GH_TOKEN": "github-write",
+            "DATABASE_URL": "validation-db", "OPENROUTER_API_KEY": "validation-llm",
+            "ANTHROPIC_API_KEY": "model-auth",
+        }
+        with mock.patch.dict(m.os.environ, source, clear=True):
+            none = m._child_env()
+            github = m._child_env("github")
+            validation = m._child_env("validation")
+        self.assertNotIn("GH_TOKEN", none)
+        self.assertNotIn("DATABASE_URL", none)
+        self.assertNotIn("ANTHROPIC_API_KEY", none)
+        self.assertEqual(github["GH_TOKEN"], "github-write")
+        self.assertNotIn("DATABASE_URL", github)
+        self.assertNotIn("ANTHROPIC_API_KEY", github)
+        self.assertEqual(validation["DATABASE_URL"], "validation-db")
+        self.assertEqual(validation["OPENROUTER_API_KEY"], "validation-llm")
+        self.assertNotIn("GH_TOKEN", validation)
+        self.assertNotIn("ANTHROPIC_API_KEY", validation)
+
     def floors(self):
         return {"static_checks": 5, "unit_tests": 549, "holdout_assertions": 9, "mutations_total": 4}
 

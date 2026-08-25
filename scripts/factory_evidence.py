@@ -17,6 +17,32 @@ TRUST_ROOT = (
     "FACTORY_RULES.md", "MISSION.md", "CLAUDE.md",
 )
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+GITHUB_CREDENTIALS = ("GH_TOKEN", "GITHUB_TOKEN")
+VALIDATION_CREDENTIALS = (
+    "DATABASE_URL", "OPENROUTER_API_KEY", "JWT_SECRET", "SUPADATA_API_KEY",
+    "YOUTUBE_CHANNEL_ID", "DARK_FACTORY_E2E_EMAIL", "DARK_FACTORY_E2E_PASSWORD",
+)
+PROVIDER_CREDENTIAL_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "AWS_", "GOOGLE_", "AZURE_")
+
+
+def _child_env(scope: str = "none") -> dict[str, str]:
+    if scope not in {"none", "github", "validation"}:
+        raise ValueError(f"invalid evidence credential scope: {scope}")
+    original = dict(os.environ)
+
+    def sensitive(name: str) -> bool:
+        return (
+            name in GITHUB_CREDENTIALS
+            or name in VALIDATION_CREDENTIALS
+            or name.startswith(PROVIDER_CREDENTIAL_PREFIXES)
+        )
+
+    child = {key: value for key, value in original.items() if not sensitive(key)}
+    allowed = GITHUB_CREDENTIALS if scope == "github" else VALIDATION_CREDENTIALS if scope == "validation" else ()
+    for key in allowed:
+        if original.get(key):
+            child[key] = original[key]
+    return child
 
 
 def die(msg: str) -> None:
@@ -33,9 +59,11 @@ def digest(v: object) -> str:
 
 
 def run(argv: list[str], cwd: Path = ROOT, timeout: int = 300,
-        check: bool = True) -> subprocess.CompletedProcess[str]:
-    p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", timeout=timeout)
+        check: bool = True, credential_scope: str = "none") -> subprocess.CompletedProcess[str]:
+    p = subprocess.run(
+        argv, cwd=cwd, env=_child_env(credential_scope), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=timeout,
+    )
     if check and p.returncode:
         die(f"{' '.join(argv)} failed: {((p.stdout or '') + (p.stderr or ''))[-1600:]}")
     return p
@@ -43,7 +71,7 @@ def run(argv: list[str], cwd: Path = ROOT, timeout: int = 300,
 
 def gh_json(pr: str) -> dict:
     return json.loads(run(["gh", "pr", "view", pr, "--json",
-                           "body,headRefOid,baseRefOid"], timeout=30).stdout)
+                           "body,headRefOid,baseRefOid"], timeout=30, credential_scope="github").stdout)
 
 
 def extract(body: str, kind: str) -> tuple[dict, str]:
@@ -543,7 +571,10 @@ def main() -> None:
     holdout_result = verify_architecture_holdout(holdout, architecture_result["changed_files"], policy)
 
     floors = json.loads(run(["git", "show", "origin/main:.factory/locks/floor.json"]).stdout)
-    harness = run([sys.executable, "harness/ci.py"], timeout=1800, check=False)
+    harness = run(
+        [sys.executable, "harness/ci.py"], timeout=1800, check=False,
+        credential_scope="validation",
+    )
     transcript = (harness.stdout or "") + (harness.stderr or "")
     if harness.returncode:
         die("full harness failed: " + transcript[-2000:])

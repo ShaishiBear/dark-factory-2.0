@@ -11,6 +11,9 @@ from unittest.mock import Mock, patch
 from factory_kernel.agents import AgentRequest
 from factory_kernel.cli import runtime as cli_runtime
 from factory_kernel.config import ProviderConfig
+from factory_kernel.credential_env import scoped_environment
+from factory_kernel.github_cli import GitHubClient
+from factory_kernel.runtime import KernelRuntime
 from factory_kernel.git_authority import (
     GitAuthorityError,
     commit_acceptance_tests,
@@ -147,6 +150,121 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         self.assertEqual(argv[argv.index("--tools") + 1], "")
         self.assertNotIn("--allowedTools", argv)
+
+
+class CredentialScopeTests(unittest.TestCase):
+    def source(self):
+        return {
+            "PATH": "/usr/bin",
+            "NORMAL": "safe",
+            "GH_TOKEN": "github-write",
+            "DATABASE_URL": "validation-db",
+            "OPENROUTER_API_KEY": "validation-llm",
+            "ANTHROPIC_API_KEY": "model-auth",
+        }
+
+    def test_scoped_environment_requires_explicit_capability(self):
+        none = scoped_environment(source=self.source())
+        self.assertEqual(none["NORMAL"], "safe")
+        self.assertNotIn("GH_TOKEN", none)
+        self.assertNotIn("DATABASE_URL", none)
+        self.assertNotIn("OPENROUTER_API_KEY", none)
+        self.assertNotIn("ANTHROPIC_API_KEY", none)
+
+        github = scoped_environment(scope="github", source=self.source())
+        self.assertEqual(github["GH_TOKEN"], "github-write")
+        self.assertNotIn("DATABASE_URL", github)
+        self.assertNotIn("ANTHROPIC_API_KEY", github)
+
+        validation = scoped_environment(scope="validation", source=self.source())
+        self.assertEqual(validation["DATABASE_URL"], "validation-db")
+        self.assertEqual(validation["OPENROUTER_API_KEY"], "validation-llm")
+        self.assertNotIn("GH_TOKEN", validation)
+        self.assertNotIn("ANTHROPIC_API_KEY", validation)
+
+        both = scoped_environment(scope="github+validation", source=self.source())
+        self.assertEqual(both["GH_TOKEN"], "github-write")
+        self.assertEqual(both["DATABASE_URL"], "validation-db")
+        self.assertNotIn("ANTHROPIC_API_KEY", both)
+
+        with self.assertRaises(ValueError):
+            scoped_environment({"GH_TOKEN": "smuggled"}, source=self.source())
+
+    @patch("factory_kernel.runtime.subprocess.run")
+    def test_kernel_exec_defaults_to_zero_credentials(self, run):
+        run.return_value = Mock(returncode=0, stdout="ok", stderr="")
+        runtime = object.__new__(KernelRuntime)
+        with patch.dict(os.environ, self.source(), clear=True):
+            runtime._exec(["true"], cwd=Path("/tmp"))
+        env = run.call_args.kwargs["env"]
+        self.assertNotIn("GH_TOKEN", env)
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("OPENROUTER_API_KEY", env)
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+
+    @patch("factory_kernel.github_cli.subprocess.run")
+    def test_git_push_token_is_ephemeral_child_capability(self, run):
+        run.return_value = Mock(returncode=0, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as tmp:
+            client = GitHubClient("owner/repo", cwd=tmp)
+            with patch.dict(os.environ, self.source(), clear=True):
+                client.push_branch("factory/issue-7")
+        argv = run.call_args.args[0]
+        env = run.call_args.kwargs["env"]
+        self.assertNotIn("github-write", " ".join(argv))
+        self.assertNotIn("GH_TOKEN", env)
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("OPENROUTER_API_KEY", env)
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        self.assertEqual(env["FACTORY_GIT_TOKEN"], "github-write")
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        self.assertIn("GIT_ASKPASS", env)
+
+
+class GitHubWorkerWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.workflow = (ROOT / ".github/workflows/dark-factory-worker.yml").read_text(encoding="utf-8")
+
+    def test_scheduler_is_only_schedule_or_manual_and_never_cancels_active_authority(self):
+        self.assertIn("  schedule:\n", self.workflow)
+        self.assertIn("  workflow_dispatch:\n", self.workflow)
+        self.assertNotIn("pull_request_target:", self.workflow)
+        self.assertNotIn("\n  pull_request:\n", self.workflow)
+        self.assertIn("cancel-in-progress: false", self.workflow)
+        self.assertIn("timeout-minutes: 300", self.workflow)
+
+    def test_scheduler_does_not_persist_write_token_into_checkout(self):
+        self.assertIn("persist-credentials: false", self.workflow)
+        self.assertNotIn("persist-credentials: true", self.workflow)
+
+    def test_scheduler_permissions_are_explicit_and_worker_tools_are_pinned(self):
+        for permission in ("contents: write", "issues: write", "pull-requests: write"):
+            self.assertIn(permission, self.workflow)
+        for ref in (
+            "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+            "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e",
+            "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+            "@anthropic-ai/claude-code@2.1.245",
+            "agent-browser@0.35.0",
+        ):
+            self.assertIn(ref, self.workflow)
+        self.assertGreaterEqual(self.workflow.count("token: ''"), 3)
+        self.assertIn("github-token: ''", self.workflow)
+
+    def test_scheduler_fails_closed_before_exact_one_shot_dispatch(self):
+        self.assertIn("FACTORY_PREFLIGHT_REFUSED GitHub Issues are disabled", self.workflow)
+        for name in (
+            "ANTHROPIC_API_KEY", "DATABASE_URL", "OPENROUTER_API_KEY", "JWT_SECRET",
+            "SUPADATA_API_KEY", "YOUTUBE_CHANNEL_ID", "DARK_FACTORY_E2E_EMAIL",
+            "DARK_FACTORY_E2E_PASSWORD",
+        ):
+            self.assertIn(name, self.workflow)
+        self.assertIn("run: python -m factory_kernel dispatch --once", self.workflow)
+        self.assertNotIn("dispatch --once --no-merge", self.workflow)
+
 
 
 class GitAuthorityTests(unittest.TestCase):

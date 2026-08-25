@@ -5,35 +5,257 @@
     "A mutation only counts when its exact anchor is unique and the previously-green focused suite fails after injection."
   ],
   "defects": [
-    {"id": "security-verdict-forced-pass", "file": "scripts/factory_security.py", "find": "\"verdict\": \"pass\" if not findings else \"fail\",", "replace": "\"verdict\": \"pass\",", "why": "The deterministic security guard could make all findings advisory."},
-    {"id": "security-github-protection-removed", "file": "scripts/factory_security.py", "find": "or path.startswith(\".github/\")", "replace": "or False", "why": "An autonomous PR could rewrite CI without the protected-path veto."},
-    {"id": "security-kernel-protection-removed", "file": "scripts/factory_security.py", "find": "or path.startswith(\"factory_kernel/\")", "replace": "or False", "why": "An autonomous PR could rewrite the repo-owned dispatcher and merge authority boundary."},
-    {"id": "security-backend-lock-coupling-removed", "file": "scripts/factory_security.py", "find": "if py_changes and BACKEND_LOCK not in changed_files:", "replace": "if False and py_changes and BACKEND_LOCK not in changed_files:", "why": "A backend manifest could change while its exact lock stayed stale."},
-    {"id": "security-direct-python-source-allowed", "file": "scripts/factory_security.py", "find": "if change[\"ecosystem\"] == \"python\" and DISALLOWED_PY_SOURCE.search(spec):", "replace": "if False and change[\"ecosystem\"] == \"python\" and DISALLOWED_PY_SOURCE.search(spec):", "why": "A mutable or credential-bearing direct dependency URL could bypass provenance."},
-    {"id": "security-secret-scan-disabled", "file": "scripts/factory_security.py", "find": "secrets = secret_findings(added_lines(diff))", "replace": "secrets = []", "why": "High-confidence credentials in added source would no longer veto merge."},
-    {"id": "worker-shell-tool-enabled", "file": "factory_kernel/worker_policy.py", "find": "WRITE_TOOLS = (*READ_TOOLS, \"Write\", \"Edit\")", "replace": "WRITE_TOOLS = (*READ_TOOLS, \"Write\", \"Edit\", \"Bash\")", "why": "An issue-influenced model worker could regain arbitrary shell and Git authority."},
-    {"id": "worker-env-secret-filter-disabled", "file": "factory_kernel/providers.py", "find": "if key in exact or key.startswith(prefixes)", "replace": "if True", "why": "GitHub and application validation secrets could leak into untrusted model subprocesses."},
-    {"id": "worker-bare-isolation-disabled", "file": "factory_kernel/providers.py", "find": "            \"--bare\",", "replace": "            \"--bare-disabled\",", "why": "Project plugins, hooks, skills or auto-memory could silently expand the headless worker authority surface."},
-    {"id": "worker-test-envelope-disabled", "file": "factory_kernel/git_authority.py", "find": "    if actual != sorted(declared):", "replace": "    if False and actual != sorted(declared):", "why": "The acceptance-test worker could smuggle product changes into its kernel-created RED commit."},
-    {"id": "worker-design-envelope-disabled", "file": "factory_kernel/git_authority.py", "find": "    if outside:", "replace": "    if False and outside:", "why": "The implementation worker could commit files outside the compiled design envelope."},
-    {"id": "architecture-layer-direction-disabled", "file": "scripts/factory_architecture_guard.py", "find": "if target_layer not in allowed[source_layer]:", "replace": "if False and target_layer not in allowed[source_layer]:", "why": "A new reverse/cross-layer dependency could be introduced without deterministic rejection."},
-    {"id": "architecture-design-envelope-disabled", "file": "scripts/factory_architecture_guard.py", "find": "unplanned = sorted(set(product_changed) - planned_set)", "replace": "unplanned = []", "why": "The coder could change production files the compiled design never authorized."},
-    {"id": "architecture-frontend-scope-narrowed", "file": "scripts/factory_architecture_guard.py", "find": "PRODUCT_PREFIXES = (\"app/backend/\", \"app/frontend/\")", "replace": "PRODUCT_PREFIXES = (\"app/backend/\", \"app/frontend/src/\")", "why": "Frontend manifests and build/config files could drift outside the design-authorized architecture envelope."},
-    {"id": "architecture-unclassified-source-admitted", "file": "scripts/factory_architecture_guard.py", "find": "if unclassified_new:", "replace": "if False and unclassified_new:", "why": "An agent could create a new source namespace outside every declared architecture layer."},
-    {"id": "architecture-cycle-detection-disabled", "file": "scripts/factory_architecture_guard.py", "find": "if len(component) > 1 or (len(component) == 1 and node in graph.get(node, set())):", "replace": "if False and (len(component) > 1 or (len(component) == 1 and node in graph.get(node, set()))):", "why": "New dependency cycles could accumulate while architecture validation still reported clean."},
-    {"id": "architecture-no-growth-per-path-disabled", "file": "scripts/factory_architecture_guard.py", "find": "if touched and delta > 0:", "replace": "if False and touched and delta > 0:", "why": "Growth in one governed hotspot could be hidden by shrinkage in another path in the same debt group."},
-    {"id": "architecture-no-growth-disabled", "file": "scripts/factory_architecture_guard.py", "find": "if graph_cfg[\"enforce_no_growth_debt\"] and growth:", "replace": "if False and graph_cfg[\"enforce_no_growth_debt\"] and growth:", "why": "Known architecture hotspots could grow on every ticket despite a no-growth policy."},
-    {"id": "evidence-security-fail-accepted", "file": "scripts/factory_evidence.py", "find": "if value.get(\"verdict\") != \"pass\":\n        die(\"deterministic security guard did not authorize merge\")", "replace": "if False and value.get(\"verdict\") != \"pass\":\n        die(\"deterministic security guard did not authorize merge\")", "why": "Final merge authority could accept a deterministic security failure."},
-    {"id": "evidence-contradictory-security-pass-accepted", "file": "scripts/factory_evidence.py", "find": "if collections[\"findings\"] or collections[\"protected_paths\"] or collections[\"secret_findings\"]:", "replace": "if False and (collections[\"findings\"] or collections[\"protected_paths\"] or collections[\"secret_findings\"]):", "why": "A forged pass could carry blocking security findings into evidence."},
-    {"id": "evidence-stale-architecture-policy-accepted", "file": "scripts/factory_evidence.py", "find": "if arch.get(\"policy_sha256\") != digest(policy):", "replace": "if False and arch.get(\"policy_sha256\") != digest(policy):", "why": "Architecture evidence could be bound to a stale or substituted policy."},
-    {"id": "evidence-architecture-guard-not-recomputed", "file": "scripts/factory_evidence.py", "find": "if recomputed_hash != builder[\"sha256\"]:", "replace": "if False and recomputed_hash != builder[\"sha256\"]:", "why": "A builder could forge deterministic architecture-guard provenance without independent final recomputation."},
-    {"id": "evidence-architecture-holdout-nonpass-accepted", "file": "scripts/factory_evidence.py", "find": "if value.get(\"verdict\") != \"pass\" or value.get(\"convergence\") == \"regresses\":", "replace": "if False and (value.get(\"verdict\") != \"pass\" or value.get(\"convergence\") == \"regresses\"):", "why": "A blinded architecture rejection could be ignored by final merge authority."},
-    {"id": "evidence-forged-test-plan-hash-accepted", "file": "scripts/factory_evidence.py", "find": "if digest(plan) != proof[\"test_plan_sha256\"]:", "replace": "if False and digest(plan) != proof[\"test_plan_sha256\"]:", "why": "Acceptance checkpoints could be rewritten without invalidating their proof-plan binding."},
-    {"id": "merge-parent-check-disabled", "file": "harness/merge_verify.py", "find": "if len(merge_parents) != 1 or merge_parents[0] != base:", "replace": "if False and (len(merge_parents) != 1 or merge_parents[0] != base):", "why": "A squash created on a moved or wrong base could be blessed after merge."},
-    {"id": "merge-tree-check-disabled", "file": "harness/merge_verify.py", "find": "if merge_tree != auth_tree:", "replace": "if False and merge_tree != auth_tree:", "why": "The server-created merge tree could differ from the tree that actually passed evidence."},
-    {"id": "merge-main-reachability-check-disabled", "file": "harness/merge_verify.py", "find": "if not merge_is_ancestor:", "replace": "if False and not merge_is_ancestor:", "why": "A reported merge SHA not contained in current main history could be accepted."},
-    {"id": "immunity-text-assertion-disabled", "file": "harness/immunity.py", "find": "if needle not in path.read_text(encoding=\"utf-8\"):", "replace": "if False and needle not in path.read_text(encoding=\"utf-8\"):", "why": "A learned structural lesson could disappear while the immunity checker still reported pass."},
-    {"id": "immunity-numeric-floor-disabled", "file": "harness/immunity.py", "find": "if not isinstance(selected, (int, float)) or isinstance(selected, bool) or selected < minimum:", "replace": "if False and (not isinstance(selected, (int, float)) or isinstance(selected, bool) or selected < minimum):", "why": "A protected learned floor could regress without reopening the lesson."},
-    {"id": "immunity-array-floor-disabled", "file": "harness/immunity.py", "find": "if matches < minimum:", "replace": "if False and matches < minimum:", "why": "Required independent detector probes could vanish while immunity still reported pass."}
+    {
+      "id": "security-verdict-forced-pass",
+      "file": "scripts/factory_security.py",
+      "find": "\"verdict\": \"pass\" if not findings else \"fail\",",
+      "replace": "\"verdict\": \"pass\",",
+      "why": "The deterministic security guard could make all findings advisory."
+    },
+    {
+      "id": "security-github-protection-removed",
+      "file": "scripts/factory_security.py",
+      "find": "or path.startswith(\".github/\")",
+      "replace": "or False",
+      "why": "An autonomous PR could rewrite CI without the protected-path veto."
+    },
+    {
+      "id": "security-kernel-protection-removed",
+      "file": "scripts/factory_security.py",
+      "find": "or path.startswith(\"factory_kernel/\")",
+      "replace": "or False",
+      "why": "An autonomous PR could rewrite the repo-owned dispatcher and merge authority boundary."
+    },
+    {
+      "id": "security-backend-lock-coupling-removed",
+      "file": "scripts/factory_security.py",
+      "find": "if py_changes and BACKEND_LOCK not in changed_files:",
+      "replace": "if False and py_changes and BACKEND_LOCK not in changed_files:",
+      "why": "A backend manifest could change while its exact lock stayed stale."
+    },
+    {
+      "id": "security-direct-python-source-allowed",
+      "file": "scripts/factory_security.py",
+      "find": "if change[\"ecosystem\"] == \"python\" and DISALLOWED_PY_SOURCE.search(spec):",
+      "replace": "if False and change[\"ecosystem\"] == \"python\" and DISALLOWED_PY_SOURCE.search(spec):",
+      "why": "A mutable or credential-bearing direct dependency URL could bypass provenance."
+    },
+    {
+      "id": "security-secret-scan-disabled",
+      "file": "scripts/factory_security.py",
+      "find": "secrets = secret_findings(added_lines(diff))",
+      "replace": "secrets = []",
+      "why": "High-confidence credentials in added source would no longer veto merge."
+    },
+    {
+      "id": "worker-shell-tool-enabled",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "WRITE_TOOLS = (*READ_TOOLS, \"Write\", \"Edit\")",
+      "replace": "WRITE_TOOLS = (*READ_TOOLS, \"Write\", \"Edit\", \"Bash\")",
+      "why": "An issue-influenced model worker could regain arbitrary shell and Git authority."
+    },
+    {
+      "id": "worker-env-secret-filter-disabled",
+      "file": "factory_kernel/providers.py",
+      "find": "if key in exact or key.startswith(prefixes)",
+      "replace": "if True",
+      "why": "GitHub and application validation secrets could leak into untrusted model subprocesses."
+    },
+    {
+      "id": "worker-bare-isolation-disabled",
+      "file": "factory_kernel/providers.py",
+      "find": "            \"--bare\",",
+      "replace": "            \"--bare-disabled\",",
+      "why": "Project plugins, hooks, skills or auto-memory could silently expand the headless worker authority surface."
+    },
+    {
+      "id": "worker-test-envelope-disabled",
+      "file": "factory_kernel/git_authority.py",
+      "find": "    if actual != sorted(declared):",
+      "replace": "    if False and actual != sorted(declared):",
+      "why": "The acceptance-test worker could smuggle product changes into its kernel-created RED commit."
+    },
+    {
+      "id": "worker-design-envelope-disabled",
+      "file": "factory_kernel/git_authority.py",
+      "find": "    if outside:",
+      "replace": "    if False and outside:",
+      "why": "The implementation worker could commit files outside the compiled design envelope."
+    },
+    {
+      "id": "architecture-layer-direction-disabled",
+      "file": "scripts/factory_architecture_guard.py",
+      "find": "if target_layer not in allowed[source_layer]:",
+      "replace": "if False and target_layer not in allowed[source_layer]:",
+      "why": "A new reverse/cross-layer dependency could be introduced without deterministic rejection."
+    },
+    {
+      "id": "architecture-design-envelope-disabled",
+      "file": "scripts/factory_architecture_guard.py",
+      "find": "unplanned = sorted(set(product_changed) - planned_set)",
+      "replace": "unplanned = []",
+      "why": "The coder could change production files the compiled design never authorized."
+    },
+    {
+      "id": "architecture-frontend-scope-narrowed",
+      "file": "scripts/factory_architecture_guard.py",
+      "find": "PRODUCT_PREFIXES = (\"app/backend/\", \"app/frontend/\")",
+      "replace": "PRODUCT_PREFIXES = (\"app/backend/\", \"app/frontend/src/\")",
+      "why": "Frontend manifests and build/config files could drift outside the design-authorized architecture envelope."
+    },
+    {
+      "id": "architecture-unclassified-source-admitted",
+      "file": "scripts/factory_architecture_guard.py",
+      "find": "if unclassified_new:",
+      "replace": "if False and unclassified_new:",
+      "why": "An agent could create a new source namespace outside every declared architecture layer."
+    },
+    {
+      "id": "architecture-cycle-detection-disabled",
+      "file": "scripts/factory_architecture_guard.py",
+      "find": "if len(component) > 1 or (len(component) == 1 and node in graph.get(node, set())):",
+      "replace": "if False and (len(component) > 1 or (len(component) == 1 and node in graph.get(node, set()))):",
+      "why": "New dependency cycles could accumulate while architecture validation still reported clean."
+    },
+    {
+      "id": "architecture-no-growth-per-path-disabled",
+      "file": "scripts/factory_architecture_guard.py",
+      "find": "if touched and delta > 0:",
+      "replace": "if False and touched and delta > 0:",
+      "why": "Growth in one governed hotspot could be hidden by shrinkage in another path in the same debt group."
+    },
+    {
+      "id": "architecture-no-growth-disabled",
+      "file": "scripts/factory_architecture_guard.py",
+      "find": "if graph_cfg[\"enforce_no_growth_debt\"] and growth:",
+      "replace": "if False and graph_cfg[\"enforce_no_growth_debt\"] and growth:",
+      "why": "Known architecture hotspots could grow on every ticket despite a no-growth policy."
+    },
+    {
+      "id": "evidence-security-fail-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if value.get(\"verdict\") != \"pass\":\n        die(\"deterministic security guard did not authorize merge\")",
+      "replace": "if False and value.get(\"verdict\") != \"pass\":\n        die(\"deterministic security guard did not authorize merge\")",
+      "why": "Final merge authority could accept a deterministic security failure."
+    },
+    {
+      "id": "evidence-contradictory-security-pass-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if collections[\"findings\"] or collections[\"protected_paths\"] or collections[\"secret_findings\"]:",
+      "replace": "if False and (collections[\"findings\"] or collections[\"protected_paths\"] or collections[\"secret_findings\"]):",
+      "why": "A forged pass could carry blocking security findings into evidence."
+    },
+    {
+      "id": "evidence-stale-architecture-policy-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if arch.get(\"policy_sha256\") != digest(policy):",
+      "replace": "if False and arch.get(\"policy_sha256\") != digest(policy):",
+      "why": "Architecture evidence could be bound to a stale or substituted policy."
+    },
+    {
+      "id": "evidence-architecture-guard-not-recomputed",
+      "file": "scripts/factory_evidence.py",
+      "find": "if recomputed_hash != builder[\"sha256\"]:",
+      "replace": "if False and recomputed_hash != builder[\"sha256\"]:",
+      "why": "A builder could forge deterministic architecture-guard provenance without independent final recomputation."
+    },
+    {
+      "id": "evidence-architecture-holdout-nonpass-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if value.get(\"verdict\") != \"pass\" or value.get(\"convergence\") == \"regresses\":",
+      "replace": "if False and (value.get(\"verdict\") != \"pass\" or value.get(\"convergence\") == \"regresses\"):",
+      "why": "A blinded architecture rejection could be ignored by final merge authority."
+    },
+    {
+      "id": "evidence-forged-test-plan-hash-accepted",
+      "file": "scripts/factory_evidence.py",
+      "find": "if digest(plan) != proof[\"test_plan_sha256\"]:",
+      "replace": "if False and digest(plan) != proof[\"test_plan_sha256\"]:",
+      "why": "Acceptance checkpoints could be rewritten without invalidating their proof-plan binding."
+    },
+    {
+      "id": "merge-parent-check-disabled",
+      "file": "harness/merge_verify.py",
+      "find": "if len(merge_parents) != 1 or merge_parents[0] != base:",
+      "replace": "if False and (len(merge_parents) != 1 or merge_parents[0] != base):",
+      "why": "A squash created on a moved or wrong base could be blessed after merge."
+    },
+    {
+      "id": "merge-tree-check-disabled",
+      "file": "harness/merge_verify.py",
+      "find": "if merge_tree != auth_tree:",
+      "replace": "if False and merge_tree != auth_tree:",
+      "why": "The server-created merge tree could differ from the tree that actually passed evidence."
+    },
+    {
+      "id": "merge-main-reachability-check-disabled",
+      "file": "harness/merge_verify.py",
+      "find": "if not merge_is_ancestor:",
+      "replace": "if False and not merge_is_ancestor:",
+      "why": "A reported merge SHA not contained in current main history could be accepted."
+    },
+    {
+      "id": "immunity-text-assertion-disabled",
+      "file": "harness/immunity.py",
+      "find": "if needle not in path.read_text(encoding=\"utf-8\"):",
+      "replace": "if False and needle not in path.read_text(encoding=\"utf-8\"):",
+      "why": "A learned structural lesson could disappear while the immunity checker still reported pass."
+    },
+    {
+      "id": "immunity-numeric-floor-disabled",
+      "file": "harness/immunity.py",
+      "find": "if not isinstance(selected, (int, float)) or isinstance(selected, bool) or selected < minimum:",
+      "replace": "if False and (not isinstance(selected, (int, float)) or isinstance(selected, bool) or selected < minimum):",
+      "why": "A protected learned floor could regress without reopening the lesson."
+    },
+    {
+      "id": "immunity-array-floor-disabled",
+      "file": "harness/immunity.py",
+      "find": "if matches < minimum:",
+      "replace": "if False and matches < minimum:",
+      "why": "Required independent detector probes could vanish while immunity still reported pass."
+    },
+    {
+      "id": "worker-kernel-subprocess-secret-scrub-disabled",
+      "file": "factory_kernel/runtime.py",
+      "find": "        merged = scoped_environment(env, scope=credential_scope)",
+      "replace": "        merged = dict(os.environ)\n        if env:\n            merged.update(env)",
+      "why": "PR-controlled dependency and test subprocesses could inherit GitHub, model and validation credentials."
+    },
+    {
+      "id": "worker-evidence-child-secret-scrub-disabled",
+      "file": "scripts/factory_evidence.py",
+      "find": "    child = {key: value for key, value in original.items() if not sensitive(key)}",
+      "replace": "    child = dict(original)",
+      "why": "Independent RED/GREEN replay could inherit the repository write token or validation credentials."
+    },
+    {
+      "id": "worker-git-push-ambient-secret-env-restored",
+      "file": "factory_kernel/github_cli.py",
+      "find": "            env = scoped_environment(scope=\"none\")",
+      "replace": "            env = dict(os.environ)",
+      "why": "The trusted git push child could unnecessarily inherit application and model credentials."
+    },
+    {
+      "id": "worker-scheduler-persists-checkout-token",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "          persist-credentials: false",
+      "replace": "          persist-credentials: true",
+      "why": "A write-capable GitHub token could be stored in Git config where PR-controlled subprocesses can read it."
+    },
+    {
+      "id": "worker-scheduler-disables-merge-authority",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "        run: python -m factory_kernel dispatch --once",
+      "replace": "        run: python -m factory_kernel dispatch --once --no-merge",
+      "why": "The production scheduler could silently stop exercising the intended exact-head merge authority path."
+    },
+    {
+      "id": "worker-scheduler-claude-version-floats",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "          npm install -g @anthropic-ai/claude-code@2.1.245",
+      "replace": "          npm install -g @anthropic-ai/claude-code",
+      "why": "The reasoning-worker executable could drift between unattended runs without review or revalidation."
+    }
   ]
 }
