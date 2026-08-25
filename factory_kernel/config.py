@@ -14,6 +14,7 @@ class ProviderConfig:
     binary: str
     model: str
     timeout_seconds: int
+    architecture_model: str = ""
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,9 @@ def load_config(path: str | Path) -> KernelConfig:
             provider_id=_string(provider.get("id"), "provider.id"),
             binary=_string(provider.get("binary"), "provider.binary"),
             model=_string(provider.get("model"), "provider.model"),
+            architecture_model=_string(
+                provider.get("architecture_model"), "provider.architecture_model"
+            ),
             timeout_seconds=_positive_int(provider.get("timeout_seconds"), "provider.timeout_seconds"),
         ),
         runtime=RuntimeConfig(
