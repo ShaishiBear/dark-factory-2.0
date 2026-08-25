@@ -75,6 +75,19 @@ class ArchitectureGuardTests(unittest.TestCase):
         self.assertEqual(unplanned, ["app/backend/services/new_service.py"])
         self.assertEqual(new, ["app/backend/services/new_service.py"])
 
+    def test_frontend_config_is_inside_design_envelope(self):
+        design = {
+            "planned_files": ["app/frontend/src/components/ChatArea.tsx"],
+            "allowed_new_files": [],
+        }
+        unplanned, new = m.authorize_files(
+            design,
+            ["app/frontend/src/components/ChatArea.tsx", "app/frontend/vite.config.ts"],
+            [],
+        )
+        self.assertEqual(unplanned, ["app/frontend/vite.config.ts"])
+        self.assertEqual(new, [])
+
     def test_explicit_new_file_authorization_passes(self):
         design = {
             "planned_files": [
