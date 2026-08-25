@@ -6,14 +6,15 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
 BLOCK = re.compile(
-    r"<!-- factory-(contract|proof):start -->\s*```factory-\1\s*(\{.*?\})\s*```\s*"
+    r"<!-- factory-(contract|proof|design):start -->\s*```factory-\1\s*(\{.*?\})\s*```\s*"
     r"\1-sha256:\s*([0-9a-f]{64})\s*<!-- factory-\1:end -->", re.S
 )
 TRUST_ROOT = (
-    ".archon/workflows/dark-factory-validate-pr.yaml",
-    "scripts/factory_protocol.py", "scripts/factory_proof.py", "scripts/factory_evidence.py",
-    "scripts/factory_architecture.py", "scripts/factory_security.py", ".factory/architecture.json",
-    "harness/", ".factory/holdout/", ".factory/locks/floor.json",
+    "factory_kernel/",
+    ".factory/kernel.json", ".factory/evidence-spine.json", ".factory/prompts/",
+    ".factory/architecture.json", ".factory/holdout/", ".factory/locks/",
+    "scripts/", "harness/", ".github/", "deploy/systemd/",
+    "FACTORY_RULES.md", "MISSION.md", "CLAUDE.md",
 )
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -60,24 +61,28 @@ def extract(body: str, kind: str) -> tuple[dict, str]:
     die(f"missing factory-{kind} evidence block")
 
 
-def load_protocol():
-    path = ROOT / "scripts" / "factory_protocol.py"
-    spec = importlib.util.spec_from_file_location("factory_protocol_authoritative", path)
+def load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        die("cannot load authoritative contract validator")
+        die(f"cannot load authoritative {name}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_protocol():
+    return load_module(ROOT / "scripts" / "factory_protocol.py", "factory_protocol_authoritative")
 
 
 def load_security():
-    path = ROOT / "scripts" / "factory_security.py"
-    spec = importlib.util.spec_from_file_location("factory_security_authoritative", path)
-    if spec is None or spec.loader is None:
-        die("cannot load authoritative security guard")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module(ROOT / "scripts" / "factory_security.py", "factory_security_authoritative")
+
+
+def load_architecture_guard():
+    return load_module(
+        ROOT / "scripts" / "factory_architecture_guard.py",
+        "factory_architecture_guard_authoritative",
+    )
 
 
 def verify_contract(contract: dict, expected_hash: str, issue: int) -> dict:
@@ -249,6 +254,54 @@ def verify_architecture(proof: dict, head: str, base: str, contract_hash: str, p
         "principles": expected["principles"], "migrations": expected["migrations"],
         "debts": expected["debts"], "verdict": arch["verdict"],
         "convergence": arch.get("convergence"),
+    }
+
+
+def verify_architecture_guard(
+    proof: dict, design: dict, design_hash: str, head: str, base: str, policy: dict
+) -> dict:
+    if design_hash != proof.get("design_sha256"):
+        die("attached design does not match proof design hash")
+    builder = proof.get("architecture_guard")
+    if not isinstance(builder, dict) or not HEX64.fullmatch(str(builder.get("sha256", ""))):
+        die("proof lacks deterministic architecture guard provenance")
+    for key in (
+        "new_forbidden_edges", "new_cycles", "no_growth_regressions", "unplanned_product_files"
+    ):
+        if builder.get(key) != 0:
+            die(f"builder architecture guard reports non-zero {key}")
+    guard = load_architecture_guard()
+    try:
+        recomputed = guard.compute(policy, design, base, head)
+    except SystemExit:
+        die("authoritative architecture drift guard rejected current PR")
+    recomputed_hash = guard.digest(recomputed)
+    if recomputed_hash != builder["sha256"]:
+        die("builder architecture guard hash does not match independent recomputation")
+    if recomputed.get("base_sha") != base or recomputed.get("head_sha") != head:
+        die("architecture guard is not bound to exact PR base/head")
+    if recomputed.get("policy_sha256") != digest(policy) or recomputed.get("design_sha256") != design_hash:
+        die("architecture guard is not bound to authoritative policy/design")
+    if (
+        recomputed.get("unplanned_product_files")
+        or recomputed.get("unauthorized_new_files")
+        or recomputed.get("forbidden_edges", {}).get("new")
+        or recomputed.get("cycles", {}).get("new")
+        or recomputed.get("no_growth_regressions")
+    ):
+        die("architecture drift guard contains a blocking deterministic regression")
+    return {
+        "sha256": recomputed_hash,
+        "policy_sha256": recomputed["policy_sha256"],
+        "design_sha256": design_hash,
+        "base_sha": base,
+        "head_sha": head,
+        "production_changed_files": recomputed.get("production_changed_files", []),
+        "new_product_files": recomputed.get("new_product_files", []),
+        "new_forbidden_edges": 0,
+        "new_cycles": 0,
+        "no_growth_regressions": 0,
+        "unplanned_product_files": 0,
     }
 
 
@@ -465,6 +518,7 @@ def main() -> None:
         die("PR trust root is not current with origin/main; rebase required: " + ", ".join(drift))
 
     contract, contract_hash = extract(body, "contract")
+    design, design_hash = extract(body, "design")
     proof, proof_hash = extract(body, "proof")
     issue = contract.get("issue", {}).get("number")
     if not isinstance(issue, int):
@@ -478,7 +532,12 @@ def main() -> None:
     if verdict.get("verdict") != "approve":
         die("evidence gate only authorizes an approve verdict")
     proof_result = verify_proof(proof, head, contract, contract_hash)
+    if design_hash != proof_result["design_sha256"]:
+        die("attached design hash does not match independently validated proof")
     policy = json.loads(run(["git", "show", "origin/main:.factory/architecture.json"]).stdout)
+    architecture_guard_result = verify_architecture_guard(
+        proof, design, design_hash, head, base, policy
+    )
     architecture_result = verify_architecture(proof, head, base, contract_hash, policy)
     holdout = json.loads(Path(args.architecture_verdict).read_text(encoding="utf-8"))
     holdout_result = verify_architecture_holdout(holdout, architecture_result["changed_files"], policy)
@@ -498,8 +557,11 @@ def main() -> None:
         "version": "5.0", "pr": int(args.pr), "issue": issue,
         "base_sha": base, "head_sha": head,
         "contract_sha256": contract_hash, "contract": contract_result,
+        "design_sha256": design_hash,
         "proof_sha256": proof_hash, "proof": proof_result,
-        "architecture": architecture_result, "architecture_holdout": holdout_result,
+        "architecture": architecture_result,
+        "architecture_guard": architecture_guard_result,
+        "architecture_holdout": holdout_result,
         "security": security_result,
         "validator_verdict_sha256": digest(verdict),
         "harness_sha256": hashlib.sha256(transcript.encode()).hexdigest(),
