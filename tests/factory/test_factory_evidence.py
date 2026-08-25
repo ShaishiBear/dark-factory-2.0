@@ -1,6 +1,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
+from unittest import mock
 
 P = Path(__file__).parents[2] / "scripts" / "factory_evidence.py"
 spec = importlib.util.spec_from_file_location("factory_evidence", P)
@@ -108,6 +109,32 @@ class EvidenceTests(unittest.TestCase):
         value.update(overrides)
         return value
 
+    def design(self):
+        return {
+            "version": "1.0",
+            "planned_files": ["app/backend/rag/service.py"],
+            "allowed_new_files": [],
+        }
+
+    def guard_result(self, design=None):
+        design = design or self.design()
+        return {
+            "version": "1.0",
+            "policy_sha256": m.digest(self.policy()),
+            "design_sha256": m.digest(design),
+            "base_sha": "b" * 40,
+            "head_sha": "a" * 40,
+            "changed_files": ["app/backend/rag/service.py"],
+            "production_changed_files": ["app/backend/rag/service.py"],
+            "new_product_files": [],
+            "unplanned_product_files": [],
+            "unauthorized_new_files": [],
+            "forbidden_edges": {"base": [], "head": [], "new": []},
+            "cycles": {"base": [], "head": [], "new": []},
+            "debt_bytes": {"D-RAG": {"base_bytes": 100, "head_bytes": 100, "delta_bytes": 0, "touched": True}},
+            "no_growth_regressions": [],
+        }
+
     def assert_rejects_harness(self, text):
         with self.assertRaises(SystemExit):
             m.parse_harness(text, self.floors())
@@ -122,6 +149,26 @@ class EvidenceTests(unittest.TestCase):
     def verify_holdout(self, value=None):
         return m.verify_architecture_holdout(
             value or self.architecture_holdout(), ["app/backend/rag/service.py"], self.policy())
+
+    def verify_guard(self, *, proof=None, design=None, result=None):
+        design = design or self.design()
+        result = result or self.guard_result(design)
+        proof = proof or self.architecture_proof(head="a" * 40)
+        proof["design_sha256"] = m.digest(design)
+        proof["architecture_guard"] = {
+            "sha256": m.digest(result),
+            "new_forbidden_edges": 0,
+            "new_cycles": 0,
+            "no_growth_regressions": 0,
+            "unplanned_product_files": 0,
+        }
+        fake = mock.Mock()
+        fake.compute.return_value = result
+        fake.digest.side_effect = m.digest
+        with mock.patch.object(m, "load_architecture_guard", return_value=fake):
+            return m.verify_architecture_guard(
+                proof, design, m.digest(design), "a" * 40, "b" * 40, self.policy()
+            )
 
     def test_good_full_harness(self):
         self.assertEqual(m.parse_harness(self.log(), self.floors())["mutations_caught"], 4)
@@ -261,6 +308,49 @@ class EvidenceTests(unittest.TestCase):
         p["architecture_builder_sha256"] = m.digest(p["architecture_builder"])
         with self.assertRaises(SystemExit):
             self.verify_arch(p)
+
+    def test_architecture_guard_is_independently_recomputed(self):
+        result = self.verify_guard()
+        self.assertEqual(result["new_forbidden_edges"], 0)
+        self.assertEqual(result["base_sha"], "b" * 40)
+        self.assertEqual(result["head_sha"], "a" * 40)
+
+    def test_architecture_guard_rejects_design_hash_mismatch(self):
+        design = self.design()
+        proof = self.architecture_proof(head="a" * 40)
+        proof["design_sha256"] = "f" * 64
+        proof["architecture_guard"] = {
+            "sha256": "e" * 64,
+            "new_forbidden_edges": 0,
+            "new_cycles": 0,
+            "no_growth_regressions": 0,
+            "unplanned_product_files": 0,
+        }
+        with self.assertRaises(SystemExit):
+            m.verify_architecture_guard(
+                proof, design, m.digest(design), "a" * 40, "b" * 40, self.policy()
+            )
+
+    def test_architecture_guard_rejects_forged_builder_hash(self):
+        design = self.design()
+        result = self.guard_result(design)
+        proof = self.architecture_proof(head="a" * 40)
+        proof["design_sha256"] = m.digest(design)
+        proof["architecture_guard"] = {
+            "sha256": "f" * 64,
+            "new_forbidden_edges": 0,
+            "new_cycles": 0,
+            "no_growth_regressions": 0,
+            "unplanned_product_files": 0,
+        }
+        fake = mock.Mock()
+        fake.compute.return_value = result
+        fake.digest.side_effect = m.digest
+        with mock.patch.object(m, "load_architecture_guard", return_value=fake):
+            with self.assertRaises(SystemExit):
+                m.verify_architecture_guard(
+                    proof, design, m.digest(design), "a" * 40, "b" * 40, self.policy()
+                )
 
     def test_architecture_holdout_exact_policy_passes(self):
         self.assertEqual(self.verify_holdout()["verdict"], "pass")
