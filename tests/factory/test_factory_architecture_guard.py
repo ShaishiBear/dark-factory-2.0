@@ -117,6 +117,19 @@ class ArchitectureGuardTests(unittest.TestCase):
         self.assertEqual(unplanned, [])
         self.assertEqual(new, [])
 
+    def test_new_source_must_join_declared_layer(self):
+        path = "app/backend/orchestration/new_pipeline.py"
+        design = {"planned_files": [path], "allowed_new_files": [path]}
+        with (
+            mock.patch.object(m, "resolve_ref", side_effect=["b" * 40, "a" * 40]),
+            mock.patch.object(m, "graph_edges", side_effect=[set(), set()]),
+            mock.patch.object(m, "changed_files", return_value=[path]),
+            mock.patch.object(m, "new_product_files", return_value=[path]),
+            mock.patch.object(m, "debt_growth", return_value={}),
+        ):
+            with self.assertRaises(SystemExit):
+                m.compute(self.policy(), design, "base", "head")
+
     def test_compute_records_exact_git_objects_not_symbolic_refs(self):
         policy = self.policy()
         design = {
