@@ -87,9 +87,15 @@ class EvidenceSpineTests(unittest.TestCase):
         policy = load_policy(Path(__file__).parents[2] / ".factory/evidence-spine.json")
         ids = [requirement.claim_id for requirement in policy.requirements]
         self.assertEqual(ids[0], "contract")
+        self.assertIn("architecture-drift", ids)
         self.assertIn("architecture-conformance", ids)
         self.assertIn("mutation", ids)
         self.assertIn("immunity", ids)
+        drift = next(x for x in policy.requirements if x.claim_id == "architecture-drift")
+        self.assertTrue(drift.deterministic_required)
+        self.assertTrue(drift.independent_required)
+        self.assertTrue(drift.exact_head_required)
+        self.assertTrue(drift.final_evidence_required)
         self.assertTrue(all(requirement.final_evidence_required for requirement in policy.requirements))
 
     def test_policy_rejects_forward_dependency(self):
