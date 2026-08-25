@@ -7,9 +7,10 @@ from pathlib import Path
 
 from .config import load_config
 from .manifest import RunManifest
-from .runtime import FactoryStopped, KernelRuntime
+from .runtime import FactoryStopped
 from .state import FactoryState, Outcome, Stage, retry, transition
 from .triage import TriageEngine
+from .worker_runtime import WorkerControlledRuntime
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / ".factory" / "kernel.json"
@@ -34,8 +35,8 @@ def state_next(issue: int, stage: str, outcome: str, attempt: int) -> int:
     return 0
 
 
-def runtime(config_path: Path) -> KernelRuntime:
-    return KernelRuntime(repo_root=ROOT, config=load_config(config_path))
+def runtime(config_path: Path) -> WorkerControlledRuntime:
+    return WorkerControlledRuntime(repo_root=ROOT, config=load_config(config_path))
 
 
 def main() -> int:
@@ -100,7 +101,7 @@ def main() -> int:
             return 0
         if args.command == "dispatch":
             if not args.once:
-                parser.error("dispatch currently requires --once; scheduling belongs to systemd")
+                parser.error("dispatch currently requires --once; scheduling belongs outside kernel")
             decision = rt.dispatch_once(merge=not args.no_merge)
             if decision.kind == "idle":
                 count = TriageEngine(rt).run_once()
