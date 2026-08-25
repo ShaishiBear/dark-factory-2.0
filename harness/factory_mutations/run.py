@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -54,9 +55,14 @@ def build_copy(parent: Path) -> Path:
 def run_tests(root: Path) -> subprocess.CompletedProcess[str]:
     outputs: list[str] = []
     failed = False
+    env = dict(os.environ)
+    python_paths = [str(root), str(root / "scripts")]
+    if env.get("PYTHONPATH"):
+        python_paths.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(python_paths)
     for rel in TEST_FILES:
         proc = subprocess.run(
-            [sys.executable, rel], cwd=root, capture_output=True, text=True,
+            [sys.executable, rel], cwd=root, env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=180,
         )
         outputs.append((proc.stdout or "") + (proc.stderr or ""))
