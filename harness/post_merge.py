@@ -181,7 +181,7 @@ def execute(*, merge_verification: Path, output: Path) -> dict:
         )
         return payload
     finally:
-        remove(ROOT, worktree, force=True)
+        remove(ROOT, worktree, force=True, require_clean=False)
 
 
 def main() -> None:
