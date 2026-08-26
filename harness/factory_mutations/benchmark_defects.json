@@ -1,0 +1,36 @@
+{
+  "_what_this_is": [
+    "Adversarial mutations for the hidden behavioural benchmark authority.",
+    "The public scorer may be visible, but private cases, exact result coverage and exact factory-SHA binding must remain authoritative."
+  ],
+  "defects": [
+    {
+      "id": "benchmark-private-suite-requirement-disabled",
+      "file": "factory_kernel/benchmark.py",
+      "find": "    if require_private and not any(s.visibility == \"private\" for s in suite_list):",
+      "replace": "    if False and require_private and not any(s.visibility == \"private\" for s in suite_list):",
+      "why": "Production could claim hidden-benchmark assurance while running only public cases visible to the agents."
+    },
+    {
+      "id": "benchmark-result-coverage-check-disabled",
+      "file": "factory_kernel/benchmark.py",
+      "find": "    if set(results) != set(cases):",
+      "replace": "    if False and set(results) != set(cases):",
+      "why": "Skipped hard cases or injected extra results could be silently ignored."
+    },
+    {
+      "id": "benchmark-wrong-outcomes-ignored",
+      "file": "factory_kernel/benchmark.py",
+      "find": "        if results[case_id] != cases[case_id].expected",
+      "replace": "        if False and results[case_id] != cases[case_id].expected",
+      "why": "A factory returning the wrong terminal behaviour could still receive a passing benchmark verdict."
+    },
+    {
+      "id": "benchmark-factory-sha-binding-disabled",
+      "file": "factory_kernel/benchmark.py",
+      "find": "    if value.get(\"factory_sha\") != factory_sha:",
+      "replace": "    if False and value.get(\"factory_sha\") != factory_sha:",
+      "why": "Benchmark results from a different factory revision could be replayed as current evidence."
+    }
+  ]
+}
