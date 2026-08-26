@@ -11,7 +11,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFECTS = Path(__file__).resolve().parent / "defects.json"
+MUTATION_DIR = Path(__file__).resolve().parent
+DEFECT_FILES = (MUTATION_DIR / "defects.json", MUTATION_DIR / "native_ci_defects.json")
 IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_DIRS = ("factory_kernel",)
 COPY_FILES = (
@@ -109,13 +110,26 @@ def immunity_is_green() -> bool:
     return True
 
 
+def load_defects() -> list[dict]:
+    defects: list[dict] = []
+    for path in DEFECT_FILES:
+        if not path.is_file():
+            raise RuntimeError(f"required factory mutation manifest missing: {path.name}")
+        loaded = json.loads(path.read_text(encoding="utf-8")).get("defects")
+        if not isinstance(loaded, list) or not loaded:
+            raise RuntimeError(f"no defects configured in {path.name}")
+        defects.extend(loaded)
+    ids = [str(defect.get("id", "")) for defect in defects]
+    if len(ids) != len(set(ids)) or not all(ids):
+        raise RuntimeError("factory mutation ids must be non-empty and unique across manifests")
+    return defects
+
+
 def main() -> int:
-    if not DEFECTS.is_file():
-        print("FACTORY_MUTATIONS_REFUSED defects.json is missing", flush=True)
-        return 1
-    defects = json.loads(DEFECTS.read_text(encoding="utf-8")).get("defects")
-    if not isinstance(defects, list) or not defects:
-        print("FACTORY_MUTATIONS_REFUSED no defects configured", flush=True)
+    try:
+        defects = load_defects()
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"FACTORY_MUTATIONS_REFUSED {exc}", flush=True)
         return 1
     if not immunity_is_green():
         return 1
