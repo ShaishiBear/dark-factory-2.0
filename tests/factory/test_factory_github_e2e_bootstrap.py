@@ -72,6 +72,38 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             source,
         )
 
+    def test_native_pr_ci_pins_toolchain_and_scrubs_checkout_token(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "dark-factory-ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            workflow,
+        )
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn(
+            "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+            workflow,
+        )
+        self.assertIn("python-version: '3.12.14'", workflow)
+        self.assertIn(
+            "astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e",
+            workflow,
+        )
+        self.assertIn("version: '0.12.5'", workflow)
+        self.assertIn(
+            "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+            workflow,
+        )
+        self.assertIn("bun-version: '1.4.0'", workflow)
+        for floating in (
+            "actions/checkout@v4",
+            "actions/setup-python@v5",
+            "astral-sh/setup-uv@v6",
+            "oven-sh/setup-bun@v2",
+        ):
+            self.assertNotIn(floating, workflow)
+
     def test_worker_refuses_unprotected_main(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
             encoding="utf-8"
