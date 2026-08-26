@@ -13,7 +13,7 @@ env:
 jobs:
   rewrite:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -62,5 +62,9 @@ jobs:
         run: python -m unittest discover -s tests/factory -p 'test_*.py'
       - name: Canonical quick gate
         run: python harness/ci.py --quick
-      - name: Factory trust-root mutations
-        run: python harness/factory_mutations/run.py
+      - name: Independent core holdout
+        run: python .factory/holdout/run.py
+      - name: Independent citation holdout
+        run: python .factory/holdout/citations.py
+      - name: Integrated application and trust-root mutations
+        run: python harness/mutations/run.py
