@@ -30,6 +30,7 @@ COPY_FILES = (
     "harness/harness.config.json",
     "harness/serve.py",
     "harness/merge_verify.py",
+    "harness/post_merge.py",
     "harness/immunity.py",
     "tests/factory/test_factory_security.py",
     "tests/factory/test_factory_security_evidence.py",
@@ -38,6 +39,7 @@ COPY_FILES = (
     "tests/factory/test_factory_worker_authority.py",
     "tests/factory/test_factory_github_e2e_bootstrap.py",
     "tests/factory/test_factory_merge_verify.py",
+    "tests/factory/test_factory_post_merge.py",
     "tests/factory/test_factory_immunity.py",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
