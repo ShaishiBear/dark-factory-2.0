@@ -12,7 +12,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MUTATION_DIR = Path(__file__).resolve().parent
-DEFECT_FILES = (MUTATION_DIR / "defects.json", MUTATION_DIR / "native_ci_defects.json")
+DEFECT_FILES = (
+    MUTATION_DIR / "defects.json",
+    MUTATION_DIR / "native_ci_defects.json",
+    MUTATION_DIR / "post_merge_defects.json",
+)
 IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_DIRS = ("factory_kernel",)
 COPY_FILES = (
