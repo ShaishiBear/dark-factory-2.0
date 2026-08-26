@@ -18,6 +18,7 @@ COPY_FILES = (
     ".github/workflows/dark-factory-worker.yml",
     ".factory/architecture.json",
     ".factory/kernel.json",
+    "app/backend/main.py",
     "scripts/frontier_filter.py",
     "scripts/factory_security.py",
     "scripts/factory_evidence.py",
