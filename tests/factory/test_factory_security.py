@@ -54,6 +54,7 @@ class SecurityGuardTests(unittest.TestCase):
             ".factory/evidence-spine.json",
             ".factory/prompts/implement.md",
             ".factory/holdout/run.py",
+            ".factory/benchmark/public.json",
             "harness/ci.py",
             "scripts/factory_evidence.py",
             "deploy/systemd/dark-factory.service",
