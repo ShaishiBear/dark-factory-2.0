@@ -111,6 +111,7 @@ def protected_path(path: str) -> bool:
         or path.startswith("factory_kernel/")
         or path.startswith(".factory/prompts/")
         or path.startswith(".factory/holdout/")
+        or path.startswith(".factory/benchmark/")
         or path.startswith(".github/")
         or path.startswith("deploy/systemd/")
         or path.startswith("harness/")
