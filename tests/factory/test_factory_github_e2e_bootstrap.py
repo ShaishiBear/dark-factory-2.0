@@ -60,6 +60,18 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
         )
         self.assertEqual(serve.BOOTSTRAP_REQUIRED, ["SUPADATA_API_KEY"])
 
+    def test_backend_migrations_use_running_locked_interpreter(self) -> None:
+        source = (ROOT / "app" / "backend" / "main.py").read_text(encoding="utf-8")
+        self.assertIn("import sys", source)
+        self.assertIn(
+            '[\n            sys.executable,\n            "-m",\n            "alembic",',
+            source,
+        )
+        self.assertNotIn(
+            '[\n            "uv",\n            "run",\n            "alembic",',
+            source,
+        )
+
     def test_worker_provisions_disposable_validation_state(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
             encoding="utf-8"
