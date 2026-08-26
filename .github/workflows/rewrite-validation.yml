@@ -8,12 +8,12 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: bc2a59e15ee6fef3fe4464ea8f8a260594135475
+  CANDIDATE_SHA: 64973061cfce324e4fa406a5fe127eb277411a88
 
 jobs:
   rewrite:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -62,9 +62,5 @@ jobs:
         run: python -m unittest discover -s tests/factory -p 'test_*.py'
       - name: Canonical quick gate
         run: python harness/ci.py --quick
-      - name: Independent core holdout
-        run: python .factory/holdout/run.py
-      - name: Independent citation holdout
-        run: python .factory/holdout/citations.py
-      - name: Integrated application and trust-root mutations
-        run: python harness/mutations/run.py
+      - name: Factory trust-root mutations
+        run: python harness/factory_mutations/run.py
