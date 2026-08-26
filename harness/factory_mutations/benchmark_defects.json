@@ -31,6 +31,13 @@
       "find": "    if value.get(\"factory_sha\") != factory_sha:",
       "replace": "    if False and value.get(\"factory_sha\") != factory_sha:",
       "why": "Benchmark results from a different factory revision could be replayed as current evidence."
+    },
+    {
+      "id": "benchmark-contract-protection-removed",
+      "file": "scripts/factory_security.py",
+      "find": "        or path.startswith(\".factory/benchmark/\")",
+      "replace": "        or False",
+      "why": "An autonomous product PR could rewrite the benchmark contract used to judge the factory itself."
     }
   ]
 }
