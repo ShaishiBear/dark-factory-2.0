@@ -77,7 +77,7 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn(
-            'main_protected="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq \' .protected\')"'.replace("\' .protected\'", "'.protected'"),
+            "gh api \"repos/$GITHUB_REPOSITORY/branches/main\" --jq '.protected'",
             workflow,
         )
         self.assertIn('test "$main_protected" = "true" || {', workflow)
