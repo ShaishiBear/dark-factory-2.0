@@ -16,6 +16,7 @@ DEFECT_FILES = (
     MUTATION_DIR / "defects.json",
     MUTATION_DIR / "native_ci_defects.json",
     MUTATION_DIR / "post_merge_defects.json",
+    MUTATION_DIR / "benchmark_defects.json",
 )
 IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_DIRS = ("factory_kernel",)
@@ -35,6 +36,7 @@ COPY_FILES = (
     "harness/serve.py",
     "harness/merge_verify.py",
     "harness/post_merge.py",
+    "harness/observe.py",
     "harness/immunity.py",
     "tests/factory/test_factory_security.py",
     "tests/factory/test_factory_security_evidence.py",
@@ -44,6 +46,7 @@ COPY_FILES = (
     "tests/factory/test_factory_github_e2e_bootstrap.py",
     "tests/factory/test_factory_merge_verify.py",
     "tests/factory/test_factory_post_merge.py",
+    "tests/factory/test_factory_benchmark.py",
     "tests/factory/test_factory_immunity.py",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
