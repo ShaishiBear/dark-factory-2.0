@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: d09a2a4c542f87119152959a214376caeceebc1a
+  CANDIDATE_SHA: bc2a59e15ee6fef3fe4464ea8f8a260594135475
 
 jobs:
   full-e2e:
