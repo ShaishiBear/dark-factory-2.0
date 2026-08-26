@@ -12,7 +12,7 @@ The canonical entrypoint is:
 python -m factory_kernel dispatch --once
 ```
 
-A production host runs that command from the checked-out repository using `deploy/systemd/dark-factory.service` + `dark-factory.timer`. The service has no independent workflow logic: scheduling is outside the kernel; all dispatch semantics live in `factory_kernel/` and protected policy in `.factory/`.
+The canonical unattended scheduler is `.github/workflows/dark-factory-worker.yml`. It invokes one dispatch at minute 17 of every hour and also supports manual `workflow_dispatch`. The workflow is deliberately thin: all dispatch semantics live in `factory_kernel/` and protected policy in `.factory/`. The checked-in `deploy/systemd/dark-factory.service` + `dark-factory.timer` are an optional self-hosted scheduling alternative; they do not contain independent workflow policy.
 
 One dispatch cycle is deterministic in this order:
 
@@ -36,7 +36,7 @@ PR validation deliberately has priority over starting new build work.
 
 `scripts/factory-stop.sh` remains the two-channel fail-closed stop authority and is called by the Python kernel before dispatch and again immediately before merge.
 
-1. Local: `${FACTORY_WORKDIR}/.factory-stop`. This works with the network down.
+1. Local: `${FACTORY_WORKDIR}/.factory-stop`. This works even if the network is down.
 2. Remote: any open issue carrying `factory:stop`.
 
 If the GitHub stop state cannot be read, the factory stops. An unreadable stop button is not treated as permission to continue.
@@ -55,7 +55,8 @@ If the GitHub stop state cannot be read, the factory stops. An unreadable stop b
 | Provenance manifest | `factory_kernel/manifest.py` |
 | Evidence-spine policy/compiler | `.factory/evidence-spine.json`, `factory_kernel/spine.py` |
 | Deterministic engineering authorities | `scripts/factory_*.py`, `harness/` |
-| Scheduler | `deploy/systemd/dark-factory.*` |
+| Canonical unattended scheduler | `.github/workflows/dark-factory-worker.yml` |
+| Optional self-hosted scheduler | `deploy/systemd/dark-factory.*` |
 | PR quick authority | `.github/workflows/dark-factory-ci.yml` |
 
 The model provider is replaceable. The checked-in default is the Claude Code CLI. Provider output is untrusted reasoning; it never directly authorizes a merge.
@@ -181,7 +182,24 @@ The earlier experiment used Archon YAML workflows and command files. Active `.ar
 
 ## Operations
 
-Expected host layout for the checked-in systemd unit:
+### Canonical GitHub-hosted worker
+
+Before unattended Level-4 dispatch is enabled, repository configuration must satisfy the same fail-closed preflight enforced by `.github/workflows/dark-factory-worker.yml`:
+
+- GitHub Issues are enabled. Issues are the intake, state and remote emergency-stop surface.
+- `main` is protected by GitHub branch protection/rules so a direct push cannot bypass the in-repo evidence and exact-tree merge authority.
+- all eight factory control labels exist: `factory:accepted`, `factory:rejected`, `factory:rate-limited`, `factory:in-progress`, `factory:needs-review`, `factory:needs-fix`, `factory:needs-human`, `factory:stop`.
+- repository Actions secrets `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` are configured.
+
+The worker checks out current `main` without persisting checkout credentials, runs one global dispatch at a time, and refuses to start if any prerequisite above is missing.
+
+Application validation state is disposable per run rather than a persistent secret surface. The worker provisions local `postgres:16` database `dark_factory_validation`, a random JWT secret, a synthetic E2E account/password, and `DARK_FACTORY_E2E_BOOTSTRAP=1`. The locked browser fixture is ingested through the real Supadata/OpenRouter application path.
+
+The GitHub-hosted toolchain is pinned to Ubuntu 24.04, Python 3.12.14, Node 24, uv 0.12.5, Bun 1.4.0, Claude Code 2.1.245 and agent-browser 0.35.0.
+
+### Optional self-hosted scheduler
+
+The systemd files remain available when an operator deliberately chooses a self-hosted scheduler. Expected layout for those checked-in units is:
 
 ```text
 /opt/dark-factory/repo        repository checkout
@@ -189,7 +207,7 @@ Expected host layout for the checked-in systemd unit:
 /opt/dark-factory/.factory-stop emergency local kill file
 ```
 
-The dedicated service account is `dark-factory`. It needs authenticated `gh`, the configured model CLI, Git push rights to the repository, and the validation environment required by the full harness. Secrets stay on the host; they are not committed into `.factory/kernel.json`.
+A self-hosted service account needs authenticated `gh`, the configured model CLI, Git push rights to the repository, and the validation environment required by the full harness. Secrets stay on the host; they are not committed into `.factory/kernel.json`.
 
 Useful commands:
 
