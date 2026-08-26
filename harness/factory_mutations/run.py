@@ -46,6 +46,7 @@ COPY_FILES = (
     "tests/factory/test_factory_github_e2e_bootstrap.py",
     "tests/factory/test_factory_merge_verify.py",
     "tests/factory/test_factory_post_merge.py",
+    "tests/factory/test_factory_post_merge_runtime.py",
     "tests/factory/test_factory_benchmark.py",
     "tests/factory/test_factory_immunity.py",
 )
