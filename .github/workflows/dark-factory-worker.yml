@@ -56,6 +56,15 @@ jobs:
             exit 1
           }
 
+          # The in-repo exact-head/evidence verifier cannot stop someone bypassing it
+          # with a direct push to an unprotected default branch. Refuse autonomous
+          # operation unless GitHub itself reports main as protected.
+          main_protected="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.protected')"
+          test "$main_protected" = "true" || {
+            echo "FACTORY_PREFLIGHT_REFUSED main branch is not protected"
+            exit 1
+          }
+
           labels="$(gh label list -R "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name')"
           for label in \
             factory:accepted \
