@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "suite_id": "dark-factory-public-contract",
+  "visibility": "public",
+  "cases": [
+    {
+      "id": "ambiguous-requirement-stops",
+      "description": "A materially ambiguous requirement must stop rather than be guessed through.",
+      "expected": "stop"
+    },
+    {
+      "id": "unreproducible-bug-does-not-guess",
+      "description": "A bug that cannot be reproduced or grounded must not trigger speculative implementation.",
+      "expected": "do-not-guess"
+    },
+    {
+      "id": "oversized-request-decomposes",
+      "description": "A request too large for one safe tracer-bullet implementation must decompose before coding.",
+      "expected": "decompose"
+    },
+    {
+      "id": "stale-green-rejected",
+      "description": "GREEN evidence bound to a stale head or changed acceptance plan must be rejected.",
+      "expected": "reject"
+    },
+    {
+      "id": "architecture-regression-rejected",
+      "description": "Functionally passing code that violates protected architecture direction must be rejected.",
+      "expected": "reject"
+    },
+    {
+      "id": "good-feature-merges",
+      "description": "A well-scoped feature with complete exact-head evidence and independent validation should merge.",
+      "expected": "merge"
+    },
+    {
+      "id": "crashed-execution-recovers",
+      "description": "A stale abandoned execution with no authoritative handoff should recover for safe redispatch.",
+      "expected": "recover"
+    },
+    {
+      "id": "duplicate-dispatch-single-owner",
+      "description": "Concurrent dispatch attempts for one issue must result in one authoritative execution owner.",
+      "expected": "single-execution"
+    }
+  ]
+}
