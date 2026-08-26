@@ -24,6 +24,20 @@
       "find": "    if value.get(\"version\") != \"1.0\" or value.get(\"verdict\") != \"verified\":",
       "replace": "    if value.get(\"version\") != \"1.0\":",
       "why": "Post-merge validation could run from failed or forged merge verification evidence."
+    },
+    {
+      "id": "post-merge-runtime-hook-disabled",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        if not merge:\n            return result",
+      "replace": "        if True:\n            return result",
+      "why": "The production merge lifecycle could stop after tree verification and never exercise actual-main smoke/E2E."
+    },
+    {
+      "id": "post-merge-revert-main-tip-guard-disabled",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        if current_main != merge_sha:",
+      "replace": "        if False and current_main != merge_sha:",
+      "why": "The kernel could generate a mechanical revert after unrelated commits landed on main."
     }
   ]
 }
