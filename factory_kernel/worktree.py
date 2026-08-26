@@ -85,11 +85,23 @@ def create_detached(
         raise
 
 
-def remove(repo: str | Path, worktree: Worktree, *, require_clean: bool = True) -> None:
+def remove(
+    repo: str | Path,
+    worktree: Worktree,
+    *,
+    require_clean: bool = True,
+    force: bool = False,
+) -> None:
     root = Path(repo).resolve()
+    if require_clean and force:
+        raise ValueError("force removal cannot also require a clean worktree")
     if require_clean and worktree.path.exists() and not is_clean(worktree.path):
         raise WorktreeError(f"refusing to remove dirty worktree: {worktree.path}")
-    _run(root, ["worktree", "remove", str(worktree.path)])
+    argv = ["worktree", "remove"]
+    if force:
+        argv.append("--force")
+    argv.append(str(worktree.path))
+    _run(root, argv)
     _run(root, ["worktree", "prune"], check=False)
 
 
