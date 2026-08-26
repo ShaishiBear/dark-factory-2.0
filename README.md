@@ -20,7 +20,7 @@ The canonical control-plane entrypoint is:
 python -m factory_kernel dispatch --once
 ```
 
-A production host only schedules that command. The workflow/state/authority logic itself lives in `factory_kernel/`, `.factory/`, `scripts/factory_*.py` and `harness/`.
+The canonical unattended scheduler is `.github/workflows/dark-factory-worker.yml`: it invokes one dispatch at minute 17 of every hour and also supports manual `workflow_dispatch`. The workflow/state/authority logic itself lives in `factory_kernel/`, `.factory/`, `scripts/factory_*.py` and `harness/`. The checked-in systemd unit/timer remain an optional self-hosted scheduling alternative, not a second control plane.
 
 ### Three distinct layers
 
@@ -46,7 +46,7 @@ bounded issue triage
 idle
 ```
 
-The scheduler is intentionally uninteresting. `deploy/systemd/dark-factory.timer` invokes the one-shot service; all policy stays in the repo.
+The scheduler is intentionally uninteresting. The canonical GitHub-hosted workflow invokes the one-shot kernel command; the optional systemd timer does the same for a deliberately self-hosted deployment. All policy stays in the repo-owned kernel.
 
 ### How an issue becomes code
 
@@ -136,6 +136,17 @@ The kernel keeps coordination visible in GitHub rather than an opaque database.
 **Priority:** `priority:critical|high|medium|low`.
 
 The stale-lease authority in `scripts/factory_lease.py` prevents abandoned `factory:in-progress` claims from wedging the queue.
+
+### GitHub-hosted activation prerequisites
+
+The unattended worker fails closed unless repository configuration is ready for Level-4 authority:
+
+- GitHub Issues must be enabled because issues are the intake, state and remote-stop surface.
+- `main` must be protected by GitHub branch protection/rules so a direct push cannot bypass the in-repo evidence and exact-tree merge authority.
+- all eight control labels must exist: `factory:accepted`, `factory:rejected`, `factory:rate-limited`, `factory:in-progress`, `factory:needs-review`, `factory:needs-fix`, `factory:needs-human`, `factory:stop`.
+- Actions secrets `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` must be configured.
+
+Validation database/JWT/browser-account state is not a persistent secret requirement: each hosted run creates disposable local Postgres and synthetic E2E state. See [`FACTORY.md`](FACTORY.md) for the full operational contract.
 
 ### Flood protection
 
