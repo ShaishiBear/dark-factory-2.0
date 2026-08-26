@@ -72,6 +72,17 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             source,
         )
 
+    def test_worker_refuses_unprotected_main(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'main_protected="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq \' .protected\')"'.replace("\' .protected\'", "'.protected'"),
+            workflow,
+        )
+        self.assertIn('test "$main_protected" = "true" || {', workflow)
+        self.assertIn("FACTORY_PREFLIGHT_REFUSED main branch is not protected", workflow)
+
     def test_worker_provisions_disposable_validation_state(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
             encoding="utf-8"
