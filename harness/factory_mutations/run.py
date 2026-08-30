@@ -17,6 +17,7 @@ DEFECT_FILES = (
     MUTATION_DIR / "native_ci_defects.json",
     MUTATION_DIR / "post_merge_defects.json",
     MUTATION_DIR / "benchmark_defects.json",
+    MUTATION_DIR / "spine_defects.json",
 )
 IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_DIRS = ("factory_kernel",)
@@ -24,11 +25,14 @@ COPY_FILES = (
     ".github/workflows/dark-factory-ci.yml",
     ".github/workflows/dark-factory-worker.yml",
     ".factory/architecture.json",
+    ".factory/evidence-spine.json",
     ".factory/kernel.json",
+    ".factory/locks/floor.json",
     "app/backend/main.py",
     "scripts/frontier_filter.py",
     "scripts/factory_security.py",
     "scripts/factory_evidence.py",
+    "scripts/factory_evidence_spine.py",
     "scripts/factory_protocol.py",
     "scripts/factory_architecture_guard.py",
     "harness/bootstrap_e2e.py",
@@ -49,6 +53,9 @@ COPY_FILES = (
     "tests/factory/test_factory_post_merge_runtime.py",
     "tests/factory/test_factory_benchmark.py",
     "tests/factory/test_factory_immunity.py",
+    "tests/factory/test_factory_provenance.py",
+    "tests/factory/test_factory_evidence_closure.py",
+    "tests/factory/test_factory_evidence_spine_runtime.py",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
 
