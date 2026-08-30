@@ -122,6 +122,11 @@ def run_attach(args: argparse.Namespace) -> None:
     block = "\n\n<!-- factory-contract:start -->\n```factory-contract\n" + canonical(c).decode().rstrip() + "\n```\ncontract-sha256: " + h + "\n<!-- factory-contract:end -->\n"
     tmp = Path(args.contract).with_suffix(".pr-body.md"); tmp.write_text(body + block, encoding="utf-8")
     subprocess.check_call(["gh", "pr", "edit", str(args.pr), "--body-file", str(tmp)])
+    artifacts = os.environ.get("ARTIFACTS_DIR", "").strip() or str(Path(args.contract).resolve().parent)
+    subprocess.check_call([
+        sys.executable, str(ROOT / "scripts" / "factory_provenance.py"), "publish",
+        "--pr", str(args.pr), "--artifacts", artifacts,
+    ], cwd=ROOT)
     lease("touch", c["issue"]["number"], "pr-handoff", str(args.pr))
     print(f"CONTRACT_ATTACHED pr={args.pr} sha256={h}")
 
