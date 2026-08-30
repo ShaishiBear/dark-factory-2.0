@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from factory_kernel.spine import load_policy
+
 ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
 GIT_OID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -55,11 +57,43 @@ def require_oid(value: object, name: str) -> str:
     return text
 
 
+def verify_spine(bundle: dict, base: str, head: str) -> None:
+    spine = bundle.get("spine")
+    if not isinstance(spine, dict) or spine.get("version") != "1.0":
+        die("Evidence Bundle lacks canonical evidence spine")
+    if spine.get("completion_level") != 100:
+        die("evidence spine has not reached 100 percent completion")
+    if spine.get("base_sha") != base or spine.get("head_sha") != head:
+        die("evidence spine is not bound to bundle base/head")
+
+    try:
+        policy = load_policy(ROOT / ".factory" / "evidence-spine.json")
+    except ValueError as exc:
+        die(f"cannot load protected evidence-spine policy: {exc}")
+    if spine.get("policy_sha256") != policy.sha256():
+        die("evidence spine was compiled against a different protected policy")
+
+    claims = spine.get("claims")
+    expected = [requirement.claim_id for requirement in policy.requirements]
+    if not isinstance(claims, list) or [row.get("claim_id") for row in claims if isinstance(row, dict)] != expected:
+        die("evidence spine does not contain the exact required claim sequence")
+    if any(not isinstance(row, dict) or row.get("completion_level") != 100 for row in claims):
+        die("one or more evidence-spine claims are below 100 percent")
+
+    manifest = str(spine.get("manifest_sha256") or "")
+    provenance = str(spine.get("builder_provenance_sha256") or "")
+    if not SHA256.fullmatch(manifest) or bundle.get("run_manifest_sha256") != manifest:
+        die("Evidence Bundle manifest hash does not match the completed spine")
+    if not SHA256.fullmatch(provenance) or bundle.get("builder_provenance_sha256") != provenance:
+        die("Evidence Bundle builder provenance hash does not match the completed spine")
+
+
 def bundle_fields(bundle: dict) -> tuple[str, str]:
     if bundle.get("version") != "5.0":
         die("merged-SHA verifier requires Evidence Bundle v5")
     base = require_oid(bundle.get("base_sha"), "bundle base_sha")
     head = require_oid(bundle.get("head_sha"), "bundle head_sha")
+    verify_spine(bundle, base, head)
     return base, head
 
 
