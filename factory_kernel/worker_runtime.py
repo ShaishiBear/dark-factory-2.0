@@ -21,6 +21,34 @@ class WorkerControlledRuntime(BaseKernelRuntime):
     commits, exact-main revalidation and safe revert-PR creation.
     """
 
+    def _exec(
+        self,
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+        credential_scope: str = "none",
+        timeout: int = 300,
+        transcript: Path | None = None,
+    ) -> str:
+        """Upgrade the generic v5 evidence call to the production 100%-spine authority.
+
+        The base runtime deliberately remains usable for focused lifecycle tests. Production CLI
+        commands instantiate this class, so no autonomous merge can fall back to the legacy
+        Evidence Bundle path: the outer authority must close all protected spine claims first.
+        """
+        routed = list(argv)
+        if len(routed) >= 2 and routed[0] == "python" and routed[1] == "scripts/factory_evidence.py":
+            routed[1] = "scripts/factory_evidence_spine.py"
+        return super()._exec(
+            routed,
+            cwd=cwd,
+            env=env,
+            credential_scope=credential_scope,
+            timeout=timeout,
+            transcript=transcript,
+        )
+
     def validate_pr(self, pr_number: int, *, merge: bool = True) -> Path:
         result = super().validate_pr(pr_number, merge=merge)
         if not merge:
