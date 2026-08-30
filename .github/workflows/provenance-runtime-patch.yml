@@ -1,0 +1,48 @@
+name: provenance-runtime-patch
+
+on:
+  push:
+    branches:
+      - validation/df2-provenance-patch-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Assert exact defect-bearing head
+        env:
+          EXPECTED_SHA: 8dd0bc85d5f07e018ad116eb5a95400249a0f315
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Insert durable provenance publication before review handoff
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('factory_kernel/runtime.py')
+          text = path.read_text(encoding='utf-8')
+          anchor = '''            self._exec(\n                [\n                    "python", "scripts/factory_proof.py", "attach",\n                    "--proof", str(paths.artifacts / "final-green-proof.json"),\n                    "--pr", str(pr_number),\n                ],\n                cwd=worktree.path,\n                env=env,\n                credential_scope="github",\n                timeout=180,\n            )\n            self.github.add_pr_label(pr_number, self.config.labels["needs_review"])\n'''
+          replacement = '''            self._exec(\n                [\n                    "python", "scripts/factory_proof.py", "attach",\n                    "--proof", str(paths.artifacts / "final-green-proof.json"),\n                    "--pr", str(pr_number),\n                ],\n                cwd=worktree.path,\n                env=env,\n                credential_scope="github",\n                timeout=180,\n            )\n            self._exec(\n                [\n                    "python", "scripts/factory_provenance.py", "publish",\n                    "--pr", str(pr_number),\n                    "--artifacts", str(paths.artifacts),\n                ],\n                cwd=worktree.path,\n                env=env,\n                credential_scope="github",\n                timeout=240,\n                transcript=paths.transcripts / "provenance-publish.log",\n            )\n            self.github.add_pr_label(pr_number, self.config.labels["needs_review"])\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit(f'expected one builder handoff anchor, saw {text.count(anchor)}')
+          path.write_text(text.replace(anchor, replacement, 1), encoding='utf-8')
+          PY
+          git diff --check
+          grep -n "factory_provenance.py" factory_kernel/runtime.py
+
+      - name: Commit exact runtime fix
+        run: |
+          git config user.name 'Dark Factory Validation'
+          git config user.email 'dark-factory@users.noreply.github.com'
+          git add factory_kernel/runtime.py
+          git commit -m 'fix(factory): publish builder provenance before review handoff'
+          git push origin HEAD:rewrite/df2-repo-owned-factory
