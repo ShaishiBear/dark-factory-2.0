@@ -10,7 +10,7 @@ permissions:
   pull-requests: read
 
 env:
-  CANDIDATE_SHA: 077b0069ca4ae9077b481ee3b6f260a91536f0c1
+  CANDIDATE_SHA: 3af850a0b03f89a52aa24ae25bc5f8680d323e84
 
 jobs:
   preflight:
@@ -18,27 +18,24 @@ jobs:
     timeout-minutes: 20
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
       SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
-      YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
-      DARK_FACTORY_E2E_EMAIL: ${{ secrets.DARK_FACTORY_E2E_EMAIL }}
-      DARK_FACTORY_E2E_PASSWORD: ${{ secrets.DARK_FACTORY_E2E_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout exact rewrite candidate
-        uses: actions/checkout@v4
+      - name: Checkout exact rewrite candidate without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: rewrite/df2-repo-owned-factory
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Assert exact candidate head
         run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+          token: ''
 
       - name: Probe pinned Claude worker
         run: |
@@ -82,7 +79,7 @@ jobs:
             fi
           done
 
-      - name: Check repository surfaces and required secrets
+      - name: Check current unattended-worker prerequisites
         shell: bash
         run: |
           failed=0
@@ -91,6 +88,13 @@ jobs:
             failed=1
           else
             echo "GITHUB_ISSUES_ENABLED"
+          fi
+
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.protected')" != "true" ]; then
+            echo "MAIN_BRANCH_UNPROTECTED"
+            failed=1
+          else
+            echo "MAIN_BRANCH_PROTECTED"
           fi
 
           labels="$(gh label list -R "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name')"
@@ -112,15 +116,7 @@ jobs:
             fi
           done
 
-          for name in \
-            ANTHROPIC_API_KEY \
-            DATABASE_URL \
-            OPENROUTER_API_KEY \
-            JWT_SECRET \
-            SUPADATA_API_KEY \
-            YOUTUBE_CHANNEL_ID \
-            DARK_FACTORY_E2E_EMAIL \
-            DARK_FACTORY_E2E_PASSWORD
+          for name in ANTHROPIC_API_KEY OPENROUTER_API_KEY SUPADATA_API_KEY
           do
             if [ -n "${!name:-}" ]; then
               echo "SECRET_PRESENT $name"
