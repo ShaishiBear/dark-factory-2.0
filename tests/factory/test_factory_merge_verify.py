@@ -12,11 +12,38 @@ HEAD = "b" * 40
 TREE = "c" * 40
 MERGE = "d" * 40
 EVIDENCE = "e" * 64
+MANIFEST = "1" * 64
+PROVENANCE = "2" * 64
 
 
 class MergeVerifyTests(unittest.TestCase):
+    def spine(self, **overrides):
+        policy = m.load_policy(Path(__file__).parents[2] / ".factory/evidence-spine.json")
+        value = {
+            "version": "1.0",
+            "base_sha": BASE,
+            "head_sha": HEAD,
+            "policy_sha256": policy.sha256(),
+            "manifest_sha256": MANIFEST,
+            "builder_provenance_sha256": PROVENANCE,
+            "claims": [
+                {"claim_id": requirement.claim_id, "completion_level": 100}
+                for requirement in policy.requirements
+            ],
+            "completion_level": 100,
+        }
+        value.update(overrides)
+        return value
+
     def bundle(self, **overrides):
-        value = {"version": "5.0", "base_sha": BASE, "head_sha": HEAD}
+        value = {
+            "version": "5.0",
+            "base_sha": BASE,
+            "head_sha": HEAD,
+            "spine": self.spine(),
+            "run_manifest_sha256": MANIFEST,
+            "builder_provenance_sha256": PROVENANCE,
+        }
         value.update(overrides)
         return value
 
@@ -56,6 +83,34 @@ class MergeVerifyTests(unittest.TestCase):
         }
         values.update(overrides)
         return m.post_result(bundle, authorization, **values)
+
+    def test_pre_authorizes_exact_evidenced_base_head_and_tree(self):
+        result = self.authorize()
+        self.assertEqual(result["base_sha"], BASE)
+        self.assertEqual(result["head_sha"], HEAD)
+        self.assertEqual(result["head_tree_sha"], TREE)
+
+    def test_pre_rejects_missing_evidence_spine(self):
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=None))
+
+    def test_pre_rejects_incomplete_evidence_spine_claim(self):
+        spine = self.spine()
+        spine["claims"][0]["completion_level"] = 80
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=spine))
+
+    def test_pre_rejects_wrong_evidence_spine_policy(self):
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=self.spine(policy_sha256="f" * 64)))
+
+    def test_pre_rejects_stale_evidence_spine_head(self):
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=self.spine(head_sha="f" * 40)))
+
+    def test_pre_rejects_manifest_hash_not_matching_spine(self):
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(run_manifest_sha256="f" * 64))
 
     def test_pre_authorizes_exact_evidenced_base_head_and_tree(self):
         result = self.authorize()
