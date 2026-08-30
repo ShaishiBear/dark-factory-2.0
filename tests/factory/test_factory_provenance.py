@@ -113,6 +113,14 @@ class BuilderProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "frontier did not authorize"):
             self.pack()
 
+    def test_builder_publishes_provenance_before_review_handoff(self):
+        runtime = (Path(__file__).parents[2] / "factory_kernel/runtime.py").read_text(encoding="utf-8")
+        publish = '"python", "scripts/factory_provenance.py", "publish",'
+        handoff = 'self.github.add_pr_label(pr_number, self.config.labels["needs_review"])'
+        self.assertEqual(runtime.count(publish), 1)
+        self.assertEqual(runtime.count(handoff), 1)
+        self.assertLess(runtime.index(publish), runtime.index(handoff))
+
 
 if __name__ == "__main__":
     unittest.main()
