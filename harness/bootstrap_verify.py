@@ -19,10 +19,19 @@ trust-root inventory, policy hashes -- but never what would be *good enough*. Mi
 markers, mutation families, trust-root scope and pinned-policy scope all come from the external
 policy, and the candidate can only widen them, never narrow them.
 
-Evidence content is likewise separated from evidence provenance. A JSON file asserting "81/81" is
-not proof that anything ran 81 mutations. Counts are therefore parsed out of the raw validation
-log, whose digest the evidence document commits to and which the authorization records, so the
-numbers are recomputed rather than believed.
+Evidence content is likewise separated from evidence provenance, and measurement from parsing.
+This program once read its counts out of the aggregated validation log with an unconstrained
+regex search. Candidate-controlled programs write to that same log, so one line printed early
+decided what the authority believed: a run with six escaped mutations could be recorded as "1/1"
+and satisfy the caught-equals-total invariant. Searching a shared stream is not measurement.
+
+Measurements now come from a structured result produced by an external validation driver, which
+executes the pinned recipe, judges each stage by its exit status, and reads each count from that
+stage's own output while refusing ambiguity. This program never parses candidate output. It binds
+the driver and recipe digests the policy pins, the run identity the human names, and the raw log
+digest -- the last so a human can independently confirm against GitHub that the run exists,
+concluded successfully and executed this commit. It deliberately makes no network calls; a JSON
+file plus a text file is not provenance, and pretending otherwise would be worse than saying so.
 
 Properties that make this an authority rather than another component of what it judges:
 
@@ -54,13 +63,6 @@ SELF = Path(__file__).resolve()
 MANIFEST = ".factory/bootstrap/genesis.json"
 SHA256 = 64
 
-# Count extraction lives here, in the human-reviewed external verifier, so neither the candidate
-# nor the policy can redefine how an observation is read out of a log.
-COUNTERS = {
-    "focused_tests": r"FOCUSED_OK tests=(\d+)",
-    "unit_tests": r"UNIT_PASSED tests=(\d+)",
-    "static_checks": r"STATIC_OK checks=(\d+)",
-}
 # The manifest describes the tree. Anything that would let it define its own standard is refused.
 FORBIDDEN_MANIFEST_KEYS = ("evidence_requirements", "authorization", "approved_by", "minimum")
 
@@ -126,29 +128,24 @@ def check_policy_shape(policy: dict) -> None:
     string_list(policy.get("required_trust_root_prefixes"), "required_trust_root_prefixes")
     string_list(policy.get("required_trust_root_paths"), "required_trust_root_paths")
     string_list(policy.get("required_policy_files"), "required_policy_files")
-    string_list(policy.get("required_markers"), "required_markers")
     string_list(policy.get("required_mutation_families"), "required_mutation_families")
-    string_list(policy.get("required_external_evidence"), "required_external_evidence", allow_empty=True)
-    holdouts = policy.get("required_holdout_classes")
-    require(
-        isinstance(holdouts, dict) and holdouts
-        and all(isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in holdouts.items()),
-        "genesis policy required_holdout_classes is missing or invalid",
-    )
+    # A holdout class and an external requirement are each satisfied by a named stage that ran and
+    # exited zero, not by a string appearing somewhere in a shared log.
+    for key, allow_empty in (("required_holdout_classes", False), ("required_external_evidence", True)):
+        block = policy.get(key)
+        require(
+            isinstance(block, dict) and (block or allow_empty)
+            and all(isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in block.items()),
+            f"genesis policy {key} is missing or invalid",
+        )
     minimums = policy.get("minimum")
     require(isinstance(minimums, dict) and minimums, "genesis policy sets no minimums")
-    unknown = sorted(set(minimums) - set(COUNTERS))
-    require(not unknown, "genesis policy names unmeasurable minimums: " + ", ".join(unknown))
     for key, floor in sorted(minimums.items()):
         require(isinstance(floor, int) and floor > 0, f"genesis policy minimum {key} is invalid")
-    families = policy.get("mutation_family_markers")
-    require(
-        isinstance(families, dict)
-        and all(isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in families.items()),
-        "genesis policy mutation_family_markers is missing or invalid",
-    )
-    absent = [f for f in policy["required_mutation_families"] if f not in families]
-    require(not absent, "genesis policy requires unmeasurable mutation families: " + ", ".join(absent))
+    string_list(policy.get("required_stages"), "required_stages")
+    for key in ("validation_driver_sha256", "validation_recipe_sha256"):
+        value = str(policy.get(key) or "")
+        require(len(value) == SHA256, f"genesis policy does not pin {key}")
 
 
 def check_manifest_covers_policy(manifest: dict, policy: dict) -> tuple[list[str], dict, set[str]]:
@@ -204,8 +201,66 @@ def count(log: str, pattern: str, label: str) -> int:
     return int(match.group(1))  # type: ignore[union-attr]
 
 
-def check_evidence(policy: dict, evidence: dict, log: str, commit: str, run: str) -> dict:
-    """Observations are read out of the run's own log, not taken from the evidence document."""
+def check_result(policy: dict, result: dict, commit: str) -> dict:
+    """Read measurements from the pinned driver's structured result, never from candidate output."""
+    require(result.get("version") == "1.0", "validation result version must be 1.0")
+    require(
+        str(result.get("driver_sha256") or "") == policy["validation_driver_sha256"],
+        "validation result was not produced by the driver the policy pins",
+    )
+    require(
+        str(result.get("recipe_sha256") or "") == policy["validation_recipe_sha256"],
+        "validation result did not execute the recipe the policy pins",
+    )
+    require(
+        str(result.get("candidate_sha") or "") == commit,
+        "validation result is for a different commit than the one being authorized",
+    )
+    require(result.get("verdict") == "pass", "validation result did not pass")
+
+    stages = result.get("stages")
+    require(isinstance(stages, list) and stages, "validation result records no stages")
+    names = [str(s.get("name") or "") for s in stages if isinstance(s, dict)]
+    require(len(names) == len(stages) and all(names), "validation result has unnamed stages")
+    require(len(set(names)) == len(names), "validation result repeats a stage name")
+    mandatory = list(policy["required_stages"])
+    mandatory += [policy["required_holdout_classes"][k] for k in sorted(policy["required_holdout_classes"])]
+    mandatory += [policy["required_external_evidence"][k] for k in sorted(policy["required_external_evidence"])]
+    absent = sorted({s for s in mandatory if s not in names})
+    require(not absent, "validation result omits mandatory stages: " + ", ".join(absent))
+
+    measurements: dict[str, int] = {}
+    for stage in stages:
+        require(stage.get("exit") == 0, f"validation stage {stage.get('name')!r} did not succeed")
+        for key, value in (stage.get("measurements") or {}).items():
+            require(isinstance(value, int), f"measurement {key} is not an integer")
+            require(key not in measurements, f"measurement {key} is reported by more than one stage")
+            measurements[key] = value
+
+    for key, floor in sorted(policy["minimum"].items()):
+        require(key in measurements, f"validation result does not measure {key}")
+        require(
+            measurements[key] >= floor,
+            f"observed {key}={measurements[key]} is below the required {floor}",
+        )
+    for family in policy["required_mutation_families"]:
+        total, caught, not_injected = (
+            measurements.get(f"{family}_total"),
+            measurements.get(f"{family}_caught"),
+            measurements.get(f"{family}_not_injected"),
+        )
+        require(
+            None not in (total, caught, not_injected),
+            f"validation result does not measure the {family} family",
+        )
+        require(total > 0, f"observed {family} ran nothing")
+        require(caught == total, f"observed {family} let a mutation escape")
+        require(not_injected == 0, f"observed {family} failed to inject every mutation")
+    return measurements
+
+
+def check_evidence_identity(policy: dict, evidence: dict, commit: str, run: str) -> None:
+    """What the human attests about the run, so their independent GitHub check is auditable."""
     require(
         str(evidence.get("candidate_sha") or "") == commit,
         "final validation evidence is for a different commit than the one being authorized",
@@ -222,35 +277,6 @@ def check_evidence(policy: dict, evidence: dict, log: str, commit: str, run: str
         str(evidence.get("conclusion") or "") == "success",
         "final validation run did not conclude successfully",
     )
-    if policy.get("require_exact_final_head", True):
-        require(
-            re.search(rf"EXACT_HEAD_OK {re.escape(commit)}\b", log) is not None,
-            "validation log does not prove the run executed against the authorized head",
-        )
-
-    markers = list(policy["required_markers"])
-    markers += [policy["required_holdout_classes"][name] for name in sorted(policy["required_holdout_classes"])]
-    markers += list(policy["required_external_evidence"])
-    absent = [m for m in markers if m not in log]
-    require(not absent, "validation log is missing required markers: " + ", ".join(sorted(set(absent))))
-
-    observed: dict[str, object] = {}
-    for key, floor in sorted(policy["minimum"].items()):
-        actual = count(log, COUNTERS[key], key)
-        require(actual >= floor, f"observed {key}={actual} is below the required {floor}")
-        observed[key] = actual
-
-    for family in policy["required_mutation_families"]:
-        prefix = policy["mutation_family_markers"][family]
-        guard = rf"(?<![A-Z_]){re.escape(prefix)}"
-        total = count(log, guard + r"_TOTAL=(\d+)", f"{family} total")
-        caught = count(log, guard + r"_CAUGHT=(\d+)", f"{family} caught")
-        not_injected = count(log, guard + r"_NOT_INJECTED=(\d+)", f"{family} not-injected")
-        require(total > 0, f"observed {family} ran nothing")
-        require(caught == total, f"observed {family} let a mutation escape")
-        require(not_injected == 0, f"observed {family} failed to inject every mutation")
-        observed[family] = {"total": total, "caught": caught, "not_injected": not_injected}
-    return observed
 
 
 def verify(args: argparse.Namespace) -> dict:
@@ -324,19 +350,28 @@ def verify(args: argparse.Namespace) -> dict:
         require(path in listed, f"pinned policy is outside the trust root: {path}")
         require(digest(blob(repo, commit, path)) == str(recorded or ""), f"pinned policy changed: {path}")
 
-    # 5. Evidence for this exact commit, measured from the run's own log.
+    # 5. Evidence for this exact commit: identity attested by the human, measurements produced by
+    #    the pinned driver, and the raw log bound so the GitHub check can be made independently.
     evidence_path = Path(args.evidence).resolve()
     evidence = read_json(evidence_path, "final validation evidence")
+    check_evidence_identity(policy, evidence, commit, args.evidence_run)
+
+    result_path = Path(args.result).resolve()
+    result_bytes = result_path.read_bytes() if result_path.is_file() else b""
+    require(bool(result_bytes), f"validation result does not exist: {result_path}")
+    result_sha = digest(result_bytes)
+    require(
+        str(evidence.get("result_sha256") or "") == result_sha,
+        f"validation result does not match the digest the evidence commits to (actual {result_sha})",
+    )
+    observed = check_result(policy, read_json(result_path, "validation result"), commit)
+
     log_path = Path(args.evidence_log).resolve()
     require(log_path.is_file(), f"validation log does not exist: {log_path}")
-    log_bytes = log_path.read_bytes()
-    log_sha = digest(log_bytes)
+    log_sha = digest(log_path.read_bytes())
     require(
         str(evidence.get("log_sha256") or "") == log_sha,
         f"validation log does not match the digest the evidence commits to (actual {log_sha})",
-    )
-    observed = check_evidence(
-        policy, evidence, log_bytes.decode("utf-8", "replace"), commit, args.evidence_run
     )
 
     return {
@@ -355,6 +390,9 @@ def verify(args: argparse.Namespace) -> dict:
         "evidence_run": args.evidence_run,
         "evidence_sha256": digest(evidence_path.read_bytes()),
         "evidence_log_sha256": log_sha,
+        "validation_result_sha256": result_sha,
+        "validation_driver_sha256": policy["validation_driver_sha256"],
+        "validation_recipe_sha256": policy["validation_recipe_sha256"],
         "observed": observed,
         "approver": args.approver,
         "reason": args.reason,
@@ -382,6 +420,7 @@ def main() -> None:
     parser.add_argument("--expect-manifest", dest="expect_manifest")
     parser.add_argument("--evidence")
     parser.add_argument("--evidence-log", dest="evidence_log")
+    parser.add_argument("--result")
     parser.add_argument("--evidence-run", dest="evidence_run")
     parser.add_argument("--approver")
     parser.add_argument("--reason")
@@ -397,14 +436,15 @@ def main() -> None:
 
     supplied = (
         args.commit, args.policy, args.expect_policy, args.expect_verifier, args.expect_manifest,
-        args.evidence, args.evidence_log, args.evidence_run, args.approver, args.reason,
+        args.evidence, args.evidence_log, args.result, args.evidence_run,
+        args.approver, args.reason,
     )
     if not all(str(value or "").strip() for value in supplied):
         fail(
             "genesis authorization requires --commit, --policy, --expect-policy, "
-            "--expect-verifier, --expect-manifest, --evidence, --evidence-log, --evidence-run, "
-            "--approver and --reason; every one of them is supplied by a human at ceremony time, "
-            "not by the repository"
+            "--expect-verifier, --expect-manifest, --evidence, --evidence-log, --result, "
+            "--evidence-run, --approver and --reason; every one of them is supplied by a human "
+            "at ceremony time, not by the repository"
         )
     result = verify(args)
     payload = json.dumps(result, indent=2, sort_keys=True)

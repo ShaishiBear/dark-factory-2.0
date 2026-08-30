@@ -20,6 +20,7 @@ DEFECT_FILES = (
     MUTATION_DIR / "spine_defects.json",
     MUTATION_DIR / "independence_defects.json",
     MUTATION_DIR / "bootstrap_defects.json",
+    MUTATION_DIR / "genesis_driver_defects.json",
 )
 IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_DIRS = ("factory_kernel",)
@@ -45,6 +46,9 @@ COPY_FILES = (
     "harness/observe.py",
     "harness/immunity.py",
     "harness/bootstrap_verify.py",
+    "harness/genesis_validate.py",
+    "harness/genesis-recipe.json",
+    "harness/focused.py",
     "tests/factory/test_factory_security.py",
     "tests/factory/test_factory_security_evidence.py",
     "tests/factory/test_factory_evidence.py",
@@ -60,6 +64,7 @@ COPY_FILES = (
     "tests/factory/test_factory_evidence_closure.py",
     "tests/factory/test_factory_independence.py",
     "tests/factory/test_factory_bootstrap.py",
+    "tests/factory/test_factory_genesis_driver.py",
     "tests/factory/test_factory_spine.py",
     "tests/factory/test_factory_evidence_spine_runtime.py",
 )

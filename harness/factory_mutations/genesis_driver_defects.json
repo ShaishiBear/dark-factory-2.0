@@ -1,0 +1,59 @@
+{
+  "_what_this_is": [
+    "Adversarial regressions for the external genesis validation driver.",
+    "The driver replaces regex search over an aggregated log, where candidate programs also write.",
+    "These mutations attack what makes it a measurement: exit status as the verdict, per-stage",
+    "capture, and refusal of ambiguity rather than first-match resolution."
+  ],
+  "defects": [
+    {
+      "id": "genesis-driver-exit-status-ignored",
+      "file": "harness/genesis_validate.py",
+      "find": "    if proc.returncode == 0:",
+      "replace": "    if True:",
+      "why": "A stage that failed could still contribute measurements, so printed text would outrank the exit code."
+    },
+    {
+      "id": "genesis-driver-ambiguity-first-match",
+      "file": "harness/genesis_validate.py",
+      "find": "    if len(unique) != 1:",
+      "replace": "    if False and len(unique) != 1:",
+      "why": "An ambiguous marker would resolve to its first match, which is the log-spoofing hole the driver exists to close."
+    },
+    {
+      "id": "genesis-driver-absent-marker-tolerated",
+      "file": "harness/genesis_validate.py",
+      "find": "    if not found:\n        fail(f\"stage {name!r} did not report {marker!r}\")",
+      "replace": "    if not found:\n        return 0",
+      "why": "A stage that never reported a measurement would silently contribute zero."
+    },
+    {
+      "id": "genesis-driver-head-binding-disabled",
+      "file": "harness/genesis_validate.py",
+      "find": "    if head != args.commit:",
+      "replace": "    if False and head != args.commit:",
+      "why": "The driver could measure a tree other than the commit being authorized."
+    },
+    {
+      "id": "genesis-driver-stage-name-uniqueness-dropped",
+      "file": "harness/genesis_validate.py",
+      "find": "    if len(set(names)) != len(names) or not all(names):",
+      "replace": "    if False and (len(set(names)) != len(names) or not all(names)):",
+      "why": "Duplicate stage names could let one stage's result masquerade as another's."
+    },
+    {
+      "id": "genesis-driver-failed-stages-not-fatal",
+      "file": "harness/genesis_validate.py",
+      "find": "    if failed:\n        fail(",
+      "replace": "    if False and failed:\n        fail(",
+      "why": "The driver would emit a passing result even though mandatory stages failed."
+    },
+    {
+      "id": "genesis-driver-shared-output-measurement",
+      "file": "harness/genesis_validate.py",
+      "find": "    found = re.findall(marker, output)",
+      "replace": "    found = re.findall(marker, output) or ['0']",
+      "why": "A missing measurement would be fabricated rather than refused."
+    }
+  ]
+}

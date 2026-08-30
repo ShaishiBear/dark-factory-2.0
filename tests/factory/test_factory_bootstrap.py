@@ -37,32 +37,45 @@ def git(repo: Path, *args: str) -> str:
     return proc.stdout
 
 
-def log_text(commit: str, **over) -> str:
+DRIVER_SHA = "d" * 64
+RECIPE_SHA = "e" * 64
+STAGES = ("focused-factory-suite", "static-gate", "unit-gate", "quick-gate",
+          "application-mutations", "factory-mutations")
+
+
+def result_doc(commit: str, *, stages=None, **over) -> dict:
+    """A structured result of the shape the pinned external driver emits."""
     values = {
-        "focused": 316, "unit": 766, "static": 5,
-        "fm_total": 94, "fm_caught": 94, "fm_not": 0,
-        "am_total": 9, "am_caught": 9, "am_not": 0,
-        "head": commit,
+        "focused_tests": 328, "unit_tests": 766, "static_checks": 5,
+        "factory_mutations_total": 102, "factory_mutations_caught": 102,
+        "factory_mutations_not_injected": 0,
+        "application_mutations_total": 9, "application_mutations_caught": 9,
+        "application_mutations_not_injected": 0,
     }
     values.update(over)
-    return "\n".join(
-        [
-            f"EXACT_HEAD_OK {values['head']}",
-            f"FOCUSED_OK tests={values['focused']}",
-            f"STATIC_OK checks={values['static']}",
-            f"UNIT_PASSED tests={values['unit']}",
-            "GATE_OK mode=quick",
-            "HOLDOUT_CORE_OK", "HOLDOUT_CITATION_OK",
-            "IMMUNITY_OK entries=5 assertions=14",
-            f"MUTATIONS_TOTAL={values['am_total']}",
-            f"MUTATIONS_CAUGHT={values['am_caught']}",
-            f"MUTATIONS_NOT_INJECTED={values['am_not']}",
-            f"FACTORY_MUTATIONS_TOTAL={values['fm_total']}",
-            f"FACTORY_MUTATIONS_CAUGHT={values['fm_caught']}",
-            f"FACTORY_MUTATIONS_NOT_INJECTED={values['fm_not']}",
-            "FACTORY_MUTATIONS_OK",
-        ]
-    ) + "\n"
+    measured = {
+        "focused-factory-suite": {"focused_tests": values["focused_tests"]},
+        "static-gate": {"static_checks": values["static_checks"]},
+        "unit-gate": {"unit_tests": values["unit_tests"]},
+        "application-mutations": {
+            k: values[k] for k in values if k.startswith("application_mutations_")
+        },
+        "factory-mutations": {k: values[k] for k in values if k.startswith("factory_mutations_")},
+    }
+    names = STAGES if stages is None else tuple(stages)
+    return {
+        "version": "1.0",
+        "driver_sha256": DRIVER_SHA,
+        "recipe_sha256": RECIPE_SHA,
+        "candidate_sha": commit,
+        "verdict": "pass",
+        "failed_stages": [],
+        "stages": [
+            {"name": n, "argv": ["python", f"{n}.py"], "exit": 0,
+             "measurements": measured.get(n, {}), "output_sha256": "0" * 64}
+            for n in names
+        ],
+    }
 
 
 class Ceremony:
@@ -100,16 +113,14 @@ class Ceremony:
             "required_trust_root_prefixes": ["factory_kernel/", "harness/", "tests/factory/"],
             "required_trust_root_paths": ["factory_kernel/spine.py", "MISSION.md"],
             "required_policy_files": ["factory_kernel/spine.py"],
-            "required_markers": ["STATIC_OK", "UNIT_PASSED", "GATE_OK", "FACTORY_MUTATIONS_OK"],
-            "required_holdout_classes": {"core": "HOLDOUT_CORE_OK", "citation": "HOLDOUT_CITATION_OK"},
+            "required_stages": ["focused-factory-suite", "static-gate", "unit-gate",
+                                "application-mutations", "factory-mutations"],
+            "required_holdout_classes": {"quick": "quick-gate"},
+            "required_external_evidence": {},
             "required_mutation_families": ["factory_mutations", "application_mutations"],
-            "mutation_family_markers": {
-                "factory_mutations": "FACTORY_MUTATIONS",
-                "application_mutations": "MUTATIONS",
-            },
             "minimum": {"focused_tests": 300, "unit_tests": 700, "static_checks": 5},
-            "required_external_evidence": [],
-            "require_exact_final_head": True,
+            "validation_driver_sha256": DRIVER_SHA,
+            "validation_recipe_sha256": RECIPE_SHA,
         }
         value.update(over)
         return value
@@ -154,7 +165,7 @@ class Ceremony:
         git(self.path, "commit", "-qm", "genesis manifest")
         return sha256(raw)
 
-    def evidence(self, commit: str, log: str, **over) -> dict:
+    def evidence(self, commit: str, log: str, result: dict, **over) -> dict:
         value = {
             "repository": "example/repo",
             "workflow": "independence-validation",
@@ -163,12 +174,14 @@ class Ceremony:
             "conclusion": "success",
             "candidate_sha": commit,
             "log_sha256": sha256(log.encode()),
+            "result_sha256": sha256(json.dumps(result, indent=2, sort_keys=True).encode() + b"\n"),
         }
         value.update(over)
         return value
 
     def run(self, *, policy=None, manifest_sha=None, verifier=None, expect_policy=None,
-            commit=None, evidence=None, log=None, policy_path=None, run_url=None, extra=None):
+            commit=None, evidence=None, log=None, result=None, policy_path=None,
+            run_url=None, extra=None):
         head = git(self.path, "rev-parse", "HEAD").strip()
         target = commit or head
         raw = subprocess.run(
@@ -177,10 +190,15 @@ class Ceremony:
         ).stdout
         policy_value = policy if policy is not None else self.policy()
         ppath = policy_path or self.write_policy(policy_value)
-        log_value = log if log is not None else log_text(target)
+        log_value = log if log is not None else "raw ci log\n"
         log_file = self.tmp / "run.log"
         log_file.write_text(log_value, encoding="utf-8")
-        ev = evidence if evidence is not None else self.evidence(target, log_value)
+        result_value = result if result is not None else result_doc(target)
+        result_file = self.tmp / "validation-result.json"
+        result_file.write_text(
+            json.dumps(result_value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        ev = evidence if evidence is not None else self.evidence(target, log_value, result_value)
         ev_file = self.tmp / "evidence.json"
         ev_file.write_text(json.dumps(ev), encoding="utf-8")
         argv = [
@@ -191,6 +209,7 @@ class Ceremony:
             "--expect-verifier", verifier or self.verifier_sha(),
             "--expect-manifest", manifest_sha or sha256(raw),
             "--evidence", str(ev_file), "--evidence-log", str(log_file),
+            "--result", str(result_file),
             "--evidence-run", run_url or "https://example.invalid/run/12345",
             "--approver", "repository owner",
             "--reason", "genesis: this PR replaces the machinery governing future PRs",
@@ -225,9 +244,12 @@ class GenesisCeremonyTests(unittest.TestCase):
             "genesis_policy_sha256", "verifier_sha256", "manifest_sha256", "evidence_sha256",
             "evidence_log_sha256", "evidence_run", "candidate_tree", "base_sha",
             "approver", "reason", "authorized_at", "repository",
+            "validation_result_sha256", "validation_driver_sha256", "validation_recipe_sha256",
         ):
             self.assertTrue(str(auth.get(field) or "").strip(), field)
-        self.assertEqual(auth["observed"]["factory_mutations"]["caught"], 94)
+        self.assertEqual(auth["observed"]["factory_mutations_caught"], 102)
+        self.assertEqual(auth["validation_driver_sha256"], DRIVER_SHA)
+        self.assertEqual(auth["validation_recipe_sha256"], RECIPE_SHA)
 
     # ---------- the external policy is not the candidate's to write ----------
 
@@ -318,23 +340,118 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertNotIn(MANIFEST_REL, after)
 
-    # ---------- evidence content versus evidence provenance ----------
+    # ---------- measurement lives in the pinned driver, not in candidate output ----------
 
-    def test_counts_come_from_the_log_not_the_evidence_document(self):
-        """A document asserting good numbers proves nothing if the log disagrees."""
+    def test_measurements_come_from_the_structured_result(self):
+        """A weak measurement in the driver's result is refused however the log reads."""
         self.c.write_manifest(self.c.manifest())
-        log = log_text(git(self.c.path, "rev-parse", "HEAD").strip(), unit=10)
-        proc = self.c.run(log=log)
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(result=result_doc(head, unit_tests=10))
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("observed unit_tests=10 is below the required 700", proc.stderr)
 
-    def test_fabricated_evidence_for_no_real_run_is_refused(self):
+    def test_marker_shaped_text_in_the_log_cannot_supply_a_measurement(self):
+        """The historical spoof: candidate stdout printing authority-looking markers."""
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        real = log_text(head)
-        proc = self.c.run(log=real, evidence=self.c.evidence(head, real, log_sha256="9" * 64))
+        spoof = (
+            "FOCUSED_OK tests=999999\nFACTORY_MUTATIONS_TOTAL=1\n"
+            "FACTORY_MUTATIONS_CAUGHT=1\nFACTORY_MUTATIONS_NOT_INJECTED=0\n"
+        )
+        result = result_doc(head, factory_mutations_caught=100)  # a real escape
+        proc = self.c.run(log=spoof, result=result)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("let a mutation escape", proc.stderr)
+
+    def test_result_not_produced_by_the_pinned_driver_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(result=result_doc(head, **{}) | {"driver_sha256": "a" * 64})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not produced by the driver the policy pins", proc.stderr)
+
+    def test_result_from_another_recipe_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(result=result_doc(head) | {"recipe_sha256": "b" * 64})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("did not execute the recipe the policy pins", proc.stderr)
+
+    def test_omitted_mandatory_stage_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        remaining = [s for s in STAGES if s != "static-gate"]
+        proc = self.c.run(result=result_doc(head, stages=remaining))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("omits mandatory stages: static-gate", proc.stderr)
+
+    def test_omitted_holdout_stage_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        remaining = [s for s in STAGES if s != "quick-gate"]
+        proc = self.c.run(result=result_doc(head, stages=remaining))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("omits mandatory stages: quick-gate", proc.stderr)
+
+    def test_failed_stage_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        result = result_doc(head)
+        result["stages"][1]["exit"] = 1
+        proc = self.c.run(result=result)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("did not succeed", proc.stderr)
+
+    def test_duplicate_stage_names_are_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        result = result_doc(head)
+        result["stages"].append(dict(result["stages"][0]))
+        proc = self.c.run(result=result)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("repeats a stage name", proc.stderr)
+
+    def test_substituted_result_document_is_refused(self):
+        """The evidence commits to the result's digest, so a swapped result fails closed."""
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        log = "raw ci log\n"
+        honest = result_doc(head)
+        proc = self.c.run(
+            log=log, result=result_doc(head, factory_mutations_total=1, factory_mutations_caught=1),
+            evidence=self.c.evidence(head, log, honest),
+        )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("does not match the digest the evidence commits to", proc.stderr)
+
+    def test_substituted_log_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        result = result_doc(head)
+        proc = self.c.run(
+            log="different log\n",
+            evidence=self.c.evidence(head, "raw ci log\n", result),
+            result=result,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("validation log does not match the digest", proc.stderr)
+
+    def test_result_for_another_commit_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(result=result_doc("0" * 40) | {"candidate_sha": "0" * 40})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("different commit than the one being authorized", proc.stderr)
+
+    def test_parent_commit_evidence_cannot_authorize_the_manifest_bearing_child(self):
+        parent = git(self.c.path, "rev-parse", "HEAD").strip()
+        self.c.write_manifest(self.c.manifest())
+        child = git(self.c.path, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(parent, child)
+        log, result = "raw ci log\n", result_doc(child)
+        proc = self.c.run(evidence=self.c.evidence(parent, log, result), log=log, result=result)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("different commit than the one being authorized", proc.stderr)
 
     def test_evidence_for_another_run_identity_is_refused(self):
         self.c.write_manifest(self.c.manifest())
@@ -342,66 +459,27 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("does not name the run identity supplied", proc.stderr)
 
-    def test_log_from_another_head_is_refused(self):
-        self.c.write_manifest(self.c.manifest())
-        head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(log=log_text(head, head=COMMIT_RE))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("did not prove the run executed against the authorized head", proc.stderr.replace("does not", "did not"))
-
-    def test_parent_commit_evidence_cannot_authorize_the_manifest_bearing_child(self):
-        parent = git(self.c.path, "rev-parse", "HEAD").strip()
-        self.c.write_manifest(self.c.manifest())
-        child = git(self.c.path, "rev-parse", "HEAD").strip()
-        self.assertNotEqual(parent, child)
-        log = log_text(child)
-        proc = self.c.run(evidence=self.c.evidence(parent, log), log=log)
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("different commit than the one being authorized", proc.stderr)
-
-    def test_missing_required_marker_is_refused(self):
-        self.c.write_manifest(self.c.manifest())
-        head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(log=log_text(head).replace("GATE_OK mode=quick\n", ""))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("missing required markers: GATE_OK", proc.stderr)
-
-    def test_missing_holdout_class_is_refused(self):
-        self.c.write_manifest(self.c.manifest())
-        head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(log=log_text(head).replace("HOLDOUT_CITATION_OK\n", ""))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("HOLDOUT_CITATION_OK", proc.stderr)
-
-    def test_omitted_mutation_family_is_refused(self):
-        self.c.write_manifest(self.c.manifest())
-        head = git(self.c.path, "rev-parse", "HEAD").strip()
-        log = "\n".join(
-            line for line in log_text(head).splitlines()
-            if not line.startswith("MUTATIONS_")
-        ) + "\n"
-        proc = self.c.run(log=log)
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("application_mutations", proc.stderr)
-
-    def test_mutation_invariant_is_enforced_from_the_log(self):
+    def test_mutation_invariant_is_enforced_from_the_result(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
         for over, expected in (
-            ({"fm_caught": 93}, "let a mutation escape"),
-            ({"fm_not": 2}, "failed to inject"),
-            ({"fm_total": 0, "fm_caught": 0}, "ran nothing"),
+            ({"factory_mutations_caught": 101}, "let a mutation escape"),
+            ({"factory_mutations_not_injected": 2}, "failed to inject"),
+            ({"factory_mutations_total": 0, "factory_mutations_caught": 0}, "ran nothing"),
         ):
             with self.subTest(over=over):
-                proc = self.c.run(log=log_text(head, **over))
+                proc = self.c.run(result=result_doc(head, **over))
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertIn(expected, proc.stderr)
 
     def test_unsuccessful_run_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        log = log_text(head)
-        proc = self.c.run(log=log, evidence=self.c.evidence(head, log, conclusion="failure"))
+        log, result = "raw ci log\n", result_doc(head)
+        proc = self.c.run(
+            log=log, result=result,
+            evidence=self.c.evidence(head, log, result, conclusion="failure"),
+        )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("did not conclude successfully", proc.stderr)
 
