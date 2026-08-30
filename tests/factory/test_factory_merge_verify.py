@@ -94,6 +94,10 @@ class MergeVerifyTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.authorize(bundle=self.bundle(spine=None))
 
+    def test_pre_rejects_spine_below_global_100_percent(self):
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=self.spine(completion_level=80)))
+
     def test_pre_rejects_incomplete_evidence_spine_claim(self):
         spine = self.spine()
         spine["claims"][0]["completion_level"] = 80
