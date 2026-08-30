@@ -19,6 +19,13 @@
       "why": "Tampered embedded builder artifacts could survive the fresh-validator handoff."
     },
     {
+      "id": "provenance-builder-publication-removed",
+      "file": "factory_kernel/runtime.py",
+      "find": "\"python\", \"scripts/factory_provenance.py\", \"publish\",",
+      "replace": "\"python\", \"scripts/factory_provenance.py\", \"disabled-publish\",",
+      "why": "The builder could label a PR ready for fresh validation without first publishing durable exact-head provenance."
+    },
+    {
       "id": "evidence-spine-production-route-falls-back",
       "file": "factory_kernel/worker_runtime.py",
       "find": "routed[1] = \"scripts/factory_evidence_spine.py\"",
