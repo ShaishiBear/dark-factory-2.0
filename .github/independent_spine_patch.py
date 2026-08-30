@@ -1,0 +1,186 @@
+from pathlib import Path
+
+path = Path('factory_kernel/evidence_closure.py')
+text = path.read_text(encoding='utf-8')
+
+old_import = 'from pathlib import Path\n'
+if text.count(old_import) != 1:
+    raise SystemExit(f'Path import anchor count={text.count(old_import)}')
+text = text.replace(old_import, 'from pathlib import Path, PurePosixPath\n', 1)
+
+old_authorities = '    "design": "architecture-conformance-worker",\n    "architecture-governor": "architecture-conformance-worker",'
+if text.count(old_authorities) != 1:
+    raise SystemExit(f'authority anchor count={text.count(old_authorities)}')
+text = text.replace(
+    old_authorities,
+    '    "design": "fresh-design-verifier",\n    "architecture-governor": "fresh-governor-verifier",',
+    1,
+)
+
+marker = '\ndef compile_full_spine(\n'
+if text.count(marker) != 1:
+    raise SystemExit(f'compile_full_spine marker count={text.count(marker)}')
+helper = r'''
+
+def _string_list(value: object, label: str, *, allow_empty: bool = False) -> list[str]:
+    if not isinstance(value, list) or (not allow_empty and not value):
+        raise ValueError(f"fresh independent {label} must be a {'possibly empty' if allow_empty else 'non-empty'} list")
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"fresh independent {label} must contain non-empty strings")
+    if len(value) != len(set(value)):
+        raise ValueError(f"fresh independent {label} must not contain duplicates")
+    return list(value)
+
+
+def _safe_path_list(value: object, label: str, *, allow_empty: bool = False) -> list[str]:
+    items = _string_list(value, label, allow_empty=allow_empty)
+    for raw in items:
+        path = PurePosixPath(raw)
+        if path.is_absolute() or ".." in path.parts or raw != path.as_posix():
+            raise ValueError(f"fresh independent {label} contains unsafe path {raw!r}")
+    return items
+
+
+def _overlaps(path: str, prefix: str) -> bool:
+    left, right = path.rstrip("/"), prefix.rstrip("/")
+    return left == right or left.startswith(right + "/") or right.startswith(left + "/")
+
+
+def _applicable_ids(entries: object, files: list[str], path_key: str, *, active_only: bool = False) -> list[str]:
+    if not isinstance(entries, list):
+        raise ValueError("fresh independent architecture policy collection is invalid")
+    result: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping) or not isinstance(entry.get("id"), str) or not entry["id"].strip():
+            raise ValueError("fresh independent architecture policy entry is invalid")
+        if active_only and entry.get("active") is not True:
+            continue
+        paths = entry.get(path_key)
+        if not isinstance(paths, list) or any(not isinstance(item, str) or not item for item in paths):
+            raise ValueError("fresh independent architecture policy path scope is invalid")
+        if any(_overlaps(path, prefix) for path in files for prefix in paths):
+            result.append(str(entry["id"]))
+    return sorted(result)
+
+
+def _builder_content(pack: Mapping[str, Any], claim_id: str) -> Mapping[str, Any]:
+    artifacts = pack.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise ValueError("builder provenance artifacts are invalid")
+    record = artifacts.get(claim_id)
+    if not isinstance(record, Mapping) or not isinstance(record.get("content"), Mapping):
+        raise ValueError(f"builder provenance lacks canonical {claim_id} content")
+    return record["content"]
+
+
+def _fresh_design_governor_authority(pack: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    """Fresh validator-side semantic verification, independent of builder conformance."""
+    contract = _builder_content(pack, "contract")
+    context = _builder_content(pack, "context")
+    policy = _builder_content(pack, "architecture-policy")
+    design = _builder_content(pack, "design")
+    governor = _builder_content(pack, "architecture-governor")
+
+    if contract.get("version") != "2.0" or context.get("version") != "1.0":
+        raise ValueError("fresh independent design authority received invalid contract/context versions")
+    if design.get("version") != "1.0" or policy.get("version") != "1.0":
+        raise ValueError("fresh independent design authority received invalid design/policy versions")
+
+    contract_hash = sha256_value(contract)
+    context_hash = sha256_value(context)
+    design_hash = sha256_value(design)
+    policy_hash = sha256_value(policy)
+    if context.get("contract_sha256") != contract_hash:
+        raise ValueError("fresh independent context is not bound to canonical contract")
+    if design.get("contract_sha256") != contract_hash or design.get("context_sha256") != context_hash:
+        raise ValueError("fresh independent design is not bound to canonical contract/context")
+
+    behaviors = contract.get("behaviors")
+    if not isinstance(behaviors, list) or not behaviors:
+        raise ValueError("fresh independent contract has no acceptance behaviors")
+    acceptance_ids = [item.get("id") for item in behaviors if isinstance(item, Mapping)]
+    if len(acceptance_ids) != len(behaviors) or any(not isinstance(item, str) or not item for item in acceptance_ids):
+        raise ValueError("fresh independent contract acceptance ids are invalid")
+    if len(acceptance_ids) != len(set(acceptance_ids)):
+        raise ValueError("fresh independent contract acceptance ids are duplicated")
+
+    _string_list(design.get("modules"), "design modules")
+    seams = _string_list(design.get("seams"), "design seams")
+    _string_list(design.get("invariants"), "design invariants")
+    _string_list(design.get("data_flows"), "design data_flows")
+    if not isinstance(design.get("public_interfaces"), list):
+        raise ValueError("fresh independent design public_interfaces must be a list")
+    planned = _safe_path_list(design.get("planned_files"), "design planned_files")
+    allowed_new = _safe_path_list(design.get("allowed_new_files"), "design allowed_new_files", allow_empty=True)
+    context_files = _safe_path_list(context.get("files"), "context files")
+    if not set(allowed_new).issubset(set(planned)):
+        raise ValueError("fresh independent allowed_new_files are outside planned_files")
+    if set(planned) - set(context_files) - set(allowed_new):
+        raise ValueError("fresh independent design contains planned files outside validated context/new-file envelope")
+
+    mapping = design.get("ac_mapping")
+    if not isinstance(mapping, Mapping) or set(mapping) != set(acceptance_ids):
+        raise ValueError("fresh independent design AC mapping does not exactly cover contract acceptance ids")
+    for acceptance_id, mapped in mapping.items():
+        if not isinstance(mapped, list) or not mapped or any(not isinstance(item, str) or item not in seams for item in mapped):
+            raise ValueError(f"fresh independent design AC mapping is invalid for {acceptance_id}")
+
+    if governor.get("version") != "1.0" or governor.get("decision") != "proceed":
+        raise ValueError("fresh independent governor did not authorize implementation")
+    if governor.get("convergence") not in {"improves", "neutral"}:
+        raise ValueError("fresh independent governor permits architectural regression")
+    expected_bindings = {
+        "policy_sha256": policy_hash,
+        "contract_sha256": contract_hash,
+        "context_sha256": context_hash,
+        "design_sha256": design_hash,
+    }
+    for key, expected in expected_bindings.items():
+        if governor.get(key) != expected:
+            raise ValueError(f"fresh independent governor {key} binding is stale")
+    source_files = sorted(set(context_files) | set(planned))
+    if governor.get("source_files") != source_files:
+        raise ValueError("fresh independent governor source-file envelope is stale")
+    expected_ids = {
+        "principles": _applicable_ids(policy.get("principles"), source_files, "scope"),
+        "migrations": _applicable_ids(policy.get("migrations"), source_files, "paths", active_only=True),
+        "debts": _applicable_ids(policy.get("debt"), source_files, "paths"),
+    }
+    for key, expected in expected_ids.items():
+        actual = governor.get(key)
+        if not isinstance(actual, list) or actual != expected or len(actual) != len(set(actual)):
+            raise ValueError(f"fresh independent governor {key} do not exactly match current policy applicability")
+    _string_list(governor.get("rationale"), "governor rationale")
+    if governor.get("required_changes") != []:
+        raise ValueError("fresh independent governor proceed decision carries required changes")
+
+    return {
+        "design": {
+            "verdict": "pass", "contract_sha256": contract_hash,
+            "context_sha256": context_hash, "design_sha256": design_hash,
+            "acceptance_ids": acceptance_ids, "planned_files": planned,
+            "allowed_new_files": allowed_new,
+        },
+        "architecture-governor": {
+            "verdict": "pass", "policy_sha256": policy_hash,
+            "contract_sha256": contract_hash, "context_sha256": context_hash,
+            "design_sha256": design_hash, "governor_sha256": sha256_value(governor),
+            "source_files": source_files, **expected_ids,
+        },
+    }
+'''
+text = text.replace(marker, helper + marker, 1)
+
+old = '''    _validate_builder_bindings(pack=pack, legacy=legacy_bundle, base_sha=base, head_sha=head)\n\n    builder_refs = {'''
+new = '''    _validate_builder_bindings(pack=pack, legacy=legacy_bundle, base_sha=base, head_sha=head)\n    fresh_builder_authority = _fresh_design_governor_authority(pack)\n\n    builder_refs = {'''
+if text.count(old) != 1:
+    raise SystemExit(f'builder binding insertion anchor count={text.count(old)}')
+text = text.replace(old, new, 1)
+
+old = '''        "design": {\n            "conformance_sha256": builder_refs["architecture-conformance"].sha256,\n            "verdict": pack["artifacts"]["architecture-conformance"]["content"].get("verdict"),\n        },\n        "architecture-governor": {\n            "conformance_sha256": builder_refs["architecture-conformance"].sha256,\n            "verdict": pack["artifacts"]["architecture-conformance"]["content"].get("verdict"),\n        },'''
+new = '''        "design": fresh_builder_authority["design"],\n        "architecture-governor": fresh_builder_authority["architecture-governor"],'''
+if text.count(old) != 1:
+    raise SystemExit(f'independent evidence replacement anchor count={text.count(old)}')
+text = text.replace(old, new, 1)
+
+path.write_text(text, encoding='utf-8')
