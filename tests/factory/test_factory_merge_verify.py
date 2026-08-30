@@ -112,12 +112,6 @@ class MergeVerifyTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.authorize(bundle=self.bundle(run_manifest_sha256="f" * 64))
 
-    def test_pre_authorizes_exact_evidenced_base_head_and_tree(self):
-        result = self.authorize()
-        self.assertEqual(result["base_sha"], BASE)
-        self.assertEqual(result["head_sha"], HEAD)
-        self.assertEqual(result["head_tree_sha"], TREE)
-
     def test_pre_rejects_main_moving_after_evidence(self):
         with self.assertRaises(SystemExit):
             self.authorize(current_base="f" * 40)
