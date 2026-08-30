@@ -100,25 +100,25 @@
       "why": "Evidence from some other run could be accepted as the run the human named at ceremony time."
     },
     {
-      "id": "bootstrap-exact-head-provenance-unchecked",
+      "id": "bootstrap-result-commit-binding-unchecked",
       "file": "harness/bootstrap_verify.py",
-      "find": "            re.search(rf\"EXACT_HEAD_OK {re.escape(commit)}\\b\", log) is not None,",
-      "replace": "            True or re.search(rf\"EXACT_HEAD_OK {re.escape(commit)}\\b\", log) is not None,",
-      "why": "A log that never proves which head it ran against could authorize genesis."
+      "find": "        str(result.get(\"candidate_sha\") or \"\") == commit,",
+      "replace": "        True or str(result.get(\"candidate_sha\") or \"\") == commit,",
+      "why": "A validation result measured against a different commit could authorize this one."
     },
     {
-      "id": "bootstrap-required-markers-ignored",
+      "id": "bootstrap-mandatory-stages-ignored",
       "file": "harness/bootstrap_verify.py",
-      "find": "    require(not absent, \"validation log is missing required markers: \" + \", \".join(sorted(set(absent))))",
-      "replace": "    require(True, \"validation log is missing required markers: \" + \", \".join(sorted(set(absent))))",
-      "why": "Genesis could be authorized without required validation stages or holdout classes having run."
+      "find": "    absent = sorted({s for s in mandatory if s not in names})",
+      "replace": "    absent = []",
+      "why": "A mandatory stage, holdout class or external requirement could be omitted from the run entirely."
     },
     {
       "id": "bootstrap-evidence-minimums-ignored",
       "file": "harness/bootstrap_verify.py",
-      "find": "        require(actual >= floor, f\"observed {key}={actual} is below the required {floor}\")",
-      "replace": "        require(True, f\"observed {key}={actual} is below the required {floor}\")",
-      "why": "Genesis could be authorized on evidence weaker than the external policy demands."
+      "find": "            measurements[key] >= floor,",
+      "replace": "            True or measurements[key] >= floor,",
+      "why": "Genesis could be authorized on measurements weaker than the external policy demands."
     },
     {
       "id": "bootstrap-escaped-mutation-evidence-accepted",

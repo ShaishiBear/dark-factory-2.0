@@ -55,7 +55,6 @@ import datetime as _dt
 import hashlib
 import json
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -193,12 +192,6 @@ def check_manifest_covers_policy(manifest: dict, policy: dict) -> tuple[list[str
         f"genesis manifest lists itself in the trust-root inventory: {MANIFEST}",
     )
     return prefixes, policies, set(files)
-
-
-def count(log: str, pattern: str, label: str) -> int:
-    match = re.search(pattern, log)
-    require(match is not None, f"validation log does not report {label}")
-    return int(match.group(1))  # type: ignore[union-attr]
 
 
 def check_result(policy: dict, result: dict, commit: str) -> dict:
