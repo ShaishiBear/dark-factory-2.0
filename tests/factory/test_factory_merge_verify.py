@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import unittest
 from pathlib import Path
@@ -16,6 +17,10 @@ MANIFEST = "1" * 64
 PROVENANCE = "2" * 64
 
 
+def _digest(claim_id: str, role: str) -> str:
+    return hashlib.sha256(f"{claim_id}:{role}".encode()).hexdigest()
+
+
 class MergeVerifyTests(unittest.TestCase):
     def spine(self, **overrides):
         policy = m.load_policy(Path(__file__).parents[2] / ".factory/evidence-spine.json")
@@ -27,7 +32,22 @@ class MergeVerifyTests(unittest.TestCase):
             "manifest_sha256": MANIFEST,
             "builder_provenance_sha256": PROVENANCE,
             "claims": [
-                {"claim_id": requirement.claim_id, "completion_level": 100}
+                {
+                    "claim_id": requirement.claim_id,
+                    "completion_level": 100,
+                    "artifact_sha256": _digest(requirement.claim_id, "artifact"),
+                    "deterministic_sha256": (
+                        _digest(requirement.claim_id, "deterministic")
+                        if requirement.deterministic_required
+                        else None
+                    ),
+                    "independent_sha256": (
+                        _digest(requirement.claim_id, "independent")
+                        if requirement.independent_required
+                        else None
+                    ),
+                    "exact_head_sha": HEAD if requirement.exact_head_required else None,
+                }
                 for requirement in policy.requirements
             ],
             "completion_level": 100,
@@ -101,6 +121,40 @@ class MergeVerifyTests(unittest.TestCase):
     def test_pre_rejects_incomplete_evidence_spine_claim(self):
         spine = self.spine()
         spine["claims"][0]["completion_level"] = 80
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=spine))
+
+    def test_pre_rejects_claim_missing_independent_certification(self):
+        """Merge authority re-derives independence from policy, not from the closure's summary."""
+        spine = self.spine()
+        row = next(r for r in spine["claims"] if r["claim_id"] == "design")
+        row["independent_sha256"] = None
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=spine))
+
+    def test_pre_rejects_claim_missing_deterministic_certification(self):
+        spine = self.spine()
+        next(r for r in spine["claims"] if r["claim_id"] == "impact")["deterministic_sha256"] = None
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=spine))
+
+    def test_pre_rejects_deterministic_certification_reused_as_independent(self):
+        spine = self.spine()
+        row = next(r for r in spine["claims"] if r["claim_id"] == "architecture-governor")
+        row["independent_sha256"] = row["deterministic_sha256"]
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=spine))
+
+    def test_pre_rejects_claim_that_independently_certifies_itself(self):
+        spine = self.spine()
+        row = next(r for r in spine["claims"] if r["claim_id"] == "design")
+        row["independent_sha256"] = row["artifact_sha256"]
+        with self.assertRaises(SystemExit):
+            self.authorize(bundle=self.bundle(spine=spine))
+
+    def test_pre_rejects_exact_head_claim_bound_to_another_head(self):
+        spine = self.spine()
+        next(r for r in spine["claims"] if r["claim_id"] == "green-proof")["exact_head_sha"] = "f" * 40
         with self.assertRaises(SystemExit):
             self.authorize(bundle=self.bundle(spine=spine))
 

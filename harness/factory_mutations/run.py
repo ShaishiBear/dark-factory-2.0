@@ -18,6 +18,7 @@ DEFECT_FILES = (
     MUTATION_DIR / "post_merge_defects.json",
     MUTATION_DIR / "benchmark_defects.json",
     MUTATION_DIR / "spine_defects.json",
+    MUTATION_DIR / "independence_defects.json",
 )
 IMMUNITY = ROOT / "harness" / "immunity.py"
 COPY_DIRS = ("factory_kernel",)
@@ -55,6 +56,8 @@ COPY_FILES = (
     "tests/factory/test_factory_immunity.py",
     "tests/factory/test_factory_provenance.py",
     "tests/factory/test_factory_evidence_closure.py",
+    "tests/factory/test_factory_independence.py",
+    "tests/factory/test_factory_spine.py",
     "tests/factory/test_factory_evidence_spine_runtime.py",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))

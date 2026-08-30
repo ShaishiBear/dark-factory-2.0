@@ -1,0 +1,110 @@
+{
+  "_what_this_is": [
+    "Adversarial regressions for authority separation on independently certified spine claims.",
+    "The historical defect these guard: the builder's post-code architecture-conformance artifact",
+    "was reused to fill the independent slots of the pre-code design and architecture-governor",
+    "claims, so the builder path certified itself and the manifest reported unearned independence.",
+    "Each mutation is injected only into an isolated copied trust root and must make the focused",
+    "authority suite fail."
+  ],
+  "defects": [
+    {
+      "id": "independence-builder-origin-check-removed",
+      "file": "factory_kernel/independence.py",
+      "find": "if judgement in builder_origin:",
+      "replace": "if False and judgement in builder_origin:",
+      "why": "A builder-produced artifact could be wrapped in an envelope and accepted as independent certification of the builder's own claim."
+    },
+    {
+      "id": "independence-authority-source-check-removed",
+      "file": "factory_kernel/independence.py",
+      "find": "if certificate.get(\"authority_id\") != spec.authority_id:",
+      "replace": "if False and certificate.get(\"authority_id\") != spec.authority_id:",
+      "why": "Any authority could fill any independent slot, so the registered authority separation would stop being enforced."
+    },
+    {
+      "id": "independence-claim-identity-aliased",
+      "file": "factory_kernel/independence.py",
+      "find": "if certificate.get(\"claim_id\") != claim_id:",
+      "replace": "if False and certificate.get(\"claim_id\") != claim_id:",
+      "why": "One certification could be aliased across claims, letting a design certificate silently satisfy the architecture-governor requirement."
+    },
+    {
+      "id": "independence-certificate-kind-unchecked",
+      "file": "factory_kernel/independence.py",
+      "find": "if certificate.get(\"kind\") != CERTIFICATE_KIND:",
+      "replace": "if False and certificate.get(\"kind\") != CERTIFICATE_KIND:",
+      "why": "A raw architecture-conformance artifact could be handed straight to an independent slot without ever being an independent certification."
+    },
+    {
+      "id": "independence-stale-head-accepted",
+      "file": "factory_kernel/independence.py",
+      "find": "if str(certificate.get(\"head_sha\") or \"\") != head_sha:",
+      "replace": "if False and str(certificate.get(\"head_sha\") or \"\") != head_sha:",
+      "why": "An independent certification issued against a different candidate head could be replayed onto this one."
+    },
+    {
+      "id": "independence-predecessor-binding-unchecked",
+      "file": "factory_kernel/independence.py",
+      "find": "        if expected is None or str(bindings.get(name) or \"\") != expected:",
+      "replace": "        if False and (expected is None or str(bindings.get(name) or \"\") != expected):",
+      "why": "A certification of some earlier contract/context/design could be reused after those inputs changed."
+    },
+    {
+      "id": "independence-design-certification-not-required-externally",
+      "file": "factory_kernel/independence.py",
+      "find": "        subject_claim=\"design\",\n        binds=(\"contract\", \"context\", \"architecture-policy\", \"design\"),\n        externally_supplied=True,",
+      "replace": "        subject_claim=\"design\",\n        binds=(\"contract\", \"context\", \"architecture-policy\", \"design\"),\n        externally_supplied=False,",
+      "why": "The design claim would stop requiring a separately executed independent certificate and fall back to whatever evidence closure happens to hold."
+    },
+    {
+      "id": "independence-governor-authority-aliased-to-conformance",
+      "file": "factory_kernel/independence.py",
+      "find": "authority_id=\"blinded-governor-certifier\",",
+      "replace": "authority_id=\"conformance-worker\",",
+      "why": "This is the original defect: the builder's post-code conformance worker registered as the independent authority certifying the pre-code governor decision."
+    },
+    {
+      "id": "spine-independent-requirement-bypassed",
+      "file": "factory_kernel/spine.py",
+      "find": "independent_ok = not requirement.independent_required or claim.independent is not None",
+      "replace": "independent_ok = True",
+      "why": "A claim missing its independent certification would still be assessed at level 80 and reach 100 percent completion."
+    },
+    {
+      "id": "evidence-closure-missing-independence-defaults-to-success",
+      "file": "factory_kernel/evidence_closure.py",
+      "find": "        independent = None\n        if requirement.independent_required:",
+      "replace": "        independent = None\n        if requirement.independent_required and claim_id in supplied:",
+      "why": "Omitting an independent certificate entirely would quietly skip the requirement instead of failing closed."
+    },
+    {
+      "id": "evidence-closure-unregistered-independence-ignored",
+      "file": "factory_kernel/evidence_closure.py",
+      "find": "        authority_for(claim_id)  # fail closed when policy requires unattainable independence",
+      "replace": "        pass  # fail closed when policy requires unattainable independence",
+      "why": "Raising the policy's required authority for a claim with no registered independent authority would not fail closed at closure."
+    },
+    {
+      "id": "merge-spine-independent-hash-unchecked",
+      "file": "harness/merge_verify.py",
+      "find": "            if not SHA256.fullmatch(independent):",
+      "replace": "            if False and not SHA256.fullmatch(independent):",
+      "why": "Merge authorization would accept a spine claim that policy requires to be independently certified but which carries no independent certification hash."
+    },
+    {
+      "id": "merge-spine-independence-reuse-allowed",
+      "file": "harness/merge_verify.py",
+      "find": "            if independent == deterministic:",
+      "replace": "            if False and independent == deterministic:",
+      "why": "A claim could present its deterministic validator's certificate as its independent certification and still authorize merge."
+    },
+    {
+      "id": "merge-spine-self-certification-allowed",
+      "file": "harness/merge_verify.py",
+      "find": "            if independent == str(row.get(\"artifact_sha256\") or \"\"):",
+      "replace": "            if False and independent == str(row.get(\"artifact_sha256\") or \"\"):",
+      "why": "A claim could point its independent slot at its own artifact and still authorize merge."
+    }
+  ]
+}

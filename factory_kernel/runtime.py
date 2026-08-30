@@ -22,6 +22,8 @@ from .config import KernelConfig
 from .credential_env import scoped_environment
 from .github_cli import GitHubClient
 from .providers import ClaudeCliProvider, prompt_text
+from .independence import build_certificate, verify_certificate
+from .provenance import verify_pack
 from .worktree import Worktree, create_detached, remove
 
 
@@ -500,6 +502,9 @@ class KernelRuntime:
                 changed_files=sorted(x for x in changed if x),
                 diff=patch,
             )
+            self._certify_precode_claims(
+                paths, head=head, base=base, issue=linked_issue
+            )
             self._write_json(
                 paths.artifacts / "validator-verdict.json",
                 {
@@ -594,6 +599,125 @@ class KernelRuntime:
             if not isinstance(value.get("findings"), list):
                 raise NeedsHuman("blinded holdout findings are invalid")
             self._write_json(paths.artifacts / "holdout.json", dict(value))
+            return value
+
+    # Post-code architecture conformance is a *different* claim about a *different* artifact.
+    # It is never a substitute for independently certifying the design the builder proposed or
+    # the governor decision that authorized it, so those get their own blinded authorities.
+    PRECODE_CERTIFIERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+        (
+            "design",
+            "design-certifier",
+            ("contract", "context", "architecture-policy", "design"),
+        ),
+        (
+            "architecture-governor",
+            "governor-certifier",
+            ("contract", "context", "architecture-policy", "design", "architecture-governor"),
+        ),
+    )
+
+    def _certify_precode_claims(
+        self, paths: RunPaths, *, head: str, base: str, issue: int | None
+    ) -> None:
+        """Issue genuinely independent certificates for the pre-code design and governor claims.
+
+        The builder cannot reach these authorities: they run on the validator, blinded to the
+        builder transcript, and the kernel -- not the model -- fills in every binding.
+        """
+        if not isinstance(issue, int) or isinstance(issue, bool) or issue <= 0:
+            raise NeedsHuman("cannot certify pre-code claims without a linked issue number")
+        pack_dir = paths.artifacts / "spine"
+        self._exec(
+            [
+                "python", "scripts/factory_provenance.py", "fetch",
+                "--head", head, "--base", base, "--issue", str(issue),
+                "--output-dir", str(pack_dir),
+            ],
+            cwd=self.repo_root,
+            env={"FACTORY_REPO": self.config.repository},
+            credential_scope="github",
+            timeout=240,
+            transcript=paths.transcripts / "provenance-fetch.log",
+        )
+        try:
+            pack = verify_pack(
+                self._read_json(pack_dir / "builder-provenance.json"),
+                expected_head_sha=head,
+                expected_base_sha=base,
+                expected_issue=issue,
+            )
+        except ValueError as exc:
+            raise NeedsHuman(f"builder provenance is unusable for certification: {exc}") from exc
+
+        hashes = {claim: record["sha256"] for claim, record in pack["artifacts"].items()}
+        values = {claim: record["content"] for claim, record in pack["artifacts"].items()}
+        target = paths.artifacts / "independent"
+        target.mkdir(parents=True, exist_ok=True)
+        for claim_id, role, inputs in self.PRECODE_CERTIFIERS:
+            judgement = self._run_precode_certifier(
+                paths,
+                claim_id=claim_id,
+                role=role,
+                inputs={key: values[key] for key in inputs},
+            )
+            certificate = build_certificate(
+                claim_id=claim_id,
+                claim_hashes=hashes,
+                head_sha=head,
+                base_sha=base,
+                judgement=judgement,
+            )
+            # Fail closed here as well as at closure: a certifier that echoed a builder artifact
+            # back must never be written to disk as if it were independent evidence.
+            verify_certificate(
+                certificate,
+                claim_id=claim_id,
+                claim_hashes=hashes,
+                builder_artifact_hashes=hashes,
+                head_sha=head,
+                base_sha=base,
+            )
+            self._write_json(target / f"{claim_id}.json", certificate)
+
+    def _run_precode_certifier(
+        self, paths: RunPaths, *, claim_id: str, role: str, inputs: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        suffix = (
+            "Return ONLY JSON with version 1.0; verdict pass|fail; and findings as objects with "
+            "severity critical|high|medium|low and non-empty description. Judge only whether the "
+            "supplied artifact is a sound, complete and policy-consistent answer to the supplied "
+            "contract and context. You are not reviewing any implementation."
+        )
+        with tempfile.TemporaryDirectory(prefix=f"dark-factory-{role}-") as tmp:
+            prompt = prompt_text(
+                self.config.prompt_path("holdout", self.repo_root),
+                preamble=(
+                    f"You are the independent {claim_id} certifier, deliberately isolated from "
+                    "the builder's reasoning and from the repository checkout. " + suffix
+                ),
+                context=(
+                    f"{claim_id} CERTIFICATION INPUT:\n" + json.dumps(inputs, sort_keys=True)
+                ),
+            )
+            result = self.provider.run(
+                AgentRequest(
+                    role=role,
+                    prompt=prompt,
+                    cwd=tmp,
+                    model=self.config.provider.model,
+                    environment={},
+                    structured_schema={"type": "object"},
+                )
+            )
+            value = result.structured_output
+            if not isinstance(value, Mapping) or value.get("version") != "1.0":
+                raise NeedsHuman(f"independent {claim_id} certifier returned invalid JSON")
+            if not isinstance(value.get("findings"), list):
+                raise NeedsHuman(f"independent {claim_id} certifier findings are invalid")
+            if value.get("verdict") != "pass":
+                raise NeedsHuman(f"independent {claim_id} certifier rejected the {claim_id} claim")
+            self._write_json(paths.artifacts / f"{claim_id}-certification.json", dict(value))
             return value
 
     def _run_architecture_holdout(

@@ -1,0 +1,197 @@
+"""Structural authority separation for independently certified spine claims.
+
+These tests exist because the evidence spine once filled the independent slots of the pre-code
+``design`` and ``architecture-governor`` claims with the builder's own post-code
+architecture-conformance artifact. The manifest reported independence that had never been earned.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+import unittest
+
+from factory_kernel.canonical import sha256_value
+from factory_kernel.evidence_closure import DETERMINISTIC_AUTHORITIES, PRODUCERS
+from factory_kernel.independence import (
+    CERTIFICATE_KIND,
+    REGISTRY,
+    authority_for,
+    build_certificate,
+    externally_supplied_claims,
+    verify_certificate,
+)
+from factory_kernel.provenance import BUILDER_CLAIMS
+from factory_kernel.spine import load_policy
+
+ROOT = Path(__file__).parents[2]
+HEAD = "b" * 40
+BASE = "a" * 40
+
+
+def hashes() -> dict[str, str]:
+    return {
+        claim_id: sha256_value({"claim": claim_id})
+        for claim_id in (
+            "contract", "context", "architecture-policy", "design",
+            "architecture-governor", "architecture-drift", "architecture-conformance",
+        )
+    }
+
+
+def certificate(claim_id: str, **overrides) -> dict:
+    value = build_certificate(
+        claim_id=claim_id,
+        claim_hashes=hashes(),
+        head_sha=HEAD,
+        base_sha=BASE,
+        judgement={"version": "1.0", "verdict": "pass", "certifies": claim_id, "findings": []},
+    )
+    value.update(overrides)
+    return value
+
+
+def verify(claim_id: str, value: dict, *, builder: dict | None = None) -> dict:
+    return verify_certificate(
+        value,
+        claim_id=claim_id,
+        claim_hashes=hashes(),
+        builder_artifact_hashes=builder if builder is not None else {},
+        head_sha=HEAD,
+        base_sha=BASE,
+    )
+
+
+class RegistryTests(unittest.TestCase):
+    def test_every_independence_required_claim_has_a_registered_authority(self):
+        """Raising policy without adding an authority must fail here, not silently at merge."""
+        policy = load_policy(ROOT / ".factory" / "evidence-spine.json")
+        required = {
+            requirement.claim_id
+            for requirement in policy.requirements
+            if requirement.independent_required
+        }
+        self.assertTrue(required)
+        for claim_id in sorted(required):
+            self.assertEqual(authority_for(claim_id).claim_id, claim_id)
+
+    def test_unregistered_claims_fail_closed(self):
+        with self.assertRaisesRegex(ValueError, "no independent authority is registered"):
+            authority_for("impact")
+
+    def test_no_independent_authority_is_a_builder_or_deterministic_authority(self):
+        """An authority is only independent if it is nobody who produced or compiled the claim.
+
+        Disjointness is asserted against *every* producer, not just the claim's own, so an
+        independent slot cannot be quietly re-pointed at a builder-path worker such as the
+        post-code conformance worker.
+        """
+        producers = set(PRODUCERS.values())
+        for entry in REGISTRY:
+            self.assertNotIn(entry.authority_id, producers)
+            self.assertNotEqual(entry.authority_id, DETERMINISTIC_AUTHORITIES[entry.claim_id])
+
+    def test_pre_code_claims_are_certified_outside_evidence_closure(self):
+        self.assertEqual(
+            externally_supplied_claims(), frozenset({"design", "architecture-governor"})
+        )
+
+    def test_design_and_governor_do_not_share_one_authority(self):
+        self.assertNotEqual(
+            authority_for("design").authority_id,
+            authority_for("architecture-governor").authority_id,
+        )
+
+    def test_certificate_binds_the_whole_pre_code_chain(self):
+        self.assertEqual(
+            authority_for("architecture-governor").binds,
+            ("contract", "context", "architecture-policy", "design", "architecture-governor"),
+        )
+
+
+class CertificateTests(unittest.TestCase):
+    def test_valid_certificate_verifies(self):
+        for claim_id in ("design", "architecture-governor"):
+            evidence = verify(claim_id, certificate(claim_id))
+            self.assertEqual(evidence["verdict"], "pass")
+            self.assertEqual(evidence["head_sha"], HEAD)
+
+    def test_kernel_not_model_fills_the_bindings(self):
+        """A judgement claiming its own bindings cannot change the envelope."""
+        value = build_certificate(
+            claim_id="design",
+            claim_hashes=hashes(),
+            head_sha=HEAD,
+            base_sha=BASE,
+            judgement={
+                "version": "1.0", "verdict": "pass", "findings": [],
+                "bindings": {"design": "0" * 64}, "head_sha": "9" * 40,
+                "subject_sha256": "0" * 64,
+            },
+        )
+        self.assertEqual(value["subject_sha256"], hashes()["design"])
+        self.assertEqual(value["head_sha"], HEAD)
+        self.assertEqual(value["bindings"]["design"], hashes()["design"])
+
+    def test_raw_builder_artifact_is_not_a_certificate(self):
+        conformance = {"version": "1.0", "verdict": "conform", "head_sha": HEAD}
+        with self.assertRaisesRegex(ValueError, "is not an independent certification"):
+            verify("design", conformance)
+
+    def test_builder_judgement_is_refused_for_every_builder_claim(self):
+        builder = {claim_id: sha256_value({"builder": claim_id}) for claim_id in BUILDER_CLAIMS}
+        for source, digest in builder.items():
+            value = certificate("design", judgement_sha256=digest)
+            with self.assertRaisesRegex(ValueError, f"builder-produced artifact '{source}'"):
+                verify("design", value, builder=builder)
+
+    def test_builder_origin_is_checked_before_verdict_and_bindings(self):
+        """Origin is structural; a failing or unbound builder artifact is refused as builder-made."""
+        builder = {"architecture-conformance": sha256_value({"builder": "conformance"})}
+        value = certificate(
+            "design",
+            judgement_sha256=builder["architecture-conformance"],
+            verdict="fail",
+            bindings={"design": "0" * 64},
+        )
+        with self.assertRaisesRegex(ValueError, "builder-produced artifact"):
+            verify("design", value, builder=builder)
+
+    def test_wrong_authority_is_refused(self):
+        value = certificate("design", authority_id="architecture-conformance-worker")
+        with self.assertRaisesRegex(ValueError, "requires authority 'blinded-design-certifier'"):
+            verify("design", value)
+
+    def test_certificate_for_another_claim_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "certifies 'design'"):
+            verify("architecture-governor", certificate("design"))
+
+    def test_kind_must_be_an_independent_certification(self):
+        value = certificate("design", kind="architecture-conformance")
+        with self.assertRaisesRegex(ValueError, "is not an independent certification"):
+            verify("design", value)
+        self.assertEqual(certificate("design")["kind"], CERTIFICATE_KIND)
+
+    def test_stale_head_base_and_predecessor_bindings_are_refused(self):
+        with self.assertRaisesRegex(ValueError, "different head SHA"):
+            verify("design", certificate("design", head_sha="9" * 40))
+        with self.assertRaisesRegex(ValueError, "different base SHA"):
+            verify("design", certificate("design", base_sha="9" * 40))
+        for name in ("contract", "context", "architecture-policy", "design"):
+            value = certificate("design")
+            value["bindings"][name] = "0" * 64
+            with self.assertRaisesRegex(ValueError, f"not bound to this run's {name}"):
+                verify("design", value)
+
+    def test_forged_subject_and_failed_verdict_are_refused(self):
+        with self.assertRaisesRegex(ValueError, "does not certify the design artifact"):
+            verify("design", certificate("design", subject_sha256="0" * 64))
+        with self.assertRaisesRegex(ValueError, "did not pass"):
+            verify("design", certificate("design", verdict="fail"))
+
+    def test_certificate_cannot_certify_its_own_judgement(self):
+        value = certificate("design", judgement_sha256=hashes()["design"])
+        with self.assertRaisesRegex(ValueError, "certifies its own judgement"):
+            verify("design", value)
+
+
+if __name__ == "__main__":
+    unittest.main()

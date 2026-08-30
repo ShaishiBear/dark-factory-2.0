@@ -12,6 +12,7 @@ import sys
 from factory_kernel.canonical import canonical_bytes
 from factory_kernel.credential_env import scoped_environment
 from factory_kernel.evidence_closure import compile_full_spine
+from factory_kernel.independence import externally_supplied_claims
 from factory_kernel.provenance import verify_pack
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -162,6 +163,13 @@ def run(args: argparse.Namespace) -> None:
         )
         holdout = load(artifact_root / "holdout.json")
         architecture_holdout = load(Path(args.architecture_verdict).resolve())
+        # Certificates for independence-required claims are produced by separate validator-side
+        # authorities before closure. Reading them by registry means a new independent claim
+        # cannot be silently left unsupplied.
+        certificates = {
+            claim_id: load(artifact_root / "independent" / f"{claim_id}.json")
+            for claim_id in sorted(externally_supplied_claims())
+        }
         manifest, index = compile_full_spine(
             repo_root=ROOT,
             artifact_root=artifact_root,
@@ -170,6 +178,7 @@ def run(args: argparse.Namespace) -> None:
             holdout=holdout,
             architecture_holdout=architecture_holdout,
             pr_number=int(args.pr),
+            independent_certificates=certificates,
         )
     except ValueError as exc:
         fail(str(exc))

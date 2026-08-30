@@ -10,6 +10,12 @@ from typing import Any, Mapping
 
 from .canonical import canonical_bytes, sha256_file, sha256_value
 from .credential_env import scoped_environment
+from .independence import (
+    authority_for,
+    build_certificate,
+    externally_supplied_claims,
+    verify_certificate,
+)
 from .manifest import ArtifactRef, Certification, ClaimRecord, RunManifest
 from .provenance import BUILDER_CLAIMS, pack_sha256, verify_pack
 from .spine import compile_evidence_index, load_policy
@@ -61,14 +67,6 @@ DETERMINISTIC_AUTHORITIES = {
     "mutation": "mutation-runner",
     "ratchet": "ratchet-verifier",
     "immunity": "immunity-verifier",
-}
-
-INDEPENDENT_AUTHORITIES = {
-    "contract": "blinded-contract-holdout",
-    "design": "architecture-conformance-worker",
-    "architecture-governor": "architecture-conformance-worker",
-    "architecture-drift": "architecture-holdout",
-    "architecture-conformance": "architecture-holdout",
 }
 
 
@@ -314,6 +312,7 @@ def compile_full_spine(
     holdout: Mapping[str, Any],
     architecture_holdout: Mapping[str, Any],
     pr_number: int,
+    independent_certificates: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[RunManifest, dict]:
     repo = Path(repo_root).resolve()
     root = Path(artifact_root).resolve()
@@ -351,24 +350,46 @@ def compile_full_spine(
         run_id=f"pr-{pr_number}-evidence-{head[:12]}", issue=issue, base_sha=base
     )
 
-    # Independent authority inputs have already been separately executed by the validator.
-    independent_evidence: dict[str, Mapping[str, Any]] = {
-        "contract": {"holdout_sha256": sha256_value(holdout), "verdict": holdout.get("verdict")},
-        "design": {
-            "conformance_sha256": builder_refs["architecture-conformance"].sha256,
-            "verdict": pack["artifacts"]["architecture-conformance"]["content"].get("verdict"),
-        },
-        "architecture-governor": {
-            "conformance_sha256": builder_refs["architecture-conformance"].sha256,
-            "verdict": pack["artifacts"]["architecture-conformance"]["content"].get("verdict"),
-        },
-        "architecture-drift": {
-            "holdout_sha256": sha256_value(architecture_holdout), "verdict": architecture_holdout.get("verdict")
-        },
-        "architecture-conformance": {
-            "holdout_sha256": sha256_value(architecture_holdout), "verdict": architecture_holdout.get("verdict")
-        },
+    # Independent authorities are separately executed; closure only verifies their separation.
+    # A judgement produced anywhere on the builder path can never fill an independent slot: every
+    # certificate below is checked against the exact builder provenance hashes.
+    claim_hashes = {claim_id: ref.sha256 for claim_id, ref in refs.items()}
+    builder_hashes = {claim_id: ref.sha256 for claim_id, ref in builder_refs.items()}
+    external_claims = externally_supplied_claims()
+    supplied = dict(independent_certificates or {})
+    unexpected = sorted(set(supplied) - external_claims)
+    if unexpected:
+        raise ValueError(
+            "independent certificates supplied for claims that do not accept them: "
+            + ", ".join(unexpected)
+        )
+    # Judgements the validator already executed in-process; the kernel, not a model, binds them.
+    in_process_judgements: dict[str, Mapping[str, Any]] = {
+        "contract": holdout,
+        "architecture-drift": architecture_holdout,
+        "architecture-conformance": architecture_holdout,
     }
+
+    def _independent_certificate(claim_id: str) -> dict:
+        authority_for(claim_id)  # fail closed when policy requires unattainable independence
+        if claim_id in external_claims:
+            certificate = supplied.get(claim_id)
+            if certificate is None:
+                raise ValueError(
+                    f"policy requires independent certification of {claim_id}, but no "
+                    "independent certificate was supplied by the validator"
+                )
+            return dict(certificate)
+        judgement = in_process_judgements.get(claim_id)
+        if judgement is None:
+            raise ValueError(f"no independent authority input for required claim: {claim_id}")
+        return build_certificate(
+            claim_id=claim_id,
+            claim_hashes=claim_hashes,
+            head_sha=head,
+            base_sha=base,
+            judgement=judgement,
+        )
 
     deterministic_evidence: dict[str, Mapping[str, Any]] = {
         "contract": dict(legacy_bundle["contract"]),
@@ -409,15 +430,20 @@ def compile_full_spine(
         ) if requirement.deterministic_required else None
         independent = None
         if requirement.independent_required:
-            evidence = independent_evidence.get(claim_id)
-            authority = INDEPENDENT_AUTHORITIES.get(claim_id)
-            if evidence is None or authority is None or evidence.get("verdict") not in {"pass", "conform"}:
-                raise ValueError(f"required independent authority did not pass: {claim_id}")
+            certificate = _independent_certificate(claim_id)
+            evidence = verify_certificate(
+                certificate,
+                claim_id=claim_id,
+                claim_hashes=claim_hashes,
+                builder_artifact_hashes=builder_hashes,
+                head_sha=head,
+                base_sha=base,
+            )
             independent = _cert(
                 root,
                 claim_id=claim_id,
                 kind="independent",
-                authority_id=authority,
+                authority_id=evidence["authority_id"],
                 subject=subject,
                 evidence=evidence,
             )

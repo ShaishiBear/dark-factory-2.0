@@ -26,6 +26,8 @@ ROLE_TOOLS: dict[str, tuple[str, ...]] = {
     "conformance": WRITE_TOOLS,
     "holdout": (),
     "architecture-holdout": (),
+    "design-certifier": (),
+    "governor-certifier": (),
 }
 
 REPO_MUTATION_ROLES = frozenset({"test_author", "implement", "repair"})

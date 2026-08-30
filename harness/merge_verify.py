@@ -80,6 +80,29 @@ def verify_spine(bundle: dict, base: str, head: str) -> None:
     if any(not isinstance(row, dict) or row.get("completion_level") != 100 for row in claims):
         die("one or more evidence-spine claims are below 100 percent")
 
+    # A completion number is the closure's own summary of its work. Merge authority re-derives the
+    # independence requirement from the protected policy and checks the certificate hashes itself,
+    # so a weakened closure cannot buy merge with a 100 it did not earn.
+    rows = {row["claim_id"]: row for row in claims}
+    for requirement in policy.requirements:
+        row = rows[requirement.claim_id]
+        deterministic = str(row.get("deterministic_sha256") or "")
+        independent = str(row.get("independent_sha256") or "")
+        if requirement.deterministic_required and not SHA256.fullmatch(deterministic):
+            die(f"spine claim {requirement.claim_id} has no deterministic certification hash")
+        if requirement.independent_required:
+            if not SHA256.fullmatch(independent):
+                die(f"spine claim {requirement.claim_id} has no independent certification hash")
+            if independent == deterministic:
+                die(
+                    f"spine claim {requirement.claim_id} reuses its deterministic certification "
+                    "as independent evidence"
+                )
+            if independent == str(row.get("artifact_sha256") or ""):
+                die(f"spine claim {requirement.claim_id} independently certifies itself")
+        if requirement.exact_head_required and row.get("exact_head_sha") != head:
+            die(f"spine claim {requirement.claim_id} is not bound to the exact candidate head")
+
     manifest = str(spine.get("manifest_sha256") or "")
     provenance = str(spine.get("builder_provenance_sha256") or "")
     if not SHA256.fullmatch(manifest) or bundle.get("run_manifest_sha256") != manifest:

@@ -8,12 +8,32 @@ from unittest.mock import patch
 
 from factory_kernel.canonical import canonical_bytes, sha256_value
 from factory_kernel.evidence_closure import compile_full_spine
+from factory_kernel.independence import build_certificate
 from factory_kernel.provenance import BUILDER_CLAIMS, verify_pack
+from factory_kernel.spine import load_policy
 
 ROOT = Path(__file__).parents[2]
 BASE = "a" * 40
 HEAD = "b" * 40
 ISSUE = 7
+
+
+IMMUNITY_RESULT = {
+    "registry_sha256": "e" * 64,
+    "active_entries": 3,
+    "assertions": 7,
+    "entry_ids": ["IMM-001", "IMM-002", "IMM-003"],
+}
+
+
+def judgement(claim_id: str) -> dict:
+    """A blinded pre-code certifier's non-authoritative judgement."""
+    return {
+        "version": "1.0",
+        "verdict": "pass",
+        "certifies": claim_id,
+        "findings": [],
+    }
 
 
 class EvidenceClosureTests(unittest.TestCase):
@@ -140,23 +160,43 @@ class EvidenceClosureTests(unittest.TestCase):
             "harness_sha256": "f" * 64,
             "observed": observed,
         }
+        self.hashes = dict(hashes)
         return pack, legacy
+
+    def certificates(self, *, head: str = HEAD, base: str = BASE, **overrides) -> dict:
+        certs = {
+            claim_id: build_certificate(
+                claim_id=claim_id,
+                claim_hashes=self.hashes,
+                head_sha=head,
+                base_sha=base,
+                judgement=judgement(claim_id),
+            )
+            for claim_id in ("design", "architecture-governor")
+        }
+        certs.update(overrides)
+        return certs
+
+    def close(self, root: Path, pack, legacy, certificates, **kwargs):
+        return compile_full_spine(
+            repo_root=ROOT,
+            artifact_root=root,
+            legacy_bundle=legacy,
+            builder_pack=pack,
+            holdout={"version": "1.0", "verdict": "pass"},
+            architecture_holdout={"version": "1.0", "verdict": "pass", "convergence": "improves"},
+            pr_number=42,
+            independent_certificates=certificates,
+            **kwargs,
+        )
 
     @patch("factory_kernel.evidence_closure._load_immunity")
     def test_complete_spine_reaches_100_percent_for_all_required_claims(self, immunity):
-        immunity.return_value = {
-            "registry_sha256": "e" * 64, "active_entries": 3,
-            "assertions": 7, "entry_ids": ["IMM-001", "IMM-002", "IMM-003"],
-        }
+        immunity.return_value = IMMUNITY_RESULT
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             pack, legacy = self.fixture(root)
-            manifest, index = compile_full_spine(
-                repo_root=ROOT, artifact_root=root, legacy_bundle=legacy,
-                builder_pack=pack, holdout={"version": "1.0", "verdict": "pass"},
-                architecture_holdout={"version": "1.0", "verdict": "pass", "convergence": "improves"},
-                pr_number=42,
-            )
+            manifest, index = self.close(root, pack, legacy, self.certificates())
             self.assertEqual(index["completion_level"], 100)
             self.assertEqual(len(index["claims"]), 21)
             self.assertTrue(all(row["completion_level"] == 100 for row in index["claims"]))
@@ -165,22 +205,199 @@ class EvidenceClosureTests(unittest.TestCase):
             self.assertTrue((root / "spine/evidence-index.json").is_file())
 
     @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_independent_design_certification_satisfies_the_design_claim(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            manifest, _index = self.close(root, pack, legacy, self.certificates())
+            design = manifest.claim("design")
+            self.assertIsNotNone(design.independent)
+            self.assertEqual(design.independent.authority_id, "blinded-design-certifier")
+            self.assertNotEqual(design.independent.authority_id, design.producer)
+            self.assertNotEqual(
+                design.independent.authority_id, design.deterministic.authority_id
+            )
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_independent_governor_authority_satisfies_the_governor_claim(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            manifest, _index = self.close(root, pack, legacy, self.certificates())
+            governor = manifest.claim("architecture-governor")
+            self.assertIsNotNone(governor.independent)
+            self.assertEqual(governor.independent.authority_id, "blinded-governor-certifier")
+            self.assertNotEqual(
+                governor.independent.authority_id,
+                manifest.claim("design").independent.authority_id,
+            )
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_builder_design_evidence_cannot_fill_its_own_independent_slot(self, immunity):
+        """The builder's own design artifact may not certify the design claim."""
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            forged = build_certificate(
+                claim_id="design",
+                claim_hashes=self.hashes,
+                head_sha=HEAD,
+                base_sha=BASE,
+                judgement=pack["artifacts"]["design"]["content"],
+            )
+            with self.assertRaisesRegex(ValueError, "builder-produced artifact 'design'"):
+                self.close(root, pack, legacy, self.certificates(design=forged))
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_architecture_conformance_cannot_substitute_for_design_certification(self, immunity):
+        """The exact historical defect: post-code conformance reused as pre-code independence."""
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            forged = build_certificate(
+                claim_id="design",
+                claim_hashes=self.hashes,
+                head_sha=HEAD,
+                base_sha=BASE,
+                judgement=pack["artifacts"]["architecture-conformance"]["content"],
+            )
+            with self.assertRaisesRegex(
+                ValueError, "builder-produced artifact 'architecture-conformance'"
+            ):
+                self.close(root, pack, legacy, self.certificates(design=forged))
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_conformance_cannot_counterfeit_governor_independence(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            forged = build_certificate(
+                claim_id="architecture-governor",
+                claim_hashes=self.hashes,
+                head_sha=HEAD,
+                base_sha=BASE,
+                judgement=pack["artifacts"]["architecture-conformance"]["content"],
+            )
+            with self.assertRaisesRegex(
+                ValueError, "builder-produced artifact 'architecture-conformance'"
+            ):
+                self.close(
+                    root, pack, legacy, self.certificates(**{"architecture-governor": forged})
+                )
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_governor_certificate_cannot_be_aliased_from_the_design_certificate(self, immunity):
+        """A design certification is not a governor certification, however well formed."""
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            certs = self.certificates()
+            with self.assertRaisesRegex(ValueError, "certifies 'design'"):
+                self.close(
+                    root, pack, legacy, self.certificates(**{"architecture-governor": certs["design"]})
+                )
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_certification_from_another_head_is_rejected(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            with self.assertRaisesRegex(ValueError, "different head SHA"):
+                self.close(root, pack, legacy, self.certificates(head="9" * 40))
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_certification_from_another_base_is_rejected(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            with self.assertRaisesRegex(ValueError, "different base SHA"):
+                self.close(root, pack, legacy, self.certificates(base="9" * 40))
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_certification_bound_to_a_stale_design_is_rejected(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            stale = self.certificates()
+            stale["architecture-governor"]["bindings"]["design"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "not bound to this run's design"):
+                self.close(root, pack, legacy, stale)
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_forged_certificate_hashes_are_rejected(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            forged = self.certificates()
+            forged["design"]["subject_sha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "does not certify the design artifact"):
+                self.close(root, pack, legacy, forged)
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_missing_independent_certification_fails_spine_closure(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            certs = self.certificates()
+            certs.pop("design")
+            with self.assertRaisesRegex(ValueError, "no .*independent certificate was supplied"):
+                self.close(root, pack, legacy, certs)
+            with self.assertRaisesRegex(ValueError, "no .*independent certificate was supplied"):
+                self.close(root, pack, legacy, None)
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_certificates_for_unregistered_claims_are_refused(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            certs = self.certificates()
+            certs["impact"] = dict(certs["design"])
+            with self.assertRaisesRegex(ValueError, "do not accept them: impact"):
+                self.close(root, pack, legacy, certs)
+
+    @patch("factory_kernel.evidence_closure.load_policy")
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_raising_required_authority_cannot_be_bypassed_by_legacy_evidence(
+        self, immunity, policy_loader
+    ):
+        """A newly independence-required claim fails closed until an authority exists for it."""
+        immunity.return_value = IMMUNITY_RESULT
+        raw = json.loads((ROOT / ".factory" / "evidence-spine.json").read_text(encoding="utf-8"))
+        for entry in raw["required_claims"]:
+            if entry["id"] == "impact":
+                entry["independent_required"] = True
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy_path = root / "raised-spine.json"
+            policy_path.write_text(json.dumps(raw), encoding="utf-8")
+            policy_loader.return_value = load_policy(policy_path)
+            pack, legacy = self.fixture(root)
+            with self.assertRaisesRegex(
+                ValueError, "no independent authority is registered for claim 'impact'"
+            ):
+                self.close(root, pack, legacy, self.certificates())
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
     def test_tampered_context_cannot_close_spine(self, immunity):
-        immunity.return_value = {
-            "registry_sha256": "e" * 64, "active_entries": 3,
-            "assertions": 7, "entry_ids": ["IMM-001", "IMM-002", "IMM-003"],
-        }
+        immunity.return_value = IMMUNITY_RESULT
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             pack, legacy = self.fixture(root)
             pack["artifacts"]["context"]["content"]["tampered"] = True
             with self.assertRaisesRegex(ValueError, "hash mismatch"):
-                compile_full_spine(
-                    repo_root=ROOT, artifact_root=root, legacy_bundle=legacy,
-                    builder_pack=pack, holdout={"version": "1.0", "verdict": "pass"},
-                    architecture_holdout={"version": "1.0", "verdict": "pass", "convergence": "improves"},
-                    pr_number=42,
-                )
+                self.close(root, pack, legacy, self.certificates())
 
 
 if __name__ == "__main__":
