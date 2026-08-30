@@ -1,0 +1,157 @@
+name: genesis-ladder
+
+# Exact-head validation ladder for the genesis candidate.
+#
+# Isolation is this workflow's job, not the driver's. Each validation stage runs in its own
+# disposable GitHub-hosted runner: a fresh VM, a fresh OS user, a fresh HOME, a fresh checkout, no
+# restored cache, and nothing that survives the job. That is why the driver runs exactly one stage
+# per invocation and has no cache environment of its own -- a stage cannot reach another stage's
+# process, filesystem, user state or dependency cache because there is no shared machine to reach
+# across.
+#
+# Each stage job independently asserts the exact candidate head, the exact tree, and the pinned
+# driver and recipe digests. The aggregation job then refuses unless every stage artifact arrives
+# exactly once and agrees on commit, tree, driver and recipe.
+#
+# EXPECTED_DRIVER_SHA256 / EXPECTED_RECIPE_SHA256 are blank for a provisional run, which prints
+# the observed digests for review. The authoritative run fills them in and fails closed.
+
+on:
+  push:
+    branches: [validation/df2-genesis-provisional-3]
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: c9a971dc383883ea1d0f868297a86fdf1696a897
+  CANDIDATE_TREE: 67db25afdacec8e5aafe9e0a9c8b58ec69e3aa2f
+  EXPECTED_DRIVER_SHA256: ''
+  EXPECTED_RECIPE_SHA256: ''
+
+jobs:
+  stage:
+    strategy:
+      fail-fast: false
+      matrix:
+        stage:
+          - kernel-compile
+          - kernel-config
+          - focused-factory-suite
+          - static-gate
+          - unit-gate
+          - quick-gate
+          - core-holdout
+          - citation-holdout
+          - immunity
+          - application-mutations
+          - factory-mutations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert exact candidate head and tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          tree="$(git rev-parse HEAD^{tree})"
+          test "$head" = "$CANDIDATE_SHA"
+          test "$tree" = "$CANDIDATE_TREE"
+          echo "EXACT_HEAD_OK $head"
+          echo "EXACT_TREE_OK $tree"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.5'
+          github-token: ''
+          enable-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.0'
+          token: ''
+
+      - name: Bind the validation driver and recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          driver="$(sha256sum harness/genesis_validate.py | cut -d' ' -f1)"
+          recipe="$(sha256sum harness/genesis-recipe.json | cut -d' ' -f1)"
+          echo "DRIVER_SHA256 $driver"
+          echo "RECIPE_SHA256 $recipe"
+          if [ -n "$EXPECTED_DRIVER_SHA256" ]; then
+            test "$driver" = "$EXPECTED_DRIVER_SHA256" || {
+              echo "LADDER_REFUSED validation driver does not match the pinned digest"; exit 1; }
+            test "$recipe" = "$EXPECTED_RECIPE_SHA256" || {
+              echo "LADDER_REFUSED validation recipe does not match the pinned digest"; exit 1; }
+            echo "LADDER_PINS_OK"
+          else
+            echo "LADDER_PINS_PROVISIONAL digests printed for review, not asserted"
+          fi
+
+      - name: Run this stage only
+        run: |
+          python harness/genesis_validate.py \
+            --repo . --commit "$CANDIDATE_SHA" \
+            --recipe harness/genesis-recipe.json \
+            --stage "${{ matrix.stage }}" \
+            --log-dir validation-logs \
+            --output "stage-${{ matrix.stage }}.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: genesis-stage-${{ matrix.stage }}
+          path: |
+            stage-${{ matrix.stage }}.json
+            validation-logs/
+
+  aggregate:
+    needs: stage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact candidate head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          echo "EXACT_HEAD_OK $(git rev-parse HEAD)"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: stage-artifacts
+          pattern: genesis-stage-*
+          merge-multiple: false
+      - name: Aggregate the stage results
+        run: |
+          python harness/genesis_aggregate.py \
+            --recipe harness/genesis-recipe.json \
+            --commit "$CANDIDATE_SHA" \
+            --stage-results stage-artifacts \
+            --output validation-result.json
+      - name: Publish the assembled result
+        if: always()
+        run: cat validation-result.json || echo '(no result produced)'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: genesis-validation-result
+          path: validation-result.json
