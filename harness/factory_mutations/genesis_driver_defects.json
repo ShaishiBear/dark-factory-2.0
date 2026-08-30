@@ -1,10 +1,9 @@
 {
   "_what_this_is": [
-    "Adversarial regressions for the external genesis validation driver.",
-    "The driver replaces regex search over an aggregated log, where candidate programs also write.",
-    "These mutations attack what makes it a measurement: exit status as the verdict, per-stage",
-    "capture, and refusal of ambiguity rather than first-match resolution.",
-    "Isolation mutations additionally prove that a stage cannot influence a later stage's code, untracked source, or runtime state."
+    "Adversarial regressions for the genesis validation driver, the aggregation authority and",
+    "the identities the genesis verifier binds. The driver runs exactly one stage per invocation,",
+    "so isolation is delegated to one disposable runner per stage; the aggregator must then refuse",
+    "unless every stage arrives exactly once, from the same commit, tree, driver and recipe."
   ],
   "defects": [
     {
@@ -12,7 +11,7 @@
       "file": "harness/genesis_validate.py",
       "find": "    if proc.returncode == 0:",
       "replace": "    if True:",
-      "why": "A stage that failed could still contribute measurements, so printed text would outrank the exit code."
+      "why": "A failed stage could still contribute measurements, so printed text would outrank the exit code."
     },
     {
       "id": "genesis-driver-ambiguity-first-match",
@@ -31,65 +30,93 @@
     {
       "id": "genesis-driver-head-binding-disabled",
       "file": "harness/genesis_validate.py",
-      "find": "    if head != args.commit:",
-      "replace": "    if False and head != args.commit:",
+      "find": "    if head != commit:",
+      "replace": "    if False and head != commit:",
       "why": "The driver could measure a tree other than the commit being authorized."
     },
     {
-      "id": "genesis-driver-stage-name-uniqueness-dropped",
-      "file": "harness/genesis_validate.py",
-      "find": "    if len(set(names)) != len(names) or not all(names):",
-      "replace": "    if False and (len(set(names)) != len(names) or not all(names)):",
-      "why": "Duplicate stage names could let one stage's result masquerade as another's."
-    },
-    {
-      "id": "genesis-driver-failed-stages-not-fatal",
-      "file": "harness/genesis_validate.py",
-      "find": "    if failed:\n        fail(",
-      "replace": "    if False and failed:\n        fail(",
-      "why": "The driver would emit a passing result even though mandatory stages failed."
-    },
-    {
-      "id": "genesis-driver-shared-output-measurement",
-      "file": "harness/genesis_validate.py",
-      "find": "    found = re.findall(marker, output)",
-      "replace": "    found = re.findall(marker, output) or ['0']",
-      "why": "A missing measurement would be fabricated rather than refused."
-    },
-    {
-      "id": "genesis-driver-stage-isolation-removed",
-      "file": "harness/genesis_validate.py",
-      "find": "        cwd = path / str(stage.get(\"cwd\") or \".\")",
-      "replace": "        cwd = repo / str(stage.get(\"cwd\") or \".\")",
-      "why": "Stages would execute in one shared mutable checkout, so an earlier candidate stage could rewrite the authority a later stage runs."
-    },
-    {
-      "id": "genesis-driver-stage-tree-verification-removed",
-      "file": "harness/genesis_validate.py",
-      "find": "    if head != commit or stage_tree != tree:",
-      "replace": "    if False and (head != commit or stage_tree != tree):",
-      "why": "A stage environment that is not the authorized commit and tree would be measured anyway."
-    },
-    {
-      "id": "genesis-driver-dirty-stage-tolerated",
+      "id": "genesis-driver-dirty-checkout-tolerated",
       "file": "harness/genesis_validate.py",
       "find": "    if dirty:",
       "replace": "    if False and dirty:",
-      "why": "A stale or dirty stage environment would be measured instead of failing closed."
+      "why": "A dirty or stale checkout would be measured instead of failing closed."
     },
     {
-      "id": "genesis-driver-object-store-recheck-removed",
+      "id": "genesis-driver-unknown-stage-tolerated",
       "file": "harness/genesis_validate.py",
-      "find": "    if git_out(repo, \"rev-parse\", f\"{commit}^{{tree}}\") != tree:",
-      "replace": "    if False and git_out(repo, \"rev-parse\", f\"{commit}^{{tree}}\") != tree:",
-      "why": "Tampering with the shared object store between stages would go undetected."
+      "find": "    if stage is None:",
+      "replace": "    if False and stage is None:",
+      "why": "A stage the recipe never defined could be silently skipped rather than refused."
     },
     {
-      "id": "genesis-driver-stage-environment-not-destroyed",
-      "file": "harness/genesis_validate.py",
-      "find": "    finally:\n        worktree_remove(repo, path)",
-      "replace": "    finally:\n        pass",
-      "why": "Stage environments would accumulate, so later stages could inherit earlier stage state."
+      "id": "genesis-aggregate-missing-stage-tolerated",
+      "file": "harness/genesis_aggregate.py",
+      "find": "    if missing:",
+      "replace": "    if False and missing:",
+      "why": "A stage that never ran would be indistinguishable from one whose artifact was dropped."
+    },
+    {
+      "id": "genesis-aggregate-duplicate-stage-tolerated",
+      "file": "harness/genesis_aggregate.py",
+      "find": "        if name in stages:",
+      "replace": "        if False and name in stages:",
+      "why": "One stage could be reported twice, letting a passing run stand in for a missing one."
+    },
+    {
+      "id": "genesis-aggregate-commit-binding-dropped",
+      "file": "harness/genesis_aggregate.py",
+      "find": "        if str(value.get(\"candidate_sha\") or \"\") != args.commit:",
+      "replace": "        if False and str(value.get(\"candidate_sha\") or \"\") != args.commit:",
+      "why": "Stage results measured against another commit could be assembled into this one's evidence."
+    },
+    {
+      "id": "genesis-aggregate-driver-tree-agreement-dropped",
+      "file": "harness/genesis_aggregate.py",
+      "find": "        elif this_driver != driver_sha or this_tree != tree:",
+      "replace": "        elif False and (this_driver != driver_sha or this_tree != tree):",
+      "why": "Stage results from different drivers or trees could be combined into one result."
+    },
+    {
+      "id": "genesis-aggregate-unexpected-stage-tolerated",
+      "file": "harness/genesis_aggregate.py",
+      "find": "    if unexpected:",
+      "replace": "    if False and unexpected:",
+      "why": "A stage the recipe does not define could be smuggled into the assembled evidence."
+    },
+    {
+      "id": "genesis-aggregate-failed-stage-not-fatal",
+      "file": "harness/genesis_aggregate.py",
+      "find": "    if failed:\n        fail(\"validation stages failed: \"",
+      "replace": "    if False and failed:\n        fail(\"validation stages failed: \"",
+      "why": "The aggregator would emit a passing result even though stages failed."
+    },
+    {
+      "id": "bootstrap-aggregator-pin-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        str(result.get(\"aggregator_sha256\") or \"\") == policy[\"validation_aggregator_sha256\"],",
+      "replace": "        True or str(result.get(\"aggregator_sha256\") or \"\") == policy[\"validation_aggregator_sha256\"],",
+      "why": "A result assembled by an unpinned aggregator could authorize genesis."
+    },
+    {
+      "id": "bootstrap-stage-isolation-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        result.get(\"stage_isolation\") == \"one-disposable-runner-per-stage\",",
+      "replace": "        True or result.get(\"stage_isolation\") == \"one-disposable-runner-per-stage\",",
+      "why": "Evidence produced without per-runner stage isolation could authorize genesis."
+    },
+    {
+      "id": "bootstrap-workflow-commit-pin-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        str(evidence.get(\"workflow_commit_sha\") or \"\") == policy[\"validation_workflow_commit_sha\"],",
+      "replace": "        True or str(evidence.get(\"workflow_commit_sha\") or \"\") == policy[\"validation_workflow_commit_sha\"],",
+      "why": "A run of some other workflow commit could be presented as the authoritative ladder."
+    },
+    {
+      "id": "bootstrap-workflow-content-pin-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        str(evidence.get(\"workflow_sha256\") or \"\") == policy[\"validation_workflow_sha256\"],",
+      "replace": "        True or str(evidence.get(\"workflow_sha256\") or \"\") == policy[\"validation_workflow_sha256\"],",
+      "why": "A run of altered workflow content could be presented as the authoritative ladder."
     }
   ]
 }

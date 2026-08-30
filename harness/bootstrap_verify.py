@@ -9,6 +9,7 @@ and mutation suite from the candidate's own tree proves self-consistency, not tr
 Four documents, and only one of them is written by the candidate:
 
     EXTERNAL GENESIS POLICY   defines what must be proven          (human-held, not in the repo)
+                              and pins the workflow, driver, recipe and aggregator identities
     CANDIDATE MANIFEST        describes the exact tree and its inventory
     FINAL-HEAD EVIDENCE       describes what a real run observed
     THIS VERIFIER             proves the relations between them    (human-held, hash-pinned)
@@ -142,9 +143,14 @@ def check_policy_shape(policy: dict) -> None:
     for key, floor in sorted(minimums.items()):
         require(isinstance(floor, int) and floor > 0, f"genesis policy minimum {key} is invalid")
     string_list(policy.get("required_stages"), "required_stages")
-    for key in ("validation_driver_sha256", "validation_recipe_sha256"):
+    for key in (
+        "validation_driver_sha256", "validation_recipe_sha256",
+        "validation_aggregator_sha256", "validation_workflow_sha256",
+    ):
         value = str(policy.get(key) or "")
         require(len(value) == SHA256, f"genesis policy does not pin {key}")
+    workflow_commit = str(policy.get("validation_workflow_commit_sha") or "")
+    require(len(workflow_commit) == 40, "genesis policy does not pin validation_workflow_commit_sha")
 
 
 def check_manifest_covers_policy(manifest: dict, policy: dict) -> tuple[list[str], dict, set[str]]:
@@ -204,6 +210,16 @@ def check_result(policy: dict, result: dict, commit: str) -> dict:
     require(
         str(result.get("recipe_sha256") or "") == policy["validation_recipe_sha256"],
         "validation result did not execute the recipe the policy pins",
+    )
+    require(
+        str(result.get("aggregator_sha256") or "") == policy["validation_aggregator_sha256"],
+        "validation result was not assembled by the aggregator the policy pins",
+    )
+    # Isolation is a property of how the stages were executed, so the assembled result has to
+    # state which model produced it rather than leaving it to be assumed.
+    require(
+        result.get("stage_isolation") == "one-disposable-runner-per-stage",
+        "validation result was not produced by one disposable runner per stage",
     )
     require(
         str(result.get("candidate_sha") or "") == commit,
@@ -269,6 +285,16 @@ def check_evidence_identity(policy: dict, evidence: dict, commit: str, run: str)
     require(
         str(evidence.get("conclusion") or "") == "success",
         "final validation run did not conclude successfully",
+    )
+    # The workflow is an authority too: a run of some other workflow, however green, is not the
+    # authoritative ladder the policy froze.
+    require(
+        str(evidence.get("workflow_commit_sha") or "") == policy["validation_workflow_commit_sha"],
+        "final validation run is not the workflow commit the policy pins",
+    )
+    require(
+        str(evidence.get("workflow_sha256") or "") == policy["validation_workflow_sha256"],
+        "final validation run did not use the workflow content the policy pins",
     )
 
 
@@ -386,6 +412,9 @@ def verify(args: argparse.Namespace) -> dict:
         "validation_result_sha256": result_sha,
         "validation_driver_sha256": policy["validation_driver_sha256"],
         "validation_recipe_sha256": policy["validation_recipe_sha256"],
+        "validation_aggregator_sha256": policy["validation_aggregator_sha256"],
+        "validation_workflow_commit_sha": policy["validation_workflow_commit_sha"],
+        "validation_workflow_sha256": policy["validation_workflow_sha256"],
         "observed": observed,
         "approver": args.approver,
         "reason": args.reason,

@@ -1,10 +1,10 @@
 {
   "_what_this_is": [
-    "The exact validation stages the genesis driver executes against the candidate commit.",
-    "Its SHA-256 is pinned by the external genesis policy, so the set of stages that ran cannot",
-    "be narrowed after the policy is frozen. Measurements are read from each stage's own output",
-    "by the driver, never from an aggregated log.",
-    "Every stage runs in a worktree created fresh from the authorized commit; only stages that need locked dependencies pay to rebuild them, and nothing is shared between stages but the hash-checked download caches."
+    "The exact validation stages the genesis ceremony requires, and how each one is measured.",
+    "Its SHA-256 is pinned by the external genesis policy, so the set of stages cannot be narrowed",
+    "after the policy is frozen. The driver executes exactly one of these per invocation, and the",
+    "pinned validation workflow runs each in its own disposable GitHub-hosted job, so no stage can",
+    "reach another's process, filesystem, user state or dependency cache."
   ],
   "version": "1.0",
   "stages": [

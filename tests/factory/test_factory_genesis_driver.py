@@ -57,39 +57,29 @@ class StageGuardTests(unittest.TestCase):
         self.commit = git(self.repo, "rev-parse", "HEAD").strip()
         self.tree = git(self.repo, "rev-parse", "HEAD^{tree}").strip()
 
-    def test_clean_authorized_environment_is_accepted(self):
-        head, tree = self.driver.assert_stage_environment(
-            self.repo, self.commit, self.tree, "s"
-        )
-        self.assertEqual((head, tree), (self.commit, self.tree))
+    def test_clean_authorized_checkout_is_accepted(self):
+        self.assertEqual(self.driver.assert_environment(self.repo, self.commit), self.tree)
 
-    def test_dirty_stage_environment_fails_closed(self):
+    def test_dirty_checkout_fails_closed(self):
         (self.repo / "a.txt").write_text("tampered\n", encoding="utf-8")
         with self.assertRaises(SystemExit):
-            self.driver.assert_stage_environment(self.repo, self.commit, self.tree, "s")
+            self.driver.assert_environment(self.repo, self.commit)
 
-    def test_untracked_file_in_a_stage_environment_fails_closed(self):
+    def test_untracked_file_fails_closed(self):
         (self.repo / "planted.py").write_text("x = 1\n", encoding="utf-8")
         with self.assertRaises(SystemExit):
-            self.driver.assert_stage_environment(self.repo, self.commit, self.tree, "s")
+            self.driver.assert_environment(self.repo, self.commit)
 
-    def test_environment_at_another_commit_fails_closed(self):
+    def test_checkout_at_another_commit_fails_closed(self):
         (self.repo / "a.txt").write_text("two\n", encoding="utf-8")
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-qm", "two")
         with self.assertRaises(SystemExit):
-            self.driver.assert_stage_environment(self.repo, self.commit, self.tree, "s")
+            self.driver.assert_environment(self.repo, self.commit)
 
-    def test_environment_with_another_tree_fails_closed(self):
+    def test_non_repository_fails_closed(self):
         with self.assertRaises(SystemExit):
-            self.driver.assert_stage_environment(self.repo, self.commit, "0" * 40, "s")
-
-    def test_object_store_recheck_accepts_the_authorized_tree(self):
-        self.driver.assert_object_store(self.repo, self.commit, self.tree, "s")
-
-    def test_object_store_recheck_fails_closed_on_a_different_tree(self):
-        with self.assertRaises(SystemExit):
-            self.driver.assert_object_store(self.repo, self.commit, "0" * 40, "s")
+            self.driver.assert_environment(Path(self.tmp.name), self.commit)
 
 
 class DriverTests(unittest.TestCase):
@@ -108,7 +98,7 @@ class DriverTests(unittest.TestCase):
         self.commit = git(self.repo, "rev-parse", "HEAD").strip()
 
     def stage(self, name: str, script: str, measures: dict | None = None) -> dict:
-        """Commit the stage script, since an isolated worktree only contains tracked content."""
+        """Commit the stage script: the driver refuses to run against a dirty checkout."""
         path = self.repo / f"{name}.py"
         path.write_text(script, encoding="utf-8")
         git(self.repo, "add", "-A")
@@ -119,16 +109,17 @@ class DriverTests(unittest.TestCase):
             stage["measures"] = measures
         return stage
 
-    def drive(self, stages: list[dict], *, commit: str | None = None):
+    def drive(self, stages: list[dict], *, commit: str | None = None, stage: str | None = None):
+        """Run exactly one stage, the only thing the driver can do."""
         recipe = self.root / "recipe.json"
         recipe.write_text(json.dumps({"version": "1.0", "stages": stages}), encoding="utf-8")
-        out = self.root / "result.json"
+        name = stage or (stages[-1]["name"] if stages else "")
+        out = self.root / f"stage-{name}.json"
         proc = subprocess.run(
             [
                 sys.executable, str(DRIVER), "--repo", str(self.repo),
                 "--commit", commit or self.commit, "--recipe", str(recipe),
-                "--log-dir", str(self.root / "logs"),
-                "--work-dir", str(self.root / "stages"), "--output", str(out),
+                "--stage", name, "--log-dir", str(self.root / "logs"), "--output", str(out),
             ],
             cwd=self.root, capture_output=True, text=True, timeout=600,
         )
@@ -140,8 +131,7 @@ class DriverTests(unittest.TestCase):
             self.stage("ok", "print('COUNT_OK n=42')", {"n": r"COUNT_OK n=(\d+)"})
         ])
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(result["verdict"], "pass")
-        self.assertEqual(result["stages"][0]["measurements"]["n"], 42)
+        self.assertEqual(result["stage"]["measurements"]["n"], 42)
         self.assertEqual(result["candidate_sha"], self.commit)
 
     def test_exit_status_is_the_verdict_not_the_printed_text(self):
@@ -151,10 +141,8 @@ class DriverTests(unittest.TestCase):
                        {"n": r"COUNT_OK n=(\d+)"})
         ])
         self.assertNotEqual(proc.returncode, 0)
-        self.assertEqual(result["verdict"], "fail")
-        self.assertEqual(result["stages"][0]["exit"], 1)
-        self.assertEqual(result["stages"][0]["measurements"], {})
-        self.assertIn("liar", result["failed_stages"])
+        self.assertEqual(result["stage"]["exit"], 1)
+        self.assertEqual(result["stage"]["measurements"], {})
 
     def test_ambiguous_marker_is_refused_rather_than_first_matched(self):
         """This is the spoof: an early value would otherwise win."""
@@ -173,35 +161,20 @@ class DriverTests(unittest.TestCase):
                        {"n": r"COUNT_OK n=(\d+)"})
         ])
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(result["stages"][0]["measurements"]["n"], 7)
+        self.assertEqual(result["stage"]["measurements"]["n"], 7)
 
     def test_absent_marker_is_refused(self):
         proc, _ = self.drive([self.stage("silent", "pass", {"n": r"COUNT_OK n=(\d+)"})])
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("did not report", proc.stderr)
 
-    def test_one_stage_cannot_supply_another_stage_output(self):
-        """Measurement is per stage; a neighbour printing the marker does not count."""
-        proc, _ = self.drive([
-            self.stage("noisy", "print('COUNT_OK n=5')"),
-            self.stage("measured", "pass", {"n": r"COUNT_OK n=(\d+)"}),
-        ])
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("stage 'measured' did not report", proc.stderr)
-
     def test_wrong_repository_head_is_refused(self):
         proc, _ = self.drive([self.stage("ok", "pass")], commit="0" * 40)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("not the commit being validated", proc.stderr)
 
-    def test_duplicate_stage_names_are_refused(self):
-        stage = self.stage("dup", "pass")
-        proc, _ = self.drive([stage, dict(stage)])
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("unique", proc.stderr)
-
     def test_empty_recipe_is_refused(self):
-        proc, _ = self.drive([])
+        proc, _ = self.drive([], stage="anything")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("no stages", proc.stderr)
 
@@ -214,97 +187,61 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(len(result["recipe_sha256"]), 64)
         self.assertEqual(result["candidate_sha"], self.commit)
 
-    # ---------- stage isolation ----------
+    # ---------- isolation is structural: the driver cannot sequence stages ----------
 
-    def test_stage_cannot_rewrite_a_later_stages_validator(self):
-        """The circularity this closes: stage A editing the authority stage B will run."""
-        victim = self.stage("victim", "print('COUNT_OK n=1')", {"n": r"COUNT_OK n=(\d+)"})
-        attacker = self.stage(
-            "attacker",
-            "from pathlib import Path\n"
-            "Path('victim.py').write_text(\"print('COUNT_OK n=999999')\\n\")\n",
-        )
-        proc, result = self.drive([attacker, victim])
+    def test_driver_runs_exactly_one_named_stage(self):
+        """Two stages cannot share a process, a checkout or a machine if only one ever runs."""
+        first = self.stage("first", "print('A_OK n=1')", {"n": r"A_OK n=(\d+)"})
+        second = self.stage("second", "print('B_OK n=2')", {"n": r"B_OK n=(\d+)"})
+        proc, result = self.drive([first, second], stage="second")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        measured = next(s for s in result["stages"] if s["name"] == "victim")
-        self.assertEqual(measured["measurements"]["n"], 1)
+        self.assertEqual(result["stage"]["name"], "second")
+        self.assertEqual(result["stage"]["measurements"]["n"], 2)
+        self.assertNotIn("stages", result)
 
-    def test_stage_cannot_plant_untracked_executable_source_for_a_later_stage(self):
-        victim = self.stage(
-            "victim",
-            "import pathlib\n"
-            "print('PLANTED' if pathlib.Path('planted.py').exists() else 'CLEAN_OK n=1')\n",
-            {"n": r"CLEAN_OK n=(\d+)"},
+    def test_driver_requires_a_stage_and_refuses_an_unknown_one(self):
+        only = self.stage("only", "pass")
+        proc, _ = self.drive([only], stage="ghost")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("no stage named", proc.stderr)
+        bare = subprocess.run(
+            [sys.executable, str(DRIVER), "--repo", str(self.repo), "--commit", self.commit,
+             "--recipe", str(self.root / "recipe.json"), "--log-dir", str(self.root / "logs"),
+             "--output", str(self.root / "x.json")],
+            cwd=self.root, capture_output=True, text=True, timeout=120,
         )
-        attacker = self.stage(
-            "attacker",
-            "from pathlib import Path\nPath('planted.py').write_text('x = 1\\n')\n",
-        )
-        proc, result = self.drive([attacker, victim])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(
-            next(s for s in result["stages"] if s["name"] == "victim")["measurements"]["n"], 1
-        )
+        self.assertNotEqual(bare.returncode, 0)
+        self.assertIn("--stage", bare.stderr)
 
-    def test_stage_cannot_leave_mutable_runtime_state_for_a_later_stage(self):
-        """Untracked runtime directories do not survive into the next stage's environment."""
-        victim = self.stage(
-            "victim",
-            "import pathlib\n"
-            "print('DIRTY' if pathlib.Path('.venv').exists() else 'FRESH_OK n=1')\n",
-            {"n": r"FRESH_OK n=(\d+)"},
-        )
-        attacker = self.stage(
-            "attacker",
-            "from pathlib import Path\n"
-            "d = Path('.venv'); d.mkdir(exist_ok=True)\n"
-            "(d / 'sitecustomize.py').write_text('import os\\n')\n",
-        )
-        proc, result = self.drive([attacker, victim])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(
-            next(s for s in result["stages"] if s["name"] == "victim")["measurements"]["n"], 1
-        )
+    def test_driver_sets_no_cache_environment_of_its_own(self):
+        """No cross-stage cache: the driver never points a package manager at shared state."""
+        source = DRIVER.read_text(encoding="utf-8")
+        for banned in ("UV_CACHE_DIR", "BUN_INSTALL_CACHE_DIR", "XDG_CACHE_HOME", "PIP_CACHE_DIR"):
+            self.assertNotIn(f'"{banned}"', source, banned)
+            self.assertNotIn(f"'{banned}'", source, banned)
 
-    def test_every_stage_records_the_exact_tree_it_executed(self):
-        first = self.stage("first", "pass")
-        second = self.stage("second", "pass")
-        proc, result = self.drive([first, second])
+    def test_driver_claims_no_unverified_cache_property(self):
+        """An authority must not assert a verification it does not perform."""
+        source = DRIVER.read_text(encoding="utf-8")
+        self.assertNotIn("caches are hash-checked", source)
+        self.assertNotIn("contents are verified against the committed lockfiles", source)
+
+    def test_dirty_checkout_fails_closed(self):
+        only = self.stage("only", "pass")
+        (self.repo / "untracked.py").write_text("x = 1\n", encoding="utf-8")
+        proc, _ = self.drive([only])
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not a clean checkout", proc.stderr)
+
+    def test_stage_result_binds_commit_tree_driver_and_recipe(self):
+        only = self.stage("only", "pass")
+        proc, result = self.drive([only])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         tree = git(self.repo, "rev-parse", "HEAD^{tree}").strip()
+        self.assertEqual(result["candidate_sha"], self.commit)
         self.assertEqual(result["candidate_tree"], tree)
-        self.assertEqual(result["stage_isolation"], "per-stage-worktree")
-        for stage in result["stages"]:
-            self.assertEqual(stage["executed_candidate_sha"], self.commit)
-            self.assertEqual(stage["executed_tree_sha"], tree)
-            self.assertTrue(stage["isolated"])
-
-    def test_stage_environment_is_destroyed_after_each_stage(self):
-        """Checked per stage, not once at the end: the outer cleanup would mask a leak."""
-        first = self.stage("first", "from pathlib import Path\nPath('left.txt').write_text('x')\n")
-        second = self.stage("second", "pass")
-        proc, result = self.drive([first, second])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        for stage in result["stages"]:
-            self.assertTrue(stage["destroyed"], stage["name"])
-            self.assertFalse((self.root / "stages" / f"stage-{stage['name']}").exists())
-        self.assertFalse((self.root / "stages").exists())
-        self.assertFalse((self.repo / "left.txt").exists())
-
-    def test_object_store_tampering_between_stages_fails_closed(self):
-        """A tree cannot change content and keep its identity, so re-resolving it detects this."""
-        victim = self.stage("victim", "pass")
-        attacker = self.stage(
-            "attacker",
-            "import subprocess, pathlib\n"
-            "root = pathlib.Path(__file__).resolve().parent\n"
-            "subprocess.run(['git', '-C', str(root), 'checkout', '-q', '-B', 'wander'])\n",
-        )
-        proc, _ = self.drive([attacker, victim], commit=self.commit)
-        # Whatever the attacker achieves, the driver must still be measuring the authorized tree.
-        self.assertIn(proc.returncode, (0, 1))
-        if proc.returncode:
-            self.assertIn("BOOTSTRAP_REFUSED" if False else "REFUSED", proc.stderr)
+        self.assertEqual(len(result["driver_sha256"]), 64)
+        self.assertEqual(len(result["recipe_sha256"]), 64)
 
     def test_driver_imports_nothing_from_the_trust_root_it_measures(self):
         source = DRIVER.read_text(encoding="utf-8")

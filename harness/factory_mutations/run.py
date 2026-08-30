@@ -47,6 +47,7 @@ COPY_FILES = (
     "harness/immunity.py",
     "harness/bootstrap_verify.py",
     "harness/genesis_validate.py",
+    "harness/genesis_aggregate.py",
     "harness/genesis-recipe.json",
     "harness/focused.py",
     "tests/factory/test_factory_security.py",
@@ -65,6 +66,7 @@ COPY_FILES = (
     "tests/factory/test_factory_independence.py",
     "tests/factory/test_factory_bootstrap.py",
     "tests/factory/test_factory_genesis_driver.py",
+    "tests/factory/test_factory_genesis_aggregate.py",
     "tests/factory/test_factory_spine.py",
     "tests/factory/test_factory_evidence_spine_runtime.py",
 )

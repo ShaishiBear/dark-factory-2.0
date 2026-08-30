@@ -39,6 +39,9 @@ def git(repo: Path, *args: str) -> str:
 
 DRIVER_SHA = "d" * 64
 RECIPE_SHA = "e" * 64
+AGGREGATOR_SHA = "f" * 64
+WORKFLOW_SHA = "1" * 64
+WORKFLOW_COMMIT = "2" * 40
 STAGES = ("focused-factory-suite", "static-gate", "unit-gate", "quick-gate",
           "application-mutations", "factory-mutations")
 
@@ -67,6 +70,8 @@ def result_doc(commit: str, *, stages=None, **over) -> dict:
         "version": "1.0",
         "driver_sha256": DRIVER_SHA,
         "recipe_sha256": RECIPE_SHA,
+        "aggregator_sha256": AGGREGATOR_SHA,
+        "stage_isolation": "one-disposable-runner-per-stage",
         "candidate_sha": commit,
         "verdict": "pass",
         "failed_stages": [],
@@ -121,6 +126,9 @@ class Ceremony:
             "minimum": {"focused_tests": 300, "unit_tests": 700, "static_checks": 5},
             "validation_driver_sha256": DRIVER_SHA,
             "validation_recipe_sha256": RECIPE_SHA,
+            "validation_aggregator_sha256": AGGREGATOR_SHA,
+            "validation_workflow_sha256": WORKFLOW_SHA,
+            "validation_workflow_commit_sha": WORKFLOW_COMMIT,
         }
         value.update(over)
         return value
@@ -172,6 +180,8 @@ class Ceremony:
             "run_id": "12345",
             "run_url": "https://example.invalid/run/12345",
             "conclusion": "success",
+            "workflow_commit_sha": WORKFLOW_COMMIT,
+            "workflow_sha256": WORKFLOW_SHA,
             "candidate_sha": commit,
             "log_sha256": sha256(log.encode()),
             "result_sha256": sha256(json.dumps(result, indent=2, sort_keys=True).encode() + b"\n"),
@@ -245,6 +255,8 @@ class GenesisCeremonyTests(unittest.TestCase):
             "evidence_log_sha256", "evidence_run", "candidate_tree", "base_sha",
             "approver", "reason", "authorized_at", "repository",
             "validation_result_sha256", "validation_driver_sha256", "validation_recipe_sha256",
+            "validation_aggregator_sha256", "validation_workflow_commit_sha",
+            "validation_workflow_sha256",
         ):
             self.assertTrue(str(auth.get(field) or "").strip(), field)
         self.assertEqual(auth["observed"]["factory_mutations_caught"], 102)
@@ -362,6 +374,43 @@ class GenesisCeremonyTests(unittest.TestCase):
         proc = self.c.run(log=spoof, result=result)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("let a mutation escape", proc.stderr)
+
+    def test_result_not_assembled_by_the_pinned_aggregator_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(result=result_doc(head) | {"aggregator_sha256": "9" * 64})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not assembled by the aggregator the policy pins", proc.stderr)
+
+    def test_result_without_per_runner_stage_isolation_is_refused(self):
+        """A result produced by sequencing stages in one environment is not the same evidence."""
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(result=result_doc(head) | {"stage_isolation": "per-stage-worktree"})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not produced by one disposable runner per stage", proc.stderr)
+
+    def test_run_of_another_workflow_commit_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        log, result = "raw ci log\n", result_doc(head)
+        proc = self.c.run(
+            log=log, result=result,
+            evidence=self.c.evidence(head, log, result, workflow_commit_sha="9" * 40),
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not the workflow commit the policy pins", proc.stderr)
+
+    def test_run_of_altered_workflow_content_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        log, result = "raw ci log\n", result_doc(head)
+        proc = self.c.run(
+            log=log, result=result,
+            evidence=self.c.evidence(head, log, result, workflow_sha256="9" * 64),
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("did not use the workflow content the policy pins", proc.stderr)
 
     def test_result_not_produced_by_the_pinned_driver_is_refused(self):
         self.c.write_manifest(self.c.manifest())
