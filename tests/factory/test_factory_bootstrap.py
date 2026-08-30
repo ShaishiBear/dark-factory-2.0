@@ -1,9 +1,12 @@
 """Adversarial coverage for the one-time genesis authority.
 
 The PR that rewrites the factory trust root cannot be certified by that trust root: running the
-candidate's own harness from the candidate's own tree proves self-consistency, not trustworthiness.
-These tests pin the properties that make the genesis verifier a real authority rather than another
-component of the thing it is judging.
+candidate's own harness from the candidate's own tree proves self-consistency, not
+trustworthiness. Nor can the candidate be allowed to author the standard it is judged against --
+an artificially weak bar can be met honestly. These tests pin the boundary between the four
+documents: an external policy says what must be proven, the candidate manifest describes only
+what the tree is, the evidence says what a real run observed, and the external verifier proves
+the relations.
 """
 from __future__ import annotations
 
@@ -19,8 +22,8 @@ import unittest
 ROOT = Path(__file__).parents[2]
 VERIFIER = ROOT / "harness" / "bootstrap_verify.py"
 MANIFEST_REL = ".factory/bootstrap/genesis.json"
-
 PREFIXES = ["factory_kernel/", "harness/", "tests/factory/"]
+COMMIT_RE = "0" * 40
 
 
 def sha256(data: bytes) -> str:
@@ -28,83 +31,120 @@ def sha256(data: bytes) -> str:
 
 
 def git(repo: Path, *args: str) -> str:
-    proc = subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, text=True, timeout=120
-    )
+    proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=120)
     if proc.returncode:
         raise RuntimeError(f"git {' '.join(args)} failed: {proc.stderr}")
     return proc.stdout
 
 
-class GenesisRepo:
-    """A miniature repository shaped like the real one, so mutations stay off the live tree."""
+def log_text(commit: str, **over) -> str:
+    values = {
+        "focused": 316, "unit": 766, "static": 5,
+        "fm_total": 94, "fm_caught": 94, "fm_not": 0,
+        "am_total": 9, "am_caught": 9, "am_not": 0,
+        "head": commit,
+    }
+    values.update(over)
+    return "\n".join(
+        [
+            f"EXACT_HEAD_OK {values['head']}",
+            f"FOCUSED_OK tests={values['focused']}",
+            f"STATIC_OK checks={values['static']}",
+            f"UNIT_PASSED tests={values['unit']}",
+            "GATE_OK mode=quick",
+            "HOLDOUT_CORE_OK", "HOLDOUT_CITATION_OK",
+            "IMMUNITY_OK entries=5 assertions=14",
+            f"MUTATIONS_TOTAL={values['am_total']}",
+            f"MUTATIONS_CAUGHT={values['am_caught']}",
+            f"MUTATIONS_NOT_INJECTED={values['am_not']}",
+            f"FACTORY_MUTATIONS_TOTAL={values['fm_total']}",
+            f"FACTORY_MUTATIONS_CAUGHT={values['fm_caught']}",
+            f"FACTORY_MUTATIONS_NOT_INJECTED={values['fm_not']}",
+            "FACTORY_MUTATIONS_OK",
+        ]
+    ) + "\n"
+
+
+class Ceremony:
+    """A miniature repository plus the human-held documents, none of it on the live tree."""
 
     def __init__(self, tmp: Path) -> None:
+        self.tmp = tmp
         self.path = tmp / "repo"
-        (self.path / "harness").mkdir(parents=True)
-        (self.path / "factory_kernel").mkdir(parents=True)
-        (self.path / "tests" / "factory").mkdir(parents=True)
-        (self.path / ".factory" / "bootstrap").mkdir(parents=True)
+        for rel in ("harness", "factory_kernel", "tests/factory", ".factory/bootstrap"):
+            (self.path / rel).mkdir(parents=True)
         shutil.copy2(VERIFIER, self.path / "harness" / "bootstrap_verify.py")
-        # The human's reviewed copy lives outside the repository under test.
-        self.external_verifier = tmp / "reviewed_bootstrap_verify.py"
-        shutil.copy2(VERIFIER, self.external_verifier)
         (self.path / "factory_kernel" / "spine.py").write_text("POLICY = 1\n", encoding="utf-8")
         (self.path / "factory_kernel" / "independence.py").write_text("REG = ()\n", encoding="utf-8")
         (self.path / "tests" / "factory" / "test_x.py").write_text("assert True\n", encoding="utf-8")
+        (self.path / "MISSION.md").write_text("mission\n", encoding="utf-8")
         git(self.path, "init", "-q", "-b", "main")
         git(self.path, "config", "user.email", "genesis@example.invalid")
         git(self.path, "config", "user.name", "Genesis")
         git(self.path, "add", "-A")
         git(self.path, "commit", "-qm", "base")
         self.base = git(self.path, "rev-parse", "HEAD").strip()
+        # The human's copies live outside the repository under test.
+        self.verifier = tmp / "reviewed_bootstrap_verify.py"
+        shutil.copy2(VERIFIER, self.verifier)
 
     def verifier_sha(self) -> str:
-        return sha256(self.external_verifier.read_bytes())
+        return sha256(self.verifier.read_bytes())
 
-    def inventory(self) -> dict[str, str]:
-        head = git(self.path, "rev-parse", "HEAD").strip()
-        listing = git(self.path, "ls-tree", "-r", "--name-only", head).splitlines()
-        return {
-            p: sha256(
-                subprocess.run(
-                    ["git", "cat-file", "blob", f"{head}:{p}"],
-                    cwd=self.path, capture_output=True, timeout=60,
-                ).stdout
-            )
-            for p in listing
-            if any(p.startswith(x) for x in PREFIXES)
-        }
-
-    def manifest(self, **overrides) -> dict:
-        files = self.inventory()
+    def policy(self, **over) -> dict:
         value = {
-            "version": "2.0",
+            "version": "1.0",
+            "repository": "example/repo",
+            "pull_request": 33,
             "base_sha": self.base,
-            "verifier_sha256": self.verifier_sha(),
-            "trust_root_prefixes": PREFIXES,
-            "trust_root": files,
-            "policy_sha256": {"factory_kernel/spine.py": files["factory_kernel/spine.py"]},
-            "evidence_requirements": {
-                "required_markers": ["STATIC_OK", "FACTORY_MUTATIONS_OK"],
-                "minimum": {"focused_tests": 100, "unit_tests": 500, "static_checks": 5},
-                "mutation_families": ["factory_mutations", "application_mutations"],
+            "required_trust_root_prefixes": ["factory_kernel/", "harness/", "tests/factory/"],
+            "required_trust_root_paths": ["factory_kernel/spine.py", "MISSION.md"],
+            "required_policy_files": ["factory_kernel/spine.py"],
+            "required_markers": ["STATIC_OK", "UNIT_PASSED", "GATE_OK", "FACTORY_MUTATIONS_OK"],
+            "required_holdout_classes": {"core": "HOLDOUT_CORE_OK", "citation": "HOLDOUT_CITATION_OK"},
+            "required_mutation_families": ["factory_mutations", "application_mutations"],
+            "mutation_family_markers": {
+                "factory_mutations": "FACTORY_MUTATIONS",
+                "application_mutations": "MUTATIONS",
             },
+            "minimum": {"focused_tests": 300, "unit_tests": 700, "static_checks": 5},
+            "required_external_evidence": [],
+            "require_exact_final_head": True,
         }
-        value.update(overrides)
+        value.update(over)
         return value
 
-    def evidence(self, commit: str, **overrides) -> dict:
+    def write_policy(self, policy: dict) -> Path:
+        path = self.tmp / "genesis-policy.json"
+        path.write_text(json.dumps(policy, indent=2, sort_keys=True), encoding="utf-8")
+        return path
+
+    def inventory(self, prefixes: list[str]) -> dict[str, str]:
+        head = git(self.path, "rev-parse", "HEAD").strip()
+        listing = git(self.path, "ls-tree", "-r", "--name-only", head).splitlines()
+        out = {}
+        for p in listing:
+            if any(p == x or p.startswith(x) for x in prefixes):
+                out[p] = sha256(
+                    subprocess.run(
+                        ["git", "-C", str(self.path), "cat-file", "blob", f"{head}:{p}"],
+                        capture_output=True, timeout=60,
+                    ).stdout
+                )
+        return out
+
+    def manifest(self, *, prefixes: list[str] | None = None, **over) -> dict:
+        prefixes = prefixes or (PREFIXES + ["MISSION.md"])
+        files = self.inventory(prefixes)
         value = {
-            "candidate_sha": commit,
-            "markers": ["STATIC_OK", "UNIT_PASSED", "FACTORY_MUTATIONS_OK"],
-            "focused_tests": 311,
-            "unit_tests": 766,
-            "static_checks": 5,
-            "factory_mutations": {"total": 91, "caught": 91, "not_injected": 0},
-            "application_mutations": {"total": 9, "caught": 9, "not_injected": 0},
+            "version": "3.0",
+            "base_sha": self.base,
+            "verifier_sha256": self.verifier_sha(),
+            "trust_root_prefixes": prefixes,
+            "trust_root": files,
+            "policy_sha256": {"factory_kernel/spine.py": files["factory_kernel/spine.py"]},
         }
-        value.update(overrides)
+        value.update(over)
         return value
 
     def write_manifest(self, manifest: dict) -> str:
@@ -114,222 +154,316 @@ class GenesisRepo:
         git(self.path, "commit", "-qm", "genesis manifest")
         return sha256(raw)
 
-    def run(self, *, verifier=None, manifest=None, candidate=None, evidence=None, extra=None):
-        """Run the ceremony the way a human does: an external copy, an explicit repo and commit."""
+    def evidence(self, commit: str, log: str, **over) -> dict:
+        value = {
+            "repository": "example/repo",
+            "workflow": "independence-validation",
+            "run_id": "12345",
+            "run_url": "https://example.invalid/run/12345",
+            "conclusion": "success",
+            "candidate_sha": commit,
+            "log_sha256": sha256(log.encode()),
+        }
+        value.update(over)
+        return value
+
+    def run(self, *, policy=None, manifest_sha=None, verifier=None, expect_policy=None,
+            commit=None, evidence=None, log=None, policy_path=None, run_url=None, extra=None):
         head = git(self.path, "rev-parse", "HEAD").strip()
-        commit = candidate or head
+        target = commit or head
         raw = subprocess.run(
-            ["git", "cat-file", "blob", f"{head}:{MANIFEST_REL}"],
-            cwd=self.path, capture_output=True, timeout=60,
+            ["git", "-C", str(self.path), "cat-file", "blob", f"{head}:{MANIFEST_REL}"],
+            capture_output=True, timeout=60,
         ).stdout
-        evidence_file = self.path.parent / "evidence.json"
-        evidence_file.write_text(
-            json.dumps(evidence if evidence is not None else self.evidence(commit)),
-            encoding="utf-8",
-        )
+        policy_value = policy if policy is not None else self.policy()
+        ppath = policy_path or self.write_policy(policy_value)
+        log_value = log if log is not None else log_text(target)
+        log_file = self.tmp / "run.log"
+        log_file.write_text(log_value, encoding="utf-8")
+        ev = evidence if evidence is not None else self.evidence(target, log_value)
+        ev_file = self.tmp / "evidence.json"
+        ev_file.write_text(json.dumps(ev), encoding="utf-8")
         argv = [
-            sys.executable, str(self.external_verifier),
-            "--repo", str(self.path),
-            "--commit", commit,
+            sys.executable, str(self.verifier),
+            "--repo", str(self.path), "--commit", target,
+            "--policy", str(ppath),
+            "--expect-policy", expect_policy or sha256(Path(ppath).read_bytes()),
             "--expect-verifier", verifier or self.verifier_sha(),
-            "--expect-manifest", manifest or sha256(raw),
-            "--evidence", str(evidence_file),
-            "--evidence-run", "https://example.invalid/run/1",
+            "--expect-manifest", manifest_sha or sha256(raw),
+            "--evidence", str(ev_file), "--evidence-log", str(log_file),
+            "--evidence-run", run_url or "https://example.invalid/run/12345",
             "--approver", "repository owner",
             "--reason", "genesis: this PR replaces the machinery governing future PRs",
         ]
-        return subprocess.run(
-            argv + list(extra or []),
-            cwd=self.path.parent, capture_output=True, text=True, timeout=180,
-        )
+        return subprocess.run(argv + list(extra or []), cwd=self.tmp, capture_output=True,
+                              text=True, timeout=180)
 
 
-class BootstrapAuthorityTests(unittest.TestCase):
+class GenesisCeremonyTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.repo = GenesisRepo(Path(self.tmp.name))
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.c = Ceremony(Path(self.tmpdir.name))
+
+    # ---------- the happy path ----------
 
     def test_valid_genesis_is_authorized(self):
-        self.repo.write_manifest(self.repo.manifest())
-        proc = self.repo.run()
+        self.c.write_manifest(self.c.manifest())
+        proc = self.c.run()
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("BOOTSTRAP_OK", proc.stdout)
 
+    def test_authorization_binds_every_document_and_the_human_act(self):
+        self.c.write_manifest(self.c.manifest())
+        out = self.c.tmp / "auth.json"
+        proc = self.c.run(extra=["--output", str(out)])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        auth = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(auth["scope"], "one-time-genesis")
+        self.assertEqual(auth["candidate_sha"], git(self.c.path, "rev-parse", "HEAD").strip())
+        for field in (
+            "genesis_policy_sha256", "verifier_sha256", "manifest_sha256", "evidence_sha256",
+            "evidence_log_sha256", "evidence_run", "candidate_tree", "base_sha",
+            "approver", "reason", "authorized_at", "repository",
+        ):
+            self.assertTrue(str(auth.get(field) or "").strip(), field)
+        self.assertEqual(auth["observed"]["factory_mutations"]["caught"], 94)
+
+    # ---------- the external policy is not the candidate's to write ----------
+
+    def test_external_policy_hash_bypass_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        proc = self.c.run(expect_policy="7" * 64)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("genesis policy is not the one that was reviewed", proc.stderr)
+
+    def test_policy_taken_from_inside_the_repository_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        inside = self.c.path / "genesis-policy.json"
+        inside.write_text(json.dumps(self.c.policy()), encoding="utf-8")
+        proc = self.c.run(policy_path=inside)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("outside the repository under test", proc.stderr)
+
+    def test_candidate_cannot_define_the_standard_it_is_judged_by(self):
+        for key in ("evidence_requirements", "minimum", "authorization", "approved_by"):
+            with self.subTest(key=key):
+                c = Ceremony(Path(tempfile.mkdtemp(dir=self.tmpdir.name)))
+                c.write_manifest(c.manifest(**{key: {"focused_tests": 1}}))
+                proc = c.run()
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("must not define the standard", proc.stderr)
+
+    def test_candidate_cannot_narrow_trust_root_scope(self):
+        self.c.write_manifest(self.c.manifest(prefixes=["factory_kernel/", "MISSION.md"]))
+        proc = self.c.run()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("narrows the trust-root scope", proc.stderr)
+
+    def test_candidate_cannot_omit_a_mandatory_trust_root_path(self):
+        manifest = self.c.manifest()
+        manifest["trust_root"].pop("MISSION.md")
+        manifest["trust_root_prefixes"] = PREFIXES
+        self.c.write_manifest(manifest)
+        proc = self.c.run()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("omits mandatory trust-root paths", proc.stderr)
+
+    def test_candidate_cannot_omit_a_mandatory_pinned_policy(self):
+        manifest = self.c.manifest()
+        manifest["policy_sha256"] = {"harness/bootstrap_verify.py": manifest["trust_root"]["harness/bootstrap_verify.py"]}
+        self.c.write_manifest(manifest)
+        proc = self.c.run()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("omits mandatory pinned policies", proc.stderr)
+
+    # ---------- the self-reference trap ----------
+
+    def test_manifest_inside_its_own_hashed_prefix_is_refused(self):
+        """No fixed point exists if the inventory must contain the inventory's own hash."""
+        policy = self.c.policy(
+            required_trust_root_prefixes=["factory_kernel/", "harness/", "tests/factory/", ".factory/"]
+        )
+        self.c.write_manifest(self.c.manifest(prefixes=PREFIXES + ["MISSION.md", ".factory/"]))
+        proc = self.c.run(policy=policy)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("no fixed point exists", proc.stderr)
+
+    def test_manifest_listing_itself_is_refused(self):
+        manifest = self.c.manifest()
+        manifest["trust_root"][MANIFEST_REL] = "8" * 64
+        self.c.write_manifest(manifest)
+        proc = self.c.run()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("lists itself", proc.stderr)
+
+    def test_inventory_is_stable_across_the_manifest_commit(self):
+        """The manifest is excluded on principle, so adding it does not disturb the inventory."""
+        before = self.c.inventory(PREFIXES + ["MISSION.md"])
+        self.c.write_manifest(self.c.manifest())
+        after = self.c.inventory(PREFIXES + ["MISSION.md"])
+        self.assertEqual(before, after)
+        self.assertNotIn(MANIFEST_REL, after)
+
+    # ---------- evidence content versus evidence provenance ----------
+
+    def test_counts_come_from_the_log_not_the_evidence_document(self):
+        """A document asserting good numbers proves nothing if the log disagrees."""
+        self.c.write_manifest(self.c.manifest())
+        log = log_text(git(self.c.path, "rev-parse", "HEAD").strip(), unit=10)
+        proc = self.c.run(log=log)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("observed unit_tests=10 is below the required 700", proc.stderr)
+
+    def test_fabricated_evidence_for_no_real_run_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        real = log_text(head)
+        proc = self.c.run(log=real, evidence=self.c.evidence(head, real, log_sha256="9" * 64))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("does not match the digest the evidence commits to", proc.stderr)
+
+    def test_evidence_for_another_run_identity_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        proc = self.c.run(run_url="https://example.invalid/run/99999")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("does not name the run identity supplied", proc.stderr)
+
+    def test_log_from_another_head_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(log=log_text(head, head=COMMIT_RE))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("did not prove the run executed against the authorized head", proc.stderr.replace("does not", "did not"))
+
+    def test_parent_commit_evidence_cannot_authorize_the_manifest_bearing_child(self):
+        parent = git(self.c.path, "rev-parse", "HEAD").strip()
+        self.c.write_manifest(self.c.manifest())
+        child = git(self.c.path, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(parent, child)
+        log = log_text(child)
+        proc = self.c.run(evidence=self.c.evidence(parent, log), log=log)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("different commit than the one being authorized", proc.stderr)
+
+    def test_missing_required_marker_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(log=log_text(head).replace("GATE_OK mode=quick\n", ""))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("missing required markers: GATE_OK", proc.stderr)
+
+    def test_missing_holdout_class_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(log=log_text(head).replace("HOLDOUT_CITATION_OK\n", ""))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("HOLDOUT_CITATION_OK", proc.stderr)
+
+    def test_omitted_mutation_family_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        log = "\n".join(
+            line for line in log_text(head).splitlines()
+            if not line.startswith("MUTATIONS_")
+        ) + "\n"
+        proc = self.c.run(log=log)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("application_mutations", proc.stderr)
+
+    def test_mutation_invariant_is_enforced_from_the_log(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        for over, expected in (
+            ({"fm_caught": 93}, "let a mutation escape"),
+            ({"fm_not": 2}, "failed to inject"),
+            ({"fm_total": 0, "fm_caught": 0}, "ran nothing"),
+        ):
+            with self.subTest(over=over):
+                proc = self.c.run(log=log_text(head, **over))
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn(expected, proc.stderr)
+
+    def test_unsuccessful_run_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        log = log_text(head)
+        proc = self.c.run(log=log, evidence=self.c.evidence(head, log, conclusion="failure"))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("did not conclude successfully", proc.stderr)
+
+    # ---------- the verifier itself ----------
+
     def test_verifier_imports_nothing_from_the_trust_root_it_certifies(self):
-        """A verifier that imported the machinery could be steered by it."""
         source = VERIFIER.read_text(encoding="utf-8")
         for banned in ("factory_kernel", "factory_security", "harness.", "from scripts"):
             self.assertNotIn(f"import {banned}", source)
             self.assertNotIn(f"from {banned}", source)
 
     def test_modified_verifier_is_refused(self):
-        """The candidate must not be able to silently edit its own certifier."""
-        self.repo.write_manifest(self.repo.manifest())
-        target = self.repo.external_verifier
-        target.write_text(target.read_text(encoding="utf-8") + "\n# tampered\n", encoding="utf-8")
-        proc = self.repo.run(verifier="4" * 64)
+        self.c.write_manifest(self.c.manifest())
+        self.c.verifier.write_text(
+            self.c.verifier.read_text(encoding="utf-8") + "\n# tampered\n", encoding="utf-8"
+        )
+        proc = self.c.run(verifier="4" * 64)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("not the one that was reviewed", proc.stderr)
 
-    def test_working_tree_tampering_is_invisible(self):
-        """Every read comes from the object store, so a dirty checkout cannot smuggle content."""
-        self.repo.write_manifest(self.repo.manifest())
-        for rel in ("harness/bootstrap_verify.py", "factory_kernel/spine.py", MANIFEST_REL):
-            (self.repo.path / rel).write_text("TAMPERED = True\n", encoding="utf-8")
-        proc = self.repo.run()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("BOOTSTRAP_OK", proc.stdout)
-
-    def test_the_ceremony_runs_the_reviewed_copy_not_the_candidates(self):
-        """The human's copy is the authority; the candidate's copy is merely inventoried."""
-        self.repo.write_manifest(self.repo.manifest())
-        self.assertFalse(
-            self.repo.external_verifier.is_relative_to(self.repo.path),
-            "the reviewed verifier must live outside the repository under test",
-        )
-        proc = self.repo.run()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-
-    def test_manifest_that_was_not_authorized_is_refused(self):
-        self.repo.write_manifest(self.repo.manifest())
-        proc = self.repo.run(manifest="0" * 64)
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("not the one that was reviewed", proc.stderr)
-
-    def test_parent_commit_evidence_cannot_authorize_the_manifest_bearing_child(self):
-        """Validation of the parent is not exact-head evidence for the commit that adds genesis."""
-        parent = git(self.repo.path, "rev-parse", "HEAD").strip()
-        self.repo.write_manifest(self.repo.manifest())
-        child = git(self.repo.path, "rev-parse", "HEAD").strip()
-        self.assertNotEqual(parent, child)
-        proc = self.repo.run(evidence=self.repo.evidence(parent))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("different commit than the one being authorized", proc.stderr)
-
-    def test_evidence_below_the_declared_requirement_is_refused(self):
-        self.repo.write_manifest(self.repo.manifest())
-        head = git(self.repo.path, "rev-parse", "HEAD").strip()
-        proc = self.repo.run(evidence=self.repo.evidence(head, unit_tests=10))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("below the required", proc.stderr)
-
-    def test_evidence_missing_a_required_marker_is_refused(self):
-        self.repo.write_manifest(self.repo.manifest())
-        head = git(self.repo.path, "rev-parse", "HEAD").strip()
-        proc = self.repo.run(evidence=self.repo.evidence(head, markers=["UNIT_PASSED"]))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("missing required markers", proc.stderr)
-
-    def test_manifest_cannot_assert_its_own_authorization(self):
-        """The human act must create the authorization, not confirm a string the candidate wrote."""
-        self.repo.write_manifest(
-            self.repo.manifest(authorization={"one_time": True, "approved_by": "me"})
-        )
-        proc = self.repo.run()
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("asserts its own authorization", proc.stderr)
-
-    def test_authorization_artifact_binds_the_human_act(self):
-        self.repo.write_manifest(self.repo.manifest())
-        proc = self.repo.run(extra=["--output", str(self.repo.path.parent / "auth.json")])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        auth = json.loads((self.repo.path.parent / "auth.json").read_text(encoding="utf-8"))
-        head = git(self.repo.path, "rev-parse", "HEAD").strip()
-        self.assertEqual(auth["candidate_sha"], head)
-        self.assertEqual(auth["scope"], "one-time-genesis")
-        for field in (
-            "candidate_tree", "verifier_sha256", "manifest_sha256", "approver", "reason",
-            "evidence_run", "evidence_sha256", "authorized_at", "base_sha",
-        ):
-            self.assertTrue(str(auth.get(field) or "").strip(), field)
-
-    def test_unlisted_trust_root_file_is_refused(self):
-        """A new authority file smuggled in outside the manifest must fail closed."""
-        manifest = self.repo.manifest()
-        self.repo.write_manifest(manifest)
-        (self.repo.path / "factory_kernel" / "sneaky.py").write_text("BYPASS = True\n", encoding="utf-8")
-        git(self.repo.path, "add", "-A")
-        git(self.repo.path, "commit", "-qm", "smuggle")
-        raw = json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n"
-        proc = self.repo.run(manifest=sha256(raw))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("unlisted", proc.stderr)
-
-    def test_trust_root_file_content_change_is_refused(self):
-        manifest = self.repo.manifest()
+    def test_trust_root_content_change_is_refused(self):
+        manifest = self.c.manifest()
         manifest["trust_root"]["factory_kernel/spine.py"] = "1" * 64
-        self.repo.write_manifest(manifest)
-        proc = self.repo.run()
+        self.c.write_manifest(manifest)
+        proc = self.c.run()
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("does not match", proc.stderr)
 
-    def test_manifest_naming_a_different_verifier_is_refused(self):
-        self.repo.write_manifest(self.repo.manifest(verifier_sha256="2" * 64))
-        proc = self.repo.run()
+    def test_unlisted_trust_root_file_is_refused(self):
+        manifest = self.c.manifest()
+        manifest_sha = self.c.write_manifest(manifest)
+        (self.c.path / "factory_kernel" / "sneaky.py").write_text("BYPASS = True\n", encoding="utf-8")
+        git(self.c.path, "add", "-A")
+        git(self.c.path, "commit", "-qm", "smuggle")
+        proc = self.c.run(manifest_sha=manifest_sha)
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("does not name this verifier", proc.stderr)
+        self.assertIn("unlisted", proc.stderr)
 
-    def test_pinned_policy_outside_the_trust_root_is_refused(self):
-        manifest = self.repo.manifest()
-        manifest["policy_sha256"] = {"README.md": "3" * 64}
-        self.repo.write_manifest(manifest)
-        proc = self.repo.run()
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("outside the trust root", proc.stderr)
-
-    def test_escaped_or_uninjected_mutation_evidence_is_refused(self):
-        self.repo.write_manifest(self.repo.manifest())
-        head = git(self.repo.path, "rev-parse", "HEAD").strip()
-        for family, block, expected in (
-            ("factory_mutations", {"total": 91, "caught": 90, "not_injected": 0}, "escape"),
-            ("factory_mutations", {"total": 91, "caught": 91, "not_injected": 2}, "inject"),
-            ("application_mutations", {"total": 0, "caught": 0, "not_injected": 0}, "ran nothing"),
-        ):
-            with self.subTest(family=family, block=block):
-                proc = self.repo.run(evidence=self.repo.evidence(head, **{family: block}))
-                self.assertNotEqual(proc.returncode, 0)
-                self.assertIn(expected, proc.stderr)
+    def test_working_tree_tampering_is_invisible(self):
+        self.c.write_manifest(self.c.manifest())
+        for rel in ("harness/bootstrap_verify.py", "factory_kernel/spine.py", MANIFEST_REL):
+            (self.c.path / rel).write_text("TAMPERED = True\n", encoding="utf-8")
+        proc = self.c.run()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
 
     def test_every_ceremony_value_is_required(self):
-        self.repo.write_manifest(self.repo.manifest())
-        head = git(self.repo.path, "rev-parse", "HEAD").strip()
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
         proc = subprocess.run(
-            [
-                sys.executable, str(self.repo.external_verifier),
-                "--repo", str(self.repo.path), "--commit", head,
-            ],
-            cwd=self.repo.path.parent, capture_output=True, text=True, timeout=120,
+            [sys.executable, str(self.c.verifier), "--repo", str(self.c.path), "--commit", head],
+            cwd=self.c.tmp, capture_output=True, text=True, timeout=120,
         )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("supplied by a human at ceremony time", proc.stderr)
 
 
 class BootstrapIsNotMergeAuthorityTests(unittest.TestCase):
-    """The exception must not become a route around the ordinary guards."""
-
-    def test_no_merge_path_consumes_the_genesis_manifest(self):
+    def test_no_merge_path_consumes_the_genesis_exception(self):
         for rel in (
-            "harness/merge_verify.py",
-            "factory_kernel/evidence_closure.py",
-            "factory_kernel/spine.py",
-            "factory_kernel/runtime.py",
-            "factory_kernel/worker_runtime.py",
-            "scripts/factory_evidence.py",
+            "harness/merge_verify.py", "factory_kernel/evidence_closure.py",
+            "factory_kernel/spine.py", "factory_kernel/runtime.py",
+            "factory_kernel/worker_runtime.py", "scripts/factory_evidence.py",
             "scripts/factory_evidence_spine.py",
         ):
-            source = (ROOT / rel).read_text(encoding="utf-8")
             with self.subTest(path=rel):
-                self.assertNotIn("bootstrap", source.lower())
+                self.assertNotIn("bootstrap", (ROOT / rel).read_text(encoding="utf-8").lower())
 
     def test_ordinary_trust_root_change_still_fails_closed(self):
-        """Genesis authorizes one commit; it grants nothing to the next trust-root change."""
         import importlib.util
 
         spec = importlib.util.spec_from_file_location("fs", ROOT / "scripts/factory_security.py")
         fs = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fs)
-        for path in ("factory_kernel/independence.py", "harness/merge_verify.py"):
+        for path in ("factory_kernel/independence.py", "harness/merge_verify.py",
+                     "harness/bootstrap_verify.py", "tests/factory/test_factory_bootstrap.py"):
             self.assertTrue(fs.protected_path(path), path)
 
 

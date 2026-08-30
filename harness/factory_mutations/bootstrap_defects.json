@@ -2,10 +2,10 @@
   "_what_this_is": [
     "Adversarial regressions for the one-time genesis authority and for semantic competence.",
     "Genesis exists because the PR that rewrites the trust root cannot be certified by that trust",
-    "root. These mutations attack what makes it an authority: an out-of-band human anchor, a",
-    "content-addressed verifier, an exactly-one-commit scope bound to evidence for that same",
-    "commit, a complete trust-root inventory, and an authorization the human creates rather than",
-    "one the candidate wrote into the tree for a human to confirm."
+    "root, and because a candidate that authors its own standard can meet a weak one honestly.",
+    "These mutations attack the boundary: the external policy defines what must be proven, the",
+    "candidate manifest may only describe the tree, observations are read from a real run's log,",
+    "and the human creates the authorization."
   ],
   "defects": [
     {
@@ -16,18 +16,67 @@
       "why": "The candidate could silently edit the very verifier that certifies its new trust root."
     },
     {
+      "id": "bootstrap-external-policy-pin-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        policy_sha == args.expect_policy,",
+      "replace": "        True or policy_sha == args.expect_policy,",
+      "why": "A genesis policy the human never reviewed could define the standard genesis is judged by."
+    },
+    {
+      "id": "bootstrap-policy-taken-from-candidate-repo",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        policy_path.is_absolute() and repo not in policy_path.parents,",
+      "replace": "        True or (policy_path.is_absolute() and repo not in policy_path.parents),",
+      "why": "The candidate could supply the external genesis policy from inside its own repository."
+    },
+    {
       "id": "bootstrap-manifest-pin-unchecked",
       "file": "harness/bootstrap_verify.py",
       "find": "        manifest_sha == args.expect_manifest,",
       "replace": "        True or manifest_sha == args.expect_manifest,",
-      "why": "A genesis manifest the human never reviewed could authorize the trust-root rewrite."
+      "why": "A genesis manifest the human never reviewed could describe the trust root being authorized."
     },
     {
       "id": "bootstrap-candidate-scope-unchecked",
       "file": "harness/bootstrap_verify.py",
-      "find": "        commit == args.commit,",
-      "replace": "        True or commit == args.commit,",
+      "find": "    require(commit == args.commit,",
+      "replace": "    require(True or commit == args.commit,",
       "why": "The one-time genesis exception could be applied to a commit other than the one named."
+    },
+    {
+      "id": "bootstrap-candidate-defines-own-standard",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    for key in FORBIDDEN_MANIFEST_KEYS:",
+      "replace": "    for key in ():",
+      "why": "The candidate could author its own evidence minimums or assert its own authorization."
+    },
+    {
+      "id": "bootstrap-trust-root-scope-narrowing-allowed",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    narrowed = [p for p in policy[\"required_trust_root_prefixes\"] if p not in prefixes]",
+      "replace": "    narrowed = []",
+      "why": "The candidate could narrow the trust-root scope so a whole authority family escapes the inventory."
+    },
+    {
+      "id": "bootstrap-mandatory-trust-root-paths-optional",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    absent_paths = [p for p in policy[\"required_trust_root_paths\"] if p not in files]",
+      "replace": "    absent_paths = []",
+      "why": "The candidate could omit a mandatory trust-root file from the genesis inventory."
+    },
+    {
+      "id": "bootstrap-mandatory-pinned-policies-optional",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    absent_policies = [p for p in policy[\"required_policy_files\"] if p not in policies]",
+      "replace": "    absent_policies = []",
+      "why": "The candidate could omit a governing policy file from the hashes pinned at genesis."
+    },
+    {
+      "id": "bootstrap-self-reference-trap-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    covered = [p for p in prefixes if MANIFEST == p or MANIFEST.startswith(p)]",
+      "replace": "    covered = []",
+      "why": "The manifest could fall inside its own hashed prefix, where no fixed point exists."
     },
     {
       "id": "bootstrap-parent-commit-evidence-accepted",
@@ -37,46 +86,53 @@
       "why": "Validation of the parent commit could be presented as exact-head evidence for the manifest-bearing child."
     },
     {
-      "id": "bootstrap-candidate-self-authorization-allowed",
+      "id": "bootstrap-evidence-log-provenance-unchecked",
       "file": "harness/bootstrap_verify.py",
-      "find": "        \"authorization\" not in manifest and \"approved_by\" not in manifest,",
-      "replace": "        True or (\"authorization\" not in manifest and \"approved_by\" not in manifest),",
-      "why": "The candidate could write its own approval into the tree and have the ceremony merely confirm it."
+      "find": "        str(evidence.get(\"log_sha256\") or \"\") == log_sha,",
+      "replace": "        True or str(evidence.get(\"log_sha256\") or \"\") == log_sha,",
+      "why": "An arbitrary log could be substituted for the one the evidence document commits to."
     },
     {
-      "id": "bootstrap-unlisted-trust-root-file-allowed",
+      "id": "bootstrap-evidence-run-identity-unchecked",
       "file": "harness/bootstrap_verify.py",
-      "find": "    require(not missing, \"trust-root files present but unlisted: \"",
-      "replace": "    require(True, \"trust-root files present but unlisted: \"",
-      "why": "A new authority file could be smuggled into the genesis trust root without human review."
+      "find": "        str(evidence.get(\"run_url\") or \"\") == run,",
+      "replace": "        True or str(evidence.get(\"run_url\") or \"\") == run,",
+      "why": "Evidence from some other run could be accepted as the run the human named at ceremony time."
     },
     {
-      "id": "bootstrap-trust-root-content-unchecked",
+      "id": "bootstrap-exact-head-provenance-unchecked",
       "file": "harness/bootstrap_verify.py",
-      "find": "        require(digest(blob(repo, commit, path)) == recorded, f\"trust-root file does not match: {path}\")",
-      "replace": "        require(True, f\"trust-root file does not match: {path}\")",
-      "why": "Genesis could certify a trust root whose files differ from the ones a human reviewed."
-    },
-    {
-      "id": "bootstrap-escaped-mutation-evidence-accepted",
-      "file": "harness/bootstrap_verify.py",
-      "find": "        require(caught == total, f\"evidence {family} let a mutation escape\")",
-      "replace": "        require(True, f\"evidence {family} let a mutation escape\")",
-      "why": "Genesis could be authorized on evidence in which trust-root mutations escaped."
-    },
-    {
-      "id": "bootstrap-evidence-minimums-ignored",
-      "file": "harness/bootstrap_verify.py",
-      "find": "        require(actual >= floor, f\"evidence {key}={actual} is below the required {floor}\")",
-      "replace": "        require(True, f\"evidence {key}={actual} is below the required {floor}\")",
-      "why": "Genesis could be authorized on evidence weaker than the manifest itself declares necessary."
+      "find": "            re.search(rf\"EXACT_HEAD_OK {re.escape(commit)}\\b\", log) is not None,",
+      "replace": "            True or re.search(rf\"EXACT_HEAD_OK {re.escape(commit)}\\b\", log) is not None,",
+      "why": "A log that never proves which head it ran against could authorize genesis."
     },
     {
       "id": "bootstrap-required-markers-ignored",
       "file": "harness/bootstrap_verify.py",
-      "find": "    require(not absent, \"final validation evidence is missing required markers: \" + \", \".join(absent))",
-      "replace": "    require(True, \"final validation evidence is missing required markers: \" + \", \".join(absent))",
-      "why": "Genesis could be authorized without the required validation stages having run at all."
+      "find": "    require(not absent, \"validation log is missing required markers: \" + \", \".join(sorted(set(absent))))",
+      "replace": "    require(True, \"validation log is missing required markers: \" + \", \".join(sorted(set(absent))))",
+      "why": "Genesis could be authorized without required validation stages or holdout classes having run."
+    },
+    {
+      "id": "bootstrap-evidence-minimums-ignored",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        require(actual >= floor, f\"observed {key}={actual} is below the required {floor}\")",
+      "replace": "        require(True, f\"observed {key}={actual} is below the required {floor}\")",
+      "why": "Genesis could be authorized on evidence weaker than the external policy demands."
+    },
+    {
+      "id": "bootstrap-escaped-mutation-evidence-accepted",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        require(caught == total, f\"observed {family} let a mutation escape\")",
+      "replace": "        require(True, f\"observed {family} let a mutation escape\")",
+      "why": "Genesis could be authorized on evidence in which trust-root mutations escaped."
+    },
+    {
+      "id": "bootstrap-mutation-family-requirement-dropped",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    for family in policy[\"required_mutation_families\"]:",
+      "replace": "    for family in []:",
+      "why": "A whole mutation family could be omitted from the genesis evidence."
     },
     {
       "id": "bootstrap-ceremony-values-optional",

@@ -64,6 +64,20 @@
         {"kind": "text_contains", "path": "factory_kernel/independence.py", "value": "if spec.externally_supplied and certificate.get(\"judgement_certifies\") != claim_id:"},
         {"kind": "text_contains", "path": "factory_kernel/runtime.py", "value": "did not declare its own subject"}
       ]
+    },
+    {
+      "id": "IMM-006",
+      "status": "active",
+      "source": {"kind": "audit", "ref": "2026-08-30-candidate-authored-genesis-standard"},
+      "failure_class": "the subject of a certification authoring the standard it is judged by",
+      "lesson": "The pull request that rewrites the trust root cannot be certified by that trust root, and it must not author the bar either: a candidate can satisfy an artificially weak standard honestly. Minimums, required markers, mutation families, trust-root scope and pinned-policy scope come from an external genesis policy supplied at ceremony time and pinned by hash; the candidate manifest may only describe the tree. Observations are read out of a real run's log rather than believed from a JSON document, and the human creates the authorization rather than confirming a string the candidate wrote.",
+      "assertions": [
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "must not define the standard"},
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "outside the repository under test"},
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "no fixed point exists"},
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "narrows the trust-root scope"},
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "does not match the digest the evidence commits to"}
+      ]
     }
   ]
 }
