@@ -357,6 +357,18 @@ class KernelRuntime:
                 credential_scope="github",
                 timeout=180,
             )
+            self._exec(
+                [
+                    "python", "scripts/factory_provenance.py", "publish",
+                    "--pr", str(pr_number),
+                    "--artifacts", str(paths.artifacts),
+                ],
+                cwd=worktree.path,
+                env=env,
+                credential_scope="github",
+                timeout=240,
+                transcript=paths.transcripts / "provenance-publish.log",
+            )
             self.github.add_pr_label(pr_number, self.config.labels["needs_review"])
             self.github.remove_issue_label(issue_number, self.config.labels["in_progress"])
             handed_off = True
