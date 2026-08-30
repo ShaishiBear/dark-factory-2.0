@@ -279,10 +279,15 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(stage["executed_tree_sha"], tree)
             self.assertTrue(stage["isolated"])
 
-    def test_stage_environment_is_destroyed_after_the_stage(self):
-        marker = self.stage("marker", "from pathlib import Path\nPath('left.txt').write_text('x')\n")
-        proc, _ = self.drive([marker])
+    def test_stage_environment_is_destroyed_after_each_stage(self):
+        """Checked per stage, not once at the end: the outer cleanup would mask a leak."""
+        first = self.stage("first", "from pathlib import Path\nPath('left.txt').write_text('x')\n")
+        second = self.stage("second", "pass")
+        proc, result = self.drive([first, second])
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        for stage in result["stages"]:
+            self.assertTrue(stage["destroyed"], stage["name"])
+            self.assertFalse((self.root / "stages" / f"stage-{stage['name']}").exists())
         self.assertFalse((self.root / "stages").exists())
         self.assertFalse((self.repo / "left.txt").exists())
 

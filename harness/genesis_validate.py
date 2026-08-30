@@ -244,6 +244,12 @@ def main() -> None:
     try:
         for stage in stages:
             result = run_stage(repo, args.commit, tree, stage, recipe, log_dir, work_dir, env)
+            # Asserted by the caller, not inside the stage's own cleanup: an environment that
+            # outlives its stage is candidate-controlled state left sitting beside the next one.
+            leftover = work_dir / f"stage-{result['name']}"
+            if leftover.exists():
+                fail(f"stage {result['name']!r} environment outlived its stage: {leftover}")
+            result["destroyed"] = True
             print(
                 f"STAGE {result['name']} exit={result['exit']} "
                 f"tree={result['executed_tree_sha'][:12]} {result['measurements']}",
