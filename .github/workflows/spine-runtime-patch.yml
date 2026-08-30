@@ -1,0 +1,59 @@
+name: spine-runtime-patch
+
+on:
+  push:
+    branches: [validation/df2-rewrite-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'chore(validation): patch runtime to spine authority'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert exact rewrite head
+        env:
+          EXPECTED: e2804e613010b0a3e5b255d0da8af040020785d6
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED"
+
+      - name: Patch runtime evidence authority
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('factory_kernel/runtime.py')
+          text = path.read_text(encoding='utf-8')
+          old = '"python", "scripts/factory_evidence.py", "--pr", str(pr_number),'
+          new = '"python", "scripts/factory_evidence_spine.py", "--pr", str(pr_number),'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one legacy evidence command, saw {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git diff --check
+          git diff -- factory_kernel/runtime.py
+
+      - name: Commit and push exact patch
+        env:
+          FACTORY_GIT_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'Dark Factory Validation'
+          git config user.email 'dark-factory@users.noreply.github.com'
+          git add factory_kernel/runtime.py
+          git commit -m 'feat(factory): route merge evidence through canonical spine'
+          cat > "$RUNNER_TEMP/askpass.sh" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$FACTORY_GIT_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+          chmod 700 "$RUNNER_TEMP/askpass.sh"
+          GIT_ASKPASS="$RUNNER_TEMP/askpass.sh" GIT_TERMINAL_PROMPT=0 \
+            git push https://github.com/${GITHUB_REPOSITORY}.git HEAD:refs/heads/rewrite/df2-repo-owned-factory
