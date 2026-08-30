@@ -172,7 +172,7 @@ class EvidenceClosureTests(unittest.TestCase):
                 base_sha=base,
                 judgement=judgement(claim_id),
             )
-            for claim_id in ("design", "architecture-governor")
+            for claim_id in ("contract", "design", "architecture-governor")
         }
         certs.update(overrides)
         return certs
@@ -203,6 +203,37 @@ class EvidenceClosureTests(unittest.TestCase):
             self.assertEqual(index["manifest_sha256"], manifest.sha256())
             self.assertTrue((root / "spine/run-manifest.json").is_file())
             self.assertTrue((root / "spine/evidence-index.json").is_file())
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_contract_has_its_own_independent_certifier(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            manifest, _index = self.close(root, pack, legacy, self.certificates())
+            contract = manifest.claim("contract")
+            self.assertEqual(contract.independent.authority_id, "blinded-contract-certifier")
+            self.assertNotEqual(
+                contract.independent.authority_id,
+                manifest.claim("holdout-code").deterministic.authority_id,
+            )
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_code_holdout_cannot_certify_the_contract_claim(self, immunity):
+        """The blinded code holdout presupposes the contract; it cannot certify it."""
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack, legacy = self.fixture(root)
+            forged = build_certificate(
+                claim_id="contract",
+                claim_hashes=self.hashes,
+                head_sha=HEAD,
+                base_sha=BASE,
+                judgement={"version": "1.0", "verdict": "pass"},
+            )
+            with self.assertRaisesRegex(ValueError, "does not certify contract"):
+                self.close(root, pack, legacy, self.certificates(contract=forged))
 
     @patch("factory_kernel.evidence_closure._load_immunity")
     def test_independent_design_certification_satisfies_the_design_claim(self, immunity):

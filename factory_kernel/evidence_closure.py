@@ -365,7 +365,6 @@ def compile_full_spine(
         )
     # Judgements the validator already executed in-process; the kernel, not a model, binds them.
     in_process_judgements: dict[str, Mapping[str, Any]] = {
-        "contract": holdout,
         "architecture-drift": architecture_holdout,
         "architecture-conformance": architecture_holdout,
     }

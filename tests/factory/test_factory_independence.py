@@ -91,8 +91,23 @@ class RegistryTests(unittest.TestCase):
 
     def test_pre_code_claims_are_certified_outside_evidence_closure(self):
         self.assertEqual(
-            externally_supplied_claims(), frozenset({"design", "architecture-governor"})
+            externally_supplied_claims(),
+            frozenset({"contract", "design", "architecture-governor"}),
         )
+
+    def test_contract_is_not_certified_by_the_code_holdout(self):
+        """The code holdout judges the diff against the contract; that is the opposite question."""
+        contract = authority_for("contract")
+        self.assertTrue(contract.externally_supplied)
+        self.assertEqual(contract.authority_id, "blinded-contract-certifier")
+        self.assertNotEqual(contract.authority_id, PRODUCERS["holdout-code"])
+        self.assertNotEqual(contract.authority_id, DETERMINISTIC_AUTHORITIES["holdout-code"])
+
+    def test_every_dedicated_certifier_has_its_own_authority(self):
+        dedicated = [
+            entry.authority_id for entry in REGISTRY if entry.externally_supplied
+        ]
+        self.assertEqual(len(dedicated), len(set(dedicated)))
 
     def test_design_and_governor_do_not_share_one_authority(self):
         self.assertNotEqual(
@@ -109,7 +124,7 @@ class RegistryTests(unittest.TestCase):
 
 class CertificateTests(unittest.TestCase):
     def test_valid_certificate_verifies(self):
-        for claim_id in ("design", "architecture-governor"):
+        for claim_id in ("contract", "design", "architecture-governor"):
             evidence = verify(claim_id, certificate(claim_id))
             self.assertEqual(evidence["verdict"], "pass")
             self.assertEqual(evidence["head_sha"], HEAD)
@@ -186,6 +201,42 @@ class CertificateTests(unittest.TestCase):
             verify("design", certificate("design", subject_sha256="0" * 64))
         with self.assertRaisesRegex(ValueError, "did not pass"):
             verify("design", certificate("design", verdict="fail"))
+
+    def test_judgement_must_declare_its_own_subject(self):
+        """A verdict produced for another purpose cannot be re-wrapped as this certification."""
+        code_holdout = {"version": "1.0", "verdict": "pass", "findings": []}
+        value = build_certificate(
+            claim_id="contract",
+            claim_hashes=hashes(),
+            head_sha=HEAD,
+            base_sha=BASE,
+            judgement=code_holdout,
+        )
+        with self.assertRaisesRegex(ValueError, "does not certify contract"):
+            verify("contract", value)
+
+    def test_judgement_declaring_another_claim_is_refused(self):
+        value = build_certificate(
+            claim_id="design",
+            claim_hashes=hashes(),
+            head_sha=HEAD,
+            base_sha=BASE,
+            judgement={"version": "1.0", "verdict": "pass", "certifies": "contract",
+                       "findings": []},
+        )
+        with self.assertRaisesRegex(ValueError, "does not certify design"):
+            verify("design", value)
+
+    def test_in_process_wrapping_does_not_require_a_declared_subject(self):
+        """Closure constructs those envelopes itself around a judgement of known purpose."""
+        value = build_certificate(
+            claim_id="architecture-drift",
+            claim_hashes=hashes(),
+            head_sha=HEAD,
+            base_sha=BASE,
+            judgement={"version": "1.0", "verdict": "pass"},
+        )
+        self.assertEqual(verify("architecture-drift", value)["verdict"], "pass")
 
     def test_certificate_cannot_certify_its_own_judgement(self):
         value = certificate("design", judgement_sha256=hashes()["design"])

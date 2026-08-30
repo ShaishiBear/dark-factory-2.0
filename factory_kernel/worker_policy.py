@@ -26,6 +26,7 @@ ROLE_TOOLS: dict[str, tuple[str, ...]] = {
     "conformance": WRITE_TOOLS,
     "holdout": (),
     "architecture-holdout": (),
+    "contract-certifier": (),
     "design-certifier": (),
     "governor-certifier": (),
 }

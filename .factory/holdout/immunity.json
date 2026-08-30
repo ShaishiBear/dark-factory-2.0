@@ -52,6 +52,18 @@
         {"kind": "text_contains", "path": "factory_kernel/evidence_closure.py", "value": "authority_for(claim_id)"},
         {"kind": "text_contains", "path": "harness/merge_verify.py", "value": "has no independent certification hash"}
       ]
+    },
+    {
+      "id": "IMM-005",
+      "status": "active",
+      "source": {"kind": "audit", "ref": "2026-08-30-contract-certified-by-code-holdout"},
+      "failure_class": "an independent authority answering a different question than the claim it certifies",
+      "lesson": "Validator-side is not sufficient for independence; the authority must answer the claim's own question. The contract claim's independent slot was filled by the blinded code holdout, which judges the diff against the contract while presupposing the contract is right - anti-correlated with contract faithfulness, since a contract that drops requirements makes that holdout more likely to pass. The contract claim keeps a dedicated certifier that sees the issue and no diff, and every externally supplied certificate must declare its own subject from inside the hashed judgement.",
+      "assertions": [
+        {"kind": "text_contains", "path": "factory_kernel/independence.py", "value": "authority_id=\"blinded-contract-certifier\""},
+        {"kind": "text_contains", "path": "factory_kernel/independence.py", "value": "if spec.externally_supplied and certificate.get(\"judgement_certifies\") != claim_id:"},
+        {"kind": "text_contains", "path": "factory_kernel/runtime.py", "value": "did not declare its own subject"}
+      ]
     }
   ]
 }

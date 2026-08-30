@@ -604,18 +604,46 @@ class KernelRuntime:
     # Post-code architecture conformance is a *different* claim about a *different* artifact.
     # It is never a substitute for independently certifying the design the builder proposed or
     # the governor decision that authorized it, so those get their own blinded authorities.
-    PRECODE_CERTIFIERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    PRECODE_CERTIFIERS: tuple[tuple[str, str, tuple[str, ...], bool], ...] = (
+        # The contract certifier is the only one that sees the issue, and it sees no diff: it
+        # judges whether the compiled contract faithfully captures what was asked, which is the
+        # opposite question from whether the implementation satisfies the contract.
+        ("contract", "contract-certifier", ("contract",), True),
         (
             "design",
             "design-certifier",
             ("contract", "context", "architecture-policy", "design"),
+            False,
         ),
         (
             "architecture-governor",
             "governor-certifier",
             ("contract", "context", "architecture-policy", "design", "architecture-governor"),
+            False,
         ),
     )
+
+    CERTIFIER_QUESTIONS: dict[str, str] = {
+        "contract": (
+            "Judge only whether the compiled contract is a faithful, complete and correctly "
+            "scoped capture of the supplied issue: every requirement the issue states is "
+            "represented by an acceptance criterion, nothing is silently dropped or narrowed, "
+            "and nothing is invented beyond what the issue asks. You are not reviewing any "
+            "design or implementation, and you have deliberately not been shown one."
+        ),
+        "design": (
+            "Judge only whether the supplied design is a sound, complete and policy-consistent "
+            "answer to the supplied contract and context. You are not reviewing any "
+            "implementation, and you have deliberately not been shown one."
+        ),
+        "architecture-governor": (
+            "Judge only whether the governor's decision is warranted by the supplied policy, "
+            "contract, context and design: whether the applicable principles, migrations and "
+            "debts were correctly identified, and whether proceeding is justified rather than "
+            "requiring a veto or a prefactor. You are not reviewing any implementation, and you "
+            "have deliberately not been shown one."
+        ),
+    }
 
     def _certify_precode_claims(
         self, paths: RunPaths, *, head: str, base: str, issue: int | None
@@ -654,12 +682,12 @@ class KernelRuntime:
         values = {claim: record["content"] for claim, record in pack["artifacts"].items()}
         target = paths.artifacts / "independent"
         target.mkdir(parents=True, exist_ok=True)
-        for claim_id, role, inputs in self.PRECODE_CERTIFIERS:
+        for claim_id, role, inputs, needs_issue in self.PRECODE_CERTIFIERS:
+            payload: dict[str, Any] = {key: values[key] for key in inputs}
+            if needs_issue:
+                payload["issue"] = self._certification_issue(issue)
             judgement = self._run_precode_certifier(
-                paths,
-                claim_id=claim_id,
-                role=role,
-                inputs={key: values[key] for key in inputs},
+                paths, claim_id=claim_id, role=role, inputs=payload
             )
             certificate = build_certificate(
                 claim_id=claim_id,
@@ -680,14 +708,22 @@ class KernelRuntime:
             )
             self._write_json(target / f"{claim_id}.json", certificate)
 
+    def _certification_issue(self, issue: int) -> dict[str, Any]:
+        """The issue as the contract certifier sees it: what was asked, and nothing else."""
+        record = self.github.issue(issue)
+        return {
+            "number": issue,
+            "title": str(record.get("title") or ""),
+            "body": str(record.get("body") or ""),
+        }
+
     def _run_precode_certifier(
         self, paths: RunPaths, *, claim_id: str, role: str, inputs: Mapping[str, Any]
     ) -> Mapping[str, Any]:
         suffix = (
-            "Return ONLY JSON with version 1.0; verdict pass|fail; and findings as objects with "
-            "severity critical|high|medium|low and non-empty description. Judge only whether the "
-            "supplied artifact is a sound, complete and policy-consistent answer to the supplied "
-            "contract and context. You are not reviewing any implementation."
+            f"Return ONLY JSON with version 1.0; certifies {claim_id!r}; verdict pass|fail; and "
+            "findings as objects with severity critical|high|medium|low and non-empty "
+            "description. " + self.CERTIFIER_QUESTIONS[claim_id]
         )
         with tempfile.TemporaryDirectory(prefix=f"dark-factory-{role}-") as tmp:
             prompt = prompt_text(
@@ -715,6 +751,10 @@ class KernelRuntime:
                 raise NeedsHuman(f"independent {claim_id} certifier returned invalid JSON")
             if not isinstance(value.get("findings"), list):
                 raise NeedsHuman(f"independent {claim_id} certifier findings are invalid")
+            if value.get("certifies") != claim_id:
+                raise NeedsHuman(
+                    f"independent {claim_id} certifier did not declare its own subject"
+                )
             if value.get("verdict") != "pass":
                 raise NeedsHuman(f"independent {claim_id} certifier rejected the {claim_id} claim")
             self._write_json(paths.artifacts / f"{claim_id}-certification.json", dict(value))

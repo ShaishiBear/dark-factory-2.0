@@ -19,6 +19,14 @@ Relatedness is not independence. A post-code conformance judgement is a *differe
 a *different artifact* produced by a *different authority class* than an independent
 certification of the pre-code design or the governor's proceed decision, and this module refuses
 to let one stand in for the other however it is labelled.
+
+The ``contract`` claim carried a quieter version of the same error. Its independent slot was
+filled by the blinded *code* holdout, which is validator-side and so not circular, but which
+judges whether the diff satisfies the contract while *presupposing* the contract is right. The
+contract claim asks the opposite question -- is this compiled contract a faithful and complete
+capture of the issue -- and the two are anti-correlated: a contract that silently drops half the
+issue makes the code holdout *more* likely to pass, not less. A dedicated certifier now answers
+the contract question, blinded to the implementation so it cannot rationalise from the diff.
 """
 from __future__ import annotations
 
@@ -49,10 +57,10 @@ class IndependentAuthority:
 REGISTRY: tuple[IndependentAuthority, ...] = (
     IndependentAuthority(
         claim_id="contract",
-        authority_id="blinded-contract-holdout",
+        authority_id="blinded-contract-certifier",
         subject_claim="contract",
         binds=("contract",),
-        externally_supplied=False,
+        externally_supplied=True,
     ),
     IndependentAuthority(
         claim_id="design",
@@ -134,6 +142,7 @@ def build_certificate(
         "head_sha": head_sha,
         "base_sha": base_sha,
         "verdict": verdict,
+        "judgement_certifies": judgement.get("certifies"),
         "judgement_sha256": sha256_value(dict(judgement)),
     }
 
@@ -189,6 +198,16 @@ def verify_certificate(
         raise ValueError(
             f"independent slot for {claim_id} is filled by builder-produced artifact "
             f"{builder_origin[judgement]!r}; a builder claim cannot certify itself"
+        )
+
+    # A certificate the kernel did not construct in-process must name its own subject from
+    # inside the hashed judgement. `claim_id` is set by whoever built the envelope; this is the
+    # authority's own declaration, so a judgement produced for some other purpose -- a code
+    # holdout's verdict, say -- cannot be re-wrapped as certification of this claim.
+    if spec.externally_supplied and certificate.get("judgement_certifies") != claim_id:
+        raise ValueError(
+            f"judgement offered for the {claim_id} independent slot does not certify {claim_id}; "
+            f"it declares {certificate.get('judgement_certifies')!r}"
         )
 
     subject = _hash(certificate.get("subject_sha256"), "subject_sha256")
