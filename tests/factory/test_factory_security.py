@@ -58,12 +58,30 @@ class SecurityGuardTests(unittest.TestCase):
             "harness/ci.py",
             "scripts/factory_evidence.py",
             "deploy/systemd/dark-factory.service",
+            "tests/factory/test_factory_evidence_closure.py",
         ]
         for path in paths:
             with self.subTest(path=path):
                 result = self.evaluate(changed_files=[path])
                 self.assertEqual(result["verdict"], "fail")
                 self.assertEqual(result["protected_paths"], [path])
+
+    def test_factory_detector_tests_are_trust_root(self):
+        """The tests are what turn an injected trust-root mutation into a red suite."""
+        for path in (
+            "tests/factory/test_factory_independence.py",
+            "tests/factory/test_factory_merge_verify.py",
+            "tests/factory/test_factory_bootstrap.py",
+        ):
+            with self.subTest(path=path):
+                result = self.evaluate(changed_files=[path])
+                self.assertEqual(result["verdict"], "fail")
+                self.assertEqual(result["protected_paths"], [path])
+
+    def test_application_tests_are_not_trust_root(self):
+        """Only the factory's own detectors are protected; product tests stay ordinary work."""
+        result = self.evaluate(changed_files=["app/backend/tests/test_messages.py"])
+        self.assertEqual(result["protected_paths"], [])
 
     def test_legacy_archon_prompt_is_not_an_authority_anymore(self):
         path = ".archon/commands/dark-factory-engineering-plan.md"

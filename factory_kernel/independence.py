@@ -43,13 +43,35 @@ SHA256_LEN = 64
 
 @dataclass(frozen=True)
 class IndependentAuthority:
-    """The one authority permitted to fill a claim's independent slot."""
+    """The one authority permitted to fill a claim's independent slot.
+
+    ``sees`` is what the authority is actually shown. It is not documentation: the kernel builds
+    the authority's input from this field, and ``__post_init__`` refuses any entry whose authority
+    is not shown every artifact the claim is bound to. Independence without competence is not
+    independence -- an authority that never sees the design cannot certify conformance to it,
+    however structurally separate from the builder it is.
+    """
 
     claim_id: str
     authority_id: str
     subject_claim: str
     binds: tuple[str, ...]
+    sees: tuple[str, ...]
     externally_supplied: bool
+    extra_inputs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        unseen = sorted(set(self.binds) - set(self.sees))
+        if unseen:
+            raise ValueError(
+                f"independent authority {self.authority_id!r} cannot certify {self.claim_id!r}: "
+                "it is never shown " + ", ".join(unseen)
+            )
+        if self.subject_claim not in self.sees:
+            raise ValueError(
+                f"independent authority {self.authority_id!r} cannot certify {self.claim_id!r}: "
+                f"it is never shown the {self.subject_claim} artifact it must judge"
+            )
 
 
 # Protected registry. Changing an entry changes who is allowed to certify a claim, so it lives in
@@ -60,13 +82,17 @@ REGISTRY: tuple[IndependentAuthority, ...] = (
         authority_id="blinded-contract-certifier",
         subject_claim="contract",
         binds=("contract",),
+        sees=("contract",),
         externally_supplied=True,
+        # The issue is what the contract is judged against; it is not itself a spine claim.
+        extra_inputs=("issue",),
     ),
     IndependentAuthority(
         claim_id="design",
         authority_id="blinded-design-certifier",
         subject_claim="design",
         binds=("contract", "context", "architecture-policy", "design"),
+        sees=("contract", "context", "architecture-policy", "design"),
         externally_supplied=True,
     ),
     IndependentAuthority(
@@ -74,6 +100,7 @@ REGISTRY: tuple[IndependentAuthority, ...] = (
         authority_id="blinded-governor-certifier",
         subject_claim="architecture-governor",
         binds=("contract", "context", "architecture-policy", "design", "architecture-governor"),
+        sees=("contract", "context", "architecture-policy", "design", "architecture-governor"),
         externally_supplied=True,
     ),
     IndependentAuthority(
@@ -81,14 +108,22 @@ REGISTRY: tuple[IndependentAuthority, ...] = (
         authority_id="architecture-holdout",
         subject_claim="architecture-drift",
         binds=("architecture-policy", "design", "architecture-drift"),
+        sees=("architecture-policy", "design", "architecture-drift"),
         externally_supplied=False,
+        extra_inputs=("changed_files", "diff"),
     ),
     IndependentAuthority(
         claim_id="architecture-conformance",
         authority_id="architecture-holdout",
         subject_claim="architecture-conformance",
-        binds=("architecture-policy", "design", "architecture-conformance"),
+        binds=(
+            "architecture-policy", "design", "architecture-governor", "architecture-conformance",
+        ),
+        sees=(
+            "architecture-policy", "design", "architecture-governor", "architecture-conformance",
+        ),
         externally_supplied=False,
+        extra_inputs=("changed_files", "diff"),
     ),
 )
 
@@ -104,6 +139,25 @@ def authority_for(claim_id: str) -> IndependentAuthority:
             f"no independent authority is registered for claim {claim_id!r}; "
             "policy requires independence that no authority can supply"
         ) from exc
+
+
+def authority_inputs(claim_ids: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The exact claim artifacts and extra inputs one authority must be shown for these claims.
+
+    One authority may certify several claims. Its input is the union of what each of those claims
+    requires, so a shared authority is competent for every claim it serves, not just the first.
+    """
+    seen: list[str] = []
+    extra: list[str] = []
+    for claim_id in claim_ids:
+        spec = authority_for(claim_id)
+        seen.extend(name for name in spec.sees if name not in seen)
+        extra.extend(name for name in spec.extra_inputs if name not in extra)
+    return tuple(seen), tuple(extra)
+
+
+def claims_for_authority(authority_id: str) -> tuple[str, ...]:
+    return tuple(entry.claim_id for entry in REGISTRY if entry.authority_id == authority_id)
 
 
 def externally_supplied_claims() -> frozenset[str]:

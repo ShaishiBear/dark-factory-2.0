@@ -22,7 +22,12 @@ from .config import KernelConfig
 from .credential_env import scoped_environment
 from .github_cli import GitHubClient
 from .providers import ClaudeCliProvider, prompt_text
-from .independence import build_certificate, verify_certificate
+from .independence import (
+    authority_inputs,
+    build_certificate,
+    claims_for_authority,
+    verify_certificate,
+)
 from .provenance import verify_pack
 from .worktree import Worktree, create_detached, remove
 
@@ -496,14 +501,16 @@ class KernelRuntime:
             if verdict.get("verdict") != "pass":
                 raise NeedsHuman("blinded holdout rejected PR")
 
+            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)
             architecture_holdout = self._run_architecture_holdout(
                 paths,
+                pack=pack,
                 policy=policy,
                 changed_files=sorted(x for x in changed if x),
                 diff=patch,
             )
             self._certify_precode_claims(
-                paths, head=head, base=base, issue=linked_issue
+                paths, pack=pack, head=head, base=base, issue=linked_issue
             )
             self._write_json(
                 paths.artifacts / "validator-verdict.json",
@@ -604,23 +611,13 @@ class KernelRuntime:
     # Post-code architecture conformance is a *different* claim about a *different* artifact.
     # It is never a substitute for independently certifying the design the builder proposed or
     # the governor decision that authorized it, so those get their own blinded authorities.
-    PRECODE_CERTIFIERS: tuple[tuple[str, str, tuple[str, ...], bool], ...] = (
+    PRECODE_CERTIFIERS: tuple[tuple[str, str], ...] = (
         # The contract certifier is the only one that sees the issue, and it sees no diff: it
         # judges whether the compiled contract faithfully captures what was asked, which is the
         # opposite question from whether the implementation satisfies the contract.
-        ("contract", "contract-certifier", ("contract",), True),
-        (
-            "design",
-            "design-certifier",
-            ("contract", "context", "architecture-policy", "design"),
-            False,
-        ),
-        (
-            "architecture-governor",
-            "governor-certifier",
-            ("contract", "context", "architecture-policy", "design", "architecture-governor"),
-            False,
-        ),
+        ("contract", "contract-certifier"),
+        ("design", "design-certifier"),
+        ("architecture-governor", "governor-certifier"),
     )
 
     CERTIFIER_QUESTIONS: dict[str, str] = {
@@ -645,16 +642,12 @@ class KernelRuntime:
         ),
     }
 
-    def _certify_precode_claims(
+    def _builder_pack(
         self, paths: RunPaths, *, head: str, base: str, issue: int | None
-    ) -> None:
-        """Issue genuinely independent certificates for the pre-code design and governor claims.
-
-        The builder cannot reach these authorities: they run on the validator, blinded to the
-        builder transcript, and the kernel -- not the model -- fills in every binding.
-        """
+    ) -> Mapping[str, Any]:
+        """Fetch and re-verify the exact-head builder provenance the authorities are judged on."""
         if not isinstance(issue, int) or isinstance(issue, bool) or issue <= 0:
-            raise NeedsHuman("cannot certify pre-code claims without a linked issue number")
+            raise NeedsHuman("cannot certify claims without a linked issue number")
         pack_dir = paths.artifacts / "spine"
         self._exec(
             [
@@ -669,7 +662,7 @@ class KernelRuntime:
             transcript=paths.transcripts / "provenance-fetch.log",
         )
         try:
-            pack = verify_pack(
+            return verify_pack(
                 self._read_json(pack_dir / "builder-provenance.json"),
                 expected_head_sha=head,
                 expected_base_sha=base,
@@ -678,13 +671,32 @@ class KernelRuntime:
         except ValueError as exc:
             raise NeedsHuman(f"builder provenance is unusable for certification: {exc}") from exc
 
+    def _certify_precode_claims(
+        self,
+        paths: RunPaths,
+        *,
+        pack: Mapping[str, Any],
+        head: str,
+        base: str,
+        issue: int | None,
+    ) -> None:
+        """Issue genuinely independent certificates for the pre-code claims.
+
+        The builder cannot reach these authorities: they run on the validator, blinded to the
+        builder transcript, and the kernel -- not the model -- fills in every binding.
+        """
+        if not isinstance(issue, int) or isinstance(issue, bool) or issue <= 0:
+            raise NeedsHuman("cannot certify pre-code claims without a linked issue number")
         hashes = {claim: record["sha256"] for claim, record in pack["artifacts"].items()}
         values = {claim: record["content"] for claim, record in pack["artifacts"].items()}
         target = paths.artifacts / "independent"
         target.mkdir(parents=True, exist_ok=True)
-        for claim_id, role, inputs, needs_issue in self.PRECODE_CERTIFIERS:
-            payload: dict[str, Any] = {key: values[key] for key in inputs}
-            if needs_issue:
+        for claim_id, role in self.PRECODE_CERTIFIERS:
+            # What the authority is shown comes from the protected registry, which refuses any
+            # entry that is not shown every artifact its claim is bound to.
+            seen, extra = authority_inputs((claim_id,))
+            payload: dict[str, Any] = {key: values[key] for key in seen}
+            if "issue" in extra:
                 payload["issue"] = self._certification_issue(issue)
             judgement = self._run_precode_certifier(
                 paths, claim_id=claim_id, role=role, inputs=payload
@@ -764,15 +776,26 @@ class KernelRuntime:
         self,
         paths: RunPaths,
         *,
+        pack: Mapping[str, Any],
         policy: Mapping[str, Any],
         changed_files: list[str],
         diff: str,
     ) -> Path:
-        context = {
-            "architecture_policy": policy,
-            "changed_files": changed_files,
-            "diff": diff,
+        """One architecture authority, shown everything both of its claims are bound to.
+
+        It certifies architecture-drift and architecture-conformance. Conformance asserts the
+        implementation conforms to the design and the governor's decision, so an authority shown
+        only the policy and the diff was never competent to certify it. The registry now says what
+        this authority must see, and the input is built from that rather than from a hand-kept
+        literal that could drift away from the claims.
+        """
+        values = {claim: record["content"] for claim, record in pack["artifacts"].items()}
+        seen, _extra = authority_inputs(claims_for_authority("architecture-holdout"))
+        context: dict[str, Any] = {
+            name: policy if name == "architecture-policy" else values[name] for name in seen
         }
+        context["changed_files"] = changed_files
+        context["diff"] = diff
         suffix = (
             "Return ONLY JSON with version 1.0; verdict pass|fail; convergence "
             "improves|neutral|regresses; principles, migrations, debts arrays containing exactly "

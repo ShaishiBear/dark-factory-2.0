@@ -1,0 +1,81 @@
+{
+  "_what_this_is": [
+    "Adversarial regressions for the one-time genesis authority and for semantic competence.",
+    "Genesis exists because the PR that rewrites the trust root cannot be certified by that",
+    "trust root. These mutations attack the properties that make it a real authority: an",
+    "out-of-band human anchor, a content-addressed verifier, an exactly-one-commit scope, and",
+    "a complete trust-root inventory."
+  ],
+  "defects": [
+    {
+      "id": "bootstrap-verifier-self-hash-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        self_sha == args.expect_verifier,",
+      "replace": "        True or self_sha == args.expect_verifier,",
+      "why": "The candidate could silently edit the very verifier that certifies its new trust root."
+    },
+    {
+      "id": "bootstrap-manifest-pin-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        manifest_sha == args.expect_manifest,",
+      "replace": "        True or manifest_sha == args.expect_manifest,",
+      "why": "A genesis manifest the human never approved could authorize the trust-root rewrite."
+    },
+    {
+      "id": "bootstrap-candidate-scope-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        head == args.expect_candidate,",
+      "replace": "        True or head == args.expect_candidate,",
+      "why": "The one-time genesis exception could be carried silently onto a later commit."
+    },
+    {
+      "id": "bootstrap-unlisted-trust-root-file-allowed",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    require(not missing, \"trust-root files present at the candidate but unlisted: \"",
+      "replace": "    require(True, \"trust-root files present at the candidate but unlisted: \"",
+      "why": "A new authority file could be smuggled into the genesis trust root without human review."
+    },
+    {
+      "id": "bootstrap-trust-root-content-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        require(digest(blob(head, path)) == recorded, f\"trust-root file does not match: {path}\")",
+      "replace": "        require(True, f\"trust-root file does not match: {path}\")",
+      "why": "Genesis could certify a trust root whose files differ from the ones a human approved."
+    },
+    {
+      "id": "bootstrap-escaped-mutation-evidence-accepted",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        require(caught == total, f\"observed {family} let a mutation escape\")",
+      "replace": "        require(True, f\"observed {family} let a mutation escape\")",
+      "why": "Genesis could be authorized on evidence in which trust-root mutations escaped."
+    },
+    {
+      "id": "bootstrap-one-time-authorization-dropped",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    require(auth.get(\"one_time\") is True, \"genesis authorization is not marked one-time\")",
+      "replace": "    require(True, \"genesis authorization is not marked one-time\")",
+      "why": "The genesis exception would stop being explicitly one-time human authorization."
+    },
+    {
+      "id": "bootstrap-human-values-optional",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    if not (args.expect_verifier and args.expect_manifest and args.expect_candidate):",
+      "replace": "    if False and not (args.expect_verifier and args.expect_manifest and args.expect_candidate):",
+      "why": "The out-of-band human anchor could be omitted entirely, leaving the candidate to certify itself."
+    },
+    {
+      "id": "security-factory-tests-unprotected",
+      "file": "scripts/factory_security.py",
+      "find": "        or path.startswith(\"tests/factory/\")",
+      "replace": "        or path.startswith(\"tests/factory/__never__/\")",
+      "why": "The factory's own detector tests could be weakened by an ordinary PR without tripping the trust-root guard."
+    },
+    {
+      "id": "independence-competence-invariant-removed",
+      "file": "factory_kernel/independence.py",
+      "find": "        unseen = sorted(set(self.binds) - set(self.sees))",
+      "replace": "        unseen = []",
+      "why": "An authority could certify a claim it is never shown the artifacts for: independent, but not competent."
+    }
+  ]
+}

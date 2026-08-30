@@ -115,6 +115,10 @@ def protected_path(path: str) -> bool:
         or path.startswith(".github/")
         or path.startswith("deploy/systemd/")
         or path.startswith("harness/")
+        # The factory's own tests are detectors, not product code: they are what turns an injected
+        # trust-root mutation into a red suite. A mutation whose sole detector was quietly weakened
+        # still escapes loudly, but a property with no corresponding mutation had no signal at all.
+        or path.startswith("tests/factory/")
         or path.startswith("scripts/factory_")
         or name == "Dockerfile"
         or re.fullmatch(r"docker-compose(?:\.[^.]+)?\.ya?ml", name) is not None

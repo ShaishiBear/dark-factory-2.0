@@ -14,7 +14,10 @@ from factory_kernel.evidence_closure import DETERMINISTIC_AUTHORITIES, PRODUCERS
 from factory_kernel.independence import (
     CERTIFICATE_KIND,
     REGISTRY,
+    IndependentAuthority,
     authority_for,
+    authority_inputs,
+    claims_for_authority,
     build_certificate,
     externally_supplied_claims,
     verify_certificate,
@@ -72,6 +75,57 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(required)
         for claim_id in sorted(required):
             self.assertEqual(authority_for(claim_id).claim_id, claim_id)
+
+    def test_every_authority_is_shown_everything_its_claim_is_bound_to(self):
+        """Independence without competence is not independence."""
+        for entry in REGISTRY:
+            self.assertTrue(set(entry.binds) <= set(entry.sees), entry.claim_id)
+            self.assertIn(entry.subject_claim, entry.sees, entry.claim_id)
+
+    def test_an_authority_blind_to_its_bindings_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "it is never shown design"):
+            IndependentAuthority(
+                claim_id="architecture-conformance",
+                authority_id="architecture-holdout",
+                subject_claim="architecture-conformance",
+                binds=("design", "architecture-conformance"),
+                sees=("architecture-conformance",),
+                externally_supplied=False,
+            )
+
+    def test_an_authority_blind_to_its_subject_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "never shown the design artifact"):
+            IndependentAuthority(
+                claim_id="design",
+                authority_id="blinded-design-certifier",
+                subject_claim="design",
+                binds=("contract",),
+                sees=("contract",),
+                externally_supplied=True,
+            )
+
+    def test_conformance_authority_sees_the_design_and_governor_it_judges(self):
+        """Conformance asserts the code matches the design and the governor's decision."""
+        spec = authority_for("architecture-conformance")
+        for name in ("architecture-policy", "design", "architecture-governor"):
+            self.assertIn(name, spec.sees)
+            self.assertIn(name, spec.binds)
+
+    def test_shared_authority_input_covers_every_claim_it_certifies(self):
+        claims = claims_for_authority("architecture-holdout")
+        self.assertEqual(set(claims), {"architecture-drift", "architecture-conformance"})
+        seen, extra = authority_inputs(claims)
+        for claim_id in claims:
+            self.assertTrue(set(authority_for(claim_id).sees) <= set(seen), claim_id)
+        self.assertIn("diff", extra)
+
+    def test_contract_certifier_is_never_shown_the_diff(self):
+        """It must judge the contract against the issue, not rationalise from an implementation."""
+        spec = authority_for("contract")
+        self.assertEqual(spec.extra_inputs, ("issue",))
+        self.assertNotIn("diff", spec.extra_inputs)
+        for pre_code in ("design", "architecture-governor"):
+            self.assertNotIn("diff", authority_for(pre_code).extra_inputs)
 
     def test_unregistered_claims_fail_closed(self):
         with self.assertRaisesRegex(ValueError, "no independent authority is registered"):
