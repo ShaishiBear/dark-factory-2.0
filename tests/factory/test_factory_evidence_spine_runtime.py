@@ -16,7 +16,7 @@ class EvidenceSpineRuntimeTests(unittest.TestCase):
             credential_scope="github+validation",
         )
         self.assertEqual(result, "ok")
-        argv = base_exec.call_args.args[1]
+        argv = base_exec.call_args.args[0]
         self.assertEqual(argv[0], "python")
         self.assertEqual(argv[1], "scripts/factory_evidence_spine.py")
         self.assertNotIn("scripts/factory_evidence.py", argv)
@@ -26,7 +26,7 @@ class EvidenceSpineRuntimeTests(unittest.TestCase):
         runtime = object.__new__(WorkerControlledRuntime)
         runtime._exec(["python", "harness/post_merge.py"], cwd=Path("/tmp"))
         self.assertEqual(
-            base_exec.call_args.args[1],
+            base_exec.call_args.args[0],
             ["python", "harness/post_merge.py"],
         )
 
