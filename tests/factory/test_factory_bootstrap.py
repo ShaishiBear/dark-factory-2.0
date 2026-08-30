@@ -237,6 +237,19 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("genesis policy is not the one that was reviewed", proc.stderr)
 
+    def test_manifest_that_was_not_reviewed_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        proc = self.c.run(manifest_sha="6" * 64)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("genesis manifest is not the one that was reviewed", proc.stderr)
+
+    def test_commit_must_be_named_exactly_not_by_a_moving_reference(self):
+        """A symbolic ref could point somewhere else later; genesis names one immutable commit."""
+        self.c.write_manifest(self.c.manifest())
+        proc = self.c.run(commit="main")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("does not resolve to itself", proc.stderr)
+
     def test_policy_taken_from_inside_the_repository_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         inside = self.c.path / "genesis-policy.json"

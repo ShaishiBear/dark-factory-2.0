@@ -53,8 +53,8 @@
     {
       "id": "independence-design-certification-not-required-externally",
       "file": "factory_kernel/independence.py",
-      "find": "        subject_claim=\"design\",\n        binds=(\"contract\", \"context\", \"architecture-policy\", \"design\"),\n        externally_supplied=True,",
-      "replace": "        subject_claim=\"design\",\n        binds=(\"contract\", \"context\", \"architecture-policy\", \"design\"),\n        externally_supplied=False,",
+      "find": "        subject_claim=\"design\",\n        binds=(\"contract\", \"context\", \"architecture-policy\", \"design\"),\n        sees=(\"contract\", \"context\", \"architecture-policy\", \"design\"),\n        externally_supplied=True,",
+      "replace": "        subject_claim=\"design\",\n        binds=(\"contract\", \"context\", \"architecture-policy\", \"design\"),\n        sees=(\"contract\", \"context\", \"architecture-policy\", \"design\"),\n        externally_supplied=False,",
       "why": "The design claim would stop requiring a separately executed independent certificate and fall back to whatever evidence closure happens to hold."
     },
     {
@@ -109,8 +109,8 @@
     {
       "id": "independence-contract-certified-by-code-holdout",
       "file": "factory_kernel/independence.py",
-      "find": "        claim_id=\"contract\",\n        authority_id=\"blinded-contract-certifier\",\n        subject_claim=\"contract\",\n        binds=(\"contract\",),\n        externally_supplied=True,",
-      "replace": "        claim_id=\"contract\",\n        authority_id=\"blinded-contract-holdout\",\n        subject_claim=\"contract\",\n        binds=(\"contract\",),\n        externally_supplied=False,",
+      "find": "        claim_id=\"contract\",\n        authority_id=\"blinded-contract-certifier\",\n        subject_claim=\"contract\",\n        binds=(\"contract\",),\n        sees=(\"contract\",),\n        externally_supplied=True,",
+      "replace": "        claim_id=\"contract\",\n        authority_id=\"blinded-contract-holdout\",\n        subject_claim=\"contract\",\n        binds=(\"contract\",),\n        sees=(\"contract\",),\n        externally_supplied=False,",
       "why": "The blinded code holdout would again certify the contract claim, judging the diff against a contract it presupposes is correct instead of judging the contract against the issue."
     },
     {
