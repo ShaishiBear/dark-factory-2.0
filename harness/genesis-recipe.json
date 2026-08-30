@@ -3,78 +3,158 @@
     "The exact validation stages the genesis driver executes against the candidate commit.",
     "Its SHA-256 is pinned by the external genesis policy, so the set of stages that ran cannot",
     "be narrowed after the policy is frozen. Measurements are read from each stage's own output",
-    "by the driver, never from an aggregated log."
+    "by the driver, never from an aggregated log.",
+    "Every stage runs in a worktree created fresh from the authorized commit; only stages that need locked dependencies pay to rebuild them, and nothing is shared between stages but the hash-checked download caches."
   ],
   "version": "1.0",
   "stages": [
     {
       "name": "kernel-compile",
-      "argv": ["python", "-m", "compileall", "-q", "factory_kernel"],
-      "timeout_seconds": 300
+      "argv": [
+        "python",
+        "-m",
+        "compileall",
+        "-q",
+        "factory_kernel"
+      ],
+      "timeout_seconds": 300,
+      "needs_dependencies": false
     },
     {
       "name": "kernel-config",
-      "argv": ["python", "-m", "factory_kernel", "config-check"],
-      "timeout_seconds": 300
+      "argv": [
+        "python",
+        "-m",
+        "factory_kernel",
+        "config-check"
+      ],
+      "timeout_seconds": 300,
+      "needs_dependencies": false
     },
     {
       "name": "focused-factory-suite",
-      "argv": ["python", "harness/focused.py"],
-      "measures": {"focused_tests": "FOCUSED_OK tests=(\\d+)"},
-      "timeout_seconds": 1800
+      "argv": [
+        "python",
+        "harness/focused.py"
+      ],
+      "measures": {
+        "focused_tests": "FOCUSED_OK tests=(\\d+)"
+      },
+      "timeout_seconds": 1800,
+      "needs_dependencies": false
     },
     {
       "name": "static-gate",
-      "argv": ["python", "harness/static.py"],
-      "measures": {"static_checks": "STATIC_OK checks=(\\d+)"},
-      "timeout_seconds": 1800
+      "argv": [
+        "python",
+        "harness/static.py"
+      ],
+      "measures": {
+        "static_checks": "STATIC_OK checks=(\\d+)"
+      },
+      "timeout_seconds": 1800,
+      "needs_dependencies": true
     },
     {
       "name": "unit-gate",
-      "argv": ["python", "harness/unit.py"],
-      "measures": {"unit_tests": "UNIT_PASSED tests=(\\d+)"},
-      "timeout_seconds": 1800
+      "argv": [
+        "python",
+        "harness/unit.py"
+      ],
+      "measures": {
+        "unit_tests": "UNIT_PASSED tests=(\\d+)"
+      },
+      "timeout_seconds": 1800,
+      "needs_dependencies": true
     },
     {
       "name": "quick-gate",
-      "argv": ["python", "harness/ci.py", "--quick"],
-      "timeout_seconds": 2400
+      "argv": [
+        "python",
+        "harness/ci.py",
+        "--quick"
+      ],
+      "timeout_seconds": 2400,
+      "needs_dependencies": true
     },
     {
       "name": "core-holdout",
-      "argv": ["python", ".factory/holdout/run.py"],
-      "timeout_seconds": 900
+      "argv": [
+        "python",
+        ".factory/holdout/run.py"
+      ],
+      "timeout_seconds": 900,
+      "needs_dependencies": true
     },
     {
       "name": "citation-holdout",
-      "argv": ["python", ".factory/holdout/citations.py"],
-      "timeout_seconds": 900
+      "argv": [
+        "python",
+        ".factory/holdout/citations.py"
+      ],
+      "timeout_seconds": 900,
+      "needs_dependencies": true
     },
     {
       "name": "immunity",
-      "argv": ["python", "harness/immunity.py"],
-      "measures": {"immunity_entries": "IMMUNITY_OK entries=(\\d+)"},
-      "timeout_seconds": 300
+      "argv": [
+        "python",
+        "harness/immunity.py"
+      ],
+      "measures": {
+        "immunity_entries": "IMMUNITY_OK entries=(\\d+)"
+      },
+      "timeout_seconds": 300,
+      "needs_dependencies": false
     },
     {
       "name": "application-mutations",
-      "argv": ["python", "harness/mutations/run.py"],
+      "argv": [
+        "python",
+        "harness/mutations/run.py"
+      ],
       "measures": {
         "application_mutations_total": "(?<![A-Z_])MUTATIONS_TOTAL=(\\d+)",
         "application_mutations_caught": "(?<![A-Z_])MUTATIONS_CAUGHT=(\\d+)",
         "application_mutations_not_injected": "(?<![A-Z_])MUTATIONS_NOT_INJECTED=(\\d+)"
       },
-      "timeout_seconds": 3600
+      "timeout_seconds": 3600,
+      "needs_dependencies": true
     },
     {
       "name": "factory-mutations",
-      "argv": ["python", "harness/factory_mutations/run.py"],
+      "argv": [
+        "python",
+        "harness/factory_mutations/run.py"
+      ],
       "measures": {
         "factory_mutations_total": "FACTORY_MUTATIONS_TOTAL=(\\d+)",
         "factory_mutations_caught": "FACTORY_MUTATIONS_CAUGHT=(\\d+)",
         "factory_mutations_not_injected": "FACTORY_MUTATIONS_NOT_INJECTED=(\\d+)"
       },
-      "timeout_seconds": 3600
+      "timeout_seconds": 3600,
+      "needs_dependencies": false
+    }
+  ],
+  "prepare": [
+    {
+      "argv": [
+        "uv",
+        "sync",
+        "--frozen",
+        "--all-extras"
+      ],
+      "cwd": "app/backend",
+      "timeout_seconds": 1800
+    },
+    {
+      "argv": [
+        "bun",
+        "install",
+        "--frozen-lockfile"
+      ],
+      "cwd": "app/frontend",
+      "timeout_seconds": 1800
     }
   ]
 }

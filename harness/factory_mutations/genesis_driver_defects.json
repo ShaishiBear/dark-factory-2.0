@@ -3,7 +3,8 @@
     "Adversarial regressions for the external genesis validation driver.",
     "The driver replaces regex search over an aggregated log, where candidate programs also write.",
     "These mutations attack what makes it a measurement: exit status as the verdict, per-stage",
-    "capture, and refusal of ambiguity rather than first-match resolution."
+    "capture, and refusal of ambiguity rather than first-match resolution.",
+    "Isolation mutations additionally prove that a stage cannot influence a later stage's code, untracked source, or runtime state."
   ],
   "defects": [
     {
@@ -54,6 +55,41 @@
       "find": "    found = re.findall(marker, output)",
       "replace": "    found = re.findall(marker, output) or ['0']",
       "why": "A missing measurement would be fabricated rather than refused."
+    },
+    {
+      "id": "genesis-driver-stage-isolation-removed",
+      "file": "harness/genesis_validate.py",
+      "find": "        cwd = path / str(stage.get(\"cwd\") or \".\")",
+      "replace": "        cwd = repo / str(stage.get(\"cwd\") or \".\")",
+      "why": "Stages would execute in one shared mutable checkout, so an earlier candidate stage could rewrite the authority a later stage runs."
+    },
+    {
+      "id": "genesis-driver-stage-tree-verification-removed",
+      "file": "harness/genesis_validate.py",
+      "find": "    if head != commit or stage_tree != tree:",
+      "replace": "    if False and (head != commit or stage_tree != tree):",
+      "why": "A stage environment that is not the authorized commit and tree would be measured anyway."
+    },
+    {
+      "id": "genesis-driver-dirty-stage-tolerated",
+      "file": "harness/genesis_validate.py",
+      "find": "    if dirty:",
+      "replace": "    if False and dirty:",
+      "why": "A stale or dirty stage environment would be measured instead of failing closed."
+    },
+    {
+      "id": "genesis-driver-object-store-recheck-removed",
+      "file": "harness/genesis_validate.py",
+      "find": "    if git_out(repo, \"rev-parse\", f\"{commit}^{{tree}}\") != tree:",
+      "replace": "    if False and git_out(repo, \"rev-parse\", f\"{commit}^{{tree}}\") != tree:",
+      "why": "Tampering with the shared object store between stages would go undetected."
+    },
+    {
+      "id": "genesis-driver-stage-environment-not-destroyed",
+      "file": "harness/genesis_validate.py",
+      "find": "    finally:\n        worktree_remove(repo, path)",
+      "replace": "    finally:\n        pass",
+      "why": "Stage environments would accumulate, so later stages could inherit earlier stage state."
     }
   ]
 }
