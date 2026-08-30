@@ -1,0 +1,66 @@
+name: independence-validation
+
+on:
+  push:
+    branches: [validation/df2-independence-v1]
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: 49c998b941a3b6f350bcbfd93cc036f508ce02a6
+
+jobs:
+  exact-head-ladder:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.5'
+          github-token: ''
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.0'
+          token: ''
+      - name: Install locked backend dependencies
+        working-directory: app/backend
+        run: uv sync --frozen --all-extras
+      - name: Install locked frontend dependencies
+        working-directory: app/frontend
+        run: bun install --frozen-lockfile
+      - name: Compile repo-owned kernel
+        run: python -m compileall -q factory_kernel
+      - name: Validate kernel configuration
+        run: python -m factory_kernel config-check
+      - name: Focused factory suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}/scripts
+        run: python -m unittest discover -s tests/factory -p 'test_*.py'
+      - name: Canonical static gate
+        run: python harness/static.py
+      - name: Canonical unit gate
+        run: python harness/unit.py
+      - name: Canonical quick gate
+        run: python harness/ci.py --quick
+      - name: Independent core holdout
+        run: python .factory/holdout/run.py
+      - name: Independent citation holdout
+        run: python .factory/holdout/citations.py
+      - name: Immunity registry
+        run: python harness/immunity.py
+      - name: Application and integrated mutations
+        run: python harness/mutations/run.py
+      - name: Factory trust-root mutations
+        run: python harness/factory_mutations/run.py
