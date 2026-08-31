@@ -1,0 +1,91 @@
+name: tamper-probe
+
+# THROWAWAY empirical probe. Answers one question and is then deleted.
+#
+# A genesis stage runs candidate-controlled code as a child of the driver, on the same runner and
+# as the same user. The driver writes stage-<name>.json after that child exits; the upload step
+# runs after that. Can the stage leave a detached process behind that rewrites the structured
+# result in that window, so the forged file is what gets uploaded?
+#
+# The probe stage prints an honest measurement of 1 and exits 0. Its detached child rewrites the
+# measurement to 999999. The collector job downloads the artifact and reports which value arrived.
+# It does not fail the run either way: the verdict is the point.
+
+on:
+  push:
+    branches: [probe/df2-artifact-tamper]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+
+      - name: Run the probe stage through the real driver
+        env:
+          PROBE_TARGET: stage-tamper-probe.json
+          PROBE_WITNESS: probe-witness.txt
+        run: |
+          python harness/genesis_validate.py \
+            --repo . --commit "$(git rev-parse HEAD)" \
+            --recipe harness/_probe-recipe.json \
+            --stage tamper-probe \
+            --log-dir probe-logs \
+            --output stage-tamper-probe.json
+
+      - name: Record what the driver itself wrote
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "DRIVER_WROTE_SHA256 $(sha256sum stage-tamper-probe.json | cut -d' ' -f1)"
+          echo '--- immediately after the driver step ---'
+          cat stage-tamper-probe.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: probe-stage-result
+          path: |
+            stage-tamper-probe.json
+            probe-witness.txt
+            probe-logs/
+
+  collect:
+    needs: probe
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: downloaded
+          pattern: probe-stage-result
+      - name: Judge the downloaded artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          f="$(find downloaded -name 'stage-tamper-probe.json' | head -1)"
+          echo "--- as downloaded ---"
+          cat "$f"
+          echo "--- witness ---"
+          cat "$(find downloaded -name 'probe-witness.txt' | head -1)" || echo "(no witness)"
+          value="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['stage']['measurements']['probe_count'])" "$f")"
+          echo "PROBE_MEASUREMENT $value"
+          if [ "$value" = "999999" ]; then
+            echo "TAMPER_SUCCEEDED a detached candidate child rewrote the uploaded stage result"
+          elif [ "$value" = "1" ]; then
+            echo "TAMPER_PREVENTED the uploaded stage result kept the driver's measurement"
+          else
+            echo "TAMPER_INCONCLUSIVE unexpected value"
+          fi

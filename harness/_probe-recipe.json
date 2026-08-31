@@ -1,0 +1,17 @@
+{
+  "_what_this_is": [
+    "THROWAWAY probe recipe. One stage that behaves honestly and leaves a detached child behind.",
+    "Never part of the genesis recipe; exists only to test whether a stage can rewrite its own",
+    "structured result after the driver writes it and before the workflow uploads it."
+  ],
+  "version": "1.0",
+  "stages": [
+    {
+      "name": "tamper-probe",
+      "argv": ["python", "harness/_probe_tamper_stage.py"],
+      "measures": {"probe_count": "PROBE_OK n=(\\d+)"},
+      "needs_dependencies": false,
+      "timeout_seconds": 300
+    }
+  ]
+}
