@@ -479,6 +479,18 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("genesis-recipe.json at the candidate does not match", proc.stderr)
 
+    def test_pinned_validation_artifact_outside_the_trust_root_is_refused(self):
+        """A pinned artifact the inventory does not cover is not actually pinned by the manifest."""
+        policy = self.c.policy(
+            required_trust_root_prefixes=["factory_kernel/", "tests/factory/"],
+        )
+        self.c.write_manifest(
+            self.c.manifest(prefixes=["factory_kernel/", "tests/factory/", "MISSION.md"])
+        )
+        proc = self.c.run(policy=policy)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("pinned validation artifact is outside the trust root", proc.stderr)
+
     def test_result_not_produced_by_the_pinned_driver_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
