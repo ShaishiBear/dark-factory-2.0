@@ -39,7 +39,9 @@ Properties that make this an authority rather than another component of what it 
 * it imports nothing from the trust root it certifies, and uses only the standard library and
   ``git``;
 * it is short enough to read end to end -- being auditable *is* the security property;
-* every repository file is read from the object store at the exact commit, never a working tree;
+* every repository file is read from the object store at the exact commit, never a working tree,
+  including the validation driver, aggregator and recipe whose digests the policy pins -- those
+  are recomputed here rather than believed from the result document they produced;
 * it self-hashes and refuses unless the human's pinned value matches;
 * the repository never asserts that it was approved. The approver, the reason, the moment, the
   policy and the validating run are supplied at ceremony time, and this program *creates* the
@@ -368,6 +370,22 @@ def verify(args: argparse.Namespace) -> dict:
     for path, recorded in sorted(policies.items()):
         require(path in listed, f"pinned policy is outside the trust root: {path}")
         require(digest(blob(repo, commit, path)) == str(recorded or ""), f"pinned policy changed: {path}")
+
+    # 5. The pinned validation artifacts, recomputed from the candidate's own blobs. Their
+    #    identities are also stated inside the validation result, but that document is produced
+    #    downstream of the very programs it names, so it corroborates rather than proves. This
+    #    check reads the object store directly and is the one that binds.
+    for rel, key in (
+        ("harness/genesis_validate.py", "validation_driver_sha256"),
+        ("harness/genesis_aggregate.py", "validation_aggregator_sha256"),
+        ("harness/genesis-recipe.json", "validation_recipe_sha256"),
+    ):
+        require(rel in listed, f"pinned validation artifact is outside the trust root: {rel}")
+        actual = digest(blob(repo, commit, rel))
+        require(
+            actual == policy[key],
+            f"{rel} at the candidate does not match the {key} the policy pins (actual {actual})",
+        )
 
     # 5. Evidence for this exact commit: identity attested by the human, measurements produced by
     #    the pinned driver, and the raw log bound so the GitHub check can be made independently.

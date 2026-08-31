@@ -111,7 +111,8 @@
       "name": "application-mutations",
       "argv": [
         "python",
-        "harness/mutations/run.py"
+        "harness/mutations/run.py",
+        "--application-only"
       ],
       "measures": {
         "application_mutations_total": "(?<![A-Z_])MUTATIONS_TOTAL=(\\d+)",

@@ -117,6 +117,34 @@
       "find": "        str(evidence.get(\"workflow_sha256\") or \"\") == policy[\"validation_workflow_sha256\"],",
       "replace": "        True or str(evidence.get(\"workflow_sha256\") or \"\") == policy[\"validation_workflow_sha256\"],",
       "why": "A run of altered workflow content could be presented as the authoritative ladder."
+    },
+    {
+      "id": "mutations-application-only-still-runs-factory-suite",
+      "file": "harness/mutations/run.py",
+      "find": "    return \"--application-only\" in argv",
+      "replace": "    return False",
+      "why": "The genesis application stage would run the factory suite again, duplicating the family the factory stage owns."
+    },
+    {
+      "id": "genesis-recipe-application-stage-integrates-factory",
+      "file": "harness/genesis-recipe.json",
+      "find": "        \"harness/mutations/run.py\",\n        \"--application-only\"\n",
+      "replace": "        \"harness/mutations/run.py\"\n",
+      "why": "The genesis application stage would fall back to the integrated runner and measure the factory family twice."
+    },
+    {
+      "id": "bootstrap-candidate-driver-pin-not-recomputed",
+      "file": "harness/bootstrap_verify.py",
+      "find": "            actual == policy[key],",
+      "replace": "            True or actual == policy[key],",
+      "why": "The pinned validation artifacts would be believed from the candidate-produced result rather than recomputed from the object store."
+    },
+    {
+      "id": "bootstrap-pinned-artifact-outside-trust-root-allowed",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        require(rel in listed, f\"pinned validation artifact is outside the trust root: {rel}\")",
+      "replace": "        require(True, f\"pinned validation artifact is outside the trust root: {rel}\")",
+      "why": "A pinned validation artifact could sit outside the inventoried trust root entirely."
     }
   ]
 }

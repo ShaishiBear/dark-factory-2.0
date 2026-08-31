@@ -46,7 +46,8 @@ STAGES = ("focused-factory-suite", "static-gate", "unit-gate", "quick-gate",
           "application-mutations", "factory-mutations")
 
 
-def result_doc(commit: str, *, stages=None, **over) -> dict:
+def result_doc(commit: str, *, stages=None, driver=DRIVER_SHA, recipe=RECIPE_SHA,
+               aggregator=AGGREGATOR_SHA, **over) -> dict:
     """A structured result of the shape the pinned external driver emits."""
     values = {
         "focused_tests": 328, "unit_tests": 766, "static_checks": 5,
@@ -68,9 +69,9 @@ def result_doc(commit: str, *, stages=None, **over) -> dict:
     names = STAGES if stages is None else tuple(stages)
     return {
         "version": "1.0",
-        "driver_sha256": DRIVER_SHA,
-        "recipe_sha256": RECIPE_SHA,
-        "aggregator_sha256": AGGREGATOR_SHA,
+        "driver_sha256": driver,
+        "recipe_sha256": recipe,
+        "aggregator_sha256": aggregator,
         "stage_isolation": "one-disposable-runner-per-stage",
         "candidate_sha": commit,
         "verdict": "pass",
@@ -92,6 +93,12 @@ class Ceremony:
         for rel in ("harness", "factory_kernel", "tests/factory", ".factory/bootstrap"):
             (self.path / rel).mkdir(parents=True)
         shutil.copy2(VERIFIER, self.path / "harness" / "bootstrap_verify.py")
+        for rel, body in (
+            ("harness/genesis_validate.py", "DRIVER = 1\n"),
+            ("harness/genesis_aggregate.py", "AGG = 1\n"),
+            ("harness/genesis-recipe.json", '{"version": "1.0"}\n'),
+        ):
+            (self.path / rel).write_text(body, encoding="utf-8")
         (self.path / "factory_kernel" / "spine.py").write_text("POLICY = 1\n", encoding="utf-8")
         (self.path / "factory_kernel" / "independence.py").write_text("REG = ()\n", encoding="utf-8")
         (self.path / "tests" / "factory" / "test_x.py").write_text("assert True\n", encoding="utf-8")
@@ -109,6 +116,23 @@ class Ceremony:
     def verifier_sha(self) -> str:
         return sha256(self.verifier.read_bytes())
 
+    def pinned(self, rel: str) -> str:
+        return sha256((self.path / rel).read_bytes())
+
+    def commit_all(self, message: str = "change") -> None:
+        git(self.path, "add", "-A")
+        git(self.path, "commit", "-qm", message)
+
+    def result(self, commit: str, **over) -> dict:
+        """A result whose stated identities match the blobs the verifier will recompute."""
+        return result_doc(
+            commit,
+            driver=self.pinned("harness/genesis_validate.py"),
+            recipe=self.pinned("harness/genesis-recipe.json"),
+            aggregator=self.pinned("harness/genesis_aggregate.py"),
+            **over,
+        )
+
     def policy(self, **over) -> dict:
         value = {
             "version": "1.0",
@@ -124,9 +148,9 @@ class Ceremony:
             "required_external_evidence": {},
             "required_mutation_families": ["factory_mutations", "application_mutations"],
             "minimum": {"focused_tests": 300, "unit_tests": 700, "static_checks": 5},
-            "validation_driver_sha256": DRIVER_SHA,
-            "validation_recipe_sha256": RECIPE_SHA,
-            "validation_aggregator_sha256": AGGREGATOR_SHA,
+            "validation_driver_sha256": self.pinned("harness/genesis_validate.py"),
+            "validation_recipe_sha256": self.pinned("harness/genesis-recipe.json"),
+            "validation_aggregator_sha256": self.pinned("harness/genesis_aggregate.py"),
             "validation_workflow_sha256": WORKFLOW_SHA,
             "validation_workflow_commit_sha": WORKFLOW_COMMIT,
         }
@@ -203,7 +227,15 @@ class Ceremony:
         log_value = log if log is not None else "raw ci log\n"
         log_file = self.tmp / "run.log"
         log_file.write_text(log_value, encoding="utf-8")
-        result_value = result if result is not None else result_doc(target)
+        if result is None:
+            result_value = result_doc(
+                target,
+                driver=self.pinned("harness/genesis_validate.py"),
+                recipe=self.pinned("harness/genesis-recipe.json"),
+                aggregator=self.pinned("harness/genesis_aggregate.py"),
+            )
+        else:
+            result_value = result
         result_file = self.tmp / "validation-result.json"
         result_file.write_text(
             json.dumps(result_value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -260,8 +292,15 @@ class GenesisCeremonyTests(unittest.TestCase):
         ):
             self.assertTrue(str(auth.get(field) or "").strip(), field)
         self.assertEqual(auth["observed"]["factory_mutations_caught"], 102)
-        self.assertEqual(auth["validation_driver_sha256"], DRIVER_SHA)
-        self.assertEqual(auth["validation_recipe_sha256"], RECIPE_SHA)
+        self.assertEqual(
+            auth["validation_driver_sha256"], self.c.pinned("harness/genesis_validate.py")
+        )
+        self.assertEqual(
+            auth["validation_recipe_sha256"], self.c.pinned("harness/genesis-recipe.json")
+        )
+        self.assertEqual(
+            auth["validation_aggregator_sha256"], self.c.pinned("harness/genesis_aggregate.py")
+        )
 
     # ---------- the external policy is not the candidate's to write ----------
 
@@ -358,7 +397,7 @@ class GenesisCeremonyTests(unittest.TestCase):
         """A weak measurement in the driver's result is refused however the log reads."""
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(result=result_doc(head, unit_tests=10))
+        proc = self.c.run(result=self.c.result(head, unit_tests=10))
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("observed unit_tests=10 is below the required 700", proc.stderr)
 
@@ -370,7 +409,7 @@ class GenesisCeremonyTests(unittest.TestCase):
             "FOCUSED_OK tests=999999\nFACTORY_MUTATIONS_TOTAL=1\n"
             "FACTORY_MUTATIONS_CAUGHT=1\nFACTORY_MUTATIONS_NOT_INJECTED=0\n"
         )
-        result = result_doc(head, factory_mutations_caught=100)  # a real escape
+        result = self.c.result(head, factory_mutations_caught=100)  # a real escape
         proc = self.c.run(log=spoof, result=result)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("let a mutation escape", proc.stderr)
@@ -378,7 +417,7 @@ class GenesisCeremonyTests(unittest.TestCase):
     def test_result_not_assembled_by_the_pinned_aggregator_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(result=result_doc(head) | {"aggregator_sha256": "9" * 64})
+        proc = self.c.run(result=self.c.result(head) | {"aggregator_sha256": "9" * 64})
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("not assembled by the aggregator the policy pins", proc.stderr)
 
@@ -386,14 +425,14 @@ class GenesisCeremonyTests(unittest.TestCase):
         """A result produced by sequencing stages in one environment is not the same evidence."""
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(result=result_doc(head) | {"stage_isolation": "per-stage-worktree"})
+        proc = self.c.run(result=self.c.result(head) | {"stage_isolation": "per-stage-worktree"})
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("not produced by one disposable runner per stage", proc.stderr)
 
     def test_run_of_another_workflow_commit_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        log, result = "raw ci log\n", result_doc(head)
+        log, result = "raw ci log\n", self.c.result(head)
         proc = self.c.run(
             log=log, result=result,
             evidence=self.c.evidence(head, log, result, workflow_commit_sha="9" * 40),
@@ -404,7 +443,7 @@ class GenesisCeremonyTests(unittest.TestCase):
     def test_run_of_altered_workflow_content_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        log, result = "raw ci log\n", result_doc(head)
+        log, result = "raw ci log\n", self.c.result(head)
         proc = self.c.run(
             log=log, result=result,
             evidence=self.c.evidence(head, log, result, workflow_sha256="9" * 64),
@@ -412,17 +451,45 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("did not use the workflow content the policy pins", proc.stderr)
 
+    def test_candidate_driver_not_matching_the_policy_pin_is_refused(self):
+        """Recomputed from the object store, not believed from the result document."""
+        policy = self.c.policy()
+        (self.c.path / "harness/genesis_validate.py").write_text("DRIVER = 2\n", encoding="utf-8")
+        self.c.commit_all("tamper")
+        self.c.write_manifest(self.c.manifest())
+        proc = self.c.run(policy=policy)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("genesis_validate.py at the candidate does not match", proc.stderr)
+
+    def test_candidate_aggregator_not_matching_the_policy_pin_is_refused(self):
+        policy = self.c.policy()
+        (self.c.path / "harness/genesis_aggregate.py").write_text("AGG = 2\n", encoding="utf-8")
+        self.c.commit_all("tamper")
+        self.c.write_manifest(self.c.manifest())
+        proc = self.c.run(policy=policy)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("genesis_aggregate.py at the candidate does not match", proc.stderr)
+
+    def test_candidate_recipe_not_matching_the_policy_pin_is_refused(self):
+        policy = self.c.policy()
+        (self.c.path / "harness/genesis-recipe.json").write_text('{"version": "2.0"}\n', encoding="utf-8")
+        self.c.commit_all("tamper")
+        self.c.write_manifest(self.c.manifest())
+        proc = self.c.run(policy=policy)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("genesis-recipe.json at the candidate does not match", proc.stderr)
+
     def test_result_not_produced_by_the_pinned_driver_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(result=result_doc(head, **{}) | {"driver_sha256": "a" * 64})
+        proc = self.c.run(result=self.c.result(head, **{}) | {"driver_sha256": "a" * 64})
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("not produced by the driver the policy pins", proc.stderr)
 
     def test_result_from_another_recipe_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(result=result_doc(head) | {"recipe_sha256": "b" * 64})
+        proc = self.c.run(result=self.c.result(head) | {"recipe_sha256": "b" * 64})
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("did not execute the recipe the policy pins", proc.stderr)
 
@@ -430,7 +497,7 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
         remaining = [s for s in STAGES if s != "static-gate"]
-        proc = self.c.run(result=result_doc(head, stages=remaining))
+        proc = self.c.run(result=self.c.result(head, stages=remaining))
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("omits mandatory stages: static-gate", proc.stderr)
 
@@ -438,14 +505,14 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
         remaining = [s for s in STAGES if s != "quick-gate"]
-        proc = self.c.run(result=result_doc(head, stages=remaining))
+        proc = self.c.run(result=self.c.result(head, stages=remaining))
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("omits mandatory stages: quick-gate", proc.stderr)
 
     def test_failed_stage_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        result = result_doc(head)
+        result = self.c.result(head)
         result["stages"][1]["exit"] = 1
         proc = self.c.run(result=result)
         self.assertNotEqual(proc.returncode, 0)
@@ -454,7 +521,7 @@ class GenesisCeremonyTests(unittest.TestCase):
     def test_duplicate_stage_names_are_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        result = result_doc(head)
+        result = self.c.result(head)
         result["stages"].append(dict(result["stages"][0]))
         proc = self.c.run(result=result)
         self.assertNotEqual(proc.returncode, 0)
@@ -465,9 +532,9 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
         log = "raw ci log\n"
-        honest = result_doc(head)
+        honest = self.c.result(head)
         proc = self.c.run(
-            log=log, result=result_doc(head, factory_mutations_total=1, factory_mutations_caught=1),
+            log=log, result=self.c.result(head, factory_mutations_total=1, factory_mutations_caught=1),
             evidence=self.c.evidence(head, log, honest),
         )
         self.assertNotEqual(proc.returncode, 0)
@@ -476,7 +543,7 @@ class GenesisCeremonyTests(unittest.TestCase):
     def test_substituted_log_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        result = result_doc(head)
+        result = self.c.result(head)
         proc = self.c.run(
             log="different log\n",
             evidence=self.c.evidence(head, "raw ci log\n", result),
@@ -488,7 +555,7 @@ class GenesisCeremonyTests(unittest.TestCase):
     def test_result_for_another_commit_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        proc = self.c.run(result=result_doc("0" * 40) | {"candidate_sha": "0" * 40})
+        proc = self.c.run(result=self.c.result("0" * 40) | {"candidate_sha": "0" * 40})
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("different commit than the one being authorized", proc.stderr)
 
@@ -497,7 +564,7 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.c.write_manifest(self.c.manifest())
         child = git(self.c.path, "rev-parse", "HEAD").strip()
         self.assertNotEqual(parent, child)
-        log, result = "raw ci log\n", result_doc(child)
+        log, result = "raw ci log\n", self.c.result(child)
         proc = self.c.run(evidence=self.c.evidence(parent, log, result), log=log, result=result)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("different commit than the one being authorized", proc.stderr)
@@ -517,14 +584,14 @@ class GenesisCeremonyTests(unittest.TestCase):
             ({"factory_mutations_total": 0, "factory_mutations_caught": 0}, "ran nothing"),
         ):
             with self.subTest(over=over):
-                proc = self.c.run(result=result_doc(head, **over))
+                proc = self.c.run(result=self.c.result(head, **over))
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertIn(expected, proc.stderr)
 
     def test_unsuccessful_run_is_refused(self):
         self.c.write_manifest(self.c.manifest())
         head = git(self.c.path, "rev-parse", "HEAD").strip()
-        log, result = "raw ci log\n", result_doc(head)
+        log, result = "raw ci log\n", self.c.result(head)
         proc = self.c.run(
             log=log, result=result,
             evidence=self.c.evidence(head, log, result, conclusion="failure"),

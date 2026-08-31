@@ -10,6 +10,10 @@ Every application mutation is evaluated by ALL available non-E2E channels:
   - .factory/holdout/citations.py independent citation-composition probe
   - scripts/factory_security.py   deterministic security/dependency worktree guard
 
+Pass --application-only to run the application family alone and leave the factory trust-root
+family to its own owner. Genesis uses that mode, because it gives each family its own disposable
+runner; ordinary canonical use keeps the integrated default.
+
 After those real-source probes, harness/factory_mutations/run.py separately mutation-tests
 copied factory trust-root code. Factory mutations never edit the live worktree.
 
@@ -120,7 +124,22 @@ def run_factory_mutations() -> bool:
     return True
 
 
-def main() -> int:
+def application_only_requested(argv: list[str]) -> bool:
+    """Whether this invocation owns only the application family.
+
+    Kept as its own function so the decision can be tested directly. Asserting it from the shape
+    of main() only proves the guard is written, not that it is ever true.
+    """
+    return "--application-only" in argv
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Genesis fans the two mutation families out to separate disposable runners, so the
+    # application stage must not also run the factory suite: it would duplicate work the
+    # factory-mutations stage already owns, and the nested run is what timed out under the
+    # decomposition. Default behaviour is unchanged for ordinary canonical use.
+    application_only = application_only_requested(sys.argv[1:] if argv is None else argv)
+
     if not DEFECTS.exists():
         print("MUTATIONS_ABSENT no defects.json next to this script", flush=True)
         return 0
@@ -204,6 +223,14 @@ def main() -> int:
     print(f"MUTATIONS_NOT_INJECTED={not_injected}", flush=True)
 
     app_ok = caught == total and not_injected == 0
+    if application_only:
+        if app_ok:
+            print("MUTATIONS_APPLICATION_ONLY_OK", flush=True)
+            print("MUTATIONS_OK", flush=True)
+            return 0
+        print("MUTATIONS_FAILED - an application defect can currently escape", flush=True)
+        return 1
+
     factory_ok = run_factory_mutations()
     if app_ok and factory_ok:
         print("MUTATIONS_OK", flush=True)
