@@ -30,14 +30,14 @@ name: genesis-ladder
 
 on:
   push:
-    branches: [validation/df2-genesis-provisional-3]
+    branches: [validation/df2-genesis-provisional-5]
 
 permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: c9a971dc383883ea1d0f868297a86fdf1696a897
-  CANDIDATE_TREE: 67db25afdacec8e5aafe9e0a9c8b58ec69e3aa2f
+  CANDIDATE_SHA: b6d67dc5ff0bc3cc03a2bf6495cdc7353840598a
+  CANDIDATE_TREE: a552289028a6d04abec118780320a175e2714df1
   EXPECTED_DRIVER_SHA256: ''
   EXPECTED_RECIPE_SHA256: ''
   EXPECTED_COLLECTOR_SHA256: ''
