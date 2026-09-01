@@ -1,0 +1,268 @@
+name: genesis-ladder
+
+# Exact-head validation ladder for the genesis candidate.
+#
+# Isolation is this workflow's job, not the driver's. Each validation stage runs in its own
+# disposable GitHub-hosted runner: a fresh VM, a fresh OS user, a fresh HOME and a fresh checkout,
+# and nothing survives the job. That is why the driver runs exactly one stage per invocation and
+# has no cache environment of its own.
+#
+# The cache property, stated exactly as demonstrated and no more broadly: no candidate-writable
+# dependency or tool cache is restored from, or persisted to, another genesis stage job. Both
+# setup actions are configured not to restore or save, and no cache step exists anywhere in this
+# file. This is deliberately narrower than "no cache is restored" -- an earlier version of this
+# comment made that broader claim while setup-bun was in fact restoring a cached Bun executable
+# across stage jobs, and a property asserted more strongly than it is demonstrated is worse than
+# no comment at all.
+#
+# Each stage job independently asserts the exact candidate head, the exact tree, and the pinned
+# driver and recipe digests. It then executes the candidate and ends without producing anything
+# authoritative: a probe demonstrated that a detached child can rewrite a stage-written result
+# before it is uploaded. The collector job runs afterwards on its own runner, reads this run's
+# job conclusions and logs through read-only Actions authority, and builds the structured result
+# there -- from a record GitHub owns and no candidate process outlived.
+#
+# The precise cache property: no candidate-writable dependency or tool cache is restored from, or
+# persisted to, another genesis stage job.
+#
+# EXPECTED_DRIVER_SHA256 / EXPECTED_RECIPE_SHA256 are blank for a provisional run, which prints
+# the observed digests for review. The authoritative run fills them in and fails closed.
+
+on:
+  push:
+    branches: [validation/df2-genesis-authoritative]
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: bc1da02eb7f791bf30a875b5c555e69ca03b3b7a
+  CANDIDATE_TREE: 32520229566c3ce9edf848282739d38daf03f2e7
+  EXPECTED_DRIVER_SHA256: '03cb4bfeb63613a601ec5d18cf02976d46f66cd1756a01c9cf40f9e3ad5d0f5a'
+  EXPECTED_RECIPE_SHA256: 'fb13656eae5bf9a4965d7a85e615ccd36681edb4ecb74bf56c30a14f18573db5'
+  EXPECTED_COLLECTOR_SHA256: 'f34613e6a579d5ed11c715ad01bdaf323ea67014b7edf98a5ab81470519c601b'
+
+jobs:
+  stage:
+    strategy:
+      fail-fast: false
+      matrix:
+        stage:
+          - kernel-compile
+          - kernel-config
+          - focused-factory-suite
+          - static-gate
+          - unit-gate
+          - quick-gate
+          - core-holdout
+          - citation-holdout
+          - immunity
+          - application-mutations
+          - factory-mutations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert exact candidate head and tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          tree="$(git rev-parse HEAD^{tree})"
+          test "$head" = "$CANDIDATE_SHA"
+          test "$tree" = "$CANDIDATE_TREE"
+          echo "EXACT_HEAD_OK $head"
+          echo "EXACT_TREE_OK $tree"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.5'
+          github-token: ''
+          enable-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.0'
+          token: ''
+          # This action defaults no-cache to false and has a post-run cache-save hook, so the
+          # earlier "no cache is restored" claim was false: the live log showed it restoring a
+          # cached Bun executable across stage jobs.
+          no-cache: true
+
+      # The marker this step emits is assembled at runtime, and that is not a stylistic choice.
+      # The runner echoes the whole `run:` block into the same log it writes output to, so a step
+      # whose source contains both `LADDER_PINS_OK` and `LADDER_PINS_PROVISIONAL` puts both
+      # literals in every stage log no matter which branch executed -- and the collector, reading
+      # that log, would see a stage claiming both verdicts at once. Building the suffix from a
+      # variable means the echoed source contains neither marker and the output contains exactly
+      # one. The general rule: any marker an authority reads must be impossible to find in the
+      # literal text of a workflow step.
+      - name: Bind the validation driver and recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          driver="$(sha256sum harness/genesis_validate.py | cut -d' ' -f1)"
+          recipe="$(sha256sum harness/genesis-recipe.json | cut -d' ' -f1)"
+          echo "DRIVER_SHA256 $driver"
+          echo "RECIPE_SHA256 $recipe"
+          verdict=PROVISIONAL
+          if [ -n "$EXPECTED_DRIVER_SHA256" ]; then
+            test "$driver" = "$EXPECTED_DRIVER_SHA256" || {
+              echo "LADDER_REFUSED validation driver does not match the pinned digest"; exit 1; }
+            test "$recipe" = "$EXPECTED_RECIPE_SHA256" || {
+              echo "LADDER_REFUSED validation recipe does not match the pinned digest"; exit 1; }
+            verdict=OK
+          fi
+          echo "LADDER_PINS_${verdict} driver=$driver recipe=$recipe"
+
+      # Nothing authoritative is produced here. A probe demonstrated that a stage can spawn a
+      # detached child which rewrites the driver's structured result after the driver writes it
+      # and before an upload step reads it, preserving every binding while inventing the
+      # measurement. So this job executes the candidate, prints to the log, and ends. The
+      # driver's file is written to a scratch path and never uploaded; GitHub's record of this
+      # job -- its conclusion and its log, sealed when it ends -- is the evidence.
+      - name: Execute this stage only
+        run: |
+          python harness/genesis_validate.py \
+            --repo . --commit "$CANDIDATE_SHA" \
+            --recipe harness/genesis-recipe.json \
+            --stage "${{ matrix.stage }}" \
+            --log-dir "$RUNNER_TEMP/stage-logs" \
+            --output "$RUNNER_TEMP/stage-${{ matrix.stage }}.json"
+
+  collect:
+    needs: stage
+    # Runs even when a stage fails, so the collection authority exercises its negative path for
+    # real and a failed run still produces auditable evidence of why.
+    #
+    # That second clause was written here before it was true. The collector refused at the first
+    # bad stage and wrote nothing, so a failed run produced "(no result produced)" and no record
+    # of which stage failed or why. The collector now separates a structural refusal (the record
+    # is not this run's record -- nothing is written, deliberately) from stage failures (every
+    # failing stage is aggregated into a `verdict: "fail"` document, and the process still exits
+    # non-zero). The comment is left in place with this note rather than quietly corrected.
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: rewrite/df2-repo-owned-factory
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert exact candidate head and tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          tree="$(git rev-parse HEAD^{tree})"
+          test "$head" = "$CANDIDATE_SHA"
+          test "$tree" = "$CANDIDATE_TREE"
+          echo "EXACT_HEAD_OK $head"
+          echo "EXACT_TREE_OK $tree"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+
+      # Two details here are load-bearing and were both learned from a live run, not reasoned out.
+      #
+      # `--allow-escape-sequences` is required. Runner logs carry ANSI colour on every echoed
+      # command line, and modern `gh` refuses to write a body containing terminal escape sequences
+      # to a non-TTY. Without the flag this step exits 1 after having successfully fetched the
+      # log, and the collector never runs -- which is what happened on the first collector-model
+      # fan-out. The flag makes gh emit the bytes unmodified; it does not sanitize them.
+      #
+      # `--paginate` is deliberately absent. For an object-shaped response gh concatenates pages
+      # rather than merging them, so a ladder larger than one page would yield two JSON documents
+      # in one file. One page is requested instead, and the collector refuses any listing whose
+      # `total_count` exceeds the jobs actually present -- a truncated listing can hide the honest
+      # half of a duplicate stage job, which is the guard that would otherwise catch it.
+      - name: Fetch this run's GitHub job record and logs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p record/logs
+          gh api \
+            "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
+            > record/jobs.json
+          python - <<'EOF' > record/stage-ids.txt
+          import json
+          record = json.load(open("record/jobs.json"))
+          for job in record["jobs"]:
+              name = job["name"]
+              if name.startswith("stage (") and name.endswith(")"):
+                  print(job["id"])
+          EOF
+          wanted=0
+          while read -r id; do
+            [ -n "$id" ] || continue
+            wanted=$((wanted + 1))
+            gh api --allow-escape-sequences \
+              "repos/${{ github.repository }}/actions/jobs/$id/logs" > "record/logs/$id.log"
+            # An empty log is indistinguishable from a stage that printed nothing, so it is
+            # refused here rather than left for the collector to interpret.
+            [ -s "record/logs/$id.log" ] || {
+              echo "FETCH_REFUSED empty GitHub log for stage job $id"; exit 1; }
+          done < record/stage-ids.txt
+          got=$(ls -1 record/logs | wc -l)
+          [ "$wanted" -gt 0 ] || { echo "FETCH_REFUSED this run has no stage jobs"; exit 1; }
+          [ "$got" -eq "$wanted" ] || {
+            echo "FETCH_REFUSED captured $got logs for $wanted stage jobs"; exit 1; }
+          echo "FETCH_OK $got stage logs"
+          ls -la record/logs
+
+      - name: Bind the collector
+        shell: bash
+        run: |
+          set -euo pipefail
+          collector="$(sha256sum harness/genesis_collect.py | cut -d' ' -f1)"
+          echo "COLLECTOR_SHA256 $collector"
+          if [ -n "$EXPECTED_COLLECTOR_SHA256" ]; then
+            test "$collector" = "$EXPECTED_COLLECTOR_SHA256" || {
+              echo "LADDER_REFUSED collector does not match the pinned digest"; exit 1; }
+            echo "COLLECTOR_PIN_OK"
+          else
+            echo "COLLECTOR_PIN_PROVISIONAL digest printed for review, not asserted"
+          fi
+
+      # The token is deliberately absent from this step: the fetch above is the only thing that
+      # needs Actions authority, and the evidence is built without it in the environment.
+      - name: Build the validation result from the GitHub record
+        run: |
+          python harness/genesis_collect.py \
+            --jobs record/jobs.json \
+            --logs-dir record/logs \
+            --recipe harness/genesis-recipe.json \
+            --run-id "${{ github.run_id }}" \
+            --workflow-commit "${{ github.sha }}" \
+            --commit "$CANDIDATE_SHA" \
+            --tree "$CANDIDATE_TREE" \
+            --output validation-result.json
+
+      - name: Publish the assembled result
+        if: always()
+        run: cat validation-result.json || echo '(no result produced)'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: genesis-validation-result
+          path: |
+            validation-result.json
+            record/jobs.json
