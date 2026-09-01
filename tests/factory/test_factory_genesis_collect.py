@@ -51,15 +51,19 @@ class CollectorTests(unittest.TestCase):
         self.job_id = 1000
 
     def job(self, stage: str, *, conclusion: str = "success", run_id: str = RUN_ID,
-            head: str = WORKFLOW_COMMIT, name: str | None = None) -> dict:
+            head: str = WORKFLOW_COMMIT, name: str | None = None,
+            attempt: int | None = 1) -> dict:
         self.job_id += 1
-        return {
+        record = {
             "id": self.job_id,
             "run_id": int(run_id),
             "head_sha": head,
             "name": name or f"stage ({stage})",
             "conclusion": conclusion,
         }
+        if attempt is not None:
+            record["run_attempt"] = attempt
+        return record
 
     def write_log(self, job: dict, text: str) -> None:
         (self.logs / f"{job['id']}.log").write_text(text, encoding="utf-8")
@@ -71,13 +75,15 @@ class CollectorTests(unittest.TestCase):
             self.write_log(job, stage_log(extra=marker + "\n"))
             jobs.append(job)
         jobs.append({"id": 9999, "run_id": int(RUN_ID), "head_sha": WORKFLOW_COMMIT,
-                     "name": "collect", "conclusion": "success"})
+                     "run_attempt": 1, "name": "collect", "conclusion": "success"})
         return jobs
 
     def collect(self, jobs: list[dict], *, commit: str = CANDIDATE, tree: str = TREE,
-                workflow_commit: str = WORKFLOW_COMMIT, run_id: str = RUN_ID):
+                workflow_commit: str = WORKFLOW_COMMIT, run_id: str = RUN_ID,
+                total_count: int | None = None):
         record = self.root / "jobs.json"
-        record.write_text(json.dumps({"total_count": len(jobs), "jobs": jobs}), encoding="utf-8")
+        stated = len(jobs) if total_count is None else total_count
+        record.write_text(json.dumps({"total_count": stated, "jobs": jobs}), encoding="utf-8")
         out = self.root / "validation-result.json"
         proc = subprocess.run(
             [sys.executable, str(COLLECT), "--jobs", str(record), "--logs-dir", str(self.logs),
@@ -245,6 +251,245 @@ class CollectorTests(unittest.TestCase):
         proc, _ = self.collect(jobs)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("does not report alpha_count", proc.stderr)
+
+    # ---------- the record has to be the whole record ----------
+
+    def test_a_truncated_job_listing_fails_closed(self):
+        """A listing read only to page one can hide the honest half of a duplicate pair.
+
+        The duplicate guard can only fire on jobs it can see. If a forged `stage (alpha)` sits on
+        page one and the honest one is stranded on page two, the guard never sees two of them --
+        so a listing that admits to more jobs than it carries is refused before that guard runs.
+        """
+        jobs = self.default_jobs()
+        proc, result = self.collect(jobs, total_count=len(jobs) + 1)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("truncated", proc.stderr)
+        self.assertIsNone(result, "a truncated record must not produce a document at all")
+
+    def test_a_job_listing_that_states_no_total_fails_closed(self):
+        jobs = self.default_jobs()
+        proc, _ = self.collect(jobs, total_count="12")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("truncated", proc.stderr)
+
+    def test_stages_from_different_run_attempts_fail_closed(self):
+        """Partial re-runs are a re-roll channel: retry the one stage that failed until it passes.
+
+        GitHub returns the latest attempt of each job, so a ladder re-run stage-by-stage would
+        present every stage as successful. Requiring one attempt across the ladder closes it.
+        """
+        jobs = []
+        alpha = self.job("alpha", attempt=1)
+        self.write_log(alpha, stage_log(extra="A_OK n=11\n"))
+        jobs.append(alpha)
+        beta = self.job("beta", attempt=2)
+        self.write_log(beta, stage_log(extra="B_OK n=22\n"))
+        jobs.append(beta)
+        proc, _ = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("more than one run attempt", proc.stderr)
+
+    def test_a_stage_job_without_a_run_attempt_fails_closed(self):
+        jobs = []
+        alpha = self.job("alpha", attempt=None)
+        self.write_log(alpha, stage_log(extra="A_OK n=11\n"))
+        jobs.append(alpha)
+        beta = self.job("beta")
+        self.write_log(beta, stage_log(extra="B_OK n=22\n"))
+        jobs.append(beta)
+        proc, _ = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("run attempt", proc.stderr)
+
+    def test_the_attempt_that_produced_the_evidence_is_recorded(self):
+        jobs = []
+        for stage, marker in (("alpha", "A_OK n=11"), ("beta", "B_OK n=22")):
+            job = self.job(stage, attempt=3)
+            self.write_log(job, stage_log(extra=marker + "\n"))
+            jobs.append(job)
+        jobs.append({"id": 9999, "run_id": int(RUN_ID), "head_sha": WORKFLOW_COMMIT,
+                     "run_attempt": 3, "name": "collect", "conclusion": "success"})
+        proc, result = self.collect(jobs)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(result["workflow_run_attempt"], 3)
+
+    # ---------- a failed run must leave evidence of why ----------
+
+    def test_a_failed_run_still_produces_an_auditable_document(self):
+        """The workflow claims a failed run leaves auditable evidence. It has to be true.
+
+        An earlier collector refused at the first bad stage and wrote nothing, so the workflow's
+        `if: always()` collect job produced `(no result produced)` -- the comment asserted a
+        property the code did not have.
+        """
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        alpha["conclusion"] = "failure"
+        proc, result = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIsNotNone(result, "a failed run must still write the document")
+        self.assertEqual(result["verdict"], "fail")
+        self.assertEqual([f["name"] for f in result["failed_stages"]], ["alpha"])
+        self.assertIn("not success", " ".join(result["failed_stages"][0]["reasons"]))
+
+    def test_a_failed_stage_records_a_nonzero_exit(self):
+        """The verifier checks each stage exit as well as the verdict; both must reject the run."""
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        alpha["conclusion"] = "failure"
+        _, result = self.collect(jobs)
+        by_name = {s["name"]: s for s in result["stages"]}
+        self.assertEqual(by_name["alpha"]["exit"], 1)
+        self.assertEqual(by_name["beta"]["exit"], 0)
+
+    def test_every_failing_stage_is_reported_not_only_the_first(self):
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        beta = next(j for j in jobs if j["name"] == "stage (beta)")
+        alpha["conclusion"] = "failure"
+        self.write_log(beta, stage_log(tree="9" * 40, extra="B_OK n=22\n"))
+        proc, result = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(sorted(f["name"] for f in result["failed_stages"]), ["alpha", "beta"])
+
+    def test_a_structural_refusal_writes_no_document(self):
+        """A record that is not this run's record must not be turned into evidence of anything."""
+        jobs = self.default_jobs()
+        for job in jobs:
+            job["run_id"] = 9999
+        proc, result = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIsNone(result)
+
+    # ---------- the log binding is to the bytes GitHub served ----------
+
+    def test_runner_escape_sequences_do_not_break_collection(self):
+        """Real runner logs carry ANSI colour on every echoed command line.
+
+        A live run proved this is not hypothetical: the fetch step used `gh api`, which refuses
+        to write a body containing terminal escape sequences, and the collect job died before the
+        collector ever ran. The collector itself must parse such a log unharmed.
+        """
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        coloured = (
+            "\x1b[36;1mecho \"EXACT_HEAD_OK $head\"\x1b[0m\n"
+            + stage_log(extra="\x1b[0;32mA_OK n=11\x1b[0m\n")
+        )
+        self.write_log(alpha, coloured)
+        proc, result = self.collect(jobs)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        measured = {s["name"]: s["measurements"] for s in result["stages"]}
+        self.assertEqual(measured["alpha"]["alpha_count"], 11)
+
+    def test_the_recorded_log_digest_is_over_the_bytes_github_served(self):
+        """Digesting the lossily-decoded text would bind to a transformation, not to the record."""
+        import hashlib
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        raw = (stage_log(extra="A_OK n=11\n")).encode() + b"\xff\xfe undecodable\n"
+        (self.logs / f"{alpha['id']}.log").write_bytes(raw)
+        proc, result = self.collect(jobs)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        by_name = {s["name"]: s for s in result["stages"]}
+        self.assertEqual(by_name["alpha"]["output_sha256"], hashlib.sha256(raw).hexdigest())
+
+
+    # ---------- which program ran, not just where ----------
+
+    def test_a_stage_silent_about_the_driver_pins_fails_closed(self):
+        """Head and tree prove where the stage ran. They do not prove what executed there."""
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        self.write_log(alpha, f"EXACT_HEAD_OK {CANDIDATE}\nEXACT_TREE_OK {TREE}\nA_OK n=11\n")
+        proc, result = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("whether the driver pins were checked", proc.stderr)
+        self.assertEqual(result["verdict"], "fail")
+
+    def test_a_stage_claiming_both_pin_verdicts_fails_closed(self):
+        """Printing the asserted marker next to a provisional one is a collision, not a pass."""
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        self.write_log(alpha, stage_log(extra="LADDER_PINS_PROVISIONAL\nA_OK n=11\n"))
+        proc, _ = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("both asserts and waives", proc.stderr)
+
+    def test_a_provisional_run_collects_but_records_that_pins_were_not_asserted(self):
+        """A calibration run is honest and must complete; the policy is what refuses it."""
+        jobs = []
+        for stage, marker in (("alpha", "A_OK n=11"), ("beta", "B_OK n=22")):
+            job = self.job(stage)
+            self.write_log(job, f"EXACT_HEAD_OK {CANDIDATE}\nEXACT_TREE_OK {TREE}\n"
+                                f"LADDER_PINS_PROVISIONAL\n{marker}\n")
+            jobs.append(job)
+        jobs.append({"id": 9999, "run_id": int(RUN_ID), "head_sha": WORKFLOW_COMMIT,
+                     "run_attempt": 1, "name": "collect", "conclusion": "success"})
+        proc, result = self.collect(jobs)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(result["verdict"], "pass")
+        self.assertIs(result["driver_pins_asserted"], False)
+
+    def test_one_provisional_stage_is_enough_to_deny_the_asserted_claim(self):
+        jobs = self.default_jobs()
+        beta = next(j for j in jobs if j["name"] == "stage (beta)")
+        self.write_log(beta, f"EXACT_HEAD_OK {CANDIDATE}\nEXACT_TREE_OK {TREE}\n"
+                             "LADDER_PINS_PROVISIONAL\nB_OK n=22\n")
+        proc, result = self.collect(jobs)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIs(result["driver_pins_asserted"], False)
+
+    def test_a_fully_asserted_run_records_the_claim(self):
+        proc, result = self.collect(self.default_jobs())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIs(result["driver_pins_asserted"], True)
+
+
+    def test_a_log_shaped_like_a_real_runner_log_collects(self):
+        """The runner echoes each step's script into the log it also writes output to.
+
+        This nearly defeated the pin-verdict check: a step whose source contained both
+        `LADDER_PINS_OK` and `LADDER_PINS_PROVISIONAL` would put both literals into every stage
+        log regardless of which branch ran, and every stage would be read as claiming both. The
+        workflow assembles the marker suffix from a shell variable so its source contains
+        neither. This fixture reproduces that log shape, echoed script included.
+        """
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        self.write_log(alpha, (
+            '\x1b[36;1mecho "EXACT_HEAD_OK $head"\x1b[0m\n'
+            '\x1b[36;1m  verdict=PROVISIONAL\x1b[0m\n'
+            '\x1b[36;1m    verdict=OK\x1b[0m\n'
+            '\x1b[36;1m  echo "LADDER_PINS_${verdict} driver=$driver"\x1b[0m\n'
+            f"EXACT_HEAD_OK {CANDIDATE}\n"
+            f"EXACT_TREE_OK {TREE}\n"
+            "LADDER_PINS_OK driver=abc recipe=def\n"
+            "A_OK n=11\n"
+        ))
+        proc, result = self.collect(jobs)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIs(result["driver_pins_asserted"], True)
+        measured = {s["name"]: s["measurements"] for s in result["stages"]}
+        self.assertEqual(measured["alpha"]["alpha_count"], 11)
+
+    def test_a_workflow_that_echoes_both_markers_is_caught_not_guessed(self):
+        """The shape the old pin step would have produced. It must refuse, not pick one."""
+        jobs = self.default_jobs()
+        alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
+        self.write_log(alpha, (
+            f"EXACT_HEAD_OK {CANDIDATE}\n"
+            f"EXACT_TREE_OK {TREE}\n"
+            '\x1b[36;1m    echo "LADDER_PINS_OK"\x1b[0m\n'
+            '\x1b[36;1m    echo "LADDER_PINS_PROVISIONAL digests printed for review"\x1b[0m\n'
+            "LADDER_PINS_PROVISIONAL digests printed for review\n"
+            "A_OK n=11\n"
+        ))
+        proc, _ = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("both asserts and waives", proc.stderr)
+
 
 
 if __name__ == "__main__":

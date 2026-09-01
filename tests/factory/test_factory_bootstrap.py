@@ -78,6 +78,7 @@ def result_doc(commit: str, *, stages=None, driver=DRIVER_SHA, recipe=RECIPE_SHA
         "candidate_sha": commit,
         "verdict": "pass",
         "failed_stages": [],
+        "driver_pins_asserted": True,
         "stages": [
             {"name": n, "argv": ["python", f"{n}.py"], "exit": 0,
              "measurements": measured.get(n, {}), "output_sha256": "0" * 64}
@@ -546,6 +547,57 @@ class GenesisCeremonyTests(unittest.TestCase):
         proc = self.c.run(result=result)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("did not succeed", proc.stderr)
+
+    def test_a_fail_verdict_result_is_refused(self):
+        """The collector emits a document for failed runs too. It must never authorize genesis."""
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        result = self.c.result(head)
+        result["verdict"] = "fail"
+        proc = self.c.run(result=result)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("did not pass", proc.stderr)
+
+    def test_a_result_listing_failed_stages_is_refused_even_when_it_claims_to_pass(self):
+        """Two independent readings of the same fact, so one flipped field is not enough.
+
+        A collector that recorded the failures but forgot to flip the verdict would otherwise
+        present a passing document; the verifier reads the list as well as the verdict.
+        """
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        result = self.c.result(head)
+        result["verdict"] = "pass"
+        result["failed_stages"] = [
+            {"name": "unit-gate", "job_id": 1, "reasons": ["concluded 'failure', not success"]},
+        ]
+        proc = self.c.run(result=result)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("reports failed stages", proc.stderr)
+
+    def test_a_provisional_calibration_run_authorizes_nothing(self):
+        """A run whose stages only printed the driver digests is honest -- and not authority.
+
+        This is the difference between a calibration run and an authoritative one being a fact in
+        the record rather than a difference of intent.
+        """
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        result = self.c.result(head)
+        result["driver_pins_asserted"] = False
+        proc = self.c.run(result=result)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("asserted the pinned driver digest", proc.stderr)
+
+    def test_a_result_silent_about_the_driver_pins_is_refused(self):
+        """Absent is not the same as true; an older collector's document must not pass."""
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        result = self.c.result(head)
+        result.pop("driver_pins_asserted", None)
+        proc = self.c.run(result=result)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("asserted the pinned driver digest", proc.stderr)
 
     def test_duplicate_stage_names_are_refused(self):
         self.c.write_manifest(self.c.manifest())

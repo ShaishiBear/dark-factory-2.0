@@ -34,6 +34,39 @@ reviewed by a human at genesis, which is where that question belongs. The ambigu
 more here than anywhere else: if a stage emits a marker twice with different values, one of them
 being a forgery attempt, the disagreement is a refusal rather than a first match.
 
+Two classes of refusal, deliberately separated:
+
+  * A *structural* refusal means the record is not a record of the run we asked about -- it is
+    unreadable, truncated, missing or duplicating stage jobs, or carrying jobs from another run,
+    another workflow commit or another run attempt. Nothing is written. Assembling a document
+    from an untrusted record would itself be the defect.
+  * A *stage* failure means the record is sound and reports that a stage did not pass, or did not
+    prove what it was required to prove. Those are aggregated across every stage and written out
+    as a `verdict: "fail"` document listing each reason, and the process still exits non-zero. A
+    failed run is supposed to leave auditable evidence of why; an earlier version claimed that in
+    the workflow comment while refusing at the first bad stage and writing nothing at all.
+
+Run-attempt uniformity is part of the structural set for a reason that is not cosmetic. GitHub's
+job listing returns the *latest* attempt of each job, so a partially re-run ladder would present
+stages from attempt 1 beside re-run stages from attempt 2, all reporting success. That is a
+re-roll-until-green channel: a stage that fails can simply be retried alone. Requiring one attempt
+across the whole ladder closes it.
+
+Proving *which program ran* is separate from proving *where it ran*. The head and tree markers
+show the stage checked out the authorized candidate; they say nothing about whether the pinned
+validation driver is what executed. The workflow's pin step decides that and prints its verdict,
+so the collector requires that verdict to be in the log rather than inferring it from the job
+having not failed. A stage that prints the marker itself cannot help: if the pin step disagreed
+the two values collide and the ambiguity rule refuses; if it agreed the marker was already true.
+Whether the pins were *asserted* or merely *printed for review* is recorded rather than judged --
+that judgement belongs to the external policy, which is what makes a provisional calibration run
+distinguishable from an authoritative one instead of merely differing by intent.
+
+Record truncation is structural for a subtler reason. The listing is paginated, and the guard
+against one stage appearing in two jobs can only fire on jobs it can see -- so a forged duplicate
+on page one with the honest job stranded on page two would defeat it. Refusing any listing whose
+`total_count` exceeds the jobs actually present removes that window.
+
 This program makes no network calls. The workflow fetches the job metadata and logs with read-only
 Actions authority and scrubs the token before invoking it, so the token is never ambient in the
 process that builds the evidence.
@@ -49,6 +82,8 @@ import sys
 
 SELF = Path(__file__).resolve()
 STAGE_JOB = re.compile(r"^(?P<prefix>[A-Za-z0-9_-]+)\s+\((?P<stage>[^)]+)\)$")
+PINS_ASSERTED = "LADDER_PINS_OK"
+PINS_PROVISIONAL = "LADDER_PINS_PROVISIONAL"
 
 
 def fail(message: str) -> None:
@@ -70,19 +105,20 @@ def read_json(path: Path, label: str) -> dict:
     return value
 
 
-def measure(stage: str, log: str, key: str, marker: str) -> int:
+def measure(stage: str, log: str, key: str, marker: str) -> tuple[int | None, str | None]:
     """Read one count from one stage's own GitHub log, refusing ambiguity.
 
     Disagreeing occurrences are the signature of a stage printing a forged marker alongside the
-    real one, so they are a refusal rather than a first match.
+    real one, so they are a refusal rather than a first match. Returns the value or the reason it
+    could not be read, so the caller can report every bad stage rather than only the first.
     """
     found = re.findall(marker, log)
     if not found:
-        fail(f"stage {stage!r} log does not report {key}")
+        return None, f"stage {stage!r} log does not report {key}"
     unique = set(found)
     if len(unique) != 1:
-        fail(f"stage {stage!r} reported {key} ambiguously: {sorted(unique)}")
-    return int(found[0])
+        return None, f"stage {stage!r} reported {key} ambiguously: {sorted(unique)}"
+    return int(found[0]), None
 
 
 def collect_stage_jobs(jobs: list, prefix: str) -> dict[str, dict]:
@@ -129,6 +165,11 @@ def main() -> None:
     jobs = record.get("jobs")
     if not isinstance(jobs, list) or not jobs:
         fail("Actions job record contains no jobs")
+    # A paginated listing that was not read to the end can hide the second half of a duplicate
+    # pair, which is exactly what the duplicate guard below exists to catch.
+    total = record.get("total_count")
+    if not isinstance(total, int) or total != len(jobs):
+        fail(f"Actions job record is truncated: total_count {total!r}, {len(jobs)} jobs present")
 
     found = collect_stage_jobs(jobs, args.stage_job_prefix)
     missing = sorted(set(expected) - set(found))
@@ -139,7 +180,10 @@ def main() -> None:
         fail("this run has stage jobs the recipe does not define: " + ", ".join(unexpected))
 
     logs_dir = Path(args.logs_dir).resolve()
+    attempts: set[int] = set()
+    stage_pins: list[bool] = []
     stages = []
+    failed: list[dict] = []
     for name in expected:
         job = found[name]
         job_id = job.get("id")
@@ -149,33 +193,66 @@ def main() -> None:
             fail(f"stage {name!r} job belongs to a different workflow run")
         if str(job.get("head_sha") or "") != args.workflow_commit:
             fail(f"stage {name!r} job did not run from the authorized workflow commit")
+        attempt = job.get("run_attempt")
+        if not isinstance(attempt, int):
+            fail(f"stage {name!r} job does not record which run attempt produced it")
+        attempts.add(attempt)
+
+        # Everything below is a property of the stage rather than of the record, so a bad answer
+        # is collected as a failed stage instead of ending the collection at the first one.
+        reasons: list[str] = []
         if job.get("conclusion") != "success":
-            fail(f"stage {name!r} concluded {job.get('conclusion')!r}, not success")
+            reasons.append(f"stage {name!r} concluded {job.get('conclusion')!r}, not success")
 
         log_path = logs_dir / f"{job_id}.log"
+        log_bytes = b""
         if not log_path.is_file():
-            fail(f"no GitHub log was captured for stage {name!r} (job {job_id})")
-        log = log_path.read_text(encoding="utf-8", errors="replace")
+            reasons.append(f"no GitHub log was captured for stage {name!r} (job {job_id})")
+        else:
+            log_bytes = log_path.read_bytes()
+        # The binding is to the bytes GitHub served. Decoding is lossy on purpose -- runner logs
+        # carry terminal escape sequences -- so the digest is taken before decoding, not after.
+        log = log_bytes.decode("utf-8", errors="replace")
         if not re.search(rf"EXACT_HEAD_OK {re.escape(args.commit)}\b", log):
-            fail(f"stage {name!r} log does not prove it ran against the authorized candidate")
+            reasons.append(f"stage {name!r} log does not prove it ran against the authorized candidate")
         if not re.search(rf"EXACT_TREE_OK {re.escape(args.tree)}\b", log):
-            fail(f"stage {name!r} log does not prove it ran against the authorized tree")
+            reasons.append(f"stage {name!r} log does not prove it ran against the authorized tree")
+        # Which program ran, read from the record rather than assumed from the job's success.
+        asserted = PINS_ASSERTED in log
+        provisional = PINS_PROVISIONAL in log
+        if asserted and provisional:
+            reasons.append(f"stage {name!r} log both asserts and waives the driver pins")
+        elif not asserted and not provisional:
+            reasons.append(f"stage {name!r} log does not say whether the driver pins were checked")
+        stage_pins.append(asserted and not provisional)
 
         spec = next(s for s in recipe["stages"] if s["name"] == name)
-        measurements = {
-            key: measure(name, log, key, str(marker))
-            for key, marker in sorted((spec.get("measures") or {}).items())
-        }
+        measurements: dict[str, int] = {}
+        for key, marker in sorted((spec.get("measures") or {}).items()):
+            value, why = measure(name, log, key, str(marker))
+            if why is not None:
+                reasons.append(why)
+            else:
+                measurements[key] = int(value or 0)
+
+        if reasons:
+            failed.append({"name": name, "job_id": job_id,
+                           "job_conclusion": job.get("conclusion"), "reasons": reasons})
         stages.append({
             "name": name,
             "argv": list(spec.get("argv") or []),
             "cwd": str(spec.get("cwd") or "."),
-            "exit": 0,
+            "exit": 1 if reasons else 0,
             "job_id": job_id,
-            "job_conclusion": "success",
+            "job_conclusion": job.get("conclusion"),
             "measurements": measurements,
-            "output_sha256": digest(log.encode()),
+            "output_sha256": digest(log_bytes),
         })
+
+    # A ladder assembled from more than one attempt is a re-roll channel, not a run.
+    if len(attempts) != 1:
+        fail("this run's stage jobs span more than one run attempt: " + ", ".join(
+            str(a) for a in sorted(attempts)))
 
     payload = {
         "version": "1.0",
@@ -184,14 +261,28 @@ def main() -> None:
         "candidate_sha": args.commit,
         "candidate_tree": args.tree,
         "workflow_run_id": str(args.run_id),
+        "workflow_run_attempt": sorted(attempts)[0],
         "workflow_commit_sha": args.workflow_commit,
         "stage_isolation": "one-disposable-runner-per-stage",
+        # Stated, never judged: the external genesis policy decides whether a run whose pins were
+        # only printed for review may authorize anything.
+        "driver_pins_asserted": bool(stage_pins) and all(stage_pins),
         "evidence_source": "github-actions-job-record",
         "stages": stages,
-        "failed_stages": [],
-        "verdict": "pass",
+        "failed_stages": failed,
+        "verdict": "fail" if failed else "pass",
     }
     Path(args.output).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if failed:
+        for entry in failed:
+            for reason in entry["reasons"]:
+                print(f"COLLECTION_STAGE_FAILED {reason}", file=sys.stderr)
+        print(
+            f"COLLECTION_FAILED run={args.run_id} candidate={args.commit} "
+            f"failed={len(failed)}/{len(stages)}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     print(
         f"COLLECTION_OK run={args.run_id} candidate={args.commit} tree={args.tree} "
         f"stages={len(stages)} collector={payload['aggregator_sha256'][:12]}"

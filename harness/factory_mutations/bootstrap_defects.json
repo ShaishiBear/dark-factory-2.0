@@ -154,6 +154,27 @@
       "find": "        unseen = sorted(set(self.binds) - set(self.sees))",
       "replace": "        unseen = []",
       "why": "An authority could certify a claim it is never shown the artifacts for: independent, but not competent."
+    },
+    {
+      "id": "bootstrap-failed-verdict-accepted",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    require(result.get(\"verdict\") == \"pass\", \"validation result did not pass\")",
+      "replace": "    require(True, \"validation result did not pass\")",
+      "why": "A validation result that says it failed would still authorize genesis."
+    },
+    {
+      "id": "bootstrap-failed-stages-ignored",
+      "file": "harness/bootstrap_verify.py",
+      "find": "    require(not (result.get(\"failed_stages\") or []), \"validation result reports failed stages\")",
+      "replace": "    require(True, \"validation result reports failed stages\")",
+      "why": "A result listing failed stages but carrying a pass verdict would be accepted."
+    },
+    {
+      "id": "bootstrap-unasserted-driver-pins-accepted",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        result.get(\"driver_pins_asserted\") is True,",
+      "replace": "        True,",
+      "why": "A provisional calibration run, whose stages only printed the driver digests, would authorize genesis."
     }
   ]
 }

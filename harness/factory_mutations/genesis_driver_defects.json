@@ -189,6 +189,76 @@
       "find": "        str(result.get(\"workflow_commit_sha\") or \"\") == policy[\"validation_workflow_commit_sha\"],",
       "replace": "        True or str(result.get(\"workflow_commit_sha\") or \"\") == policy[\"validation_workflow_commit_sha\"],",
       "why": "A result assembled from a run of a different workflow commit could authorize genesis."
+    },
+    {
+      "id": "genesis-collect-truncated-record-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "    if not isinstance(total, int) or total != len(jobs):",
+      "replace": "    if False and (not isinstance(total, int) or total != len(jobs)):",
+      "why": "A paginated listing read only to page one hides the honest half of a duplicate stage job, defeating the duplicate guard."
+    },
+    {
+      "id": "genesis-collect-mixed-run-attempt-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "    if len(attempts) != 1:",
+      "replace": "    if False and len(attempts) != 1:",
+      "why": "Stages drawn from different run attempts let a failing stage be re-rolled alone until it passes."
+    },
+    {
+      "id": "genesis-collect-missing-run-attempt-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "        if not isinstance(attempt, int):",
+      "replace": "        if False and not isinstance(attempt, int):",
+      "why": "A job record without a run attempt cannot be checked for uniformity, so the re-roll channel reopens."
+    },
+    {
+      "id": "genesis-collect-failed-stages-reported-as-pass",
+      "file": "harness/genesis_collect.py",
+      "find": "        \"verdict\": \"fail\" if failed else \"pass\",",
+      "replace": "        \"verdict\": \"pass\",",
+      "why": "A run with failed stages would assemble a document whose verdict says it passed."
+    },
+    {
+      "id": "genesis-collect-failed-stage-exit-zeroed",
+      "file": "harness/genesis_collect.py",
+      "find": "            \"exit\": 1 if reasons else 0,",
+      "replace": "            \"exit\": 0,",
+      "why": "A failed stage would record a zero exit, so the verifier's per-stage exit check would pass over it."
+    },
+    {
+      "id": "genesis-collect-driver-pin-verdict-unread",
+      "file": "harness/genesis_collect.py",
+      "find": "        elif not asserted and not provisional:",
+      "replace": "        elif False and not asserted and not provisional:",
+      "why": "A stage whose log never says the pinned driver was checked would pass as though it had been."
+    },
+    {
+      "id": "genesis-collect-pin-verdict-collision-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "        if asserted and provisional:",
+      "replace": "        if False and asserted and provisional:",
+      "why": "A stage printing the asserted marker alongside a provisional one would be read as asserted."
+    },
+    {
+      "id": "genesis-collect-provisional-pins-reported-as-asserted",
+      "file": "harness/genesis_collect.py",
+      "find": "        \"driver_pins_asserted\": bool(stage_pins) and all(stage_pins),",
+      "replace": "        \"driver_pins_asserted\": True,",
+      "why": "A calibration run whose pins were only printed for review would claim it asserted them."
+    },
+    {
+      "id": "genesis-driver-stage-output-withheld-from-the-record",
+      "file": "harness/genesis_validate.py",
+      "find": "    sys.stdout.write(output if output.endswith(\"\\n\") or not output else output + \"\\n\")",
+      "replace": "    sys.stdout.write(\"\")",
+      "why": "The measurement never reaches GitHub's sealed log, so the record the collector reads proves nothing about it."
+    },
+    {
+      "id": "genesis-driver-stage-output-framing-dropped",
+      "file": "harness/genesis_validate.py",
+      "find": "    print(f\"STAGE_OUTPUT_BEGIN {name}\", flush=True)",
+      "replace": "    pass",
+      "why": "Without a start marker a reader cannot tell the candidate's own text from the driver's."
     }
   ]
 }

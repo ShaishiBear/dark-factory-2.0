@@ -239,6 +239,18 @@ def check_result(policy: dict, result: dict, commit: str) -> dict:
         "validation result is for a different commit than the one being authorized",
     )
     require(result.get("verdict") == "pass", "validation result did not pass")
+    # The collector emits a fail-verdict document listing every bad stage so a failed run
+    # still leaves auditable evidence. Reading the list as well as the verdict means a
+    # collector that forgot to flip the verdict is still refused here.
+    require(not (result.get("failed_stages") or []), "validation result reports failed stages")
+    # The collector states whether every stage asserted the pinned driver digest or merely
+    # printed it for review. A calibration run that only printed them is a real, honest run --
+    # and must still authorize nothing. Deciding that here rather than in the collector keeps the
+    # collector a reporter of facts and leaves the judgement with the external policy.
+    require(
+        result.get("driver_pins_asserted") is True,
+        "validation result does not record that every stage asserted the pinned driver digest",
+    )
 
     stages = result.get("stages")
     require(isinstance(stages, list) and stages, "validation result records no stages")

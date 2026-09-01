@@ -137,6 +137,20 @@ def run_stage(repo: Path, stage: dict, recipe: dict, log_dir: Path) -> dict:
     proc = execute(list(argv), cwd, int(stage.get("timeout_seconds") or 3600))
     output = (proc.stdout or "") + (proc.stderr or "")
     (log_dir / f"{name}.log").write_text(output, encoding="utf-8")
+    # The stage's own output goes to this process's stdout, and therefore into the GitHub job log.
+    #
+    # This is not for readability. Evidence is assembled on a separate runner from GitHub's sealed
+    # record of this job, and a measurement can only be evidence if it is *in* that record. The
+    # driver used to capture the stage output into a scratch file and print only its own summary,
+    # so a twenty-minute mutation stage produced a job log containing no measurement at all -- the
+    # collector would have found nothing to read and refused every stage. The file under log_dir
+    # is a scratch convenience that does not survive the job; this stream is the evidence.
+    #
+    # Framing markers bound the stage's own text so a human reading the record can see where the
+    # candidate's output starts and stops, and so the driver's own lines are never inside it.
+    print(f"STAGE_OUTPUT_BEGIN {name}", flush=True)
+    sys.stdout.write(output if output.endswith("\n") or not output else output + "\n")
+    print(f"STAGE_OUTPUT_END {name}", flush=True)
 
     measurements: dict[str, int] = {}
     measures = stage.get("measures") or {}

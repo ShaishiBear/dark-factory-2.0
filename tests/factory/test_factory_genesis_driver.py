@@ -249,6 +249,102 @@ class DriverTests(unittest.TestCase):
             self.assertNotIn(f"import {banned}", source)
             self.assertNotIn(f"from {banned}", source)
 
+class RecordReachabilityTests(unittest.TestCase):
+    """The measurement has to be in the record the collector reads, or the design does nothing.
+
+    Evidence is assembled on a separate runner from GitHub's sealed log of the stage job. The
+    driver used to capture the stage's output into a scratch file under --log-dir and print only
+    its own summary line, so a live twenty-minute mutation stage produced a job log with no
+    measurement in it at all. Every binding was intact and the whole ladder would still have been
+    refused at collection. This is the seam between the two programs, tested across it rather than
+    on either side of it.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        git(self.repo, "init", "-q", "-b", "main")
+        git(self.repo, "config", "user.email", "d@example.invalid")
+        git(self.repo, "config", "user.name", "D")
+        (self.repo / "prog.py").write_text(
+            "print('COUNT_OK n=42')\n", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "one")
+        self.commit = git(self.repo, "rev-parse", "HEAD").strip()
+        self.tree = git(self.repo, "rev-parse", "HEAD^{tree}").strip()
+        self.recipe = self.root / "recipe.json"
+        self.recipe.write_text(json.dumps({"version": "1.0", "stages": [
+            {"name": "only", "argv": [sys.executable, "prog.py"],
+             "measures": {"n": r"COUNT_OK n=(\d+)"}},
+        ]}), encoding="utf-8")
+
+    def run_driver(self):
+        return subprocess.run(
+            [sys.executable, str(DRIVER), "--repo", str(self.repo), "--commit", self.commit,
+             "--recipe", str(self.recipe), "--stage", "only",
+             "--log-dir", str(self.root / "logs"), "--output", str(self.root / "out.json")],
+            cwd=self.root, capture_output=True, text=True, timeout=600,
+        )
+
+    def test_the_stage_output_reaches_the_drivers_stdout(self):
+        proc = self.run_driver()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("COUNT_OK n=42", proc.stdout)
+        self.assertIn("STAGE_OUTPUT_BEGIN only", proc.stdout)
+        self.assertIn("STAGE_OUTPUT_END only", proc.stdout)
+
+    def test_the_framing_encloses_the_stage_text_and_not_the_drivers_own_lines(self):
+        proc = self.run_driver()
+        begin = proc.stdout.index("STAGE_OUTPUT_BEGIN only")
+        end = proc.stdout.index("STAGE_OUTPUT_END only")
+        enclosed = proc.stdout[begin:end]
+        self.assertIn("COUNT_OK n=42", enclosed)
+        self.assertNotIn("STAGE_RESULT", enclosed)
+        self.assertNotIn("STAGE_OK", enclosed)
+        self.assertLess(end, proc.stdout.index("STAGE_RESULT"))
+
+    def test_the_collector_reads_the_same_measurement_from_that_stdout(self):
+        """The seam, crossed: what the driver emits is what the collector must be able to read."""
+        proc = self.run_driver()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        logs = self.root / "joblogs"
+        logs.mkdir()
+        job_log = (
+            f"EXACT_HEAD_OK {self.commit}\n"
+            f"EXACT_TREE_OK {self.tree}\n"
+            "LADDER_PINS_OK driver=a recipe=b\n"
+        ) + proc.stdout
+        (logs / "77.log").write_text(job_log, encoding="utf-8")
+        jobs = self.root / "jobs.json"
+        jobs.write_text(json.dumps({"total_count": 1, "jobs": [
+            {"id": 77, "run_id": 5, "head_sha": "w" * 40, "run_attempt": 1,
+             "name": "stage (only)", "conclusion": "success"},
+        ]}), encoding="utf-8")
+        out = self.root / "collected.json"
+        collected = subprocess.run(
+            [sys.executable, str(ROOT / "harness" / "genesis_collect.py"),
+             "--jobs", str(jobs), "--logs-dir", str(logs), "--recipe", str(self.recipe),
+             "--run-id", "5", "--workflow-commit", "w" * 40, "--commit", self.commit,
+             "--tree", self.tree, "--output", str(out)],
+            cwd=self.root, capture_output=True, text=True, timeout=600,
+        )
+        self.assertEqual(collected.returncode, 0, collected.stderr)
+        document = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(document["verdict"], "pass")
+        self.assertEqual(document["stages"][0]["measurements"]["n"], 42)
+
+        driver_said = json.loads((self.root / "out.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            driver_said["stage"]["measurements"]["n"],
+            document["stages"][0]["measurements"]["n"],
+            "the two independent parses of the same stage must agree",
+        )
+
+
 
 if __name__ == "__main__":
     unittest.main()
