@@ -28,6 +28,7 @@ COPY_FILES = (
     ".github/workflows/dark-factory-ci.yml",
     ".github/workflows/dark-factory-worker.yml",
     ".factory/architecture.json",
+    ".factory/prompts/holdout.md",
     ".factory/evidence-spine.json",
     ".factory/kernel.json",
     ".factory/locks/floor.json",
