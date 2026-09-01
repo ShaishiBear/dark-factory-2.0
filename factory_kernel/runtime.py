@@ -36,6 +36,21 @@ class FactoryStopped(RuntimeError):
     pass
 
 
+class PostMergeUnverified(RuntimeError):
+    """The squash merge happened and then failed verification, so main is untrusted.
+
+    This is deliberately not a NeedsHuman. Every other validation failure leaves the branch
+    unmerged and the repository exactly as it was, which is why the ordinary handler can honestly
+    say no merge was authorized and invite a fresh rebuild. After this one a merge exists on main
+    that nothing has verified, so both of those statements would be false and the invitation would
+    be actively harmful: a rebuild starts from the very commit that is in doubt.
+
+    Detection after the fact is inherent -- pre-authorization prevents, post-verification detects.
+    Continuing to dispatch autonomously after detecting it is not inherent, and is what this class
+    exists to stop.
+    """
+
+
 class NeedsHuman(RuntimeError):
     pass
 
@@ -554,21 +569,29 @@ class KernelRuntime:
             self.check_stop()
             self.github.cwd = str(worktree.path)
             self.github.merge_squash(pr_number, expected_head=head)
-            self._exec(
-                [
-                    "python", "harness/merge_verify.py", "post", "--pr", str(pr_number),
-                    "--evidence", str(paths.artifacts / "evidence-bundle.json"),
-                    "--authorization", str(paths.artifacts / "merge-authorization.json"),
-                    "--output", str(paths.artifacts / "merge-verification.json"),
-                ],
-                cwd=worktree.path,
-                env=env,
-                credential_scope="github",
-                timeout=240,
-                transcript=paths.transcripts / "merge-post.log",
-            )
+            try:
+                self._exec(
+                    [
+                        "python", "harness/merge_verify.py", "post", "--pr", str(pr_number),
+                        "--evidence", str(paths.artifacts / "evidence-bundle.json"),
+                        "--authorization", str(paths.artifacts / "merge-authorization.json"),
+                        "--output", str(paths.artifacts / "merge-verification.json"),
+                    ],
+                    cwd=worktree.path,
+                    env=env,
+                    credential_scope="github",
+                    timeout=240,
+                    transcript=paths.transcripts / "merge-post.log",
+                )
+            except Exception as exc:  # the merge is already on main; this is an incident
+                raise PostMergeUnverified(
+                    f"post-merge verification failed for #{pr_number}: {exc}"
+                ) from exc
             print(f"FACTORY_MERGED_VERIFIED pr=#{pr_number} evidenced_head={head}")
             return paths.artifacts / "merge-verification.json"
+        except PostMergeUnverified as exc:
+            self._raise_post_merge_incident(pr_number, linked_issue, exc)
+            raise
         except Exception as exc:
             self._record_validation_failure(pr_number, linked_issue, exc)
             raise
@@ -960,6 +983,70 @@ class KernelRuntime:
                 )
         except Exception:
             pass
+
+    def _raise_post_merge_incident(
+        self, pr_number: int, linked_issue: int | None, exc: Exception
+    ) -> None:
+        """Stop the factory remotely, because main can no longer be trusted.
+
+        Applying a needs-fix label to a merged pull request would be containment theatre: the
+        worker wakes hourly from current main on a fresh runner and would build the next issue on
+        top of the unverified commit. The only containment that survives a fresh runner is an open
+        issue carrying the stop label, which factory-stop.sh reads from GitHub before every
+        dispatch and fails closed when it cannot read at all.
+        """
+        detail = (
+            f"POST-MERGE VERIFICATION FAILED for #{pr_number}.\n\n"
+            "A squash merge was authorized and has already happened. Verifying it afterwards "
+            "failed, so the commit now on main has not been shown to be the commit that was "
+            "evidenced.\n\n"
+            "- main must be treated as UNTRUSTED until a human reconciles it\n"
+            "- the autonomous factory has been stopped and will not dispatch again\n"
+            "- do NOT rebuild from main: a rebuild starts from the commit in doubt\n\n"
+            f"Failure class: `{type(exc).__name__}`\n"
+            f"Detail: {exc}\n\n"
+            f"Resume by reconciling main, then closing this issue (or removing "
+            f"`{self.config.labels['stop']}` from it)."
+        )
+        stopped = False
+        try:
+            with tempfile.TemporaryDirectory(prefix="dark-factory-incident-") as tmp:
+                body = Path(tmp) / "incident.md"
+                body.write_text(detail, encoding="utf-8")
+                self.github.cwd = str(self.repo_root)
+                self.github.create_issue(
+                    title=f"POST-MERGE VERIFICATION FAILED: main is untrusted (PR #{pr_number})",
+                    body_file=body,
+                    labels=(self.config.labels["stop"],),
+                )
+            stopped = True
+        except Exception:
+            # Fall back to the local kill file. It does not survive a fresh runner, so it is a
+            # second line rather than the containment, and the failure is still surfaced below.
+            try:
+                kill = self.config.runtime.work_root / ".factory-stop"
+                kill.parent.mkdir(parents=True, exist_ok=True)
+                kill.write_text(detail, encoding="utf-8")
+            except Exception:
+                pass
+        try:
+            self.github.add_pr_label(pr_number, self.config.labels["needs_human"])
+            self.github.comment_pr(
+                pr_number,
+                detail
+                + ("" if stopped else "\n\nWARNING: the stop issue could not be opened. "
+                                      "Stop the factory by hand before it dispatches again."),
+            )
+            if linked_issue is not None:
+                self.github.comment_issue(
+                    linked_issue,
+                    "Dark Factory merged this build and then failed to verify the merge. "
+                    "This issue is NOT eligible for a rebuild: main is untrusted until a human "
+                    "reconciles it.",
+                )
+        except Exception:
+            pass
+        print(f"FACTORY_POST_MERGE_INCIDENT pr=#{pr_number} stopped={'remote' if stopped else 'local-only'}")
 
     def _mark_issue_human(self, issue: int, reason: str) -> None:
         try:

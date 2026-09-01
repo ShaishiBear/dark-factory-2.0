@@ -134,6 +134,33 @@ class GitHubClient:
             raise RuntimeError("created PR could not be resolved")
         return value
 
+    def create_issue(self, *, title: str, body_file: Path, labels: tuple[str, ...] = ()) -> int:
+        """Open an issue. This is how the factory raises an incident that outlives its runner.
+
+        The worker starts from current main on a fresh hosted runner every hour, so a local kill
+        file cannot contain an incident: the next run never sees it. An open issue carrying the
+        stop label is the containment that survives, because scripts/factory-stop.sh reads it
+        from GitHub before every dispatch and fails closed when it cannot.
+        """
+        if not title.strip():
+            raise ValueError("issue title must be non-empty")
+        if not body_file.is_file():
+            raise ValueError("issue body file is missing")
+        argv = ["issue", "create", "-R", self.repository, "--title", title,
+                "--body-file", str(body_file)]
+        for label in labels:
+            if not label.strip() or label.startswith("-"):
+                raise ValueError(f"unsafe issue label: {label!r}")
+            argv += ["--label", label]
+        self.run(argv, timeout=120)
+        value = self.json(
+            ["issue", "list", "-R", self.repository, "--state", "open",
+             "--limit", "1", "--json", "number"]
+        )
+        if not isinstance(value, list) or not value or not isinstance(value[0].get("number"), int):
+            raise RuntimeError("created issue could not be resolved")
+        return int(value[0]["number"])
+
     def push_branch(self, branch: str) -> None:
         if not branch.strip() or branch.startswith("-"):
             raise ValueError("unsafe branch name")

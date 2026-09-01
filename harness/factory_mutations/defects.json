@@ -312,6 +312,34 @@
       "find": "            if verdict.get(\"verdict\") != \"pass\":",
       "replace": "            if False and verdict.get(\"verdict\") != \"pass\":",
       "why": "A blinded holdout that rejected the change would not stop the merge."
+    },
+    {
+      "id": "runtime-post-merge-failure-raises-no-incident",
+      "file": "factory_kernel/runtime.py",
+      "find": "        except PostMergeUnverified as exc:\n            self._raise_post_merge_incident(pr_number, linked_issue, exc)",
+      "replace": "        except PostMergeUnverified as exc:\n            self._record_validation_failure(pr_number, linked_issue, exc)",
+      "why": "An unverified merge on main would be reported as an ordinary failure, telling humans no merge was authorized and leaving the hourly worker free to build on it."
+    },
+    {
+      "id": "runtime-post-merge-incident-does-not-stop-the-factory",
+      "file": "factory_kernel/runtime.py",
+      "find": "                self.github.create_issue(",
+      "replace": "                (lambda **kw: 0)(",
+      "why": "No stop issue is opened, so the next hourly dispatch proceeds from an untrusted main."
+    },
+    {
+      "id": "runtime-post-merge-verification-failure-swallowed",
+      "file": "factory_kernel/runtime.py",
+      "find": "            except Exception as exc:  # the merge is already on main; this is an incident\n                raise PostMergeUnverified(",
+      "replace": "            except Exception as exc:  # mutated: swallow\n                _ = PostMergeUnverified(",
+      "why": "A failed post-merge verification would be indistinguishable from a verified merge."
+    },
+    {
+      "id": "rehearsal-evidence-seam-skips-the-architecture-holdout-rule",
+      "file": "harness/rehearsal.py",
+      "find": "                rules.verify_architecture_holdout(value, list(CHANGED_FILES), policy)",
+      "replace": "                pass",
+      "why": "The rehearsal would stop demonstrating that a rejecting architecture holdout is refused, which is exactly the gap this seam was added to close."
     }
   ]
 }

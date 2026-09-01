@@ -71,7 +71,7 @@ class RefusalTests(unittest.TestCase):
         # merge-verification-fails is excluded deliberately and asserted on its own below: post
         # verification runs after the squash, so it detects a bad merge rather than preventing it.
         for scenario in SCENARIOS:
-            if scenario.name in {"happy", "merge-verification-fails"}:
+            if scenario.name in {"happy"} or scenario.name.startswith("merge-verification-fails"):
                 continue
             with self.subTest(scenario.name):
                 trace = rehearse(scenario)
@@ -80,12 +80,27 @@ class RefusalTests(unittest.TestCase):
                     f"{scenario.name} reached the irreversible action anyway",
                 )
 
-    def test_a_rejecting_authority_stops_the_run(self):
-        for role in AUTHORITIES[:1] + AUTHORITIES[2:]:
+    def test_every_authority_can_stop_the_merge(self):
+        """All five, with no exceptions carved out.
+
+        An earlier version of this test skipped `architecture-holdout` because it is the one
+        authority `validate_pr` does not itself reject -- the runtime only requires a mapping back,
+        and the refusal lives inside the evidence authority, which the rehearsal stands in for. The
+        skip made the suite's claim that every gate refuses quietly untrue. The seam now runs the
+        production rule instead of omitting it, so the case is covered rather than excluded.
+        """
+        for role in AUTHORITIES:
             with self.subTest(role):
                 trace = rehearse(Scenario(f"reject-{role}", reject=role))
-                self.assertEqual(trace.outcome, "NeedsHuman")
-                self.assertFalse(trace.happened("merge_squash"))
+                self.assertFalse(trace.happened("merge_squash"),
+                                 f"a rejecting {role} did not stop the merge")
+
+    def test_a_rejecting_architecture_holdout_is_refused_by_the_production_rule(self):
+        """And refused by the real function, not by a restatement of it in the harness."""
+        trace = rehearse(Scenario("architecture-holdout-rejects", reject="architecture-holdout"))
+        self.assertFalse(trace.happened("merge_squash"))
+        self.assertTrue(trace.happened("factory_evidence.py"))
+        self.assertIn("architecture holdout refused", trace.error)
 
     def test_a_failing_deterministic_tool_stops_the_run(self):
         for tool in ("factory_security.py", "factory_provenance.py",
@@ -115,25 +130,48 @@ class RefusalTests(unittest.TestCase):
         self.assertTrue(trace.happened("worktree_removed"))
 
 
-class PostMergeVerificationIsDetectionNotPreventionTests(unittest.TestCase):
-    """Named rather than hidden: this is the one failure that lands on main.
+class PostMergeIncidentTests(unittest.TestCase):
+    """Detection after the merge is inherent. Continuing to run afterwards is not.
 
     `merge_verify post` runs after the squash, so a discrepancy between what was authorized and
-    what GitHub actually merged is caught only once the commit exists. That is inherent to
-    verifying a merge -- pre-authorization is what prevents, post-verification is what detects --
-    but it means a post failure is an incident on main, not a blocked PR, and the control plane
-    currently responds to it exactly as it responds to any other validation failure.
+    what GitHub merged is found once the commit already exists on main. Nothing can change that
+    ordering. What can change is the response: the ordinary failure handler would have told
+    humans "No merge was authorized" -- false here -- and invited a fresh rebuild from current
+    main, which is the very commit in doubt. It would also have left the hourly worker free to
+    build the next issue on top of it.
     """
 
-    def test_post_verification_failure_leaves_the_merge_already_made(self):
-        trace = rehearse(Scenario("merge-verification-fails", fail="merge_verify.py:post"))
-        self.assertTrue(trace.happened("merge_squash"))
-        self.assertTrue(trace.before("merge_squash", "merge_verify.py:post"))
-        self.assertEqual(trace.outcome, "RuntimeError")
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.trace = rehearse(Scenario("post-merge-fails", fail="merge_verify.py:post"))
 
-    def test_the_failure_is_at_least_surfaced_on_the_pull_request(self):
-        trace = rehearse(Scenario("merge-verification-fails", fail="merge_verify.py:post"))
-        self.assertIn("add_pr_label:factory:needs-fix", trace.names())
+    def test_the_merge_has_already_happened_when_it_is_detected(self):
+        self.assertTrue(self.trace.happened("merge_squash"))
+        self.assertTrue(self.trace.before("merge_squash", "merge_verify.py:post"))
+        self.assertEqual(self.trace.outcome, "PostMergeUnverified")
+
+    def test_a_durable_remote_stop_is_raised(self):
+        """A local kill file cannot contain this: the next run is a fresh hosted runner."""
+        self.assertIn("create_issue:factory:stop", self.trace.names(),
+                      "no stop issue was opened, so the factory would dispatch again in an hour")
+
+    def test_the_pull_request_is_marked_for_a_human_not_for_a_rebuild(self):
+        names = self.trace.names()
+        self.assertIn("add_pr_label:factory:needs-human", names)
+        self.assertNotIn("add_pr_label:factory:needs-fix", names)
+
+    def test_the_humans_are_told_the_truth(self):
+        body = self.trace.incident_body
+        self.assertIn("POST-MERGE VERIFICATION FAILED", body)
+        self.assertIn("UNTRUSTED", body)
+        self.assertNotIn("No merge was authorized", body)
+        self.assertNotIn("eligible for a bounded fresh rebuild", body)
+
+    def test_a_github_outage_does_not_silently_lose_the_incident(self):
+        trace = rehearse(Scenario("post-merge-fails-github-down",
+                                  fail="merge_verify.py:post", refuse_issue_creation=True))
+        self.assertEqual(trace.outcome, "PostMergeUnverified")
+        self.assertNotIn("create_issue:factory:stop", trace.names())
         self.assertIn("comment_pr", trace.names())
 
 

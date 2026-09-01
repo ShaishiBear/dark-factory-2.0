@@ -40,9 +40,28 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from factory_kernel.agents import AgentResult  # noqa: E402
+
+
+def _evidence_rules():
+    """Import the real evidence authority's pure rules rather than restating them here.
+
+    The architecture holdout is the one authority `validate_pr` does not itself reject: the
+    runtime requires only that it returns a mapping, and the decision to refuse a failing or
+    regressing verdict lives inside scripts/factory_evidence.py. If the rehearsal restated that
+    rule it would be asserting against its own copy, and the copy would drift. So the seam that
+    stands in for factory_evidence.py calls the production function.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "factory_evidence_rules", ROOT / "scripts" / "factory_evidence.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 from factory_kernel.canonical import sha256_value  # noqa: E402
 from factory_kernel.provenance import BUILDER_CLAIMS, NOTE_REF  # noqa: E402
 
+CHANGED_FILES: tuple[str, ...] = ("app/backend/main.py",)
 HEAD = "1" * 40
 BASE = "2" * 40
 PR_NUMBER = 77
@@ -62,6 +81,7 @@ class Trace:
     steps: list[Step] = field(default_factory=list)
     outcome: str = "incomplete"
     error: str = ""
+    incident_body: str = ""  # what the humans were actually told, verbatim
 
     def record(self, kind: str, name: str) -> None:
         self.steps.append(Step(kind, name))
@@ -116,7 +136,8 @@ class FakeGitHub:
     """Only what validate_pr touches, and it records every call."""
 
     def __init__(self, trace: Trace, *, state: str = "OPEN", labels: tuple[str, ...] = (),
-                 head: str = HEAD, base: str = BASE, body: str | None = None) -> None:
+                 head: str = HEAD, base: str = BASE, body: str | None = None,
+                 refuse_issue_creation: bool = False) -> None:
         self.trace = trace
         self.cwd = "."
         self._state = state
@@ -124,6 +145,8 @@ class FakeGitHub:
         self._head = head
         self._base = base
         self._body = body if body is not None else _pr_body()
+        self.refuse_issue_creation = refuse_issue_creation
+        self.body = ""
 
     def pr(self, number: int, *, holdout_safe: bool = False) -> Mapping[str, Any]:
         self.trace.record("github", f"pr(holdout_safe={holdout_safe})")
@@ -146,6 +169,18 @@ class FakeGitHub:
 
     def merge_squash(self, number: int, *, expected_head: str) -> None:
         self.trace.record("github", "merge_squash")
+
+    def create_issue(self, *, title: str, body_file: Path, labels: tuple[str, ...] = ()) -> int:
+        if not body_file.is_file():
+            raise AssertionError("incident body file was not written before issue creation")
+        self.body = body_file.read_text(encoding="utf-8")
+        if self.refuse_issue_creation:
+            raise RuntimeError("rehearsed GitHub failure while opening the incident")
+        for label in labels:
+            self.trace.record("github", f"create_issue:{label}")
+        if not labels:
+            self.trace.record("github", "create_issue")
+        return 9001
 
     def add_pr_label(self, number: int, label: str) -> None:
         self.trace.record("github", f"add_pr_label:{label}")
@@ -185,8 +220,18 @@ class FakeProvider:
         if role == "holdout":
             value: dict[str, Any] = {"version": "1.0", "findings": [], "verdict": verdict}
         elif role == "architecture-holdout":
-            value = {"version": "1.0", "verdict": verdict, "simplicity": "neutral",
-                     "principles": [], "migrations": [], "debts": [], "findings": []}
+            # Computed from the real policy with the real applicability function, so a passing
+            # rehearsal is not passing because the fixture happened to say the empty list.
+            rules = _evidence_rules()
+            policy = json.loads((ROOT / ".factory" / "architecture.json").read_text(encoding="utf-8"))
+            value = {
+                "version": "1.0", "verdict": verdict, "convergence": "neutral",
+                "simplicity": "neutral", "findings": [],
+                "principles": rules.applicable(policy.get("principles"), CHANGED_FILES, "scope"),
+                "migrations": rules.applicable(
+                    policy.get("migrations"), CHANGED_FILES, "paths", active_only=True),
+                "debts": rules.applicable(policy.get("debt"), CHANGED_FILES, "paths"),
+            }
         else:
             claim = {"contract-certifier": "contract", "design-certifier": "design",
                      "governor-certifier": "architecture-governor"}[role]
@@ -223,6 +268,19 @@ def exec_recorder(trace: Trace, *, fail: str | None = None) -> Callable[..., str
             target = Path(out)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps({"version": "1.0", "tool": name}), encoding="utf-8")
+        if tool == "factory_evidence.py":
+            # Stand in for the evidence authority by running its real architecture-holdout rule.
+            # Everything else that tool does is out of scope here, but this gate must not be
+            # silently absent: it is the only thing that refuses a rejecting architecture holdout.
+            idx = argv.index("--architecture-verdict")
+            value = json.loads(Path(argv[idx + 1]).read_text(encoding="utf-8"))
+            rules = _evidence_rules()
+            policy = json.loads(
+                (Path(cwd) / ".factory" / "architecture.json").read_text(encoding="utf-8"))
+            try:
+                rules.verify_architecture_holdout(value, list(CHANGED_FILES), policy)
+            except SystemExit as exc:
+                raise RuntimeError(f"{name} failed rc=1: architecture holdout refused") from exc
         if tool == "factory_provenance.py":
             idx = argv.index("--output-dir")
             pack_dir = Path(argv[idx + 1])
@@ -246,6 +304,7 @@ class Scenario:
     labels: tuple[str, ...] = ("factory:needs-review",)
     head: str = HEAD
     body: str | None = None
+    refuse_issue_creation: bool = False
 
 
 def rehearse(scenario: Scenario) -> Trace:
@@ -274,7 +333,8 @@ def rehearse(scenario: Scenario) -> Trace:
         runtime = KernelRuntime(repo_root=ROOT, config=config)
         runtime.github = FakeGitHub(
             trace, state=scenario.state, labels=scenario.labels,
-            head=scenario.head, body=scenario.body)
+            head=scenario.head, body=scenario.body,
+            refuse_issue_creation=scenario.refuse_issue_creation)
         runtime.provider = FakeProvider(trace, reject=scenario.reject)
         runtime._exec = exec_recorder(trace, fail=scenario.fail)  # type: ignore[method-assign]
         runtime._prepare_worktree = lambda cwd, paths: trace.record("control", "prepare_worktree")  # type: ignore[method-assign]
@@ -282,7 +342,7 @@ def rehearse(scenario: Scenario) -> Trace:
 
         def fake_git(*args: str, cwd: Path | None = None) -> str:
             if args[:1] == ("diff",) and "--name-only" in args:
-                return "app/backend/main.py\n"
+                return "".join(f"{path}\n" for path in CHANGED_FILES)
             if args[:1] == ("diff",):
                 return "diff --git a/app/backend/main.py b/app/backend/main.py\n"
             return ""
@@ -300,6 +360,7 @@ def rehearse(scenario: Scenario) -> Trace:
                 trace.error = str(exc)
             if removed.called:
                 trace.record("control", "worktree_removed")
+        trace.incident_body = runtime.github.body
     return trace
 
 
@@ -310,6 +371,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario("pr-unlabelled", labels=()),
     Scenario("pr-without-exact-oids", head="not-an-oid"),
     Scenario("holdout-rejects", reject="holdout"),
+    Scenario("architecture-holdout-rejects", reject="architecture-holdout"),
     Scenario("contract-certifier-rejects", reject="contract-certifier"),
     Scenario("design-certifier-rejects", reject="design-certifier"),
     Scenario("governor-certifier-rejects", reject="governor-certifier"),
@@ -318,6 +380,8 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario("evidence-bundle-fails", fail="factory_evidence.py"),
     Scenario("merge-authorization-fails", fail="merge_verify.py:pre"),
     Scenario("merge-verification-fails", fail="merge_verify.py:post"),
+    Scenario("merge-verification-fails-and-github-is-down",
+             fail="merge_verify.py:post", refuse_issue_creation=True),
 )
 
 
