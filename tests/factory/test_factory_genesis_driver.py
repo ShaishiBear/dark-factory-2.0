@@ -8,6 +8,7 @@ resolved by taking the first match.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -181,7 +182,6 @@ class DriverTests(unittest.TestCase):
     def test_result_binds_driver_recipe_and_commit(self):
         proc, result = self.drive([self.stage("ok", "pass")])
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        import hashlib
 
         self.assertEqual(result["driver_sha256"], hashlib.sha256(DRIVER.read_bytes()).hexdigest())
         self.assertEqual(len(result["recipe_sha256"]), 64)
@@ -313,10 +313,14 @@ class RecordReachabilityTests(unittest.TestCase):
 
         logs = self.root / "joblogs"
         logs.mkdir()
+        # The pin line carries real digests: the collector reads the driver digest out of it and
+        # cross-checks the recipe digest against the recipe file it hashes itself.
+        recipe_sha = hashlib.sha256(self.recipe.read_bytes()).hexdigest()
+        driver_sha = "a" * 64
         job_log = (
             f"EXACT_HEAD_OK {self.commit}\n"
             f"EXACT_TREE_OK {self.tree}\n"
-            "LADDER_PINS_OK driver=a recipe=b\n"
+            f"LADDER_PINS_OK driver={driver_sha} recipe={recipe_sha}\n"
         ) + proc.stdout
         (logs / "77.log").write_text(job_log, encoding="utf-8")
         jobs = self.root / "jobs.json"
@@ -336,6 +340,8 @@ class RecordReachabilityTests(unittest.TestCase):
         document = json.loads(out.read_text(encoding="utf-8"))
         self.assertEqual(document["verdict"], "pass")
         self.assertEqual(document["stages"][0]["measurements"]["n"], 42)
+        self.assertEqual(document["driver_sha256"], driver_sha,
+                         "the driver digest must survive from the stage log into the document")
 
         driver_said = json.loads((self.root / "out.json").read_text(encoding="utf-8"))
         self.assertEqual(

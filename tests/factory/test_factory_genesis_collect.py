@@ -8,8 +8,10 @@ separate runner from GitHub's own job record -- conclusions and logs, sealed whe
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -24,13 +26,25 @@ TREE = "t" * 40
 NAMES = ("alpha", "beta")
 
 
-def stage_log(commit: str = CANDIDATE, tree: str = TREE, *, extra: str = "") -> str:
+DRIVER_SHA = "d" * 64
+
+
+def pins(verdict: str = "OK", *, driver: str = DRIVER_SHA, recipe: str = "") -> str:
+    return f"LADDER_PINS_{verdict} driver={driver} recipe={recipe}\n"
+
+
+def stage_log(commit: str = CANDIDATE, tree: str = TREE, *, extra: str = "",
+              pin_line: str | None = None) -> str:
     return (
         f"EXACT_HEAD_OK {commit}\n"
         f"EXACT_TREE_OK {tree}\n"
-        "LADDER_PINS_OK\n"
-        f"{extra}"
+        + (pin_line if pin_line is not None else pins(recipe=RECIPE_SHA[0]))
+        + f"{extra}"
     )
+
+
+# Filled in by setUp once the recipe exists, so fixtures report the digest the collector computes.
+RECIPE_SHA = [""]
 
 
 class CollectorTests(unittest.TestCase):
@@ -48,6 +62,7 @@ class CollectorTests(unittest.TestCase):
                 {"name": "beta", "argv": ["y"], "measures": {"beta_count": r"B_OK n=(\d+)"}},
             ],
         }), encoding="utf-8")
+        RECIPE_SHA[0] = hashlib.sha256(self.recipe.read_bytes()).hexdigest()
         self.job_id = 1000
 
     def job(self, stage: str, *, conclusion: str = "success", run_id: str = RUN_ID,
@@ -408,22 +423,57 @@ class CollectorTests(unittest.TestCase):
         self.assertIn("whether the driver pins were checked", proc.stderr)
         self.assertEqual(result["verdict"], "fail")
 
-    def test_a_stage_claiming_both_pin_verdicts_fails_closed(self):
-        """Printing the asserted marker next to a provisional one is a collision, not a pass."""
+    def test_a_stage_claiming_two_pin_verdicts_fails_closed(self):
+        """Two disagreeing pin lines are a refusal, never a first match."""
         jobs = self.default_jobs()
         alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
-        self.write_log(alpha, stage_log(extra="LADDER_PINS_PROVISIONAL\nA_OK n=11\n"))
+        self.write_log(alpha, stage_log(
+            pin_line=pins(recipe=RECIPE_SHA[0]) + pins("PROVISIONAL", recipe=RECIPE_SHA[0]),
+            extra="A_OK n=11\n"))
         proc, _ = self.collect(jobs)
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("both asserts and waives", proc.stderr)
+        self.assertIn("ambiguously", proc.stderr)
+
+    def test_stages_that_ran_different_drivers_fail_closed(self):
+        """Stages executing different programs are not one ladder, whatever each reported."""
+        jobs = self.default_jobs()
+        beta = next(j for j in jobs if j["name"] == "stage (beta)")
+        self.write_log(beta, stage_log(pin_line=pins(driver="e" * 64, recipe=RECIPE_SHA[0]),
+                                       extra="B_OK n=22\n"))
+        proc, result = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("disagree about which driver", proc.stderr)
+        self.assertIsNone(result, "a record this inconsistent must not become a document")
+
+    def test_a_recipe_the_stages_did_not_run_fails_closed(self):
+        """The collector hashes a recipe file; the stages hashed one too. They must agree.
+
+        Two programs on two runners agreeing is worth more than one program agreeing with itself,
+        and it is why the driver digest is read from the sealed log rather than recomputed here.
+        """
+        jobs = self.default_jobs()
+        for job in jobs:
+            if job["name"].startswith("stage ("):
+                marker = "A_OK n=11" if "alpha" in job["name"] else "B_OK n=22"
+                self.write_log(job, stage_log(pin_line=pins(recipe="f" * 64),
+                                              extra=marker + "\n"))
+        proc, _ = self.collect(jobs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("this collector read", proc.stderr)
+
+    def test_the_driver_digest_is_carried_into_the_document(self):
+        """The genesis verifier requires this field; a document without it authorizes nothing."""
+        proc, result = self.collect(self.default_jobs())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(result["driver_sha256"], DRIVER_SHA)
 
     def test_a_provisional_run_collects_but_records_that_pins_were_not_asserted(self):
         """A calibration run is honest and must complete; the policy is what refuses it."""
         jobs = []
         for stage, marker in (("alpha", "A_OK n=11"), ("beta", "B_OK n=22")):
             job = self.job(stage)
-            self.write_log(job, f"EXACT_HEAD_OK {CANDIDATE}\nEXACT_TREE_OK {TREE}\n"
-                                f"LADDER_PINS_PROVISIONAL\n{marker}\n")
+            self.write_log(job, stage_log(pin_line=pins("PROVISIONAL", recipe=RECIPE_SHA[0]),
+                                          extra=marker + "\n"))
             jobs.append(job)
         jobs.append({"id": 9999, "run_id": int(RUN_ID), "head_sha": WORKFLOW_COMMIT,
                      "run_attempt": 1, "name": "collect", "conclusion": "success"})
@@ -435,8 +485,8 @@ class CollectorTests(unittest.TestCase):
     def test_one_provisional_stage_is_enough_to_deny_the_asserted_claim(self):
         jobs = self.default_jobs()
         beta = next(j for j in jobs if j["name"] == "stage (beta)")
-        self.write_log(beta, f"EXACT_HEAD_OK {CANDIDATE}\nEXACT_TREE_OK {TREE}\n"
-                             "LADDER_PINS_PROVISIONAL\nB_OK n=22\n")
+        self.write_log(beta, stage_log(pin_line=pins("PROVISIONAL", recipe=RECIPE_SHA[0]),
+                                       extra="B_OK n=22\n"))
         proc, result = self.collect(jobs)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIs(result["driver_pins_asserted"], False)
@@ -462,10 +512,10 @@ class CollectorTests(unittest.TestCase):
             '\x1b[36;1mecho "EXACT_HEAD_OK $head"\x1b[0m\n'
             '\x1b[36;1m  verdict=PROVISIONAL\x1b[0m\n'
             '\x1b[36;1m    verdict=OK\x1b[0m\n'
-            '\x1b[36;1m  echo "LADDER_PINS_${verdict} driver=$driver"\x1b[0m\n'
+            '\x1b[36;1m  echo "LADDER_PINS_${verdict} driver=$driver recipe=$recipe"\x1b[0m\n'
             f"EXACT_HEAD_OK {CANDIDATE}\n"
             f"EXACT_TREE_OK {TREE}\n"
-            "LADDER_PINS_OK driver=abc recipe=def\n"
+            + pins(recipe=RECIPE_SHA[0]) +
             "A_OK n=11\n"
         ))
         proc, result = self.collect(jobs)
@@ -474,21 +524,145 @@ class CollectorTests(unittest.TestCase):
         measured = {s["name"]: s["measurements"] for s in result["stages"]}
         self.assertEqual(measured["alpha"]["alpha_count"], 11)
 
-    def test_a_workflow_that_echoes_both_markers_is_caught_not_guessed(self):
-        """The shape the old pin step would have produced. It must refuse, not pick one."""
+    def test_echoed_script_text_cannot_impersonate_a_pin_verdict(self):
+        """The shape the old pin step produced -- now structurally harmless.
+
+        The runner echoes each step's script into the log it writes output to, so a step whose
+        source names both markers puts both words in every stage log. Requiring the digests in
+        the same line removes the ambiguity at the root: an echoed script contains `$driver`, not
+        a 64-hex digest, so it cannot match at all. This is a stronger fix than refusing the
+        collision, because there is no longer a collision to refuse.
+        """
         jobs = self.default_jobs()
         alpha = next(j for j in jobs if j["name"] == "stage (alpha)")
         self.write_log(alpha, (
             f"EXACT_HEAD_OK {CANDIDATE}\n"
             f"EXACT_TREE_OK {TREE}\n"
-            '\x1b[36;1m    echo "LADDER_PINS_OK"\x1b[0m\n'
-            '\x1b[36;1m    echo "LADDER_PINS_PROVISIONAL digests printed for review"\x1b[0m\n'
-            "LADDER_PINS_PROVISIONAL digests printed for review\n"
-            "A_OK n=11\n"
+            '\x1b[36;1m    echo "LADDER_PINS_OK driver=$driver recipe=$recipe"\x1b[0m\n'
+            '\x1b[36;1m    echo "LADDER_PINS_PROVISIONAL driver=$driver recipe=$recipe"\x1b[0m\n'
+            + pins("PROVISIONAL", recipe=RECIPE_SHA[0])
+            + "A_OK n=11\n"
         ))
-        proc, _ = self.collect(jobs)
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("both asserts and waives", proc.stderr)
+        proc, result = self.collect(jobs)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIs(result["driver_pins_asserted"], False,
+                      "the echoed OK line must not be read as an assertion")
+
+
+class CollectorVerifierSeamTests(unittest.TestCase):
+    """The join between the two programs, tested across it rather than on either side.
+
+    This class exists because of a defect that reached a frozen genesis policy and a completed
+    authoritative run before anyone noticed. `check_result` in harness/bootstrap_verify.py
+    requires `driver_sha256`; the collector, rewritten to build evidence from GitHub's job record,
+    stopped emitting it. Both programs had thorough tests. Both suites passed. Each tested its own
+    side of the contract against a fixture it wrote itself, so the field one demanded and the
+    other never produced was invisible to both.
+
+    The rule this encodes: every key the verifier reads out of a validation result must be a key
+    the collector actually writes, and the check must run against a real collector document.
+    """
+
+    def test_every_key_the_verifier_demands_is_one_the_collector_emits(self):
+        import ast
+        root = Path(__file__).parents[2]
+        verifier = (root / "harness" / "bootstrap_verify.py").read_text(encoding="utf-8")
+        collector = (root / "harness" / "genesis_collect.py").read_text(encoding="utf-8")
+
+        demanded = set(re.findall(r'result\.get\("([a-z0-9_]+)"', verifier))
+        self.assertIn("driver_sha256", demanded, "the regex must actually be finding keys")
+
+        emitted = set()
+        for node in ast.walk(ast.parse(collector)):
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "payload":
+                emitted = {k.value for k in node.value.keys}
+        self.assertTrue(emitted, "could not read the collector's payload keys")
+
+        self.assertEqual(
+            sorted(demanded - emitted), [],
+            "harness/bootstrap_verify.py reads validation-result keys the collector never writes",
+        )
+
+    def test_a_real_collector_document_satisfies_the_verifier(self):
+        """Not a hand-written fixture: the collector runs, and its own output is checked."""
+        import importlib.util
+        root = Path(__file__).parents[2]
+        spec = importlib.util.spec_from_file_location(
+            "bootstrap_verify", root / "harness" / "bootstrap_verify.py")
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name)
+        logs = home / "logs"
+        logs.mkdir()
+        recipe = home / "recipe.json"
+        recipe.write_text(json.dumps({"version": "1.0", "stages": [
+            {"name": "alpha", "argv": ["x"], "measures": {"alpha_count": r"A_OK n=(\d+)"}},
+            {"name": "beta", "argv": ["y"], "measures": {"beta_count": r"B_OK n=(\d+)"}},
+        ]}), encoding="utf-8")
+        recipe_sha = hashlib.sha256(recipe.read_bytes()).hexdigest()
+        driver_sha = "a" * 64
+
+        jobs = []
+        for i, (stage, marker) in enumerate((("alpha", "A_OK n=11"), ("beta", "B_OK n=22"))):
+            jid = 500 + i
+            jobs.append({"id": jid, "run_id": 7, "head_sha": "w" * 40, "run_attempt": 1,
+                         "name": f"stage ({stage})", "conclusion": "success"})
+            (logs / f"{jid}.log").write_text(
+                f"EXACT_HEAD_OK {CANDIDATE}\nEXACT_TREE_OK {TREE}\n"
+                f"LADDER_PINS_OK driver={driver_sha} recipe={recipe_sha}\n{marker}\n",
+                encoding="utf-8")
+        record = home / "jobs.json"
+        record.write_text(json.dumps({"total_count": len(jobs), "jobs": jobs}), encoding="utf-8")
+        out = home / "validation-result.json"
+        proc = subprocess.run(
+            [sys.executable, str(COLLECT), "--jobs", str(record), "--logs-dir", str(logs),
+             "--recipe", str(recipe), "--run-id", "7", "--workflow-commit", "w" * 40,
+             "--commit", CANDIDATE, "--tree", TREE, "--output", str(out)],
+            cwd=home, capture_output=True, text=True, timeout=180,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        document = json.loads(out.read_text(encoding="utf-8"))
+
+        policy = {
+            "validation_driver_sha256": driver_sha,
+            "validation_recipe_sha256": recipe_sha,
+            "validation_aggregator_sha256": document["aggregator_sha256"],
+            "validation_workflow_commit_sha": "w" * 40,
+            "required_stages": ["alpha", "beta"],
+            "required_holdout_classes": {},
+            "required_external_evidence": {},
+            "required_mutation_families": [],
+            "minimum": {"alpha_count": 10, "beta_count": 20},
+        }
+        observed = verifier.check_result(policy, document, CANDIDATE)
+        self.assertEqual(observed, {"alpha_count": 11, "beta_count": 22})
+
+    def test_the_seam_test_would_have_caught_the_defect_it_was_written_for(self):
+        """A guard nothing exercises is not a guard. Drop the field, see the verifier refuse."""
+        import importlib.util
+        root = Path(__file__).parents[2]
+        spec = importlib.util.spec_from_file_location(
+            "bootstrap_verify_neg", root / "harness" / "bootstrap_verify.py")
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+        policy = {
+            "validation_driver_sha256": "a" * 64, "validation_recipe_sha256": "b" * 64,
+            "validation_aggregator_sha256": "c" * 64, "validation_workflow_commit_sha": "w" * 40,
+            "required_stages": [], "required_holdout_classes": {},
+            "required_external_evidence": {}, "required_mutation_families": [],
+            "minimum": {"x": 1},
+        }
+        document = {"version": "1.0", "recipe_sha256": "b" * 64, "aggregator_sha256": "c" * 64,
+                    "stage_isolation": "one-disposable-runner-per-stage",
+                    "evidence_source": "github-actions-job-record",
+                    "workflow_commit_sha": "w" * 40, "candidate_sha": CANDIDATE,
+                    "verdict": "pass", "failed_stages": [], "driver_pins_asserted": True,
+                    "stages": [{"name": "s", "exit": 0, "measurements": {"x": 1}}]}
+        with self.assertRaises(SystemExit):
+            verifier.check_result(policy, document, CANDIDATE)
 
 
 

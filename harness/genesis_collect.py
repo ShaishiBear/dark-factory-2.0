@@ -82,8 +82,10 @@ import sys
 
 SELF = Path(__file__).resolve()
 STAGE_JOB = re.compile(r"^(?P<prefix>[A-Za-z0-9_-]+)\s+\((?P<stage>[^)]+)\)$")
-PINS_ASSERTED = "LADDER_PINS_OK"
-PINS_PROVISIONAL = "LADDER_PINS_PROVISIONAL"
+PINS_LINE = re.compile(
+    r"LADDER_PINS_(?P<verdict>OK|PROVISIONAL) "
+    r"driver=(?P<driver>[0-9a-f]{64}) recipe=(?P<recipe>[0-9a-f]{64})"
+)
 
 
 def fail(message: str) -> None:
@@ -182,6 +184,7 @@ def main() -> None:
     logs_dir = Path(args.logs_dir).resolve()
     attempts: set[int] = set()
     stage_pins: list[bool] = []
+    reported: set[tuple[str, str]] = set()
     stages = []
     failed: list[dict] = []
     for name in expected:
@@ -218,13 +221,17 @@ def main() -> None:
         if not re.search(rf"EXACT_TREE_OK {re.escape(args.tree)}\b", log):
             reasons.append(f"stage {name!r} log does not prove it ran against the authorized tree")
         # Which program ran, read from the record rather than assumed from the job's success.
-        asserted = PINS_ASSERTED in log
-        provisional = PINS_PROVISIONAL in log
-        if asserted and provisional:
-            reasons.append(f"stage {name!r} log both asserts and waives the driver pins")
-        elif not asserted and not provisional:
+        # The line carries the digests as well as the verdict, so the same read that proves the
+        # pins were checked also says what they were.
+        seen = {m.group("verdict", "driver", "recipe") for m in PINS_LINE.finditer(log)}
+        if not seen:
             reasons.append(f"stage {name!r} log does not say whether the driver pins were checked")
-        stage_pins.append(asserted and not provisional)
+        elif len(seen) != 1:
+            reasons.append(f"stage {name!r} reports the driver pins ambiguously: {sorted(seen)}")
+        else:
+            verdict, stage_driver, stage_recipe = next(iter(seen))
+            stage_pins.append(verdict == "OK")
+            reported.add((stage_driver, stage_recipe))
 
         spec = next(s for s in recipe["stages"] if s["name"] == name)
         measurements: dict[str, int] = {}
@@ -249,6 +256,20 @@ def main() -> None:
             "output_sha256": digest(log_bytes),
         })
 
+    # Stages that executed different programs are not one ladder, whatever each of them reported.
+    if len(reported) > 1:
+        fail("this run's stage jobs disagree about which driver and recipe they executed: " + ", ".join(
+            f"driver={d[:12]} recipe={r[:12]}" for d, r in sorted(reported)))
+    driver_sha256 = next(iter(reported))[0] if reported else ""
+    # An independent cross-check, and the reason the driver digest is read from the log rather
+    # than recomputed here: the recipe THIS program hashed must be the recipe the stages hashed.
+    # Two programs on two runners agreeing is worth more than one program agreeing with itself.
+    if reported:
+        stage_recipe = next(iter(reported))[1]
+        if stage_recipe != digest(recipe_bytes):
+            fail(f"the stages executed recipe {stage_recipe[:12]} but this collector read "
+                 f"{digest(recipe_bytes)[:12]}")
+
     # A ladder assembled from more than one attempt is a re-roll channel, not a run.
     if len(attempts) != 1:
         fail("this run's stage jobs span more than one run attempt: " + ", ".join(
@@ -257,6 +278,10 @@ def main() -> None:
     payload = {
         "version": "1.0",
         "aggregator_sha256": digest(SELF.read_bytes()),
+        # Read from the stage jobs' own sealed logs, not recomputed from a file in this runner's
+        # checkout. The genesis verifier requires this field and recomputes the same digest from
+        # the candidate's object store, so what is written here corroborates rather than proves.
+        "driver_sha256": driver_sha256,
         "recipe_sha256": digest(recipe_bytes),
         "candidate_sha": args.commit,
         "candidate_tree": args.tree,
