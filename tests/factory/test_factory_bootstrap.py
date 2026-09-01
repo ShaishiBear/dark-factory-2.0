@@ -73,6 +73,8 @@ def result_doc(commit: str, *, stages=None, driver=DRIVER_SHA, recipe=RECIPE_SHA
         "recipe_sha256": recipe,
         "aggregator_sha256": aggregator,
         "stage_isolation": "one-disposable-runner-per-stage",
+        "evidence_source": "github-actions-job-record",
+        "workflow_commit_sha": WORKFLOW_COMMIT,
         "candidate_sha": commit,
         "verdict": "pass",
         "failed_stages": [],
@@ -95,7 +97,7 @@ class Ceremony:
         shutil.copy2(VERIFIER, self.path / "harness" / "bootstrap_verify.py")
         for rel, body in (
             ("harness/genesis_validate.py", "DRIVER = 1\n"),
-            ("harness/genesis_aggregate.py", "AGG = 1\n"),
+            ("harness/genesis_collect.py", "COLLECT = 1\n"),
             ("harness/genesis-recipe.json", '{"version": "1.0"}\n'),
         ):
             (self.path / rel).write_text(body, encoding="utf-8")
@@ -129,7 +131,7 @@ class Ceremony:
             commit,
             driver=self.pinned("harness/genesis_validate.py"),
             recipe=self.pinned("harness/genesis-recipe.json"),
-            aggregator=self.pinned("harness/genesis_aggregate.py"),
+            aggregator=self.pinned("harness/genesis_collect.py"),
             **over,
         )
 
@@ -150,7 +152,7 @@ class Ceremony:
             "minimum": {"focused_tests": 300, "unit_tests": 700, "static_checks": 5},
             "validation_driver_sha256": self.pinned("harness/genesis_validate.py"),
             "validation_recipe_sha256": self.pinned("harness/genesis-recipe.json"),
-            "validation_aggregator_sha256": self.pinned("harness/genesis_aggregate.py"),
+            "validation_aggregator_sha256": self.pinned("harness/genesis_collect.py"),
             "validation_workflow_sha256": WORKFLOW_SHA,
             "validation_workflow_commit_sha": WORKFLOW_COMMIT,
         }
@@ -232,7 +234,7 @@ class Ceremony:
                 target,
                 driver=self.pinned("harness/genesis_validate.py"),
                 recipe=self.pinned("harness/genesis-recipe.json"),
-                aggregator=self.pinned("harness/genesis_aggregate.py"),
+                aggregator=self.pinned("harness/genesis_collect.py"),
             )
         else:
             result_value = result
@@ -299,7 +301,7 @@ class GenesisCeremonyTests(unittest.TestCase):
             auth["validation_recipe_sha256"], self.c.pinned("harness/genesis-recipe.json")
         )
         self.assertEqual(
-            auth["validation_aggregator_sha256"], self.c.pinned("harness/genesis_aggregate.py")
+            auth["validation_aggregator_sha256"], self.c.pinned("harness/genesis_collect.py")
         )
 
     # ---------- the external policy is not the candidate's to write ----------
@@ -421,6 +423,21 @@ class GenesisCeremonyTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("not assembled by the aggregator the policy pins", proc.stderr)
 
+    def test_result_not_assembled_from_the_github_record_is_refused(self):
+        """A probe proved a stage can rewrite its own uploaded result; such evidence is refused."""
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(result=self.c.result(head) | {"evidence_source": "stage-uploaded-file"})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not assembled from GitHub's own execution record", proc.stderr)
+
+    def test_result_assembled_from_another_workflow_commit_is_refused(self):
+        self.c.write_manifest(self.c.manifest())
+        head = git(self.c.path, "rev-parse", "HEAD").strip()
+        proc = self.c.run(result=self.c.result(head) | {"workflow_commit_sha": "9" * 40})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("assembled from a run of a different workflow commit", proc.stderr)
+
     def test_result_without_per_runner_stage_isolation_is_refused(self):
         """A result produced by sequencing stages in one environment is not the same evidence."""
         self.c.write_manifest(self.c.manifest())
@@ -463,12 +480,12 @@ class GenesisCeremonyTests(unittest.TestCase):
 
     def test_candidate_aggregator_not_matching_the_policy_pin_is_refused(self):
         policy = self.c.policy()
-        (self.c.path / "harness/genesis_aggregate.py").write_text("AGG = 2\n", encoding="utf-8")
+        (self.c.path / "harness/genesis_collect.py").write_text("COLLECT = 2\n", encoding="utf-8")
         self.c.commit_all("tamper")
         self.c.write_manifest(self.c.manifest())
         proc = self.c.run(policy=policy)
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("genesis_aggregate.py at the candidate does not match", proc.stderr)
+        self.assertIn("genesis_collect.py at the candidate does not match", proc.stderr)
 
     def test_candidate_recipe_not_matching_the_policy_pin_is_refused(self):
         policy = self.c.policy()

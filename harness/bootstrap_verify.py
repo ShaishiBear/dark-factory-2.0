@@ -223,6 +223,17 @@ def check_result(policy: dict, result: dict, commit: str) -> dict:
         result.get("stage_isolation") == "one-disposable-runner-per-stage",
         "validation result was not produced by one disposable runner per stage",
     )
+    # A probe demonstrated that a stage can rewrite its own uploaded result after the driver
+    # writes it, so evidence assembled from stage-written files is refused outright: it must be
+    # built from GitHub's own job record, on a runner no candidate process outlived.
+    require(
+        result.get("evidence_source") == "github-actions-job-record",
+        "validation result was not assembled from GitHub's own execution record",
+    )
+    require(
+        str(result.get("workflow_commit_sha") or "") == policy["validation_workflow_commit_sha"],
+        "validation result was assembled from a run of a different workflow commit",
+    )
     require(
         str(result.get("candidate_sha") or "") == commit,
         "validation result is for a different commit than the one being authorized",
@@ -377,7 +388,7 @@ def verify(args: argparse.Namespace) -> dict:
     #    check reads the object store directly and is the one that binds.
     for rel, key in (
         ("harness/genesis_validate.py", "validation_driver_sha256"),
-        ("harness/genesis_aggregate.py", "validation_aggregator_sha256"),
+        ("harness/genesis_collect.py", "validation_aggregator_sha256"),
         ("harness/genesis-recipe.json", "validation_recipe_sha256"),
     ):
         require(rel in listed, f"pinned validation artifact is outside the trust root: {rel}")

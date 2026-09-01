@@ -1,9 +1,11 @@
 {
   "_what_this_is": [
-    "Adversarial regressions for the genesis validation driver, the aggregation authority and",
-    "the identities the genesis verifier binds. The driver runs exactly one stage per invocation,",
-    "so isolation is delegated to one disposable runner per stage; the aggregator must then refuse",
-    "unless every stage arrives exactly once, from the same commit, tree, driver and recipe."
+    "Adversarial regressions for the genesis validation driver, the collection authority and the",
+    "identities the genesis verifier binds. The driver runs exactly one stage per invocation, so",
+    "isolation is one disposable runner per stage. Nothing authoritative is written while candidate",
+    "code can be alive: a probe proved a detached child can rewrite a stage-written result before",
+    "upload. The collector therefore builds evidence on a separate runner from GitHub's own job",
+    "record, and must refuse missing, duplicate, failed, foreign or unproven stage jobs."
   ],
   "defects": [
     {
@@ -47,48 +49,6 @@
       "find": "    if stage is None:",
       "replace": "    if False and stage is None:",
       "why": "A stage the recipe never defined could be silently skipped rather than refused."
-    },
-    {
-      "id": "genesis-aggregate-missing-stage-tolerated",
-      "file": "harness/genesis_aggregate.py",
-      "find": "    if missing:",
-      "replace": "    if False and missing:",
-      "why": "A stage that never ran would be indistinguishable from one whose artifact was dropped."
-    },
-    {
-      "id": "genesis-aggregate-duplicate-stage-tolerated",
-      "file": "harness/genesis_aggregate.py",
-      "find": "        if name in stages:",
-      "replace": "        if False and name in stages:",
-      "why": "One stage could be reported twice, letting a passing run stand in for a missing one."
-    },
-    {
-      "id": "genesis-aggregate-commit-binding-dropped",
-      "file": "harness/genesis_aggregate.py",
-      "find": "        if str(value.get(\"candidate_sha\") or \"\") != args.commit:",
-      "replace": "        if False and str(value.get(\"candidate_sha\") or \"\") != args.commit:",
-      "why": "Stage results measured against another commit could be assembled into this one's evidence."
-    },
-    {
-      "id": "genesis-aggregate-driver-tree-agreement-dropped",
-      "file": "harness/genesis_aggregate.py",
-      "find": "        elif this_driver != driver_sha or this_tree != tree:",
-      "replace": "        elif False and (this_driver != driver_sha or this_tree != tree):",
-      "why": "Stage results from different drivers or trees could be combined into one result."
-    },
-    {
-      "id": "genesis-aggregate-unexpected-stage-tolerated",
-      "file": "harness/genesis_aggregate.py",
-      "find": "    if unexpected:",
-      "replace": "    if False and unexpected:",
-      "why": "A stage the recipe does not define could be smuggled into the assembled evidence."
-    },
-    {
-      "id": "genesis-aggregate-failed-stage-not-fatal",
-      "file": "harness/genesis_aggregate.py",
-      "find": "    if failed:\n        fail(\"validation stages failed: \"",
-      "replace": "    if False and failed:\n        fail(\"validation stages failed: \"",
-      "why": "The aggregator would emit a passing result even though stages failed."
     },
     {
       "id": "bootstrap-aggregator-pin-unchecked",
@@ -145,6 +105,90 @@
       "find": "        require(rel in listed, f\"pinned validation artifact is outside the trust root: {rel}\")",
       "replace": "        require(True, f\"pinned validation artifact is outside the trust root: {rel}\")",
       "why": "A pinned validation artifact could sit outside the inventoried trust root entirely."
+    },
+    {
+      "id": "genesis-collect-missing-stage-job-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "    if missing:",
+      "replace": "    if False and missing:",
+      "why": "A stage that never ran would be indistinguishable from one GitHub has no job for."
+    },
+    {
+      "id": "genesis-collect-duplicate-stage-job-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "        if stage in seen:",
+      "replace": "        if False and stage in seen:",
+      "why": "One stage could appear in two jobs, letting a passing job stand in for a failing one."
+    },
+    {
+      "id": "genesis-collect-failed-job-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "        if job.get(\"conclusion\") != \"success\":",
+      "replace": "        if False and job.get(\"conclusion\") != \"success\":",
+      "why": "A failed GitHub stage job would still contribute measurements to the assembled evidence."
+    },
+    {
+      "id": "genesis-collect-run-identity-unchecked",
+      "file": "harness/genesis_collect.py",
+      "find": "        if str(job.get(\"run_id\") or \"\") != str(args.run_id):",
+      "replace": "        if False and str(job.get(\"run_id\") or \"\") != str(args.run_id):",
+      "why": "Jobs from a different workflow run could be collected as this run's evidence."
+    },
+    {
+      "id": "genesis-collect-workflow-commit-unchecked",
+      "file": "harness/genesis_collect.py",
+      "find": "        if str(job.get(\"head_sha\") or \"\") != args.workflow_commit:",
+      "replace": "        if False and str(job.get(\"head_sha\") or \"\") != args.workflow_commit:",
+      "why": "Jobs from a different workflow commit could be collected as authoritative evidence."
+    },
+    {
+      "id": "genesis-collect-candidate-head-unproven",
+      "file": "harness/genesis_collect.py",
+      "find": "        if not re.search(rf\"EXACT_HEAD_OK {re.escape(args.commit)}\\b\", log):",
+      "replace": "        if False and not re.search(rf\"EXACT_HEAD_OK {re.escape(args.commit)}\\b\", log):",
+      "why": "A stage whose log never proves which candidate it ran against would be accepted."
+    },
+    {
+      "id": "genesis-collect-candidate-tree-unproven",
+      "file": "harness/genesis_collect.py",
+      "find": "        if not re.search(rf\"EXACT_TREE_OK {re.escape(args.tree)}\\b\", log):",
+      "replace": "        if False and not re.search(rf\"EXACT_TREE_OK {re.escape(args.tree)}\\b\", log):",
+      "why": "A checkout modified after the pin check would not be detected in the recorded evidence."
+    },
+    {
+      "id": "genesis-collect-ambiguous-marker-first-matched",
+      "file": "harness/genesis_collect.py",
+      "find": "    if len(unique) != 1:",
+      "replace": "    if False and len(unique) != 1:",
+      "why": "A stage printing a forged marker alongside the real one would resolve to the first match."
+    },
+    {
+      "id": "genesis-collect-absent-log-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "        if not log_path.is_file():",
+      "replace": "        if False and not log_path.is_file():",
+      "why": "A stage with no captured GitHub log would be treated as if it had reported."
+    },
+    {
+      "id": "genesis-collect-unexpected-stage-job-tolerated",
+      "file": "harness/genesis_collect.py",
+      "find": "    if unexpected:",
+      "replace": "    if False and unexpected:",
+      "why": "A stage job the recipe does not define could be smuggled into the collected evidence."
+    },
+    {
+      "id": "bootstrap-evidence-source-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        result.get(\"evidence_source\") == \"github-actions-job-record\",",
+      "replace": "        True or result.get(\"evidence_source\") == \"github-actions-job-record\",",
+      "why": "Evidence assembled from a candidate-writable stage file could authorize genesis, which a probe proved forgeable."
+    },
+    {
+      "id": "bootstrap-result-workflow-commit-unchecked",
+      "file": "harness/bootstrap_verify.py",
+      "find": "        str(result.get(\"workflow_commit_sha\") or \"\") == policy[\"validation_workflow_commit_sha\"],",
+      "replace": "        True or str(result.get(\"workflow_commit_sha\") or \"\") == policy[\"validation_workflow_commit_sha\"],",
+      "why": "A result assembled from a run of a different workflow commit could authorize genesis."
     }
   ]
 }
