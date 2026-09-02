@@ -46,7 +46,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
         run: |
@@ -82,13 +81,32 @@ jobs:
             }
           done
 
-          for name in ANTHROPIC_API_KEY OPENROUTER_API_KEY SUPADATA_API_KEY
+          for name in OPENROUTER_API_KEY SUPADATA_API_KEY
           do
             test -n "${!name:-}" || {
               echo "FACTORY_PREFLIGHT_REFUSED missing secret $name"
               exit 1
             }
           done
+          # Model calls are routed to OpenRouter's Anthropic-compatible Messages endpoint
+          # rather than Anthropic's first-party API. The worker's whole authority boundary is
+          # enforced by Claude Code CLI flags, so the CLI stays the harness and only its base
+          # URL moves.
+          # A misrouted or unauthorised endpoint must refuse the run, not silently degrade every
+          # model judgement in it: model output is already non-authoritative, but a factory that
+          # cannot reason at all should stop rather than burn a validation ladder discovering it.
+          routing_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
+          routing_code="$(curl -sS -o /tmp/routing-preflight.json -w '%{http_code}' \
+            -X POST "https://openrouter.ai/api/v1/messages" \
+            -H "x-api-key: $OPENROUTER_API_KEY" \
+            -H 'anthropic-version: 2023-06-01' \
+            -H 'content-type: application/json' \
+            -d "{\"model\":\"$routing_model\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}")"
+          test "$routing_code" = "200" || {
+            echo "FACTORY_PREFLIGHT_REFUSED OpenRouter messages endpoint returned $routing_code for $routing_model"
+            exit 1
+          }
+
           echo "FACTORY_PREFLIGHT_OK"
 
       - name: Setup Python 3.12.14
@@ -152,7 +170,11 @@ jobs:
       - name: Dispatch exactly one factory action
         env:
           GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # ClaudeCliProvider._worker_env forwards ANTHROPIC_* to the model subprocess, so the
+          # CLI picks the routing up without any provider-code change. OPENROUTER_API_KEY is kept
+          # separately because application validation uses it directly for embeddings/inference.
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api/v1
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory

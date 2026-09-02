@@ -257,11 +257,20 @@ class GitHubWorkerWorkflowTests(unittest.TestCase):
     def test_scheduler_fails_closed_before_exact_one_shot_dispatch(self):
         self.assertIn("FACTORY_PREFLIGHT_REFUSED GitHub Issues are disabled", self.workflow)
         for name in (
-            "ANTHROPIC_API_KEY", "DATABASE_URL", "OPENROUTER_API_KEY", "JWT_SECRET",
-            "SUPADATA_API_KEY", "YOUTUBE_CHANNEL_ID", "DARK_FACTORY_E2E_EMAIL",
+            "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "DATABASE_URL", "OPENROUTER_API_KEY",
+            "JWT_SECRET", "SUPADATA_API_KEY", "YOUTUBE_CHANNEL_ID", "DARK_FACTORY_E2E_EMAIL",
             "DARK_FACTORY_E2E_PASSWORD",
         ):
             self.assertIn(name, self.workflow)
+        # Model calls leave the runner for OpenRouter's Anthropic-compatible endpoint. A silently
+        # misrouted or unauthorised endpoint would degrade every model judgement in the run
+        # instead of stopping it, so the preflight proves that exact route with the configured
+        # model before any ladder is spent.
+        self.assertIn("https://openrouter.ai/api/v1", self.workflow)
+        self.assertIn(
+            "FACTORY_PREFLIGHT_REFUSED OpenRouter messages endpoint returned", self.workflow
+        )
+        self.assertNotIn("api.anthropic.com", self.workflow)
         self.assertIn("run: python -m factory_kernel dispatch --once", self.workflow)
         self.assertNotIn("dispatch --once --no-merge", self.workflow)
 

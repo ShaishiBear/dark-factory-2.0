@@ -18,8 +18,8 @@ class ConfigTests(unittest.TestCase):
         config = load_config(ROOT / ".factory/kernel.json")
         self.assertEqual(config.repository, "ShaishiBear/dark-factory-2.0")
         self.assertEqual(config.provider.provider_id, "claude-cli")
-        self.assertEqual(config.provider.model, "sonnet")
-        self.assertEqual(config.provider.architecture_model, "opus")
+        self.assertEqual(config.provider.model, "qwen/qwen3-235b-a22b-2507")
+        self.assertEqual(config.provider.architecture_model, "deepseek/deepseek-chat-v3.1")
         self.assertNotEqual(config.provider.model, config.provider.architecture_model)
         self.assertEqual(config.validation.full_command, ("python", "harness/ci.py"))
         for role in config.prompts:

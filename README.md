@@ -144,7 +144,9 @@ The unattended worker fails closed unless repository configuration is ready for 
 - GitHub Issues must be enabled because issues are the intake, state and remote-stop surface.
 - `main` must be protected by GitHub branch protection/rules so a direct push cannot bypass the in-repo evidence and exact-tree merge authority.
 - all eight control labels must exist: `factory:accepted`, `factory:rejected`, `factory:rate-limited`, `factory:in-progress`, `factory:needs-review`, `factory:needs-fix`, `factory:needs-human`, `factory:stop`.
-- Actions secrets `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` must be configured.
+- Actions secrets `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` must be configured. Model calls
+  route through OpenRouter's Anthropic-compatible Messages endpoint, so no Anthropic
+  credential is needed.
 
 Validation database/JWT/browser-account state is not a persistent secret requirement: each hosted run creates disposable local Postgres and synthetic E2E state. See [`FACTORY.md`](FACTORY.md) for the full operational contract.
 
