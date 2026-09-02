@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "repository": "ShaishiBear/dark-factory-2.0",
+  "default_branch": "main",
+  "provider": {
+    "id": "claude-cli",
+    "binary": "claude",
+    "model": "sonnet",
+    "architecture_model": "opus",
+    "timeout_seconds": 1200
+  },
+  "runtime": {
+    "max_attempts": 2,
+    "active_lease_ttl_seconds": 21600,
+    "legacy_lease_ttl_seconds": 86400,
+    "work_root": "/tmp/dark-factory"
+  },
+  "labels": {
+    "accepted": "factory:accepted",
+    "rejected": "factory:rejected",
+    "rate_limited": "factory:rate-limited",
+    "in_progress": "factory:in-progress",
+    "needs_review": "factory:needs-review",
+    "needs_fix": "factory:needs-fix",
+    "needs_human": "factory:needs-human",
+    "stop": "factory:stop"
+  },
+  "prompts": {
+    "triage": ".factory/prompts/triage.md",
+    "plan": ".factory/prompts/plan.md",
+    "investigate": ".factory/prompts/investigate.md",
+    "contract": ".factory/prompts/contract.md",
+    "context": ".factory/prompts/context.md",
+    "architecture": ".factory/prompts/architecture.md",
+    "test_author": ".factory/prompts/test-author.md",
+    "implement": ".factory/prompts/implement.md",
+    "review": ".factory/prompts/review.md",
+    "repair": ".factory/prompts/repair.md",
+    "conformance": ".factory/prompts/conformance.md",
+    "holdout": ".factory/prompts/holdout.md"
+  },
+  "validation": {
+    "quick_command": ["python", "harness/ci.py", "--quick"],
+    "full_command": ["python", "harness/ci.py"],
+    "holdout_command": ["python", ".factory/holdout/run.py"],
+    "mutation_command": ["python", "harness/mutations/run.py"],
+    "max_repair_attempts": 1
+  }
+}

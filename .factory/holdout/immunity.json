@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "_what_this_is": [
+    "Protected memory for defect classes the factory has already learned. Active entries are merge preconditions, not documentation.",
+    "The factory may propose a new lesson, but changing this registry changes the judge and therefore requires human-reviewed trust-root work.",
+    "Each assertion is evaluated against the exact current repository by harness/immunity.py. Equivalent refactors that remove an assertion require updating this protected registry rather than silently forgetting the lesson."
+  ],
+  "entries": [
+    {
+      "id": "IMM-001",
+      "status": "active",
+      "source": {"kind": "decision", "ref": "D-002"},
+      "failure_class": "canonical end-to-end behavior split across competing definitions",
+      "lesson": "The canonical E2E journey must remain in harness/ci.py and emit positive counted evidence.",
+      "assertions": [
+        {"kind": "text_contains", "path": "harness/ci.py", "value": "from e2e import run_e2e"},
+        {"kind": "text_contains", "path": "harness/ci.py", "value": "E2E_PASSED steps={steps}"}
+      ]
+    },
+    {
+      "id": "IMM-002",
+      "status": "active",
+      "source": {"kind": "decision", "ref": "D-003"},
+      "failure_class": "adversarial defects caught only inside the builder-visible optimization loop",
+      "lesson": "Independent and deterministic-security mutation coverage must retain a structural floor and explicit security-channel probes.",
+      "assertions": [
+        {"kind": "json_number_min", "path": ".factory/locks/floor.json", "pointer": "/mutations_independent_caught", "minimum": 3},
+        {"kind": "json_number_min", "path": ".factory/locks/floor.json", "pointer": "/mutations_security_caught", "minimum": 3},
+        {"kind": "json_array_match_min", "path": "harness/mutations/defects.json", "pointer": "/defects", "field": "must_catch", "contains": "security", "minimum": 3}
+      ]
+    },
+    {
+      "id": "IMM-003",
+      "status": "active",
+      "source": {"kind": "audit", "ref": "2026-08-24-stop-repo-default"},
+      "failure_class": "remote emergency-stop check defaulted to a different repository",
+      "lesson": "The remote stop half must target this repository by default and remain fail-closed when GitHub stop state is unreadable.",
+      "assertions": [
+        {"kind": "text_contains", "path": "scripts/factory-stop.sh", "value": "REPO=\"${FACTORY_REPO:-ShaishiBear/dark-factory-2.0}\""},
+        {"kind": "text_contains", "path": "scripts/factory-stop.sh", "value": "if ! HITS=$(gh issue list -R \"$REPO\" --label \"$STOP_LABEL\" --state open"}
+      ]
+    },
+    {
+      "id": "IMM-004",
+      "status": "active",
+      "source": {"kind": "audit", "ref": "2026-08-30-circular-design-governor-certification"},
+      "failure_class": "builder-produced evidence reused to fill an independent certification slot",
+      "lesson": "Independence is structural, not a label. Evidence closure once filled the independent slots of the pre-code design and architecture-governor claims with the builder's own post-code architecture-conformance artifact. Every independence-required claim must name a registered authority, and any certificate whose judgement is an artifact from the builder provenance path must be refused before verdict or bindings are considered.",
+      "assertions": [
+        {"kind": "text_contains", "path": "factory_kernel/independence.py", "value": "if judgement in builder_origin:"},
+        {"kind": "text_contains", "path": "factory_kernel/independence.py", "value": "a builder claim cannot certify itself"},
+        {"kind": "text_contains", "path": "factory_kernel/evidence_closure.py", "value": "authority_for(claim_id)"},
+        {"kind": "text_contains", "path": "harness/merge_verify.py", "value": "has no independent certification hash"}
+      ]
+    },
+    {
+      "id": "IMM-005",
+      "status": "active",
+      "source": {"kind": "audit", "ref": "2026-08-30-contract-certified-by-code-holdout"},
+      "failure_class": "an independent authority answering a different question than the claim it certifies",
+      "lesson": "Validator-side is not sufficient for independence; the authority must answer the claim's own question. The contract claim's independent slot was filled by the blinded code holdout, which judges the diff against the contract while presupposing the contract is right - anti-correlated with contract faithfulness, since a contract that drops requirements makes that holdout more likely to pass. The contract claim keeps a dedicated certifier that sees the issue and no diff, and every externally supplied certificate must declare its own subject from inside the hashed judgement.",
+      "assertions": [
+        {"kind": "text_contains", "path": "factory_kernel/independence.py", "value": "authority_id=\"blinded-contract-certifier\""},
+        {"kind": "text_contains", "path": "factory_kernel/independence.py", "value": "if spec.externally_supplied and certificate.get(\"judgement_certifies\") != claim_id:"},
+        {"kind": "text_contains", "path": "factory_kernel/runtime.py", "value": "did not declare its own subject"}
+      ]
+    },
+    {
+      "id": "IMM-006",
+      "status": "active",
+      "source": {"kind": "audit", "ref": "2026-08-30-candidate-authored-genesis-standard"},
+      "failure_class": "the subject of a certification authoring the standard it is judged by",
+      "lesson": "The pull request that rewrites the trust root cannot be certified by that trust root, and it must not author the bar either: a candidate can satisfy an artificially weak standard honestly. Minimums, required markers, mutation families, trust-root scope and pinned-policy scope come from an external genesis policy supplied at ceremony time and pinned by hash; the candidate manifest may only describe the tree. Observations are read out of a real run's log rather than believed from a JSON document, and the human creates the authorization rather than confirming a string the candidate wrote.",
+      "assertions": [
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "must not define the standard"},
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "outside the repository under test"},
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "no fixed point exists"},
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "narrows the trust-root scope"},
+        {"kind": "text_contains", "path": "harness/bootstrap_verify.py", "value": "does not match the digest the evidence commits to"}
+      ]
+    }
+  ]
+}

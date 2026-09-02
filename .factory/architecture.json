@@ -1,0 +1,177 @@
+{
+  "version": "1.0",
+  "principles": [
+    {
+      "id": "ARCH-BACKEND-BOUNDARIES",
+      "scope": ["app/backend"],
+      "rule": "Keep HTTP/request orchestration in routes, durable persistence in db, provider/network concerns behind services/integrations/llm, and retrieval behavior in rag. Do not introduce cross-layer shortcuts when an existing seam can own the behavior."
+    },
+    {
+      "id": "ARCH-FRONTEND-BOUNDARIES",
+      "scope": ["app/frontend/src"],
+      "rule": "Pages compose screens, hooks own state and async orchestration, lib owns transport and pure helpers, and components own UI behavior. Avoid moving network/state orchestration into presentation components when an existing hook or lib seam fits."
+    },
+    {
+      "id": "ARCH-DEEP-MODULES",
+      "scope": ["app"],
+      "rule": "Prefer stable, deep modules and reuse existing seams before adding parallel helpers, one-off abstractions, cross-layer shortcuts, or speculative extension points."
+    },
+    {
+      "id": "ARCH-FACTORY-TRUST",
+      "scope": ["factory_kernel", ".archon", "scripts", "harness", ".factory"],
+      "rule": "Preserve separation between builder reasoning and independent validation. Builder artifacts may propose evidence; authoritative validation must recompute or independently verify security-critical facts."
+    }
+  ],
+  "layers": [
+    {
+      "id": "backend-routes",
+      "paths": ["app/backend/routes"],
+      "allowed_imports": ["backend-auth", "backend-db", "backend-ingest", "backend-integrations", "backend-llm", "backend-rag", "backend-services"]
+    },
+    {
+      "id": "backend-services",
+      "paths": ["app/backend/services"],
+      "allowed_imports": ["backend-auth", "backend-db", "backend-ingest", "backend-integrations", "backend-llm", "backend-rag"]
+    },
+    {
+      "id": "backend-auth",
+      "paths": ["app/backend/auth"],
+      "allowed_imports": ["backend-db", "backend-integrations", "backend-services"]
+    },
+    {
+      "id": "backend-ingest",
+      "paths": ["app/backend/ingest"],
+      "allowed_imports": ["backend-db", "backend-integrations", "backend-rag", "backend-services"]
+    },
+    {
+      "id": "backend-rag",
+      "paths": ["app/backend/rag"],
+      "allowed_imports": ["backend-db", "backend-integrations", "backend-llm", "backend-services"]
+    },
+    {
+      "id": "backend-llm",
+      "paths": ["app/backend/llm"],
+      "allowed_imports": ["backend-integrations", "backend-services"]
+    },
+    {
+      "id": "backend-db",
+      "paths": ["app/backend/db"],
+      "allowed_imports": ["backend-integrations"]
+    },
+    {
+      "id": "backend-integrations",
+      "paths": ["app/backend/integrations"],
+      "allowed_imports": []
+    },
+    {
+      "id": "frontend-pages",
+      "paths": ["app/frontend/src/pages"],
+      "allowed_imports": ["frontend-components", "frontend-hooks", "frontend-lib"]
+    },
+    {
+      "id": "frontend-components",
+      "paths": ["app/frontend/src/components"],
+      "allowed_imports": ["frontend-hooks", "frontend-lib"]
+    },
+    {
+      "id": "frontend-hooks",
+      "paths": ["app/frontend/src/hooks"],
+      "allowed_imports": ["frontend-lib"]
+    },
+    {
+      "id": "frontend-lib",
+      "paths": ["app/frontend/src/lib"],
+      "allowed_imports": []
+    }
+  ],
+  "graph": {
+    "enforce_new_forbidden_edges": true,
+    "enforce_new_cycles": true,
+    "enforce_no_growth_debt": true
+  },
+  "migrations": [
+    {
+      "id": "MIG-DB-REPOSITORY-SPLIT",
+      "active": true,
+      "paths": ["app/backend/db/repository.py"],
+      "direction": "Move new capability-specific persistence toward focused repository modules. Avoid unrelated growth in the monolithic repository."
+    },
+    {
+      "id": "MIG-LLM-OPENROUTER-SPLIT",
+      "active": true,
+      "paths": ["app/backend/llm/openrouter.py"],
+      "direction": "When materially extending LLM behavior, separate provider transport/client concerns from chat orchestration rather than growing the provider module as a general service hub."
+    },
+    {
+      "id": "MIG-RAG-TOOLS-SPLIT",
+      "active": true,
+      "paths": ["app/backend/rag/tools.py"],
+      "direction": "Keep tool contracts and focused implementations separable. Avoid growing one central tool module with unrelated retrieval/application concerns."
+    },
+    {
+      "id": "MIG-ROUTE-MESSAGES-THIN",
+      "active": true,
+      "paths": ["app/backend/routes/messages.py"],
+      "direction": "Keep the route as the HTTP/SSE boundary and move reusable business or orchestration logic behind service, rag, llm, or persistence seams when new behavior would otherwise enlarge the route."
+    },
+    {
+      "id": "MIG-FRONTEND-LARGE-COMPONENTS",
+      "active": true,
+      "paths": [
+        "app/frontend/src/components/ChatArea.tsx",
+        "app/frontend/src/components/Sidebar.tsx"
+      ],
+      "direction": "Substantial new state, networking, or orchestration behavior should move into focused hooks/lib seams rather than further enlarging the large UI components."
+    },
+    {
+      "id": "MIG-FACTORY-RUNTIME-SPLIT",
+      "active": true,
+      "paths": ["factory_kernel/runtime.py"],
+      "direction": "Keep the repo-owned runtime as a thin coordinator. New substantial builder, validator, holdout, or recovery behavior should move into focused kernel modules instead of enlarging runtime.py."
+    }
+  ],
+  "debt": [
+    {
+      "id": "DEBT-DB-REPOSITORY",
+      "paths": ["app/backend/db/repository.py"],
+      "mode": "no-growth",
+      "note": "Large persistence hub; any touched change must not increase its byte footprint and new unrelated capability should prefer a focused repository module."
+    },
+    {
+      "id": "DEBT-LLM-OPENROUTER",
+      "paths": ["app/backend/llm/openrouter.py"],
+      "mode": "no-growth",
+      "note": "Provider transport and orchestration are concentrated; any touched change must not increase the file footprint and material extension should improve separation."
+    },
+    {
+      "id": "DEBT-RAG-TOOLS",
+      "paths": ["app/backend/rag/tools.py"],
+      "mode": "no-growth",
+      "note": "Tool hub is already broad; any touched change must not increase its footprint or add unrelated responsibilities."
+    },
+    {
+      "id": "DEBT-MESSAGES-ROUTE",
+      "paths": ["app/backend/routes/messages.py"],
+      "mode": "no-growth",
+      "note": "Large route; any touched change must not increase its footprint and reusable orchestration belongs outside the HTTP boundary."
+    },
+    {
+      "id": "DEBT-CHAT-AREA",
+      "paths": ["app/frontend/src/components/ChatArea.tsx"],
+      "mode": "no-growth",
+      "note": "Large UI component; if touched, ChatArea itself must not grow. Material state/network behavior should move toward hooks/lib."
+    },
+    {
+      "id": "DEBT-SIDEBAR",
+      "paths": ["app/frontend/src/components/Sidebar.tsx"],
+      "mode": "no-growth",
+      "note": "Large UI component; if touched, Sidebar itself must not grow. Material state/network behavior should move toward hooks/lib."
+    },
+    {
+      "id": "DEBT-FACTORY-RUNTIME",
+      "paths": ["factory_kernel/runtime.py"],
+      "mode": "no-growth",
+      "note": "The rewritten control plane begins as a cohesive coordinator, but further substantial responsibilities must move into focused builder/validator/recovery modules rather than growing runtime.py."
+    }
+  ]
+}

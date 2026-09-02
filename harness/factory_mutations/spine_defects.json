@@ -1,0 +1,50 @@
+{
+  "_what_this_is": [
+    "Adversarial regressions for the durable builder-provenance and protected 21-claim evidence spine.",
+    "Each mutation is injected only into an isolated copied trust root and must make the focused authority suite fail."
+  ],
+  "defects": [
+    {
+      "id": "provenance-exact-head-binding-disabled",
+      "file": "factory_kernel/provenance.py",
+      "find": "if expected_head_sha is not None and head != expected_head_sha:",
+      "replace": "if False and expected_head_sha is not None and head != expected_head_sha:",
+      "why": "A stale builder provenance note from a different PR head could be accepted by a fresh validator."
+    },
+    {
+      "id": "provenance-artifact-rehash-disabled",
+      "file": "factory_kernel/provenance.py",
+      "find": "if expected != sha256_value(content):",
+      "replace": "if False and expected != sha256_value(content):",
+      "why": "Tampered embedded builder artifacts could survive the fresh-validator handoff."
+    },
+    {
+      "id": "provenance-builder-publication-removed",
+      "file": "factory_kernel/runtime.py",
+      "find": "\"python\", \"scripts/factory_provenance.py\", \"publish\",",
+      "replace": "\"python\", \"scripts/factory_provenance.py\", \"disabled-publish\",",
+      "why": "The builder could label a PR ready for fresh validation without first publishing durable exact-head provenance."
+    },
+    {
+      "id": "evidence-spine-production-route-falls-back",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "routed[1] = \"scripts/factory_evidence_spine.py\"",
+      "replace": "routed[1] = \"scripts/factory_evidence.py\"",
+      "why": "Production validation could silently bypass 21-claim spine closure and emit only the legacy Evidence Bundle."
+    },
+    {
+      "id": "merge-spine-global-completion-disabled",
+      "file": "harness/merge_verify.py",
+      "find": "if spine.get(\"completion_level\") != 100:",
+      "replace": "if False and spine.get(\"completion_level\") != 100:",
+      "why": "Merge authorization could proceed even though the canonical evidence spine never reached global 100 percent completion."
+    },
+    {
+      "id": "merge-spine-policy-binding-disabled",
+      "file": "harness/merge_verify.py",
+      "find": "if spine.get(\"policy_sha256\") != policy.sha256():",
+      "replace": "if False and spine.get(\"policy_sha256\") != policy.sha256():",
+      "why": "A bundle compiled against a weaker or stale evidence policy could authorize merge."
+    }
+  ]
+}

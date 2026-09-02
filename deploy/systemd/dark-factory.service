@@ -1,0 +1,23 @@
+[Unit]
+Description=Dark Factory repo-owned dispatcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=dark-factory
+Group=dark-factory
+WorkingDirectory=/opt/dark-factory/repo
+Environment=PYTHONUNBUFFERED=1
+Environment=FACTORY_WORKDIR=/opt/dark-factory
+Environment=PATH=/home/dark-factory/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/opt/dark-factory/factory.env
+ExecStart=/usr/bin/python3 -m factory_kernel dispatch --once
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/dark-factory /tmp
+
+[Install]
+WantedBy=multi-user.target

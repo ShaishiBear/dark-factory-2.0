@@ -6,6 +6,7 @@ Handles lifespan startup (DB init + seeding) and route registration.
 import logging
 import os
 import subprocess
+import sys
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as get_version
@@ -29,18 +30,18 @@ async def lifespan(app: FastAPI):
     """Startup: run Alembic migrations, init Postgres pool, then seed if empty."""
     logger.info("Starting up — running Alembic migrations…")
 
-    # Run alembic upgrade head. alembic.ini lives at app/backend/alembic.ini
-    # and its script_location ("backend/alembic") is resolved relative to the
-    # working directory — which must be the parent of backend/ (i.e. /app in
-    # the container, or app/ in the repo). Force cwd so behaviour is the same
-    # regardless of where uvicorn was started from.
+    # Run Alembic with the same interpreter that is running the backend. This
+    # binds migrations to the exact locked environment used by Uvicorn instead
+    # of asking a second package runner to rediscover an environment from cwd.
+    # alembic.ini lives at app/backend/alembic.ini and its script_location
+    # ("backend/alembic") is resolved from the parent app/ directory.
     backend_dir = Path(__file__).resolve().parent
     alembic_cfg = backend_dir / "alembic.ini"
     alembic_cwd = backend_dir.parent
     result = subprocess.run(
         [
-            "uv",
-            "run",
+            sys.executable,
+            "-m",
             "alembic",
             "--config",
             str(alembic_cfg),

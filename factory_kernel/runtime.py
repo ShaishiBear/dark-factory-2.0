@@ -1,0 +1,1142 @@
+"""Repo-owned orchestration for Dark Factory.
+
+Model workers may investigate, design, test, implement and review. They never become engineering
+or merge authorities: deterministic compilers, replay gates, holdouts, the canonical harness and
+exact merged-tree verification remain the judges.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+import uuid
+from typing import Any, Mapping
+
+from .agents import AgentRequest
+from .config import KernelConfig
+from .credential_env import scoped_environment
+from .github_cli import GitHubClient
+from .providers import ClaudeCliProvider, prompt_text
+from .independence import (
+    authority_inputs,
+    build_certificate,
+    claims_for_authority,
+    verify_certificate,
+)
+from .provenance import verify_pack
+from .worktree import Worktree, create_detached, remove
+
+
+class FactoryStopped(RuntimeError):
+    pass
+
+
+class PostMergeUnverified(RuntimeError):
+    """The squash merge happened and then failed verification, so main is untrusted.
+
+    This is deliberately not a NeedsHuman. Every other validation failure leaves the branch
+    unmerged and the repository exactly as it was, which is why the ordinary handler can honestly
+    say no merge was authorized and invite a fresh rebuild. After this one a merge exists on main
+    that nothing has verified, so both of those statements would be false and the invitation would
+    be actively harmful: a rebuild starts from the very commit that is in doubt.
+
+    Detection after the fact is inherent -- pre-authorization prevents, post-verification detects.
+    Continuing to dispatch autonomously after detecting it is not inherent, and is what this class
+    exists to stop.
+    """
+
+
+class NeedsHuman(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class DispatchDecision:
+    kind: str
+    number: int | None = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RunPaths:
+    root: Path
+    artifacts: Path
+    transcripts: Path
+
+    @classmethod
+    def create(cls, work_root: Path, run_id: str) -> "RunPaths":
+        root = work_root / "runs" / run_id
+        artifacts = root / "artifacts"
+        transcripts = root / "transcripts"
+        artifacts.mkdir(parents=True, exist_ok=False)
+        transcripts.mkdir(parents=True, exist_ok=True)
+        return cls(root=root, artifacts=artifacts, transcripts=transcripts)
+
+
+class KernelRuntime:
+    VALIDATION_FAILURE_MARKER = "<!-- dark-factory-validation-failed -->"
+    PRIORITY = {"priority:critical": 0, "priority:high": 1, "priority:medium": 2, "priority:low": 3}
+
+    def __init__(self, *, repo_root: Path, config: KernelConfig):
+        self.repo_root = repo_root.resolve()
+        self.config = config
+        self.provider = ClaudeCliProvider(config.provider)
+        self.github = GitHubClient(config.repository, cwd=self.repo_root)
+
+    # ---------- control plane ----------
+
+    def check_stop(self) -> None:
+        env = scoped_environment(
+            {
+                "FACTORY_REPO": self.config.repository,
+                "FACTORY_WORKDIR": str(self.config.runtime.work_root),
+            },
+            scope="github",
+        )
+        proc = subprocess.run(
+            ["bash", "scripts/factory-stop.sh"],
+            cwd=self.repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        if proc.returncode:
+            detail = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            raise FactoryStopped(detail or "factory stop check failed closed")
+
+    def reap_stale_claims(self) -> None:
+        self._exec(
+            [
+                "python", "scripts/factory_lease.py", "reap",
+                "--active-ttl", str(self.config.runtime.active_lease_ttl_seconds),
+                "--legacy-ttl", str(self.config.runtime.legacy_lease_ttl_seconds),
+            ],
+            cwd=self.repo_root,
+            credential_scope="github",
+            timeout=180,
+        )
+
+    def choose_dispatch(self) -> DispatchDecision:
+        """Canonical priority: stop -> reap -> review -> highest-priority accepted issue."""
+        self.check_stop()
+        self.reap_stale_claims()
+
+        review = self.github.list_prs(self.config.labels["needs_review"])
+        if review:
+            return DispatchDecision(
+                "validate-pr", self._oldest_number(review), "PR validation has priority"
+            )
+
+        accepted = self.github.list_issues(self.config.labels["accepted"])
+        idle = [
+            issue
+            for issue in accepted
+            if self.config.labels["in_progress"] not in self.github.labels(issue)
+        ]
+        if idle:
+            issue = min(idle, key=self._issue_dispatch_key)
+            return DispatchDecision(
+                "build-issue", int(issue["number"]), "highest-priority accepted issue is idle"
+            )
+        return DispatchDecision("idle", reason="no review PR or accepted idle issue")
+
+    def dispatch_once(self, *, merge: bool = True) -> DispatchDecision:
+        decision = self.choose_dispatch()
+        if decision.kind == "validate-pr" and decision.number is not None:
+            self.validate_pr(decision.number, merge=merge)
+        elif decision.kind == "build-issue" and decision.number is not None:
+            self.build_issue(decision.number)
+        return decision
+
+    # ---------- builder ----------
+
+    def build_issue(self, issue_number: int) -> int:
+        self.check_stop()
+        issue = self.github.issue(issue_number)
+        labels = self.github.labels(issue)
+        if self.config.labels["accepted"] not in labels:
+            raise NeedsHuman(f"issue #{issue_number} is not {self.config.labels['accepted']}")
+        if self.config.labels["in_progress"] in labels:
+            raise NeedsHuman(f"issue #{issue_number} already has an active factory claim")
+        attempt = self._next_build_attempt(issue_number)
+        if attempt > self.config.runtime.max_attempts:
+            self._mark_issue_human(
+                issue_number,
+                f"independent validation failed {attempt - 1} times; retry budget exhausted",
+            )
+            raise NeedsHuman(f"issue #{issue_number} exhausted the autonomous retry budget")
+
+        self._fetch_main()
+        base_sha = self._git("rev-parse", f"origin/{self.config.default_branch}")
+        run_id = f"issue-{issue_number}-a{attempt}-{uuid.uuid4().hex[:10]}"
+        paths = RunPaths.create(self.config.runtime.work_root, run_id)
+        worktree = create_detached(
+            self.repo_root,
+            base_sha,
+            base_dir=self.config.runtime.work_root / "worktrees",
+        )
+        branch = f"factory/issue-{issue_number}-a{attempt}-{run_id.rsplit('-', 1)[-1]}"
+        handed_off = False
+        self.github.add_issue_label(issue_number, self.config.labels["in_progress"])
+        try:
+            self._git("checkout", "-b", branch, cwd=worktree.path)
+            self._prepare_worktree(worktree.path, paths)
+            self._write_json(paths.artifacts / "issue.json", issue)
+            env = self._run_env(paths, base_ref=f"origin/{self.config.default_branch}")
+            issue_context = self._issue_context(issue)
+
+            role = "investigate" if self._is_bug(labels) else "plan"
+            self._agent(role, worktree.path, paths, context=issue_context, env=env)
+            self._agent("contract", worktree.path, paths, context=issue_context, env=env)
+            self._exec(
+                [
+                    "python", "scripts/factory_protocol.py", "contract",
+                    "--input", str(paths.artifacts / "task-contract.raw.json"),
+                    "--output", str(paths.artifacts / "task-contract.json"),
+                    "--hash-output", str(paths.artifacts / "task-contract.sha256"),
+                    "--issue", str(issue_number),
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=120,
+                transcript=paths.transcripts / "contract-gate.log",
+            )
+
+            contract_hash = (paths.artifacts / "task-contract.sha256").read_text(
+                encoding="utf-8"
+            ).strip()
+            self._agent(
+                "context",
+                worktree.path,
+                paths,
+                context=f"Validated contract sha256: {contract_hash}",
+                env=env,
+            )
+            self._exec(
+                [
+                    "python", "scripts/factory_protocol.py", "context",
+                    "--input", str(paths.artifacts / "context.raw.json"),
+                    "--contract", str(paths.artifacts / "task-contract.json"),
+                    "--output", str(paths.artifacts / "context.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=180,
+                transcript=paths.transcripts / "context-gate.log",
+            )
+
+            self._agent("architecture", worktree.path, paths, env=env)
+            self._exec(
+                [
+                    "python", "scripts/factory_architecture.py", "compile",
+                    "--policy", ".factory/architecture.json",
+                    "--input", str(paths.artifacts / "architecture-governor.raw.json"),
+                    "--contract", str(paths.artifacts / "task-contract.json"),
+                    "--context", str(paths.artifacts / "context.json"),
+                    "--design", str(paths.artifacts / "design.json"),
+                    "--output", str(paths.artifacts / "architecture-governor.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=120,
+                transcript=paths.transcripts / "architecture-gate.log",
+            )
+            governor = self._read_json(paths.artifacts / "architecture-governor.json")
+            if governor.get("decision") != "proceed":
+                required = governor.get("required_changes")
+                details = "; ".join(required) if isinstance(required, list) else ""
+                raise NeedsHuman(
+                    f"architecture governor returned {governor.get('decision')}: {details}"
+                )
+            self._exec(
+                [
+                    "python", "scripts/factory_architecture.py", "scope",
+                    "--governor", str(paths.artifacts / "architecture-governor.json"),
+                    "--action", "implement",
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=60,
+            )
+
+            # A fresh model process authors acceptance checkpoints; deterministic RED is authority.
+            self._agent("test_author", worktree.path, paths, env=env)
+            self._exec(
+                [
+                    "python", "scripts/factory_proof.py", "red",
+                    "--spec", str(paths.artifacts / "test-spec.json"),
+                    "--output", str(paths.artifacts / "red-proof.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=600,
+                transcript=paths.transcripts / "red-gate.log",
+            )
+
+            self._agent(
+                "implement",
+                worktree.path,
+                paths,
+                context=f"Dispatched issue number is #{issue_number}. Build attempt is {attempt}.",
+                env=env,
+            )
+            self._exec(
+                [
+                    "python", "scripts/factory_proof.py", "green",
+                    "--proof", str(paths.artifacts / "red-proof.json"),
+                    "--output", str(paths.artifacts / "green-proof.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=600,
+                transcript=paths.transcripts / "green-gate.log",
+            )
+
+            self._review_and_repair(worktree, paths, env)
+            self._agent("conformance", worktree.path, paths, env=env)
+            self._exec(
+                [
+                    "python", "scripts/factory_architecture.py", "conformance",
+                    "--policy", ".factory/architecture.json",
+                    "--input", str(paths.artifacts / "architecture-conformance.raw.json"),
+                    "--contract", str(paths.artifacts / "task-contract.json"),
+                    "--context", str(paths.artifacts / "context.json"),
+                    "--design", str(paths.artifacts / "design.json"),
+                    "--governor", str(paths.artifacts / "architecture-governor.json"),
+                    "--output", str(paths.artifacts / "architecture-conformance.json"),
+                    "--base-ref", f"origin/{self.config.default_branch}",
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=180,
+                transcript=paths.transcripts / "conformance-gate.log",
+            )
+            self._exec(
+                [
+                    "python", "scripts/factory_proof.py", "green",
+                    "--proof", str(paths.artifacts / "red-proof.json"),
+                    "--output", str(paths.artifacts / "final-green-proof.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=600,
+                transcript=paths.transcripts / "final-green-gate.log",
+            )
+
+            self._exec(
+                list(self.config.validation.quick_command),
+                cwd=worktree.path,
+                env=env,
+                timeout=900,
+                transcript=paths.transcripts / "quick-gate.log",
+            )
+            self._assert_clean(worktree.path)
+            self.github.cwd = str(worktree.path)
+            self.github.push_branch(branch)
+
+            body = paths.root / "pr-body.md"
+            body.write_text(
+                f"Fixes #{issue_number}\n\n"
+                f"<!-- dark-factory-attempt:{attempt} -->\n\n"
+                "Generated by the repo-owned Dark Factory kernel. Model workers are not merge "
+                "authorities; deterministic and independent validation follows.\n",
+                encoding="utf-8",
+            )
+            pr = self.github.create_pr(
+                head=branch,
+                base=self.config.default_branch,
+                title=f"factory: {str(issue.get('title') or '').strip()}",
+                body_file=body,
+            )
+            pr_number = int(pr["number"])
+            self._exec(
+                [
+                    "python", "scripts/factory_protocol.py", "attach",
+                    "--contract", str(paths.artifacts / "task-contract.json"),
+                    "--pr", str(pr_number),
+                ],
+                cwd=worktree.path,
+                env=env,
+                credential_scope="github",
+                timeout=120,
+            )
+            self._exec(
+                [
+                    "python", "scripts/factory_proof.py", "attach",
+                    "--proof", str(paths.artifacts / "final-green-proof.json"),
+                    "--pr", str(pr_number),
+                ],
+                cwd=worktree.path,
+                env=env,
+                credential_scope="github",
+                timeout=180,
+            )
+            self._exec(
+                [
+                    "python", "scripts/factory_provenance.py", "publish",
+                    "--pr", str(pr_number),
+                    "--artifacts", str(paths.artifacts),
+                ],
+                cwd=worktree.path,
+                env=env,
+                credential_scope="github",
+                timeout=240,
+                transcript=paths.transcripts / "provenance-publish.log",
+            )
+            self.github.add_pr_label(pr_number, self.config.labels["needs_review"])
+            self.github.remove_issue_label(issue_number, self.config.labels["in_progress"])
+            handed_off = True
+            current_head = self._git("rev-parse", "HEAD", cwd=worktree.path)
+            print(
+                f"FACTORY_BUILD_OK issue=#{issue_number} attempt={attempt} "
+                f"pr=#{pr_number} head={current_head}"
+            )
+            return pr_number
+        except NeedsHuman as exc:
+            self._mark_issue_human(issue_number, str(exc))
+            raise
+        except Exception as exc:
+            self._mark_issue_human(issue_number, f"builder failed closed: {exc}")
+            raise
+        finally:
+            self.github.cwd = str(self.repo_root)
+            if handed_off:
+                remove(self.repo_root, worktree)
+
+    def _review_and_repair(
+        self, worktree: Worktree, paths: RunPaths, env: Mapping[str, str]
+    ) -> None:
+        self._agent("review", worktree.path, paths, env=env)
+        review = self._read_json(paths.artifacts / "code-review.json")
+        if review.get("verdict") == "pass":
+            return
+        if review.get("verdict") != "fail" or not isinstance(review.get("findings"), list):
+            raise NeedsHuman("review worker returned an invalid verdict")
+        self._agent(
+            "repair",
+            worktree.path,
+            paths,
+            context="Blocking review JSON:\n" + json.dumps(review, sort_keys=True),
+            env=env,
+        )
+        self._exec(
+            [
+                "python", "scripts/factory_proof.py", "green",
+                "--proof", str(paths.artifacts / "red-proof.json"),
+                "--output", str(paths.artifacts / "green-after-repair.json"),
+            ],
+            cwd=worktree.path,
+            env=env,
+            timeout=600,
+        )
+        self._agent(
+            "review",
+            worktree.path,
+            paths,
+            context="This is the fresh post-repair review.",
+            env=env,
+        )
+        second = self._read_json(paths.artifacts / "code-review.json")
+        if second.get("verdict") != "pass":
+            raise NeedsHuman("fresh post-repair review still contains blockers")
+
+    # ---------- independent PR validator / merge authority ----------
+
+    def validate_pr(self, pr_number: int, *, merge: bool = True) -> Path:
+        self.check_stop()
+        info = self.github.pr(pr_number, holdout_safe=True)
+        if info.get("state") != "OPEN":
+            raise NeedsHuman(f"PR #{pr_number} is not open")
+        labels = self.github.labels(info)
+        if self.config.labels["needs_review"] not in labels:
+            raise NeedsHuman(f"PR #{pr_number} is not marked {self.config.labels['needs_review']}")
+        head = str(info.get("headRefOid") or "")
+        base = str(info.get("baseRefOid") or "")
+        if not re.fullmatch(r"[0-9a-f]{40,64}", head) or not re.fullmatch(
+            r"[0-9a-f]{40,64}", base
+        ):
+            raise NeedsHuman("PR lacks exact Git object identities")
+
+        self._git("fetch", "origin", str(info["headRefName"]), self.config.default_branch)
+        run_id = f"pr-{pr_number}-{uuid.uuid4().hex[:12]}"
+        paths = RunPaths.create(self.config.runtime.work_root, run_id)
+        worktree = create_detached(
+            self.repo_root,
+            head,
+            base_dir=self.config.runtime.work_root / "validator-worktrees",
+        )
+        linked_issue = self._linked_issue_number(str(info.get("body") or ""))
+        try:
+            self._prepare_worktree(worktree.path, paths)
+            env = self._run_env(paths, base_ref=base)
+            self._exec(
+                [
+                    "python", "scripts/factory_security.py", "--pr", str(pr_number),
+                    "--output", str(paths.artifacts / "security.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                credential_scope="github",
+                timeout=180,
+                transcript=paths.transcripts / "security.log",
+            )
+
+            contract, proof = self._extract_attached(str(info.get("body") or ""))
+            contract_issue = contract.get("issue")
+            if isinstance(contract_issue, Mapping) and isinstance(contract_issue.get("number"), int):
+                linked_issue = int(contract_issue["number"])
+            self._write_json(paths.artifacts / "attached-contract.json", contract)
+            self._write_json(paths.artifacts / "attached-proof.json", proof)
+            patch = self._git("diff", "--binary", f"{base}...{head}", cwd=worktree.path)
+            changed = self._git(
+                "diff", "--name-only", f"{base}...{head}", cwd=worktree.path
+            ).splitlines()
+            policy = self._read_json(worktree.path / ".factory/architecture.json")
+
+            holdout_context = {
+                "contract": contract,
+                "changed_files": sorted(x for x in changed if x),
+                "diff_sha256": hashlib.sha256(patch.encode()).hexdigest(),
+                "diff": patch,
+                "proof_summary": {
+                    "test_commit": proof.get("test_commit"),
+                    "green_commit": proof.get("green_commit"),
+                    "green_results": proof.get("green_results"),
+                },
+            }
+            verdict = self._run_blinded_holdout(paths, holdout_context)
+            if verdict.get("verdict") != "pass":
+                raise NeedsHuman("blinded holdout rejected PR")
+
+            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)
+            architecture_holdout = self._run_architecture_holdout(
+                paths,
+                pack=pack,
+                policy=policy,
+                changed_files=sorted(x for x in changed if x),
+                diff=patch,
+            )
+            self._certify_precode_claims(
+                paths, pack=pack, head=head, base=base, issue=linked_issue
+            )
+            self._write_json(
+                paths.artifacts / "validator-verdict.json",
+                {
+                    "version": "1.0",
+                    "verdict": "approve",
+                    "holdout_sha256": self._json_sha(verdict),
+                },
+            )
+
+            self._exec(
+                [
+                    "python", "scripts/factory_evidence.py", "--pr", str(pr_number),
+                    "--verdict", str(paths.artifacts / "validator-verdict.json"),
+                    "--architecture-verdict", str(architecture_holdout),
+                    "--output", str(paths.artifacts / "evidence-bundle.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                credential_scope="github+validation",
+                timeout=2400,
+                transcript=paths.transcripts / "evidence.log",
+            )
+            self._exec(
+                [
+                    "python", "harness/merge_verify.py", "pre", "--pr", str(pr_number),
+                    "--evidence", str(paths.artifacts / "evidence-bundle.json"),
+                    "--output", str(paths.artifacts / "merge-authorization.json"),
+                ],
+                cwd=worktree.path,
+                env=env,
+                credential_scope="github",
+                timeout=180,
+                transcript=paths.transcripts / "merge-pre.log",
+            )
+            if not merge:
+                print(f"FACTORY_VALIDATED pr=#{pr_number} head={head} merge=disabled")
+                return paths.artifacts / "evidence-bundle.json"
+
+            # Irreversible action: stop state and expected head are both rechecked immediately.
+            self.check_stop()
+            self.github.cwd = str(worktree.path)
+            self.github.merge_squash(pr_number, expected_head=head)
+            try:
+                self._exec(
+                    [
+                        "python", "harness/merge_verify.py", "post", "--pr", str(pr_number),
+                        "--evidence", str(paths.artifacts / "evidence-bundle.json"),
+                        "--authorization", str(paths.artifacts / "merge-authorization.json"),
+                        "--output", str(paths.artifacts / "merge-verification.json"),
+                    ],
+                    cwd=worktree.path,
+                    env=env,
+                    credential_scope="github",
+                    timeout=240,
+                    transcript=paths.transcripts / "merge-post.log",
+                )
+            except Exception as exc:  # the merge is already on main; this is an incident
+                raise PostMergeUnverified(
+                    f"post-merge verification failed for #{pr_number}: {exc}"
+                ) from exc
+            print(f"FACTORY_MERGED_VERIFIED pr=#{pr_number} evidenced_head={head}")
+            return paths.artifacts / "merge-verification.json"
+        except PostMergeUnverified as exc:
+            self._raise_post_merge_incident(pr_number, linked_issue, exc)
+            raise
+        except Exception as exc:
+            self._record_validation_failure(pr_number, linked_issue, exc)
+            raise
+        finally:
+            self.github.cwd = str(self.repo_root)
+            try:
+                remove(self.repo_root, worktree)
+            except RuntimeError:
+                pass
+
+    # ---------- independent holdouts ----------
+
+    def _run_blinded_holdout(
+        self, paths: RunPaths, context: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        with tempfile.TemporaryDirectory(prefix="dark-factory-holdout-") as tmp:
+            prompt = prompt_text(
+                self.config.prompt_path("holdout", self.repo_root),
+                preamble="This invocation is intentionally isolated from the repository checkout.",
+                context="HOLDOUT INPUT:\n" + json.dumps(context, sort_keys=True),
+            )
+            result = self.provider.run(
+                AgentRequest(
+                    role="holdout",
+                    prompt=prompt,
+                    cwd=tmp,
+                    model=self.config.provider.model,
+                    environment={},
+                    structured_schema={"type": "object"},
+                )
+            )
+            value = result.structured_output
+            if not isinstance(value, Mapping) or value.get("version") != "1.0":
+                raise NeedsHuman("blinded holdout returned invalid JSON")
+            if not isinstance(value.get("findings"), list):
+                raise NeedsHuman("blinded holdout findings are invalid")
+            self._write_json(paths.artifacts / "holdout.json", dict(value))
+            return value
+
+    # Post-code architecture conformance is a *different* claim about a *different* artifact.
+    # It is never a substitute for independently certifying the design the builder proposed or
+    # the governor decision that authorized it, so those get their own blinded authorities.
+    PRECODE_CERTIFIERS: tuple[tuple[str, str], ...] = (
+        # The contract certifier is the only one that sees the issue, and it sees no diff: it
+        # judges whether the compiled contract faithfully captures what was asked, which is the
+        # opposite question from whether the implementation satisfies the contract.
+        ("contract", "contract-certifier"),
+        ("design", "design-certifier"),
+        ("architecture-governor", "governor-certifier"),
+    )
+
+    CERTIFIER_QUESTIONS: dict[str, str] = {
+        "contract": (
+            "Judge only whether the compiled contract is a faithful, complete and correctly "
+            "scoped capture of the supplied issue: every requirement the issue states is "
+            "represented by an acceptance criterion, nothing is silently dropped or narrowed, "
+            "and nothing is invented beyond what the issue asks. You are not reviewing any "
+            "design or implementation, and you have deliberately not been shown one."
+        ),
+        "design": (
+            "Judge only whether the supplied design is a sound, complete and policy-consistent "
+            "answer to the supplied contract and context. You are not reviewing any "
+            "implementation, and you have deliberately not been shown one."
+        ),
+        "architecture-governor": (
+            "Judge only whether the governor's decision is warranted by the supplied policy, "
+            "contract, context and design: whether the applicable principles, migrations and "
+            "debts were correctly identified, and whether proceeding is justified rather than "
+            "requiring a veto or a prefactor. You are not reviewing any implementation, and you "
+            "have deliberately not been shown one."
+        ),
+    }
+
+    def _builder_pack(
+        self, paths: RunPaths, *, head: str, base: str, issue: int | None
+    ) -> Mapping[str, Any]:
+        """Fetch and re-verify the exact-head builder provenance the authorities are judged on."""
+        if not isinstance(issue, int) or isinstance(issue, bool) or issue <= 0:
+            raise NeedsHuman("cannot certify claims without a linked issue number")
+        pack_dir = paths.artifacts / "spine"
+        self._exec(
+            [
+                "python", "scripts/factory_provenance.py", "fetch",
+                "--head", head, "--base", base, "--issue", str(issue),
+                "--output-dir", str(pack_dir),
+            ],
+            cwd=self.repo_root,
+            env={"FACTORY_REPO": self.config.repository},
+            credential_scope="github",
+            timeout=240,
+            transcript=paths.transcripts / "provenance-fetch.log",
+        )
+        try:
+            return verify_pack(
+                self._read_json(pack_dir / "builder-provenance.json"),
+                expected_head_sha=head,
+                expected_base_sha=base,
+                expected_issue=issue,
+            )
+        except ValueError as exc:
+            raise NeedsHuman(f"builder provenance is unusable for certification: {exc}") from exc
+
+    def _certify_precode_claims(
+        self,
+        paths: RunPaths,
+        *,
+        pack: Mapping[str, Any],
+        head: str,
+        base: str,
+        issue: int | None,
+    ) -> None:
+        """Issue genuinely independent certificates for the pre-code claims.
+
+        The builder cannot reach these authorities: they run on the validator, blinded to the
+        builder transcript, and the kernel -- not the model -- fills in every binding.
+        """
+        if not isinstance(issue, int) or isinstance(issue, bool) or issue <= 0:
+            raise NeedsHuman("cannot certify pre-code claims without a linked issue number")
+        hashes = {claim: record["sha256"] for claim, record in pack["artifacts"].items()}
+        values = {claim: record["content"] for claim, record in pack["artifacts"].items()}
+        target = paths.artifacts / "independent"
+        target.mkdir(parents=True, exist_ok=True)
+        for claim_id, role in self.PRECODE_CERTIFIERS:
+            # What the authority is shown comes from the protected registry, which refuses any
+            # entry that is not shown every artifact its claim is bound to.
+            seen, extra = authority_inputs((claim_id,))
+            payload: dict[str, Any] = {key: values[key] for key in seen}
+            if "issue" in extra:
+                payload["issue"] = self._certification_issue(issue)
+            judgement = self._run_precode_certifier(
+                paths, claim_id=claim_id, role=role, inputs=payload
+            )
+            certificate = build_certificate(
+                claim_id=claim_id,
+                claim_hashes=hashes,
+                head_sha=head,
+                base_sha=base,
+                judgement=judgement,
+            )
+            # Fail closed here as well as at closure: a certifier that echoed a builder artifact
+            # back must never be written to disk as if it were independent evidence.
+            verify_certificate(
+                certificate,
+                claim_id=claim_id,
+                claim_hashes=hashes,
+                builder_artifact_hashes=hashes,
+                head_sha=head,
+                base_sha=base,
+            )
+            self._write_json(target / f"{claim_id}.json", certificate)
+
+    def _certification_issue(self, issue: int) -> dict[str, Any]:
+        """The issue as the contract certifier sees it: what was asked, and nothing else."""
+        record = self.github.issue(issue)
+        return {
+            "number": issue,
+            "title": str(record.get("title") or ""),
+            "body": str(record.get("body") or ""),
+        }
+
+    def _run_precode_certifier(
+        self, paths: RunPaths, *, claim_id: str, role: str, inputs: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        suffix = (
+            f"Return ONLY JSON with version 1.0; certifies {claim_id!r}; verdict pass|fail; and "
+            "findings as objects with severity critical|high|medium|low and non-empty "
+            "description. " + self.CERTIFIER_QUESTIONS[claim_id]
+        )
+        with tempfile.TemporaryDirectory(prefix=f"dark-factory-{role}-") as tmp:
+            prompt = prompt_text(
+                self.config.prompt_path("holdout", self.repo_root),
+                preamble=(
+                    f"You are the independent {claim_id} certifier, deliberately isolated from "
+                    "the builder's reasoning and from the repository checkout. " + suffix
+                ),
+                context=(
+                    f"{claim_id} CERTIFICATION INPUT:\n" + json.dumps(inputs, sort_keys=True)
+                ),
+            )
+            result = self.provider.run(
+                AgentRequest(
+                    role=role,
+                    prompt=prompt,
+                    cwd=tmp,
+                    model=self.config.provider.model,
+                    environment={},
+                    structured_schema={"type": "object"},
+                )
+            )
+            value = result.structured_output
+            if not isinstance(value, Mapping) or value.get("version") != "1.0":
+                raise NeedsHuman(f"independent {claim_id} certifier returned invalid JSON")
+            if not isinstance(value.get("findings"), list):
+                raise NeedsHuman(f"independent {claim_id} certifier findings are invalid")
+            if value.get("certifies") != claim_id:
+                raise NeedsHuman(
+                    f"independent {claim_id} certifier did not declare its own subject"
+                )
+            if value.get("verdict") != "pass":
+                raise NeedsHuman(f"independent {claim_id} certifier rejected the {claim_id} claim")
+            self._write_json(paths.artifacts / f"{claim_id}-certification.json", dict(value))
+            return value
+
+    def _run_architecture_holdout(
+        self,
+        paths: RunPaths,
+        *,
+        pack: Mapping[str, Any],
+        policy: Mapping[str, Any],
+        changed_files: list[str],
+        diff: str,
+    ) -> Path:
+        """One architecture authority, shown everything both of its claims are bound to.
+
+        It certifies architecture-drift and architecture-conformance. Conformance asserts the
+        implementation conforms to the design and the governor's decision, so an authority shown
+        only the policy and the diff was never competent to certify it. The registry now says what
+        this authority must see, and the input is built from that rather than from a hand-kept
+        literal that could drift away from the claims.
+        """
+        values = {claim: record["content"] for claim, record in pack["artifacts"].items()}
+        seen, _extra = authority_inputs(claims_for_authority("architecture-holdout"))
+        context: dict[str, Any] = {
+            name: policy if name == "architecture-policy" else values[name] for name in seen
+        }
+        context["changed_files"] = changed_files
+        context["diff"] = diff
+        suffix = (
+            "Return ONLY JSON with version 1.0; verdict pass|fail; convergence "
+            "improves|neutral|regresses; principles, migrations, debts arrays containing exactly "
+            "the policy IDs applicable to changed_files; and findings as objects with severity "
+            "critical|high|medium|low and non-empty description."
+        )
+        with tempfile.TemporaryDirectory(prefix="dark-factory-arch-holdout-") as tmp:
+            prompt = prompt_text(
+                self.config.prompt_path("holdout", self.repo_root),
+                preamble="You are the independent architecture holdout. " + suffix,
+                context="ARCHITECTURE HOLDOUT INPUT:\n" + json.dumps(context, sort_keys=True),
+            )
+            result = self.provider.run(
+                AgentRequest(
+                    role="architecture-holdout",
+                    prompt=prompt,
+                    cwd=tmp,
+                    model=self.config.provider.model,
+                    environment={},
+                    structured_schema={"type": "object"},
+                )
+            )
+            value = result.structured_output
+            if not isinstance(value, Mapping):
+                raise NeedsHuman("architecture holdout returned invalid JSON")
+            target = paths.artifacts / "architecture-holdout.json"
+            self._write_json(target, dict(value))
+            return target
+
+    # ---------- helpers ----------
+
+    def _prepare_worktree(self, cwd: Path, paths: RunPaths) -> None:
+        """Every isolated worktree gets exact locked dependencies before any model/test work."""
+        self._exec(
+            ["uv", "sync", "--frozen", "--all-extras"],
+            cwd=cwd / "app" / "backend",
+            timeout=600,
+            transcript=paths.transcripts / "backend-sync.log",
+        )
+        self._exec(
+            ["bun", "install", "--frozen-lockfile"],
+            cwd=cwd / "app" / "frontend",
+            timeout=600,
+            transcript=paths.transcripts / "frontend-sync.log",
+        )
+
+    def _agent(
+        self,
+        role: str,
+        cwd: Path,
+        paths: RunPaths,
+        *,
+        context: str = "",
+        env: Mapping[str, str],
+    ) -> None:
+        self.check_stop()
+        prompt = prompt_text(
+            self.config.prompt_path(role, cwd),
+            preamble=(
+                "You are a replaceable reasoning worker inside Dark Factory. You are not a merge "
+                "authority. Obey repository and artifact constraints exactly."
+            ),
+            context=context,
+        )
+        result = self.provider.run(
+            AgentRequest(
+                role=role,
+                prompt=prompt,
+                cwd=str(cwd),
+                model=self.config.provider.model,
+                environment=dict(env),
+            )
+        )
+        (paths.transcripts / f"agent-{role}.log").write_text(
+            result.content + "\n", encoding="utf-8"
+        )
+
+    def _run_env(self, paths: RunPaths, *, base_ref: str) -> dict[str, str]:
+        return {
+            "ARTIFACTS_DIR": str(paths.artifacts),
+            "FACTORY_BASE_REF": base_ref,
+            "FACTORY_REPO": self.config.repository,
+            "FACTORY_WORKDIR": str(self.config.runtime.work_root),
+        }
+
+    def _fetch_main(self) -> None:
+        self._git("fetch", "origin", self.config.default_branch)
+
+    def _exec(
+        self,
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+        credential_scope: str = "none",
+        timeout: int = 300,
+        transcript: Path | None = None,
+    ) -> str:
+        merged = scoped_environment(env, scope=credential_scope)
+        proc = subprocess.run(
+            argv,
+            cwd=cwd,
+            env=merged,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+        output = (proc.stdout or "") + (proc.stderr or "")
+        if transcript is not None:
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            transcript.write_text(output, encoding="utf-8")
+        if proc.returncode:
+            raise RuntimeError(f"{' '.join(argv)} failed rc={proc.returncode}: {output[-4000:]}")
+        return output
+
+    def _git(self, *args: str, cwd: Path | None = None) -> str:
+        return self._exec(["git", *args], cwd=cwd or self.repo_root, timeout=180).strip()
+
+    def _assert_clean(self, cwd: Path) -> None:
+        status = self._git("status", "--porcelain", cwd=cwd)
+        if status:
+            raise RuntimeError("factory worker left the worktree dirty:\n" + status)
+
+    def _next_build_attempt(self, issue_number: int) -> int:
+        value = self.github.json(
+            [
+                "issue", "view", str(issue_number), "-R", self.config.repository,
+                "--json", "comments",
+            ]
+        )
+        comments = value.get("comments", []) if isinstance(value, Mapping) else []
+        failures = 0
+        if isinstance(comments, list):
+            for comment in comments:
+                if not isinstance(comment, Mapping):
+                    continue
+                body = comment.get("body")
+                if isinstance(body, str) and self.VALIDATION_FAILURE_MARKER in body:
+                    failures += 1
+        return failures + 1
+
+    def _record_validation_failure(
+        self, pr_number: int, linked_issue: int | None, exc: Exception
+    ) -> None:
+        try:
+            self.github.cwd = str(self.repo_root)
+            self.github.remove_pr_label(pr_number, self.config.labels["needs_review"])
+            self.github.add_pr_label(pr_number, self.config.labels["needs_fix"])
+            self.github.comment_pr(
+                pr_number,
+                "Dark Factory validation failed closed. No merge was authorized. "
+                f"Failure class: `{type(exc).__name__}`. The validator transcript remains on the host.",
+            )
+            if linked_issue is not None:
+                self.github.comment_issue(
+                    linked_issue,
+                    self.VALIDATION_FAILURE_MARKER
+                    + "\nDark Factory independent validation rejected the latest build. "
+                    "The issue remains eligible for a bounded fresh rebuild from current main.",
+                )
+        except Exception:
+            pass
+
+    def _raise_post_merge_incident(
+        self, pr_number: int, linked_issue: int | None, exc: Exception
+    ) -> None:
+        """Stop the factory remotely, because main can no longer be trusted.
+
+        Applying a needs-fix label to a merged pull request would be containment theatre: the
+        worker wakes hourly from current main on a fresh runner and would build the next issue on
+        top of the unverified commit. The only containment that survives a fresh runner is an open
+        issue carrying the stop label, which factory-stop.sh reads from GitHub before every
+        dispatch and fails closed when it cannot read at all.
+        """
+        detail = (
+            f"POST-MERGE VERIFICATION FAILED for #{pr_number}.\n\n"
+            "A squash merge was authorized and has already happened. Verifying it afterwards "
+            "failed, so the commit now on main has not been shown to be the commit that was "
+            "evidenced.\n\n"
+            "- main must be treated as UNTRUSTED until a human reconciles it\n"
+            "- the autonomous factory has been stopped and will not dispatch again\n"
+            "- do NOT rebuild from main: a rebuild starts from the commit in doubt\n\n"
+            f"Failure class: `{type(exc).__name__}`\n"
+            f"Detail: {exc}\n\n"
+            f"Resume by reconciling main, then closing this issue (or removing "
+            f"`{self.config.labels['stop']}` from it)."
+        )
+        stopped = False
+        try:
+            with tempfile.TemporaryDirectory(prefix="dark-factory-incident-") as tmp:
+                body = Path(tmp) / "incident.md"
+                body.write_text(detail, encoding="utf-8")
+                self.github.cwd = str(self.repo_root)
+                self.github.create_issue(
+                    title=f"POST-MERGE VERIFICATION FAILED: main is untrusted (PR #{pr_number})",
+                    body_file=body,
+                    labels=(self.config.labels["stop"],),
+                )
+            stopped = True
+        except Exception:
+            # Fall back to the local kill file. It does not survive a fresh runner, so it is a
+            # second line rather than the containment, and the failure is still surfaced below.
+            try:
+                kill = self.config.runtime.work_root / ".factory-stop"
+                kill.parent.mkdir(parents=True, exist_ok=True)
+                kill.write_text(detail, encoding="utf-8")
+            except Exception:
+                pass
+        try:
+            self.github.add_pr_label(pr_number, self.config.labels["needs_human"])
+            self.github.comment_pr(
+                pr_number,
+                detail
+                + ("" if stopped else "\n\nWARNING: the stop issue could not be opened. "
+                                      "Stop the factory by hand before it dispatches again."),
+            )
+            if linked_issue is not None:
+                self.github.comment_issue(
+                    linked_issue,
+                    "Dark Factory merged this build and then failed to verify the merge. "
+                    "This issue is NOT eligible for a rebuild: main is untrusted until a human "
+                    "reconciles it.",
+                )
+        except Exception:
+            pass
+        print(f"FACTORY_POST_MERGE_INCIDENT pr=#{pr_number} stopped={'remote' if stopped else 'local-only'}")
+
+    def _mark_issue_human(self, issue: int, reason: str) -> None:
+        try:
+            self.github.cwd = str(self.repo_root)
+            self.github.remove_issue_label(issue, self.config.labels["in_progress"])
+            self.github.remove_issue_label(issue, self.config.labels["accepted"])
+            self.github.add_issue_label(issue, self.config.labels["needs_human"])
+            self.github.comment_issue(
+                issue,
+                "Dark Factory stopped this run without merging. " + reason[:1500],
+            )
+        except Exception:
+            pass
+
+    def _issue_dispatch_key(self, issue: Mapping[str, Any]) -> tuple[int, str, int]:
+        labels = self.github.labels(issue)
+        priority = min((self.PRIORITY[label] for label in labels if label in self.PRIORITY), default=4)
+        return priority, str(issue.get("updatedAt") or ""), int(issue["number"])
+
+    @staticmethod
+    def _is_bug(labels: set[str]) -> bool:
+        return any(label.lower() in {"bug", "type:bug", "kind:bug"} for label in labels)
+
+    @staticmethod
+    def _oldest_number(items: list[Mapping[str, Any]]) -> int:
+        item = min(items, key=lambda row: (str(row.get("updatedAt") or ""), int(row["number"])))
+        return int(item["number"])
+
+    @staticmethod
+    def _linked_issue_number(body: str) -> int | None:
+        match = re.search(r"(?im)^\s*(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+#([1-9][0-9]*)\b", body)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _issue_context(issue: Mapping[str, Any]) -> str:
+        labels = sorted(GitHubClient.labels(issue))
+        return (
+            "ORIGINAL ISSUE (source of truth):\n"
+            + json.dumps(
+                {
+                    "number": issue.get("number"),
+                    "title": issue.get("title"),
+                    "body": issue.get("body"),
+                    "labels": labels,
+                },
+                sort_keys=True,
+            )
+        )
+
+    @staticmethod
+    def _write_json(path: Path, value: object) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _read_json(path: Path) -> Mapping[str, Any]:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"cannot read factory JSON {path}: {exc}") from exc
+        if not isinstance(value, Mapping):
+            raise RuntimeError(f"factory JSON must be an object: {path}")
+        return value
+
+    @staticmethod
+    def _json_sha(value: object) -> str:
+        payload = (
+            json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def _extract_attached(body: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+        def one(kind: str) -> Mapping[str, Any]:
+            pattern = re.compile(
+                rf"<!-- factory-{kind}:start -->\s*```factory-{kind}\s*(\{{.*?\}})\s*```",
+                re.S,
+            )
+            match = pattern.search(body)
+            if not match:
+                raise NeedsHuman(f"PR is missing attached factory-{kind} evidence")
+            try:
+                value = json.loads(match.group(1))
+            except json.JSONDecodeError as exc:
+                raise NeedsHuman(f"attached factory-{kind} is invalid JSON") from exc
+            if not isinstance(value, Mapping):
+                raise NeedsHuman(f"attached factory-{kind} must be an object")
+            return value
+
+        return one("contract"), one("proof")

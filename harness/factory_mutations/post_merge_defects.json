@@ -1,0 +1,43 @@
+{
+  "_what_this_is": [
+    "Adversarial mutations for the post-merge main authority.",
+    "Each mutation must make the focused post-merge tests go red in the isolated trust-root copy."
+  ],
+  "defects": [
+    {
+      "id": "post-merge-main-tip-check-disabled",
+      "file": "harness/post_merge.py",
+      "find": "    if main_sha != merge_sha:",
+      "replace": "    if False and main_sha != merge_sha:",
+      "why": "A later or unrelated main tip could be reported as post-merge verified."
+    },
+    {
+      "id": "post-merge-browser-step-check-disabled",
+      "file": "harness/post_merge.py",
+      "find": "    if not isinstance(observed.get(\"e2e_steps\"), int) or observed[\"e2e_steps\"] < 1:",
+      "replace": "    if False and (not isinstance(observed.get(\"e2e_steps\"), int) or observed[\"e2e_steps\"] < 1):",
+      "why": "Post-merge authority could bless a full-gate transcript with no browser journey."
+    },
+    {
+      "id": "post-merge-verification-verdict-ignored",
+      "file": "harness/post_merge.py",
+      "find": "    if value.get(\"version\") != \"1.0\" or value.get(\"verdict\") != \"verified\":",
+      "replace": "    if value.get(\"version\") != \"1.0\":",
+      "why": "Post-merge validation could run from failed or forged merge verification evidence."
+    },
+    {
+      "id": "post-merge-runtime-hook-disabled",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        if not merge:\n            return result",
+      "replace": "        if True:\n            return result",
+      "why": "The production merge lifecycle could stop after tree verification and never exercise actual-main smoke/E2E."
+    },
+    {
+      "id": "post-merge-revert-main-tip-guard-disabled",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        if current_main != merge_sha:",
+      "replace": "        if False and current_main != merge_sha:",
+      "why": "The kernel could generate a mechanical revert after unrelated commits landed on main."
+    }
+  ]
+}

@@ -11,7 +11,7 @@ argument-hint: (no arguments — reads $static-checks-*, $run-tests-*, $behavior
 
 ## Your Role
 
-You are the final arbiter for a Dark Factory PR validation. Multiple independent reviewers (behavioral, security, code quality, static checks, tests) have run in parallel. Your job is to aggregate their findings and render ONE of three verdicts: **approve**, **request_changes**, or **reject**.
+You are the final arbiter for a Dark Factory PR validation. Multiple independent reviewers (behavioral, security, architecture, code quality, static checks, tests) have run in parallel. Your job is to aggregate their findings and render ONE of three verdicts: **approve**, **request_changes**, or **reject**.
 
 You are **deterministic** — the rules below are hard and you should apply them as if you were a decision table, not a judgment call. The only place judgment enters is classifying individual findings as "blocker" vs "fixable" when the rules don't pre-specify.
 
@@ -56,6 +56,9 @@ $behavioral-e2e-p1.output
 ### Security Check
 $security-check-p1.output
 
+### Architecture Holdout (independent, blinded)
+$architecture-holdout-p1.output
+
 ### Code Review
 $code-review-p1.output
 
@@ -75,13 +78,13 @@ If the validator's own infrastructure did not complete, you CANNOT render a subs
 
 **FORBIDDEN escape hatch — read carefully.** `not_e2e_testable` is a legitimate enum value in the output schema for `e2e_status` and `behavioral_status`, but it means one specific thing: *the PR diff legitimately cannot be exercised through the browser* (e.g., a pure internal refactor, a docs-only change, a background-job tweak with no UI surface). It does NOT mean "the E2E node didn't produce output" or "the app failed to start." If `$start-app.output` is empty or lacks `APP_STARTED`, or if `$checkout-pr.output` lacks `Checked out PR #`, or if `$behavioral-e2e-p1.output` is empty because its upstream dependency failed — you are **FORBIDDEN** from returning `e2e_status: "not_e2e_testable"` or `behavioral_status: "not_e2e_testable"`. Those cases are infrastructure failures, not untestable diffs, and you MUST fire rule 0 below with `e2e_status: "no"` and `behavioral_status: "no"`. Returning `not_e2e_testable` to paper over a missing `APP_STARTED` marker is a validator bug and defeats the entire purpose of rule 0.
 
-Additionally, if `$static-checks-backend-p1.output`, `$static-checks-frontend-p1.output`, `$run-tests-backend-p1.output`, `$run-tests-frontend-p1.output`, or `$behavioral-e2e-p1.output` is empty (no content at all — meaning the node was skipped because its upstream dependency failed), that is also an infrastructure failure even if `checkout-pr.output` looks fine.
+Additionally, if `$static-checks-backend-p1.output`, `$static-checks-frontend-p1.output`, `$run-tests-backend-p1.output`, `$run-tests-frontend-p1.output`, `$behavioral-e2e-p1.output`, or `$architecture-holdout-p1.output` is empty (no content at all — meaning the node was skipped because its upstream dependency failed), that is also an infrastructure failure even if `checkout-pr.output` looks fine.
 
 In any of those cases, return:
 
 - `verdict`: `"reject"`
 - `should_escalate`: `true`
-- `escalation_reason`: `"Validator infrastructure failed — checkout-pr or start-app did not complete, so static checks, tests, and E2E regression never ran. Manual investigation required before retrying."`
+- `escalation_reason`: `"Validator infrastructure failed — checkout-pr or start-app did not complete, or a mandatory holdout/check did not produce output. Manual investigation required before retrying."`
 - `summary`: `"Validator prerequisites failed; cannot render a substantive verdict."`
 - `static_checks_status`: `"fail"`
 - `tests_status`: `"fail"`
@@ -91,7 +94,7 @@ In any of those cases, return:
 - `issues_to_fix`: `[]`
 - `reasoning`: `"REJECT rule 0 (infrastructure) fired. [Which specific marker/input was missing and why this blocks a substantive verdict.]"`
 
-This is NOT a defect in the PR under review — it's a validator-side failure. The escalation flag routes it to a human who can investigate the infra issue (stale worktree, port collision, etc.) rather than re-queuing the underlying issue for another implementation attempt. Rule 0 takes absolute precedence over every other rule below; do not even evaluate rules 1-7 if rule 0 fires.
+This is NOT a defect in the PR under review — it's a validator-side failure. The escalation flag routes it to a human who can investigate the infra issue (stale worktree, port collision, etc.) rather than re-queuing the underlying issue for another implementation attempt. Rule 0 takes absolute precedence over every other rule below; do not even evaluate rules 1-8 if rule 0 fires.
 
 ### REJECT — automatic, no fix attempts, close the PR
 
@@ -104,6 +107,7 @@ Reject immediately if ANY of:
 5. `behavioral-validation.solves_issue == "no"` AND PR diff is empty/trivial (per behavioral reasoning)
 6. `code-review` output contains any `severity: critical` finding
 7. PR touches any Dark Factory hard invariants per CLAUDE.md (rate limit, RAG pipeline config, auth middleware, vector DB)
+8. `architecture-holdout.verdict == "reject"` OR `architecture-holdout.convergence == "regresses"`
 
 A rejected PR has its issue re-queued (label flipped back to `factory:accepted`) and the PR closed. Set `should_escalate: false` unless rejection #7 fires — architectural hard-invariant violations always escalate to human.
 
@@ -119,6 +123,7 @@ Approve if ALL of:
 6. `security-check.verdict == "pass"` AND `governance_files_modified == false`
 7. `code-review` finds no critical or high severity issues (medium and low are acceptable and documented for follow-up)
 8. `behavioral-validation.confidence != "low"` — low confidence behavioral verdicts never auto-approve, they become request_changes
+9. `architecture-holdout.verdict == "pass"` AND `architecture-holdout.convergence != "regresses"`
 
 ### REQUEST_CHANGES — send back to dark-factory-fix-pr
 
@@ -129,6 +134,7 @@ Request changes in all other cases, which typically include:
 - `behavioral-validation.solves_issue == "partially"` — the coder got some but not all of the asks
 - `behavioral-validation.scope_appropriate == "too_narrow"` — missed requirements
 - Medium security findings (non-fail verdict)
+- `architecture-holdout.verdict == "request_changes"` — add each architecture finding to `issues_to_fix` using `code_quality` or `scope` as the category
 - High-severity code review findings (but not critical)
 - Behavioral confidence is `"low"` — kick back for clarification instead of auto-approving
 
@@ -165,6 +171,6 @@ Make `issues_to_fix` SPECIFIC. The `dark-factory-fix-pr` workflow reads this lis
 ## Success Criteria
 
 - **RULE_APPLIED**: Your `reasoning` explicitly names which verdict rule matched (e.g., "REJECT rule 1 fired because security-check.verdict was 'fail'").
-- **TRUSTED_UPSTREAM**: You did not re-argue the behavioral or security reviewer's conclusions.
+- **TRUSTED_UPSTREAM**: You did not re-argue the behavioral, security, or architecture reviewer's conclusions.
 - **FIX_LIST_ACTIONABLE**: Every entry in `issues_to_fix` (if any) is specific enough for the fix-pr workflow to act on.
 - **NO_HALLUCINATED_FINDINGS**: You did not invent issues that weren't in the upstream node outputs.

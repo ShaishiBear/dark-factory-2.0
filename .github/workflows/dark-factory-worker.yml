@@ -1,0 +1,159 @@
+name: dark-factory-worker
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: dark-factory-worker
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.repository == 'ShaishiBear/dark-factory-2.0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dark_factory_validation
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dark_factory_validation"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout current main without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check operational prerequisites
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues')" = "true" || {
+            echo "FACTORY_PREFLIGHT_REFUSED GitHub Issues are disabled"
+            exit 1
+          }
+
+          # The in-repo exact-head/evidence verifier cannot stop someone bypassing it
+          # with a direct push to an unprotected default branch. Refuse autonomous
+          # operation unless GitHub itself reports main as protected.
+          main_protected="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.protected')"
+          test "$main_protected" = "true" || {
+            echo "FACTORY_PREFLIGHT_REFUSED main branch is not protected"
+            exit 1
+          }
+
+          labels="$(gh label list -R "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name')"
+          for label in \
+            factory:accepted \
+            factory:rejected \
+            factory:rate-limited \
+            factory:in-progress \
+            factory:needs-review \
+            factory:needs-fix \
+            factory:needs-human \
+            factory:stop
+          do
+            grep -Fx -- "$label" <<<"$labels" >/dev/null || {
+              echo "FACTORY_PREFLIGHT_REFUSED missing label $label"
+              exit 1
+            }
+          done
+
+          for name in ANTHROPIC_API_KEY OPENROUTER_API_KEY SUPADATA_API_KEY
+          do
+            test -n "${!name:-}" || {
+              echo "FACTORY_PREFLIGHT_REFUSED missing secret $name"
+              exit 1
+            }
+          done
+          echo "FACTORY_PREFLIGHT_OK"
+
+      - name: Setup Python 3.12.14
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          token: ''
+
+      - name: Setup uv 0.12.5
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.5'
+          github-token: ''
+
+      - name: Setup Bun 1.4.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.0'
+          token: ''
+
+      - name: Install pinned worker and browser CLIs
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.245
+          test "$(claude --version)" = "2.1.245 (Claude Code)"
+          npm install -g agent-browser@0.35.0
+          agent-browser install --with-deps
+          agent-browser --help >/dev/null
+
+      - name: Create disposable validation environment
+        shell: bash
+        run: |
+          jwt_secret="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          e2e_password="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$jwt_secret"
+          echo "::add-mask::$e2e_password"
+          {
+            echo "DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/dark_factory_validation"
+            echo "JWT_SECRET=$jwt_secret"
+            echo "DARK_FACTORY_E2E_EMAIL=dark-factory-e2e@localhost.invalid"
+            echo "DARK_FACTORY_E2E_PASSWORD=$e2e_password"
+            echo "DARK_FACTORY_E2E_BOOTSTRAP=1"
+            echo "SEED_ENABLE=false"
+          } >> "$GITHUB_ENV"
+          # YOUTUBE_CHANNEL_ID is intentionally unnecessary here: the locked E2E
+          # bootstraps one exact real video rather than synchronizing a channel.
+
+      - name: Validate kernel configuration
+        run: python -m factory_kernel config-check
+
+      - name: Fail closed on emergency stop before dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m factory_kernel stop-check
+
+      - name: Dispatch exactly one factory action
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+          FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
+        run: python -m factory_kernel dispatch --once

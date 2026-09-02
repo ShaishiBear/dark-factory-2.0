@@ -1,0 +1,64 @@
+{
+  "_what_this_is": [
+    "Focused regression probes for the native pull-request authority runtime.",
+    "Each probe is applied only to a copied repository sandbox and must make the focused suite go red."
+  ],
+  "defects": [
+    {
+      "id": "ci-checkout-credentials-persisted",
+      "file": ".github/workflows/dark-factory-ci.yml",
+      "find": "          persist-credentials: false",
+      "replace": "          persist-credentials: true",
+      "why": "The PR checkout token could remain in Git config for later checkout subprocesses."
+    },
+    {
+      "id": "ci-checkout-action-floats",
+      "file": ".github/workflows/dark-factory-ci.yml",
+      "find": "        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+      "replace": "        uses: actions/checkout@v4",
+      "why": "The code-fetching action could drift between validations without review."
+    },
+    {
+      "id": "ci-python-action-floats",
+      "file": ".github/workflows/dark-factory-ci.yml",
+      "find": "      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+      "replace": "      - uses: actions/setup-python@v5",
+      "why": "The Python setup action could drift between validations without review."
+    },
+    {
+      "id": "ci-python-version-floats",
+      "file": ".github/workflows/dark-factory-ci.yml",
+      "find": "          python-version: '3.12.14'",
+      "replace": "          python-version: '3.12'",
+      "why": "The native authority could silently move to a new Python patch release."
+    },
+    {
+      "id": "ci-uv-action-floats",
+      "file": ".github/workflows/dark-factory-ci.yml",
+      "find": "      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e",
+      "replace": "      - uses: astral-sh/setup-uv@v6",
+      "why": "The uv setup action could drift between validations without review."
+    },
+    {
+      "id": "ci-uv-version-floats",
+      "file": ".github/workflows/dark-factory-ci.yml",
+      "find": "          version: '0.12.5'",
+      "replace": "          version: '0.12.6'",
+      "why": "The native authority could silently use a different dependency resolver than the validated worker."
+    },
+    {
+      "id": "ci-bun-action-floats",
+      "file": ".github/workflows/dark-factory-ci.yml",
+      "find": "      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+      "replace": "      - uses: oven-sh/setup-bun@v2",
+      "why": "The Bun setup action could drift between validations without review."
+    },
+    {
+      "id": "ci-bun-version-floats",
+      "file": ".github/workflows/dark-factory-ci.yml",
+      "find": "          bun-version: '1.4.0'",
+      "replace": "          bun-version: 'latest'",
+      "why": "The native authority could silently move to a different Bun runtime."
+    }
+  ]
+}
