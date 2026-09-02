@@ -189,7 +189,10 @@ Before unattended Level-4 dispatch is enabled, repository configuration must sat
 - GitHub Issues are enabled. Issues are the intake, state and remote emergency-stop surface.
 - `main` is protected by GitHub branch protection/rules so a direct push cannot bypass the in-repo evidence and exact-tree merge authority.
 - all eight factory control labels exist: `factory:accepted`, `factory:rejected`, `factory:rate-limited`, `factory:in-progress`, `factory:needs-review`, `factory:needs-fix`, `factory:needs-human`, `factory:stop`.
-- repository Actions secrets `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` are configured.
+- repository Actions secrets `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` are configured. Model
+  calls are routed to OpenRouter's Anthropic-compatible Messages endpoint, so no separate
+  Anthropic credential is required; the preflight proves that route with the configured model
+  before dispatching.
 
 The worker checks out current `main` without persisting checkout credentials, runs one global dispatch at a time, and refuses to start if any prerequisite above is missing.
 

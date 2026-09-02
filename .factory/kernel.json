@@ -5,8 +5,8 @@
   "provider": {
     "id": "claude-cli",
     "binary": "claude",
-    "model": "sonnet",
-    "architecture_model": "opus",
+    "model": "qwen/qwen3-235b-a22b-2507",
+    "architecture_model": "deepseek/deepseek-chat-v3.1",
     "timeout_seconds": 1200
   },
   "runtime": {

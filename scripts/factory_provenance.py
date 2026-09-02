@@ -60,7 +60,10 @@ def _git_auth(args: list[str], *, check: bool = True) -> subprocess.CompletedPro
         env = {
             key: value
             for key, value in os.environ.items()
-            if key not in {"GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "SUPADATA_API_KEY"}
+            if key not in {
+                "GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+                "OPENROUTER_API_KEY", "SUPADATA_API_KEY",
+            }
         }
         env.update(
             {

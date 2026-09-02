@@ -122,7 +122,6 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
         self.assertIn("postgres:16", workflow)
         self.assertIn("dark_factory_validation", workflow)
         self.assertIn("DARK_FACTORY_E2E_BOOTSTRAP=1", workflow)
-        self.assertIn("secrets.ANTHROPIC_API_KEY", workflow)
         self.assertIn("secrets.OPENROUTER_API_KEY", workflow)
         self.assertIn("secrets.SUPADATA_API_KEY", workflow)
         for removed_secret in (
@@ -131,6 +130,11 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             "secrets.YOUTUBE_CHANNEL_ID",
             "secrets.DARK_FACTORY_E2E_EMAIL",
             "secrets.DARK_FACTORY_E2E_PASSWORD",
+            # Model auth is no longer a distinct external credential: the CLI is pointed at
+            # OpenRouter's Anthropic-compatible endpoint and authenticates with the OpenRouter
+            # key it already needs, so a separate Anthropic secret would be an unused
+            # requirement the preflight would still hard-fail on.
+            "secrets.ANTHROPIC_API_KEY",
         ):
             self.assertNotIn(removed_secret, workflow)
 
