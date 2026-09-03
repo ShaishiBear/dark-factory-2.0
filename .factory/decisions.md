@@ -76,3 +76,28 @@ type-checking rather than behaviour, and the compiler finds those. Rewriting
 **Recommendation:** give the other two the same treatment - a mutation that type-checks
 and is behaviourally wrong - and add defects aimed at the RAG and citation path, which is
 where DynaChat's value actually lives and where nothing currently probes at all.
+
+---
+
+## D-004 · The validation host is the GitHub-hosted worker, and the trust root has a maintenance lane
+
+**Status:** recorded · **Raised:** 2026-09-03
+
+D-001 and D-002 say "run it on the VPS" and name `/opt/dark-factory/validation.env`.
+That host no longer exists as the validation environment. Since the repo-owned kernel
+replaced Archon (PR #33), the canonical validation environment is
+`.github/workflows/dark-factory-worker.yml`: a disposable `postgres:16` database, a
+random JWT secret, a synthetic E2E account and one fixture video ingested per run. The
+optional `deploy/systemd/dark-factory.*` units are a scheduling alternative, not a second
+environment. Read "VPS" in D-001/D-002 as "the worker".
+
+Their substance stands. The E2E floor is still unset because no complete issue → merge
+cycle has been observed under the current kernel with a recorded `e2e_steps` count. The
+first canary issue through the full unattended factory is what produces that number; it
+is a **judgement** value and moves only through the human lane.
+
+The human lane itself is new (PR #37). Until then every protected-path change, including
+correcting this log, was unmergeable: the required `quick-authority` check refused
+protected paths for everyone and the ruleset forbade direct pushes. `FACTORY_RULES.md` §5
+now records the two authorities and §13 lists what the rules describe but the kernel does
+not yet enforce.
