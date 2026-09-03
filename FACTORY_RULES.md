@@ -171,6 +171,22 @@ Any PR that modifies **any** file matching these patterns is immediately rejecte
 
 If the factory needs to touch any of these files to solve an issue, that issue is by definition out of scope for the factory and must be escalated to `factory:needs-human`.
 
+### Who may change the trust root
+
+The protected files are the factory's judge. Two authorities exist, and the deterministic security guard (`scripts/factory_security.py`, run by the required `quick-authority` check) tells them apart:
+
+**Autonomous authority** (the factory's own PRs)
+- May modify application and product code.
+- May not modify factory trust roots. Any protected path in a factory PR is an auto-reject.
+
+**Human maintenance authority** (a maintainer's PR)
+- May modify factory trust roots through a normal pull request to `main`.
+- Cannot waive deterministic verification merely because the PR is human-authored. Secret scanning, dependency policy, static checks, unit tests, factory tests and branch protection all still apply. Being human waives exactly one finding: the protected-path veto.
+- Human identity is determined from GitHub platform identity, never from self-declared commit metadata. The PR must be opened by a GitHub **user** account (not a Bot) holding a repository role (owner, member or collaborator). The factory opens its PRs with the Actions token, which GitHub resolves to a Bot.
+- As a second fence, every commit in a trust-root PR must resolve on GitHub's side to a user account for both author and committer. Kernel commits use an unmapped noreply identity and Actions commits resolve to a Bot; either one pushed onto a maintainer's branch fails the PR closed.
+
+The factory can never grant itself authority to change its judge. Humans can maintain the judge, and human maintenance remains observable and tested: the lane has regression tests in `tests/factory/test_factory_security.py` and trust-root mutations in `harness/factory_mutations/defects.json` that attempt to weaken the distinction.
+
 ---
 
 ## 6. Auto-Reject Triggers (No Fix Attempts)
@@ -320,12 +336,13 @@ When the factory posts comments on issues or PRs:
 
 ## 12. Changes to This File
 
-`FACTORY_RULES.md` is part of the constitution. It is on the protected files list. The factory cannot modify it. Changes to this file happen through direct human commits only.
+`FACTORY_RULES.md` is part of the constitution. It is on the protected files list. The factory cannot modify it. Changes to this file happen only through the human maintenance lane described in section 5: a pull request opened by a maintainer's GitHub user account, passing the required `quick-authority` check and branch protection. Direct pushes to `main` are forbidden by the branch ruleset for everyone, including humans.
 
 When you want to change factory behavior:
 
-1. Edit this file locally on your machine
-2. Commit and push directly to `main`
-3. The next orchestrator cycle will pick up the new rules automatically (workflows re-read the file at the start of each run)
+1. Edit this file on a branch
+2. Open a pull request to `main` from your own GitHub account; every commit must be attributable to a GitHub user account
+3. Wait for `quick-authority` to pass, then merge
+4. The next scheduled worker run reads the new rules (workflows re-read the file at the start of each run)
 
-There is no need to restart the orchestrator or the factory. The rules are read at workflow-start time, not cached globally.
+There is no need to restart anything. The rules are read at run start, not cached globally.
