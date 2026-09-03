@@ -99,6 +99,36 @@ def public_dependency_changes(changes: list[dict[str, str]]) -> list[dict[str, s
     ]
 
 
+# The application's own security surface, from CLAUDE.md "Protected paths" / MISSION.md §10.
+# These are not factory trust root -- they are product code -- but they implement or gate the
+# invariants a factory run must never quietly relax: authentication, owner-only conversation
+# access, the hardcoded message cap, the signup abuse guard and their audit tables.
+#
+# The blinded holdout defends three of those invariants behaviourally (owner-only access, the cap
+# being one number, per-user lock keying), which is stronger than a filename check because it
+# survives a refactor. It does not cover token issuance and verification, password hashing, the
+# admin dependency, the signup guard, or CORS. Those had neither a behavioural detector nor a path
+# check, so an autonomous run could have widened them and no deterministic gate would have refused.
+#
+# CORS is the one entry CLAUDE.md states as a property rather than a path ("anywhere in the
+# backend"). A path list cannot express that; main.py is where the middleware is installed, so
+# protecting it covers the real call site without claiming more than a path check can deliver.
+APPLICATION_SECURITY_PATHS = frozenset({
+    "app/backend/config.py",
+    "app/backend/main.py",
+    "app/backend/rate_limit.py",
+    "app/backend/signup_rate_limit.py",
+    "app/backend/db/repository.py",
+    "app/backend/db/signup_attempts_repo.py",
+    "app/backend/db/user_messages_repo.py",
+    "app/backend/db/users_repo.py",
+    "app/backend/routes/admin.py",
+    "app/backend/routes/auth.py",
+    "app/backend/routes/conversations.py",
+    "app/backend/routes/messages.py",
+})
+
+
 def protected_path(path: str) -> bool:
     name = Path(path).name
     return (
@@ -120,6 +150,11 @@ def protected_path(path: str) -> bool:
         # still escapes loudly, but a property with no corresponding mutation had no signal at all.
         or path.startswith("tests/factory/")
         or path.startswith("scripts/factory_")
+        or path in APPLICATION_SECURITY_PATHS
+        # Every auth module: token issuance, verification, password hashing, the request
+        # dependencies the routes gate on. Protecting the routes but not what they call would
+        # leave the invariant reachable one import away.
+        or path.startswith("app/backend/auth/")
         or name == "Dockerfile"
         or re.fullmatch(r"docker-compose(?:\.[^.]+)?\.ya?ml", name) is not None
         or name.startswith(".env")

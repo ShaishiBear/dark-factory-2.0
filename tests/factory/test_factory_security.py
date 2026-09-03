@@ -78,6 +78,52 @@ class SecurityGuardTests(unittest.TestCase):
                 self.assertEqual(result["verdict"], "fail")
                 self.assertEqual(result["protected_paths"], [path])
 
+    def test_mission_security_invariant_paths_are_blocked(self):
+        """CLAUDE.md states the factory auto-rejects these; that must be true of the guard.
+
+        The blinded holdout already defends owner-only access, the single cap value and per-user
+        lock keying behaviourally. It does not cover token issuance and verification, password
+        hashing, the admin dependency, the signup abuse guard or CORS -- those had no detector at
+        all, so an autonomous run could have relaxed them with nothing deterministic refusing.
+        """
+        for path in (
+            "app/backend/auth/tokens.py",
+            "app/backend/auth/password.py",
+            "app/backend/auth/dependencies.py",
+            "app/backend/routes/auth.py",
+            "app/backend/routes/admin.py",
+            "app/backend/routes/conversations.py",
+            "app/backend/routes/messages.py",
+            "app/backend/db/users_repo.py",
+            "app/backend/db/repository.py",
+            "app/backend/db/user_messages_repo.py",
+            "app/backend/db/signup_attempts_repo.py",
+            "app/backend/main.py",
+            "app/backend/config.py",
+            "app/backend/rate_limit.py",
+            "app/backend/signup_rate_limit.py",
+        ):
+            with self.subTest(path=path):
+                result = self.evaluate(changed_files=[path])
+                self.assertEqual(result["verdict"], "fail")
+                self.assertEqual(result["protected_paths"], [path])
+
+    def test_ordinary_application_work_is_still_ordinary(self):
+        """The guard must not swallow the product. A gate that blocks everything blocks nothing:
+        it would be routed around, and the security paths would lose the meaning of the refusal."""
+        for path in (
+            "app/backend/routes/channels.py",
+            "app/backend/rag/retriever.py",
+            "app/backend/rag/chunker.py",
+            "app/backend/db/schema.py",
+            "app/backend/services/supadata.py",
+            "app/frontend/src/components/ChatArea.tsx",
+            "app/frontend/src/lib/api.ts",
+        ):
+            with self.subTest(path=path):
+                result = self.evaluate(changed_files=[path])
+                self.assertEqual(result["protected_paths"], [])
+
     def test_application_tests_are_not_trust_root(self):
         """Only the factory's own detectors are protected; product tests stay ordinary work."""
         result = self.evaluate(changed_files=["app/backend/tests/test_messages.py"])

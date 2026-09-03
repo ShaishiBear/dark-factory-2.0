@@ -340,6 +340,27 @@
       "find": "                rules.verify_architecture_holdout(value, list(CHANGED_FILES), policy)",
       "replace": "                pass",
       "why": "The rehearsal would stop demonstrating that a rejecting architecture holdout is refused, which is exactly the gap this seam was added to close."
+    },
+    {
+      "id": "security-application-invariant-paths-unguarded",
+      "file": "scripts/factory_security.py",
+      "find": "or path in APPLICATION_SECURITY_PATHS",
+      "replace": "or False",
+      "why": "The MISSION \u00a710 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+    },
+    {
+      "id": "security-auth-package-unguarded",
+      "file": "scripts/factory_security.py",
+      "find": "or path.startswith(\"app/backend/auth/\")",
+      "replace": "or False",
+      "why": "Token issuance, verification and password hashing could be edited freely while the routes that gate on them stayed protected."
+    },
+    {
+      "id": "security-signup-guard-dropped-from-trust-root",
+      "file": "scripts/factory_security.py",
+      "find": "    \"app/backend/signup_rate_limit.py\",\n",
+      "replace": "",
+      "why": "The signup abuse guard has no behavioural holdout scenario, so removing its path entry would leave it with no detector at all."
     }
   ]
 }
