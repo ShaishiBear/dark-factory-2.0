@@ -129,6 +129,56 @@ APPLICATION_SECURITY_PATHS = frozenset({
 })
 
 
+# Trust-root maintenance lane.
+#
+# The protected paths below are the judge. The autonomous factory must never be able to rewrite
+# its own judge -- but a judge nobody can maintain is a different defect. PR #36 was itself a human
+# security correction to this guard, and this guard refused it, while branch protection forbade the
+# direct push to main that FACTORY_RULES used to prescribe. No compliant maintenance route existed.
+#
+# The lane is keyed to GitHub platform identity: the PR's resolved user object and its repository
+# association, as GitHub reports them. It is never keyed to commit author/committer text, which
+# anyone can type into a commit. The factory opens its PRs with the Actions token, so they resolve
+# to a Bot; a maintainer's PR resolves to a User holding a repository role. Being human waives
+# exactly one finding -- the protected-path veto that exists to keep the factory out of the trust
+# root. Secret scanning, dependency policy and every later rung of quick-authority still run.
+HUMAN_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+def human_maintainer(actor: dict | None) -> bool:
+    """True only for a GitHub user account that holds a role on this repository."""
+    if not isinstance(actor, dict):
+        return False
+    return actor.get("type") == "User" and actor.get("association") in HUMAN_ASSOCIATIONS
+
+
+def resolved_user(actor: dict | None) -> bool:
+    return isinstance(actor, dict) and actor.get("type") == "User" and bool(actor.get("login"))
+
+
+def commit_provenance_problems(commits: list[dict] | None) -> list[dict[str, str]]:
+    """Second fence behind the PR-identity rule, not the proof of human control.
+
+    Every commit a human PR carries into the trust root must itself resolve, on GitHub's side, to a
+    user account for both author and committer. The kernel commits under an unmapped noreply
+    identity and the Actions token commits as a Bot, so a factory commit pushed onto a human's
+    branch shows up here as unresolved or Bot even though the PR author is human. Unknown
+    provenance fails closed for the same reason.
+    """
+    if commits is None:
+        return [{"kind": "protected_path_provenance", "path": "", "commit": "",
+                 "detail": "commit provenance unavailable; trust-root changes need every commit "
+                           "attributable to a GitHub user account"}]
+    problems: list[dict[str, str]] = []
+    for commit in commits:
+        sha = str(commit.get("sha") or "")[:12]
+        for role in ("author", "committer"):
+            if not resolved_user(commit.get(role)):
+                problems.append({"kind": "protected_path_provenance", "path": "", "commit": sha,
+                                 "detail": f"commit {sha or '?'} {role} is not a resolved GitHub user account"})
+    return problems
+
+
 def protected_path(path: str) -> bool:
     name = Path(path).name
     return (
@@ -210,16 +260,21 @@ def secret_findings(lines: list[tuple[str, str]]) -> list[dict[str, str]]:
 
 
 def evaluate(*, changed_files: list[str], base_backend: str, head_backend: str,
-             base_frontend: str, head_frontend: str, diff: str, body: str) -> dict:
+             base_frontend: str, head_frontend: str, diff: str, body: str,
+             author: dict | None = None, commits: list[dict] | None = None) -> dict:
     protected = sorted(path for path in changed_files if protected_path(path))
+    lane = "human-maintenance" if human_maintainer(author) else "autonomous"
     py_changes = dependency_changes(backend_dependencies(base_backend), backend_dependencies(head_backend), "python")
     js_changes = dependency_changes(frontend_dependencies(base_frontend), frontend_dependencies(head_frontend), "javascript")
     dep_changes = py_changes + js_changes
     justification = dependency_justification(body)
     findings: list[dict[str, str]] = []
 
-    for path in protected:
-        findings.append({"kind": "protected_path", "path": path, "detail": "protected factory/deployment path modified"})
+    if protected and lane == "autonomous":
+        for path in protected:
+            findings.append({"kind": "protected_path", "path": path, "detail": "protected factory/deployment path modified"})
+    elif protected:
+        findings.extend(commit_provenance_problems(commits))
 
     if py_changes and BACKEND_LOCK not in changed_files:
         findings.append({"kind": "lockfile", "path": BACKEND_LOCK, "detail": "backend dependency change without uv.lock update"})
@@ -256,6 +311,11 @@ def evaluate(*, changed_files: list[str], base_backend: str, head_backend: str,
         "version": "1.0",
         "verdict": "pass" if not findings else "fail",
         "protected_paths": protected,
+        "authority": {
+            "lane": lane,
+            "author": str((author or {}).get("login") or ""),
+            "protected_paths_permitted": lane == "human-maintenance",
+        },
         "dependency_changes": public_dependency_changes(dep_changes),
         "secret_findings": secrets,
         "findings": findings,
@@ -272,8 +332,46 @@ def worktree_text(path: str) -> str:
     return target.read_text(encoding="utf-8") if target.is_file() else ""
 
 
+def concatenated_json(text: str) -> list:
+    """`gh api --paginate` emits one JSON document per page, back to back."""
+    decoder = json.JSONDecoder()
+    values: list = []
+    index = 0
+    while True:
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index >= len(text):
+            return values
+        value, index = decoder.raw_decode(text, index)
+        values.append(value)
+
+
+def github_actor(raw: object) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    return {"login": str(raw.get("login") or ""), "type": str(raw.get("type") or "")}
+
+
+def pr_identity(pr: str) -> tuple[dict, list[dict]]:
+    """GitHub's view of who opened the PR and who its commits resolve to. Platform identity only."""
+    info = json.loads(run(["gh", "api", f"repos/{{owner}}/{{repo}}/pulls/{pr}"]).stdout)
+    author = github_actor(info.get("user")) or {"login": "", "type": ""}
+    author["association"] = str(info.get("author_association") or "")
+    pages = concatenated_json(run(["gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{pr}/commits"]).stdout)
+    commits: list[dict] = []
+    for page in pages:
+        for item in page if isinstance(page, list) else []:
+            commits.append({
+                "sha": str(item.get("sha") or ""),
+                "author": github_actor(item.get("author")),
+                "committer": github_actor(item.get("committer")),
+            })
+    return author, commits
+
+
 def verify_pr(pr: str) -> dict:
     meta = json.loads(run(["gh", "pr", "view", pr, "--json", "body,baseRefOid,headRefOid"]).stdout)
+    author, commits = pr_identity(pr)
     base, head = meta["baseRefOid"], meta["headRefOid"]
     local = run(["git", "rev-parse", "HEAD"]).stdout.strip()
     if local != head:
@@ -285,6 +383,7 @@ def verify_pr(pr: str) -> dict:
         base_backend=git_show(base, BACKEND_MANIFEST), head_backend=git_show(head, BACKEND_MANIFEST),
         base_frontend=git_show(base, FRONTEND_MANIFEST), head_frontend=git_show(head, FRONTEND_MANIFEST),
         diff=diff, body=meta.get("body") or "",
+        author=author, commits=commits,
     )
 
 

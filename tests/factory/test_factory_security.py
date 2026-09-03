@@ -144,6 +144,135 @@ class SecurityGuardTests(unittest.TestCase):
     def test_env_file_is_blocked(self):
         self.assertEqual(self.evaluate(changed_files=["app/backend/.env.production"])["verdict"], "fail")
 
+    # ---- trust-root maintenance lane -------------------------------------------------------
+    # Identity is GitHub's resolved user object and repository association, never commit text.
+
+    @staticmethod
+    def human(login="maintainer", association="OWNER"):
+        return {"login": login, "type": "User", "association": association}
+
+    @staticmethod
+    def bot(login="github-actions[bot]"):
+        return {"login": login, "type": "Bot", "association": "CONTRIBUTOR"}
+
+    @staticmethod
+    def commit(sha="abc123def456", author=None, committer=None):
+        user = {"login": "maintainer", "type": "User"}
+        return {"sha": sha, "author": user if author is None else author,
+                "committer": user if committer is None else committer}
+
+    def test_factory_bot_pr_touching_trust_root_fails_closed(self):
+        for path in ("scripts/factory_security.py", "factory_kernel/runtime.py", "FACTORY_RULES.md",
+                     ".github/workflows/dark-factory-ci.yml", "app/backend/auth/tokens.py"):
+            with self.subTest(path=path):
+                result = self.evaluate(changed_files=[path], author=self.bot(), commits=[self.commit()])
+                self.assertEqual(result["verdict"], "fail")
+                self.assertEqual(result["authority"]["lane"], "autonomous")
+                self.assertFalse(result["authority"]["protected_paths_permitted"])
+                self.assertTrue(any(x["kind"] == "protected_path" for x in result["findings"]))
+
+    def test_unknown_author_touching_trust_root_fails_closed(self):
+        """Worktree mode and any caller that cannot prove identity stay on the autonomous lane."""
+        result = self.evaluate(changed_files=["scripts/factory_security.py"])
+        self.assertEqual(result["verdict"], "fail")
+        self.assertEqual(result["authority"]["lane"], "autonomous")
+
+    def test_human_maintainer_pr_may_change_trust_root(self):
+        result = self.evaluate(
+            changed_files=["scripts/factory_security.py", "FACTORY_RULES.md", ".github/workflows/dark-factory-ci.yml"],
+            author=self.human(), commits=[self.commit("1" * 40), self.commit("2" * 40)],
+        )
+        self.assertEqual(result["verdict"], "pass")
+        self.assertEqual(result["authority"]["lane"], "human-maintenance")
+        self.assertTrue(result["authority"]["protected_paths_permitted"])
+        self.assertEqual(result["protected_paths"],
+                         [".github/workflows/dark-factory-ci.yml", "FACTORY_RULES.md", "scripts/factory_security.py"])
+        self.assertFalse(any(x["kind"] == "protected_path" for x in result["findings"]))
+
+    def test_human_lane_accepts_member_and_collaborator_roles(self):
+        for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+            with self.subTest(association=association):
+                result = self.evaluate(changed_files=["FACTORY_RULES.md"],
+                                       author=self.human(association=association), commits=[self.commit()])
+                self.assertEqual(result["verdict"], "pass")
+
+    def test_human_without_repository_role_stays_on_autonomous_lane(self):
+        for association in ("CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "NONE", ""):
+            with self.subTest(association=association):
+                result = self.evaluate(changed_files=["FACTORY_RULES.md"],
+                                       author=self.human(association=association), commits=[self.commit()])
+                self.assertEqual(result["verdict"], "fail")
+                self.assertEqual(result["authority"]["lane"], "autonomous")
+
+    def test_bot_with_owner_association_is_still_a_bot(self):
+        result = self.evaluate(changed_files=["FACTORY_RULES.md"],
+                               author={"login": "x[bot]", "type": "Bot", "association": "OWNER"},
+                               commits=[self.commit()])
+        self.assertEqual(result["verdict"], "fail")
+        self.assertEqual(result["authority"]["lane"], "autonomous")
+
+    def test_human_lane_waives_nothing_but_the_protected_path_veto(self):
+        """Secret scan and dependency policy still bite on the human lane."""
+        marker = "-----BEGIN " + "PRIVATE KEY-----"  # split so this PR's own diff does not trip the scanner
+        diff = "diff --git a/x.py b/x.py\n+++ b/x.py\n+" + marker + "\n"
+        result = self.evaluate(changed_files=["scripts/factory_security.py", "x.py"], diff=diff,
+                               author=self.human(), commits=[self.commit()])
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any(x["kind"] == "secret" for x in result["findings"]))
+        result = self.evaluate(
+            changed_files=["FACTORY_RULES.md", m.BACKEND_MANIFEST],
+            head_backend=self.backend(deps=["fastapi", "httpx", "resend"]),
+            body="## Dependency justification\nresend is required.\n",
+            author=self.human(), commits=[self.commit()],
+        )
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any(x["kind"] == "lockfile" for x in result["findings"]))
+
+    def test_human_pr_carrying_a_bot_commit_into_trust_root_fails(self):
+        """Second fence: a factory commit pushed onto a human's branch does not inherit the lane."""
+        bot = {"login": "github-actions[bot]", "type": "Bot"}
+        for role in ("author", "committer"):
+            with self.subTest(role=role):
+                commits = [self.commit("1" * 40), self.commit("2" * 40, **{role: bot})]
+                result = self.evaluate(changed_files=["scripts/factory_security.py"],
+                                       author=self.human(), commits=commits)
+                self.assertEqual(result["verdict"], "fail")
+                problems = [x for x in result["findings"] if x["kind"] == "protected_path_provenance"]
+                self.assertEqual(len(problems), 1)
+                self.assertEqual(problems[0]["commit"], "2" * 12)
+
+    def test_human_pr_carrying_an_unresolved_commit_into_trust_root_fails(self):
+        """The kernel commits under an unmapped noreply identity, which GitHub resolves to null."""
+        commits = [self.commit("1" * 40), self.commit("2" * 40)]
+        commits[0]["author"] = None
+        result = self.evaluate(changed_files=["scripts/factory_security.py"],
+                               author=self.human(), commits=commits)
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any(x["kind"] == "protected_path_provenance" for x in result["findings"]))
+
+    def test_human_pr_with_unknown_commit_provenance_fails_closed(self):
+        result = self.evaluate(changed_files=["scripts/factory_security.py"], author=self.human(), commits=None)
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any(x["kind"] == "protected_path_provenance" for x in result["findings"]))
+
+    def test_bot_commits_are_ordinary_outside_the_trust_root(self):
+        """The second fence guards the trust root only; factory product PRs are unaffected."""
+        bot = {"login": "github-actions[bot]", "type": "Bot"}
+        result = self.evaluate(changed_files=["app/backend/routes/channels.py"],
+                               author=self.bot(), commits=[self.commit(author=bot, committer=bot)])
+        self.assertEqual(result["verdict"], "pass")
+        self.assertEqual(result["authority"]["lane"], "autonomous")
+
+    def test_concatenated_json_pages_are_all_read(self):
+        pages = m.concatenated_json('[{"sha": "a"}]\n[{"sha": "b"}, {"sha": "c"}]\n')
+        self.assertEqual([c["sha"] for page in pages for c in page], ["a", "b", "c"])
+        self.assertEqual(m.concatenated_json("   "), [])
+
+    def test_github_actor_keeps_only_platform_identity(self):
+        self.assertIsNone(m.github_actor(None))
+        self.assertEqual(m.github_actor({"login": "x", "type": "User", "email": "x@y"}),
+                         {"login": "x", "type": "User"})
+
     def test_backend_dependency_requires_lockfile(self):
         result = self.evaluate(
             changed_files=[m.BACKEND_MANIFEST],

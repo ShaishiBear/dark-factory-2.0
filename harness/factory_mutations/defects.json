@@ -346,7 +346,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION \u00a710 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION §10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -361,6 +361,27 @@
       "find": "    \"app/backend/signup_rate_limit.py\",\n",
       "replace": "",
       "why": "The signup abuse guard has no behavioural holdout scenario, so removing its path entry would leave it with no detector at all."
+    },
+    {
+      "id": "security-human-lane-granted-to-bots",
+      "file": "scripts/factory_security.py",
+      "find": "return actor.get(\"type\") == \"User\" and actor.get(\"association\") in HUMAN_ASSOCIATIONS",
+      "replace": "return True",
+      "why": "The trust-root maintenance lane would open to the factory's own Bot identity, letting an autonomous PR rewrite its judge."
+    },
+    {
+      "id": "security-human-lane-requires-repository-role-removed",
+      "file": "scripts/factory_security.py",
+      "find": "HUMAN_ASSOCIATIONS = frozenset({\"OWNER\", \"MEMBER\", \"COLLABORATOR\"})",
+      "replace": "HUMAN_ASSOCIATIONS = frozenset({\"OWNER\", \"MEMBER\", \"COLLABORATOR\", \"CONTRIBUTOR\", \"FIRST_TIME_CONTRIBUTOR\", \"NONE\", \"\"})",
+      "why": "Any GitHub user account, not only one holding a role on this repository, could change the trust root through a PR."
+    },
+    {
+      "id": "security-human-lane-commit-provenance-unchecked",
+      "file": "scripts/factory_security.py",
+      "find": "        findings.extend(commit_provenance_problems(commits))",
+      "replace": "        pass",
+      "why": "A factory commit pushed onto a human's branch would inherit the human lane; the second fence behind PR identity would be gone."
     }
   ]
 }
