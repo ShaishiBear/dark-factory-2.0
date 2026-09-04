@@ -29,6 +29,7 @@ from .independence import (
     verify_certificate,
 )
 from .provenance import verify_pack
+from .repro import OBSERVED_ARTIFACT, REPRO_ARTIFACT, ReproRefused, default_runner, execute, load_repro, observed_record
 from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
 from .worker_policy import BUILDER_BLIND_PATHS
@@ -229,7 +230,14 @@ class KernelRuntime:
 
             role = "investigate" if self._is_bug(labels) else "plan"
             self._agent(role, worktree.path, paths, context=issue_context, env=env)
-            self._agent("contract", worktree.path, paths, context=issue_context, env=env)
+            contract_context = issue_context
+            if role == "investigate":
+                # The red loop is a precondition of the contract: the kernel executes the
+                # proposed repro and refuses to continue unless it fails for the named reason.
+                contract_context = issue_context + "\n\n" + self._observe_repro(
+                    paths.artifacts, worktree.path
+                )
+            self._agent("contract", worktree.path, paths, context=contract_context, env=env)
             self._exec(
                 [
                     "python", "scripts/factory_protocol.py", "contract",
@@ -476,6 +484,20 @@ class KernelRuntime:
         result = outcome.as_dict()
         self._write_json(paths.artifacts / "code-review.json", result)
         return result
+
+    def _observe_repro(self, artifacts: Path, worktree: Path, *, runner=default_runner) -> str:
+        """Execute the investigate worker's repro; refuse unless it goes red for the named reason."""
+        try:
+            repro = load_repro(artifacts / REPRO_ARTIFACT)
+            observation = execute(repro, worktree=worktree, runner=runner)
+        except ReproRefused as exc:
+            raise NeedsHuman(f"bug repro refused: {exc}") from exc
+        record = observed_record(repro, observation)
+        self._write_json(artifacts / OBSERVED_ARTIFACT, record)
+        return "REPRO OBSERVED (kernel-executed, deterministic):\n" + json.dumps(
+            {k: record[k] for k in ("argv", "cwd", "rc", "matched_symptom", "output_sha256")},
+            sort_keys=True,
+        )
 
     def _review_and_repair(
         self, worktree: Worktree, paths: RunPaths, env: Mapping[str, str]
