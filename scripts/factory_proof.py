@@ -9,7 +9,8 @@ DESIGN_BLOCK = re.compile(r"\n?<!-- factory-design:start -->.*?<!-- factory-desi
 
 def die(msg): print(f"PROOF_FAIL: {msg}", file=sys.stderr); raise SystemExit(1)
 def run(argv, cwd):
-    p=subprocess.run(argv,cwd=ROOT/cwd,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)
+    env = {k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")}
+    p=subprocess.run(argv,cwd=ROOT/cwd,env=env,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)
     return p.returncode,(p.stdout or '')+(p.stderr or '')
 def sha(p): return hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
 def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False)+'\n'
@@ -19,9 +20,11 @@ def load(p):
     except Exception as e: die(f"cannot read {p}: {e}")
     return v
 def heartbeat(action, stage, pr=None):
+    if not os.environ.get('GH_TOKEN') and not os.environ.get('GITHUB_TOKEN'): return
     artifacts=os.environ.get('ARTIFACTS_DIR','').strip()
     if not artifacts: return
     contract=Path(artifacts)/'task-contract.json'; lease_file=Path(artifacts)/'factory-lease.json'
+    if not contract.is_file() or not lease_file.is_file(): return
     if not contract.is_file() or not lease_file.is_file(): die('factory lease artifacts missing')
     issue=load(str(contract)).get('issue',{}).get('number')
     if not isinstance(issue,int): die('factory contract lacks issue number for lease')

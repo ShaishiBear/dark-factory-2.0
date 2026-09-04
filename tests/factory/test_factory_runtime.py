@@ -171,7 +171,7 @@ class ExecCredentialScopeTests(unittest.TestCase):
         run.return_value = Mock(returncode=0, stdout="ok", stderr="")
         rt = KernelRuntime(repo_root=ROOT, config=load_config(ROOT / ".factory/kernel.json"))
         with patch.dict("os.environ", {"GH_TOKEN": "test_token_123"}, clear=True):
-            output = rt._exec(["python", "scripts/factory_protocol.py", "contract"], cwd=ROOT, credential_scope="github")
+            output = rt._exec(["python", "scripts/factory_lease.py", "start"], cwd=ROOT, credential_scope="github")
             self.assertEqual(output, "ok")
             child_env = run.call_args.kwargs["env"]
             self.assertEqual(child_env.get("GH_TOKEN"), "test_token_123")
@@ -181,10 +181,27 @@ class ExecCredentialScopeTests(unittest.TestCase):
         run.return_value = Mock(returncode=0, stdout="ok", stderr="")
         rt = KernelRuntime(repo_root=ROOT, config=load_config(ROOT / ".factory/kernel.json"))
         with patch.dict("os.environ", {"GH_TOKEN": "test_token_123"}, clear=True):
-            output = rt._exec(["python", "some_script.py"], cwd=ROOT, credential_scope="none")
+            output = rt._exec(["python", "scripts/factory_proof.py", "red"], cwd=ROOT, credential_scope="none")
             self.assertEqual(output, "ok")
             child_env = run.call_args.kwargs["env"]
             self.assertNotIn("GH_TOKEN", child_env)
+
+    @patch.object(KernelRuntime, "_exec")
+    def test_lease_heartbeat_uses_github_scope(self, mock_exec):
+        mock_exec.return_value = "ok"
+        rt = KernelRuntime(repo_root=ROOT, config=load_config(ROOT / ".factory/kernel.json"))
+        paths = Mock(artifacts=Path("/tmp/artifacts"))
+        rt._lease_heartbeat("start", 49, "contract", paths, cwd=Path("/tmp"))
+        mock_exec.assert_called_once_with(
+            [
+                "python", "scripts/factory_lease.py", "start",
+                "--issue", "49", "--stage", "contract",
+                "--lease-file", "/tmp/artifacts/factory-lease.json",
+            ],
+            cwd=Path("/tmp"),
+            credential_scope="github",
+            timeout=120,
+        )
 
 
 class AttachedEvidenceTests(unittest.TestCase):

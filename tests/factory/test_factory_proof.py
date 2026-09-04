@@ -17,6 +17,19 @@ spec.loader.exec_module(proof)
 TEST_FILE = "tests/factory/test_factory_evidence.py"
 
 
+class CheckpointEnvironmentSanitizationTests(unittest.TestCase):
+    @mock.patch("subprocess.run")
+    def test_run_strips_gh_token_and_github_token_from_child_environment(self, mock_run):
+        mock_run.return_value = mock.Mock(returncode=0, stdout="ok", stderr="")
+        with mock.patch.dict("os.environ", {"GH_TOKEN": "secret_gh_token", "GITHUB_TOKEN": "secret_github_token", "PATH": "/bin"}, clear=True):
+            rc, out = proof.run(["python", "-c", "import os; print('GH_TOKEN' in os.environ)"], ".")
+            self.assertEqual(rc, 0)
+            self.assertEqual(out, "ok")
+            passed_env = mock_run.call_args.kwargs["env"]
+            self.assertNotIn("GH_TOKEN", passed_env)
+            self.assertNotIn("GITHUB_TOKEN", passed_env)
+
+
 class ProofSpecTests(unittest.TestCase):
     def contract(self):
         return {

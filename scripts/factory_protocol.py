@@ -31,10 +31,14 @@ def canonical(value: dict) -> bytes:
 
 
 def lease(action: str, issue: int, stage: str, pr: str | None = None) -> None:
+    if not os.environ.get("GH_TOKEN") and not os.environ.get("GITHUB_TOKEN"):
+        return
     artifacts = os.environ.get("ARTIFACTS_DIR", "").strip()
     if not artifacts:
         return
     lease_file = Path(artifacts) / "factory-lease.json"
+    if not lease_file.is_file() and action != "start":
+        return
     argv = [
         sys.executable, str(ROOT / "scripts" / "factory_lease.py"), action,
         "--issue", str(issue), "--stage", stage, "--lease-file", str(lease_file),

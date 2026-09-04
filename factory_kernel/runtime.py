@@ -126,6 +126,21 @@ class KernelRuntime:
             timeout=180,
         )
 
+    def _lease_heartbeat(self, action: str, issue: int, stage: str, paths: RunPaths, cwd: Path, pr: int | None = None) -> None:
+        lease_file = paths.artifacts / "factory-lease.json"
+        argv = [
+            "python", "scripts/factory_lease.py", action,
+            "--issue", str(issue), "--stage", stage, "--lease-file", str(lease_file),
+        ]
+        if pr is not None and action != "start":
+            argv.extend(["--pr", str(pr)])
+        self._exec(
+            argv,
+            cwd=cwd,
+            credential_scope="github",
+            timeout=120,
+        )
+
     def choose_dispatch(self) -> DispatchDecision:
         """Canonical priority: stop -> reap -> review -> highest-priority accepted issue."""
         self.check_stop()
@@ -211,10 +226,11 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
-                credential_scope="github",
+                credential_scope="none",
                 timeout=120,
                 transcript=paths.transcripts / "contract-gate.log",
             )
+            self._lease_heartbeat("start", issue_number, "contract", paths, cwd=worktree.path)
 
             contract_hash = (paths.artifacts / "task-contract.sha256").read_text(
                 encoding="utf-8"
@@ -235,10 +251,11 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
-                credential_scope="github",
+                credential_scope="none",
                 timeout=180,
                 transcript=paths.transcripts / "context-gate.log",
             )
+            self._lease_heartbeat("touch", issue_number, "design-context", paths, cwd=worktree.path)
 
             self._agent("architecture", worktree.path, paths, env=env)
             self._exec(
@@ -284,10 +301,11 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
-                credential_scope="github",
+                credential_scope="none",
                 timeout=600,
                 transcript=paths.transcripts / "red-gate.log",
             )
+            self._lease_heartbeat("touch", issue_number, "red", paths, cwd=worktree.path)
 
             self._agent(
                 "implement",
@@ -304,10 +322,11 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
-                credential_scope="github",
+                credential_scope="none",
                 timeout=600,
                 transcript=paths.transcripts / "green-gate.log",
             )
+            self._lease_heartbeat("touch", issue_number, "green", paths, cwd=worktree.path)
 
             self._review_and_repair(worktree, paths, env)
             self._agent("conformance", worktree.path, paths, env=env)
@@ -336,10 +355,11 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
-                credential_scope="github",
+                credential_scope="none",
                 timeout=600,
                 transcript=paths.transcripts / "final-green-gate.log",
             )
+            self._lease_heartbeat("touch", issue_number, "final-green", paths, cwd=worktree.path)
 
             self._exec(
                 list(self.config.validation.quick_command),
@@ -444,7 +464,7 @@ class KernelRuntime:
             ],
             cwd=worktree.path,
             env=env,
-            credential_scope="github",
+            credential_scope="none",
             timeout=600,
         )
         self._agent(
