@@ -93,6 +93,29 @@ jobs:
               exit 1
             }
           done
+
+          # The kernel opens the product PR with this same Actions token. Whether Actions may
+          # create pull requests is a repository setting (Settings > Actions > General >
+          # Workflow permissions > "Allow GitHub Actions to create and approve pull requests").
+          # The first complete canary build (D-022) discovered it was off only after a
+          # two-hour build, at `gh pr create`. Reading the setting needs administration:read,
+          # which GITHUB_TOKEN does not hold, so this check is honest about its reach: an
+          # explicit false refuses the run; a readable true passes; a 403 or other read failure
+          # is reported as unverified and the run continues, failing loudly at PR creation.
+          pr_permission="$(gh api "repos/$GITHUB_REPOSITORY/actions/permissions/workflow" \
+            --jq '.can_approve_pull_request_reviews' 2>/dev/null || echo "unreadable")"
+          case "$pr_permission" in
+            true)
+              echo "FACTORY_PREFLIGHT_PR_PERMISSION_OK"
+              ;;
+            false)
+              echo "FACTORY_PREFLIGHT_REFUSED GitHub Actions may not create pull requests (Settings > Actions > General > Workflow permissions)"
+              exit 1
+              ;;
+            *)
+              echo "FACTORY_PREFLIGHT_PR_PERMISSION_UNVERIFIED token cannot read actions/permissions/workflow; a run will fail at gh pr create if the setting is off"
+              ;;
+          esac
           # Cheap early signal only: a raw request built the way the SDK builds it
           # (base URL + /v1/messages). The authority for the route is the CLI probe below,
           # which runs the pinned worker binary exactly as the kernel launches it.
