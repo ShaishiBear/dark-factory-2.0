@@ -165,12 +165,14 @@ class FakeGitHub:
                  refuse_issue_creation: bool = False, comments: tuple[str, ...] = (),
                  prs: tuple[Mapping[str, Any], ...] = (),
                  author: str = "github-actions[bot]",
+                 author_type: str = "Bot",
                  issue_labels: tuple[str, ...] = ("factory:needs-human",)) -> None:
         self.trace = trace
         self.cwd = "."
         self._state = state
         self._labels = labels
         self._author = author
+        self._author_type = author_type
         self._issue_labels = issue_labels
         self._head = head
         self._base = base
@@ -191,8 +193,15 @@ class FakeGitHub:
             "baseRefName": "main", "baseRefOid": self._base,
             "state": self._state, "changedFiles": 1,
             "labels": [{"name": name} for name in self._labels],
-            "author": {"login": self._author},
+            # GraphQL spelling, as `gh pr view --json author` returns it for a GitHub App.
+            # Nothing in the kernel decides from it; `pr_author()` below is the authority.
+            "author": {"login": "app/github-actions" if self._author == "github-actions[bot]" else self._author},
         }
+
+    def pr_author(self, number: int) -> dict[str, str]:
+        """REST `pulls/N` `user` shape: the spelling the trust-root guard and resume decide from."""
+        self.trace.record("github", "pr_author")
+        return {"login": self._author, "type": self._author_type}
 
     def issue(self, number: int) -> Mapping[str, Any]:
         self.trace.record("github", "issue")
@@ -377,7 +386,8 @@ class Scenario:
     red_files: Mapping[str, str] | None = None   # RED-hashed files the pack declares
     worktree_files: Mapping[str, str] | None = None  # files present in the rehearsed worktree
     rebase_conflict: bool = False
-    author: str = "github-actions[bot]"  # who opened the PR, for resume
+    author: str = "github-actions[bot]"  # who opened the PR (REST login), for resume
+    author_type: str = "Bot"             # REST user.type; the factory is a Bot
     issue_labels: tuple[str, ...] = ("factory:needs-human",)  # linked issue's labels, for resume
     artifacts: Mapping[str, dict] | None = None  # resume: builder artifacts by relative name
 
@@ -420,7 +430,8 @@ def rehearse(scenario: Scenario) -> Trace:
             head=scenario.head, body=scenario.body,
             refuse_issue_creation=scenario.refuse_issue_creation,
             comments=scenario.comments, prs=scenario.prs,
-            author=scenario.author, issue_labels=scenario.issue_labels)
+            author=scenario.author, author_type=scenario.author_type,
+            issue_labels=scenario.issue_labels)
         artifacts_dir = home / "uploaded-artifacts"
         if scenario.artifacts is not None:
             artifacts_dir.mkdir()

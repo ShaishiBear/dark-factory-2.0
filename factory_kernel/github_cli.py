@@ -62,6 +62,21 @@ class GitHubClient:
             ["pr", "view", str(number), "-R", self.repository, "--json", fields]
         )
 
+    def pr_author(self, number: int) -> dict[str, str]:
+        """Who opened the PR, as GitHub's REST API reports it: platform identity, one spelling.
+
+        `gh pr view --json author` (GraphQL) names a GitHub App as `app/github-actions`; the
+        REST `pulls/N` endpoint names the same actor `github-actions[bot]` with type `Bot`. The
+        trust-root guard (`scripts/factory_security.py pr_identity`) decides lanes from the REST
+        shape, so every kernel decision about a PR's author reads the same source.
+        """
+        self._number(number, "PR")
+        info = self.json(["api", f"repos/{self.repository}/pulls/{number}"])
+        user = info.get("user") if isinstance(info, Mapping) else None
+        if not isinstance(user, Mapping):
+            raise RuntimeError(f"GitHub reported no user for PR #{number}")
+        return {"login": str(user.get("login") or ""), "type": str(user.get("type") or "")}
+
     def pr_comments(self, number: int) -> list[str]:
         """Comment bodies in creation order; the kernel's own markers live in them."""
         self._number(number, "PR")

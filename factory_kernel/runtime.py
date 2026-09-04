@@ -49,7 +49,7 @@ from .repro import (
 )
 from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
-from .worker_policy import BUILDER_BLIND_PATHS, KERNEL_COMMIT_ARGS, max_turns
+from .worker_policy import BUILDER_BLIND_PATHS, KERNEL_COMMIT_NAME, KERNEL_COMMIT_ARGS, max_turns
 from .worktree import Worktree, create_detached, remove
 
 STAGE_TIMINGS = "stage-timings.jsonl"
@@ -1029,7 +1029,12 @@ class KernelRuntime:
 
     # ---------- resume: finish a pushed-but-unpublished PR from its uploaded artifacts ----------
 
-    ACTIONS_BOT_LOGIN = "github-actions"
+    # The factory opens PRs with the Actions token. GitHub's REST API reports that actor as
+    # login `github-actions[bot]`, type `Bot`; the kernel already commits under that exact name
+    # (worker_policy.KERNEL_COMMIT_NAME), so there is one spelling of the factory's identity.
+    # The GraphQL spelling `app/github-actions` (what `gh pr view --json author` returns) is
+    # never compared: canary run 33927106276 refused the factory's own PR #74 on it.
+    FACTORY_PR_AUTHOR = {"login": KERNEL_COMMIT_NAME, "type": "Bot"}
 
     def resume_pr(self, pr_number: int, artifacts_dir: Path) -> str:
         """Finish a build that pushed its branch and opened its PR, then died before the
@@ -1054,11 +1059,11 @@ class KernelRuntime:
         info = self.github.pr(pr_number, holdout_safe=True)
         if info.get("state") != "OPEN":
             raise NeedsHuman(f"PR #{pr_number} is not open")
-        author = info.get("author") if isinstance(info.get("author"), Mapping) else {}
-        login = str(author.get("login") or "")
-        if login.removesuffix("[bot]") != self.ACTIONS_BOT_LOGIN:
+        author = self.github.pr_author(pr_number)
+        if author.get("type") != self.FACTORY_PR_AUTHOR["type"] or author.get("login") != self.FACTORY_PR_AUTHOR["login"]:
             raise NeedsHuman(
-                f"PR #{pr_number} was not opened by the factory (author {login!r}); "
+                f"PR #{pr_number} was not opened by the factory "
+                f"(author {author.get('login')!r}, type {author.get('type')!r}); "
                 "only an autonomous PR can be resumed"
             )
         head = str(info.get("headRefOid") or "")

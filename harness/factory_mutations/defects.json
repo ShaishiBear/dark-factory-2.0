@@ -1044,9 +1044,16 @@
     {
       "id": "resume-accepts-human-authored-pr",
       "file": "factory_kernel/runtime.py",
-      "find": "        if login.removesuffix(\"[bot]\") != self.ACTIONS_BOT_LOGIN:",
+      "find": "        if author.get(\"type\") != self.FACTORY_PR_AUTHOR[\"type\"] or author.get(\"login\") != self.FACTORY_PR_AUTHOR[\"login\"]:",
       "replace": "        if False:",
-      "why": "A human-authored PR could be handed to autonomous validation with attached artifacts it did not build."
+      "why": "A human-authored PR could be resumed as if the factory had built it; resume must only finish the factory's own PRs."
+    },
+    {
+      "id": "resume-author-type-ignored",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if author.get(\"type\") != self.FACTORY_PR_AUTHOR[\"type\"] or author.get(\"login\") != self.FACTORY_PR_AUTHOR[\"login\"]:",
+      "replace": "        if author.get(\"login\") != self.FACTORY_PR_AUTHOR[\"login\"]:",
+      "why": "Identity would be a login string alone; a User account named like the bot would pass as the factory."
     }
   ]
 }

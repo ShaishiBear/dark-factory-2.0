@@ -897,3 +897,26 @@ test catches. Authentication is unchanged: `factory_provenance.py publish` and
 askpass helpers.
 
 First use: PR #74 (canary attempt 10, run 33920886708).
+
+---
+
+## D-035 · One factory identity, one spelling, read from REST
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+The first resume of the factory's own PR #74 (worker run 33927106276) refused with "not
+opened by the factory (author 'app/github-actions')". `gh pr view --json author` is a GraphQL
+query and names a GitHub App as `app/github-actions`; the REST `pulls/N` endpoint names the
+same actor `github-actions[bot]` with type `Bot`. `resume_pr` compared the GraphQL spelling
+against a bare `github-actions` and never saw the actor the rest of the system knows.
+
+The trust-root guard already decides lanes from the REST shape (`scripts/factory_security.py
+pr_identity`: `user.login`, `user.type`, `author_association`), and the kernel already commits
+as `github-actions[bot]` (`worker_policy.KERNEL_COMMIT_NAME`). So the factory's identity has
+exactly one spelling and one source: `github_cli.pr_author()` reads the REST `user`, and
+`resume_pr` requires type `Bot` and that login. The GraphQL author is no longer consulted for
+any decision. Type is part of the identity: a User account named like the bot is refused.
+
+Twelfth canary defect. Grep of the kernel for other PR-author comparisons: none (`triage.py`
+compares issue authors for the daily cap, from the issue-list JSON, unchanged).
+
