@@ -29,7 +29,7 @@ export function formatCitation(citation: Citation): string {
   if (citation.source_type === 'dynamous') {
     const lessonUrl = citation.lesson_url?.trim();
     if (!lessonUrl) {
-      return `${citation.video_title} — ${range}\n  > "${citation.snippet}"`;
+      return `- ${citation.video_title} — ${range}\n  > "${citation.snippet}"`;
     }
     const link = `[${citation.video_title}](${lessonUrl})`;
     return `- ${link} — ${range}\n  > "${citation.snippet}"`;
@@ -43,14 +43,14 @@ export function formatCitation(citation: Citation): string {
     console.warn(
       `[exportMarkdown] Skipping timestamp link — invalid video_url: "${citation.video_url}"`,
     );
-    return `${citation.video_title} (timestamp link unavailable) — ${range}`;
+    return `- ${citation.video_title} (timestamp link unavailable) — ${range}\n  > "${citation.snippet}"`;
   }
 
   if (!videoId) {
     console.warn(
       `[exportMarkdown] Skipping timestamp link — invalid video_url: "${citation.video_url}"`,
     );
-    return `${citation.video_title} (timestamp link unavailable) — ${range}`;
+    return `- ${citation.video_title} (timestamp link unavailable) — ${range}\n  > "${citation.snippet}"`;
   }
 
   const externalUrl = `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(citation.start_seconds)}s`;
