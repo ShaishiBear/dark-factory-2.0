@@ -1,0 +1,52 @@
+{
+  "version": "2.0",
+  "issue": {
+    "number": 49,
+    "title": "fix(export): markdown export drops the transcript snippet when a citation URL cannot be parsed"
+  },
+  "summary": "formatCitation in app/frontend/src/lib/exportMarkdown.ts renders each citation in an exported conversation, and three of its fallback returns drift from the healthy shape (a '- ' list item whose range line is followed by an indented '> \"<snippet>\"' blockquote): the two YouTube fallbacks (unparseable video_url, or video_url with no v parameter) drop both the leading '- ' marker and the quoted-snippet blockquote, and the Dynamous empty-lesson_url fallback keeps the snippet but lacks the '- ' marker, so entries merge into the previous list item and MISSION-required transcript snippets are silently lost from the export. The fix aligns all three fallback returns with the healthy-path shape. Only that one production file changes, plus acceptance tests appended to the existing test file, whose every current case must keep passing.",
+  "behaviors": {
+    "AC-1": {
+      "given": "a citation of default/'youtube' source type with an arbitrary non-empty video_title, video_url 'not-a-url' (unparseable), start_seconds 10, end_seconds 20, and snippet 'Relevant text'",
+      "when": "formatCitation(citation) is called",
+      "then": "the returned string contains '> \"Relevant text\"' on its own line, i.e. the quoted transcript snippet appears as a blockquote line",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    },
+    "AC-2": {
+      "given": "the same citation as AC-1 (video_url 'not-a-url', snippet 'Relevant text', start_seconds 10, end_seconds 20)",
+      "when": "formatCitation(citation) is called",
+      "then": "the returned string starts with '- ' and still contains the fallback marker and timestamp range verbatim as '(timestamp link unavailable) — 0:10–0:20' (em dash U+2014 between the marker and the range, en dash U+2013 inside the range); on the unchanged tree the fallback emits no '- ' prefix, so this assertion is the RED proof of the deferred repro",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    },
+    "AC-3": {
+      "given": "a citation with source_type 'dynamous' and an empty lesson_url (''), an arbitrary non-empty video_title, a non-empty snippet, start_seconds 10, end_seconds 20",
+      "when": "formatCitation(citation) is called",
+      "then": "the returned string starts with '- ', contains no '](' (no markdown link), and still contains its '> \"<snippet>\"' blockquote",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    }
+  },
+  "invariants": [
+    "Every existing test case in app/frontend/src/lib/exportMarkdown.test.ts keeps passing unchanged; the issue requires that 'every current case must keep passing'.",
+    "formatCitation still returns the empty string when snippet is empty, whitespace-only, or undefined (existing guard, pinned by the current 'should return empty string for empty snippet' test).",
+    "The exact console.warn message '[exportMarkdown] Skipping timestamp link — invalid video_url: \"<video_url>\"' is still emitted on both YouTube fallback triggers (unparseable video_url and video_url lacking a v parameter); it is pinned verbatim by an existing test.",
+    "Healthy paths are unchanged: a citation with a valid YouTube video_url still yields '- [<title>](https://www.youtube.com/watch?v=<id>&t=<start>s) — <range>' followed by an indented '> \"<snippet>\"' blockquote line, and a Dynamous citation with a valid lesson_url still yields '- [<title>](<lesson_url>) — <range>' with the same blockquote (pinned by existing tests, including the full-export test).",
+    "After the fix, every formatCitation return path for a non-empty snippet begins with '- ' and carries its own quoted-snippet blockquote on its own line, so formatSources' newline join keeps each citation a separate Markdown list item and the reported merging symptom cannot recur on any path.",
+    "formatTimestamp, the export header, and the filename slug behave exactly as before."
+  ],
+  "out_of_scope": [
+    "Backend, database schema, and any dependency changes — no new or version-changed packages are introduced.",
+    "app/frontend/src/components/CitationModal.tsx, Message.tsx, ChatArea.tsx, and Sidebar.tsx.",
+    "The valid-URL (YouTube with a v parameter) and valid-lesson_url (Dynamous) return paths of formatCitation, except insofar as they serve as the reference shape the fallbacks must match.",
+    "formatTimestamp, the export header, and the filename slug.",
+    "Any production file other than app/frontend/src/lib/exportMarkdown.ts; acceptance tests are added to the existing app/frontend/src/lib/exportMarkdown.test.ts, which is not otherwise restructured.",
+    "Deduplicating the twin console.warn-plus-return blocks inside formatCitation (investigation-flagged separate-issue material); a fix that preserves observable output and the pinned warning may leave the duplication in place."
+  ],
+  "risks": [
+    "The YouTube fallback entries must gain the '- ' prefix and the snippet blockquote without becoming links: the existing test pins not.toContain('[Test Video Title](') and toContain('Test Video Title') for the unparseable-URL case, so the bare title text and the absence of any markdown link must survive.",
+    "The console.warn message is pinned verbatim by an existing test; rewording, reordering, or dropping the warning on either trigger path turns a currently green case red.",
+    "Snippets are interpolated raw into the blockquote with no escaping; snippets containing double quotes or newlines will surface verbatim on fallback entries exactly as they already do on healthy paths. Do not add snippet escaping in this PR — it would either diverge the fallback shape from the healthy shape or widen scope.",
+    "If the implementer deduplicates the twin warn/return blocks, observable return values and warning behavior must remain identical on all return paths; otherwise minimal duplication-preserving edits are the safer change.",
+    "RED-proof authoring: acceptance tests should assert with string matching (toContain/toMatch) against the returned string rather than boolean assertions, so a red failure prints the actual fallback line containing '(timestamp link unavailable) — 0:10–0:20' and the deferred symptom stays visible in the checkpoint output."
+  ],
+  "ambiguities": []
+}

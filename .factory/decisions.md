@@ -664,3 +664,27 @@ by construction, and repairing against them would turn a one-shot blinded judge 
 the builder can iterate against. Whether any other class deserves a loop is a question the
 recorded reason codes will answer; until they do, the honest §13 line is that refusals are
 classified and a repair loop is deferred, not that none is wanted.
+
+---
+
+## D-027 · A correct contract refused for its spelling
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Canary attempt 6 (worker run 33912650468, issue #49) cleared the deferred repro in five
+turns, had its prompt rendered with real paths, and the contract worker wrote a complete,
+correct contract in six turns: three behaviours on the right seam, six invariants pinned to
+existing tests, no ambiguities. `scripts/factory_protocol.py contract` refused it with
+"contract needs at least one observable behavior" because `behaviors` was an object keyed by
+AC id and the compiler required a list of objects each carrying `id`. The prompt said
+"`behaviors` as `AC-N` objects", which reads as a keyed map; attempt 3 had guessed the list.
+
+The seventh canary defect, and the cheapest: a prompt described a shape ambiguously and a
+deterministic gate refused a contract whose content was exactly what the gate wanted. Two
+fixes, both kept: the prompt now shows the whole file as a JSON skeleton and says in one
+sentence that `behaviors` is a list, and the compiler normalises the keyed spelling to the
+list before validation and hashing, refusing a non-AC key or a conflicting inner `id`. The
+canonical hash, the compiled file and every downstream consumer see only the list form. The
+refused raw contract is checked in as a fixture and must compile with `criteria=3`.
+
+A deterministic gate should refuse wrong content, not a second spelling of right content.

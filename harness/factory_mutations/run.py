@@ -66,6 +66,8 @@ COPY_FILES = (
     "harness/mutations/defects.json",
     "harness/focused.py",
     "tests/factory/test_factory_security.py",
+    "tests/factory/test_factory_contract_shape.py",
+    "tests/factory/fixtures/contracts/run-33912650468-issue-49-keyed.json",
     "tests/factory/test_factory_workflow_hygiene.py",
     "tests/factory/test_factory_worker_throughput.py",
     "tests/factory/test_factory_methods.py",

@@ -48,6 +48,32 @@ def validate_dependencies(deps: object) -> list[dict]:
     return deps
 
 
+def ac_number(ac_id: str) -> int:
+    return int(ac_id.split("-", 1)[1])
+
+
+def normalise_behaviors(behaviors: object) -> object:
+    """Accept `behaviors` keyed by AC id and return the canonical list form.
+
+    The contract prompt once described behaviors as "AC-N objects", and a worker wrote
+    `{"AC-1": {...}, "AC-2": {...}}` -- a complete, correct contract the compiler refused
+    (canary run 33912650468, D-027). The two spellings carry identical content, so the
+    compiler normalises the keyed form before validation and the canonical hash, the compiled
+    file and every downstream consumer see only the list form. A key that is not an AC id, or
+    a value whose own `id` disagrees with its key, is refused rather than guessed at.
+    """
+    if not isinstance(behaviors, dict):
+        return behaviors
+    for key, value in behaviors.items():
+        if not AC.match(str(key)): die(f"behaviors keyed form has a non-AC key {key!r}")
+        if not isinstance(value, dict): die(f"behavior {key} must be an object")
+        if "id" in value and value["id"] != key: die(f"behavior {key} carries a conflicting id {value['id']!r}")
+    return [
+        {"id": key, **{k: v for k, v in behaviors[key].items() if k != "id"}}
+        for key in sorted(behaviors, key=ac_number)
+    ]
+
+
 def validate_contract(c: dict, issue: int | None = None) -> str:
     required = {"version", "issue", "summary", "behaviors", "invariants", "out_of_scope", "risks", "ambiguities"}
     missing = sorted(required - c.keys())
@@ -58,7 +84,7 @@ def validate_contract(c: dict, issue: int | None = None) -> str:
     if issue is not None and c["issue"]["number"] != issue: die("contract issue number does not match dispatched issue")
     if not isinstance(c["summary"], str) or len(c["summary"].strip()) < 10: die("contract summary is too weak")
     if c["ambiguities"] != []: die("material ambiguities remain; factory must stop")
-    behaviors = c["behaviors"]
+    behaviors = c["behaviors"] = normalise_behaviors(c["behaviors"])
     if not isinstance(behaviors, list) or not behaviors: die("contract needs at least one observable behavior")
     ids: set[str] = set()
     for b in behaviors:
