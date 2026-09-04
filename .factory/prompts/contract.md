@@ -19,6 +19,6 @@ Write only `$ARTIFACTS_DIR/task-contract.raw.json` with exactly this shape:
 }
 ```
 
-`behaviors` is a list; each item carries its own `id`. Do not invent requirements. Put any genuinely unresolved product decision in `ambiguities`; the deterministic compiler will stop rather than guess. Every requested behavior must map to a testable seam.
+`behaviors` is a list; each item carries its own `id`. `invariants`, `out_of_scope`, `risks` and `ambiguities` are string arrays (plain strings, not objects). Do not invent requirements. Put any genuinely unresolved product decision in `ambiguities`; the deterministic compiler will stop rather than guess. Every requested behavior must map to a testable seam.
 
 If, and only if, the change needs a new or version-changed package, declare it in a `dependencies` array: objects with `ecosystem` (`python` or `javascript`), `name`, `purpose`, `why_existing_insufficient` and `maintenance_evidence`, each a substantive sentence. The kernel renders these verbatim into the PR body under `## Dependency justification`, which the security guard requires; an undeclared package cannot merge. Otherwise omit the array or leave it empty.

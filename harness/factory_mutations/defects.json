@@ -886,6 +886,41 @@
       "find": "    behaviors = c[\"behaviors\"] = normalise_behaviors(c[\"behaviors\"])\n",
       "replace": "    behaviors = c[\"behaviors\"]\n",
       "why": "A complete contract written with behaviors keyed by AC id would be refused again as having no behaviors, as on canary run 33912650468."
+    },
+    {
+      "id": "worker-context-rendered-as-prompt",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        if context.strip():\n            prompt = prompt.rstrip(\"\\n\") + \"\\n\\n\" + context.strip() + \"\\n\"\n",
+      "replace": "        if context.strip():\n            prompt = render_prompt(prompt.rstrip(\"\\n\") + \"\\n\\n\" + context.strip() + \"\\n\", env)\n",
+      "why": "Untrusted context (an issue body naming $PATH) would be rendered and refuse every stage of the run before a model is invoked."
+    },
+    {
+      "id": "review-diff-not-supplied",
+      "file": "factory_kernel/runtime.py",
+      "find": "        diff_context = self._diff_context(worktree.path, env)\n        full_context = (context.strip() + \"\\n\\n\" + diff_context) if context.strip() else diff_context\n",
+      "replace": "        full_context = context\n",
+      "why": "Reviewers have no shell and cannot compute a diff; without the kernel supplying it they burn their cap reading the checkout blind."
+    },
+    {
+      "id": "governor-brief-omits-applicable-policy-ids",
+      "file": "factory_kernel/runtime.py",
+      "find": "                    include_design=True, include_applicable_policy=True,\n",
+      "replace": "                    include_design=True,\n",
+      "why": "The governor would guess the policy ID sets the compiler recomputes exactly, and be refused on any semantic disagreement."
+    },
+    {
+      "id": "stage-note-existence-unchecked",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._require_stage_note(paths.artifacts, role)\n",
+      "replace": "",
+      "why": "A plan/investigate worker that wrote nothing would pass silently and the contract would be drawn from the issue alone."
+    },
+    {
+      "id": "red-gate-refuses-spec-files-the-commit-authority-accepts",
+      "file": "scripts/factory_proof.py",
+      "find": "    return 'test' in low or '/tests/' in slashed or '/__tests__/' in slashed or '.spec.' in low or low.endswith('conftest.py')\n",
+      "replace": "    return 'test' in low or '/tests/' in slashed or low.endswith('conftest.py')\n",
+      "why": "A .spec. acceptance file committed by git_authority would be refused by RED, leaving a stray commit on the branch."
     }
   ]
 }

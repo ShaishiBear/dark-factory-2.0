@@ -688,3 +688,41 @@ canonical hash, the compiled file and every downstream consumer see only the lis
 refused raw contract is checked in as a fixture and must compile with `criteria=3`.
 
 A deterministic gate should refuse wrong content, not a second spelling of right content.
+
+---
+
+## D-028 · A prompt shows the shape its validator accepts; the kernel supplies what a worker cannot compute
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Canary attempt 6 (worker run 33912650468) refused a complete, correct contract because the
+prompt said "`behaviors` as `AC-N` objects" and the worker wrote a dict keyed by AC id while the
+compiler wanted a list (D-027). A read-only audit then compared every worker-written artifact's
+prompt against the program that validates it and found the same class fourteen more times. This
+change lands the resolutions:
+
+- The kernel renders only the text it wrote (preamble, role prompt, pinned methods); the
+  untrusted `context` (issue body, repro record, review JSON) is appended unrendered, so an
+  issue that mentions `$PATH` or `$GITHUB_TOKEN` no longer refuses every stage before a model
+  runs.
+- `investigate.md` no longer lists `-x` (an exec flag the repro validator refuses), lists every
+  allowed shape, and states the 2000-character RED tail the deferred symptom is matched in;
+  `diagnosing-bugs.md` names only runner shapes and both repro records.
+- `architecture.md` and `conformance.md` show the JSON skeleton: `rationale` is an array,
+  `required_changes` is `[]` for `proceed`, conformance `findings` are plain strings coupled to
+  the verdict, and the policy ID rule is stated exactly as `applicable()`/`overlaps()` compute
+  it. The kernel additionally hands the governor the computed sets in its brief; the compiler
+  still recomputes and refuses any mismatch.
+- `context.md`: `ac_mapping` values are arrays even for one seam; no duplicates in any array.
+  `contract.md`: the four arrays are string arrays.
+- Reviewers and the conformance authority receive the merge-base diff in their invocation
+  context (bounded to 60 000 characters plus a stat); they have no shell to compute one.
+- `repair.md` has an explicit "nothing to change" path: fail rather than finish clean.
+- `factory_proof.py`'s test-oriented predicate now equals `git_authority`'s, so a `.spec.` or
+  `__tests__/` acceptance file cannot be committed and then refused at RED.
+- The kernel refuses a plan/investigate stage that wrote no note; nothing else read those files.
+
+The rule: every prompt describing a validated artifact shows the exact JSON skeleton the
+validator accepts, and the kernel supplies data the worker cannot compute (diffs, applicable
+policy IDs, hashes). Accepting an equivalent spelling is allowed; dropping a required field or
+check is not. Trust-root change through the maintainer lane.

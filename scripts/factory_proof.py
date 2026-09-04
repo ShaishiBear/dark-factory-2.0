@@ -53,6 +53,11 @@ def artifacts():
     if not isinstance(planned,list) or not planned or not isinstance(allowed_new,list):
         die('compiled design lacks implementation file envelope')
     return contract,design,ids
+def test_oriented(path):
+    # Must accept every path git_authority.commit_acceptance_tests accepts, or a declared file is
+    # committed and then refused here, leaving a stray commit (D-028). Mirror of _test_oriented.
+    low=path.lower(); slashed='/'+low
+    return 'test' in low or '/tests/' in slashed or '/__tests__/' in slashed or '.spec.' in low or low.endswith('conftest.py')
 def checkpoint(value):
     required={'acceptance_id','cwd','argv','files','expected_failure'}
     if not isinstance(value,dict) or required-value.keys(): die('test checkpoint missing fields')
@@ -66,8 +71,7 @@ def checkpoint(value):
     for f in value['files']:
         p=Path(f)
         if p.is_absolute() or '..' in p.parts or not (ROOT/p).is_file(): die(f'{ac} unsafe/missing test file {f}')
-        low=f.lower()
-        if not ('test' in low or '/tests/' in '/'+low or low.endswith('conftest.py')): die(f'{ac} acceptance file is not test-oriented: {f}')
+        if not test_oriented(f): die(f'{ac} acceptance file is not test-oriented: {f}')
     return dict(value)
 def spec(path):
     s=load(path)

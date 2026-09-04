@@ -305,6 +305,10 @@ class KernelRuntime:
 
             role = "investigate" if self._is_bug(labels) else "plan"
             self._agent(role, worktree.path, paths, context=issue_context, env=env)
+            # plan.md / investigation.md are read by no deterministic program, only by the
+            # contract worker. A worker that wrote nothing would otherwise pass silently and the
+            # contract would be drawn from the issue alone (D-028).
+            self._require_stage_note(paths.artifacts, role)
             contract_context = issue_context
             if role == "investigate":
                 # The red loop is a precondition of the contract: the kernel executes the
@@ -366,7 +370,7 @@ class KernelRuntime:
                 paths,
                 context=self._worker_brief(
                     paths, contract_hash=contract_hash, issue_context=issue_context,
-                    include_design=True,
+                    include_design=True, include_applicable_policy=True,
                 ),
                 env=env,
             )
@@ -453,7 +457,10 @@ class KernelRuntime:
             self._lease_heartbeat("touch", issue_number, "green", paths, cwd=worktree.path)
 
             self._review_and_repair(worktree, paths, env)
-            self._agent("conformance", worktree.path, paths, env=env)
+            self._agent(
+                "conformance", worktree.path, paths,
+                context=self._diff_context(worktree.path, env), env=env,
+            )
             self._exec(
                 [
                     "python", "scripts/factory_architecture.py", "conformance",
@@ -592,8 +599,11 @@ class KernelRuntime:
         Each axis writes its own artifact. The deterministic aggregator refuses a missing,
         malformed or mislabelled artifact and fails the review if either axis fails.
         """
+        # Reviewers have no shell and cannot compute a diff; the kernel supplies it (D-028).
+        diff_context = self._diff_context(worktree.path, env)
+        full_context = (context.strip() + "\n\n" + diff_context) if context.strip() else diff_context
         for axis in AXES:
-            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=context, env=env)
+            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=full_context, env=env)
         try:
             outcome = aggregate(read_axes(paths.artifacts, self._read_json))
         except ReviewInvalid as exc:
@@ -926,7 +936,10 @@ class KernelRuntime:
 
             env = self._run_env(paths, base_ref=f"origin/{default}")
             self._rehead_green(paths, worktree.path, env, output="green-proof.json", log=self.REHEAD_GREEN_LOG)
-            self._agent("conformance", worktree.path, paths, env=env)
+            self._agent(
+                "conformance", worktree.path, paths,
+                context=self._diff_context(worktree.path, env), env=env,
+            )
             self._exec(
                 [
                     "python", "scripts/factory_architecture.py", "conformance",
@@ -1360,6 +1373,64 @@ class KernelRuntime:
             num_turns=telemetry["num_turns"], duration_ms=telemetry["duration_ms"],
         )
 
+    # A merge-base diff handed to reviewers and the conformance authority. Bounded so a large
+    # change cannot blow the prompt; the worker still has Read over the checkout for the rest.
+    DIFF_CONTEXT_CHARS = 60_000
+    STAGE_NOTES = {"plan": "plan.md", "investigate": "investigation.md"}
+
+    def _require_stage_note(self, artifacts: Path, role: str) -> None:
+        """A plan/investigation the contract worker will read must exist and say something."""
+        name = self.STAGE_NOTES[role]
+        path = artifacts / name
+        if not path.is_file() or not path.read_text(encoding="utf-8", errors="replace").strip():
+            raise NeedsHuman(f"{role} worker wrote no {name}")
+
+    def _diff_context(self, worktree: Path, env: Mapping[str, str]) -> str:
+        """The merge-base..HEAD diff as text, with a stat, truncated past DIFF_CONTEXT_CHARS."""
+        base_ref = str(env.get("FACTORY_BASE_REF") or "origin/main")
+        stat = self._git("diff", "--stat", f"{base_ref}...HEAD", cwd=worktree)
+        diff = self._git("diff", f"{base_ref}...HEAD", cwd=worktree)
+        limit = self.DIFF_CONTEXT_CHARS
+        body = diff if len(diff) <= limit else (
+            diff[:limit] + f"\n\n[diff truncated after {limit} characters; read the changed files]"
+        )
+        return (
+            f"MERGE-BASE DIFF ({base_ref}...HEAD), supplied by the kernel:\n"
+            f"{stat}\n\n{body}"
+        )
+
+    def _applicable_policy_ids(self, paths: RunPaths) -> dict[str, list[str]]:
+        """The policy ID sets the architecture compiler will require, computed the same way.
+
+        The governor worker cannot run the compiler; handing it the exact sets it must echo
+        removes the guess. The compiler still recomputes and refuses any mismatch."""
+        policy = self._read_json(self.repo_root / ".factory" / "architecture.json")
+        context = self._read_json(paths.artifacts / "context.json")
+        design = self._read_json(paths.artifacts / "design.json")
+        files = sorted(
+            {str(x) for x in (context.get("files") or [])}
+            | {str(x) for x in (design.get("planned_files") or [])}
+        )
+
+        def overlaps(path: str, prefix: str) -> bool:
+            p, q = path.rstrip("/"), prefix.rstrip("/")
+            return p == q or p.startswith(q + "/") or q.startswith(p + "/")
+
+        def applicable(entries: list, key: str, *, active_only: bool = False) -> list[str]:
+            out = []
+            for entry in entries or []:
+                if active_only and not entry.get("active", False):
+                    continue
+                if any(overlaps(f, prefix) for f in files for prefix in entry.get(key, [])):
+                    out.append(str(entry["id"]))
+            return sorted(out)
+
+        return {
+            "principles": applicable(policy.get("principles"), "scope"),
+            "migrations": applicable(policy.get("migrations"), "paths", active_only=True),
+            "debts": applicable(policy.get("debt"), "paths"),
+        }
+
     def _worker_brief(
         self,
         paths: RunPaths,
@@ -1367,6 +1438,7 @@ class KernelRuntime:
         contract_hash: str,
         issue_context: str,
         include_design: bool = False,
+        include_applicable_policy: bool = False,
     ) -> str:
         """What a post-contract worker is told in its prompt, so it need not rediscover it.
 
@@ -1392,6 +1464,12 @@ class KernelRuntime:
             }
             parts.append(
                 "COMPILED CONTEXT AND DESIGN SUMMARY:\n" + json.dumps(summary, sort_keys=True)
+            )
+        if include_applicable_policy:
+            parts.append(
+                "APPLICABLE ARCHITECTURE POLICY IDS (computed by the kernel exactly as the "
+                "compiler will; copy these sets verbatim into principles, migrations, debts):\n"
+                + json.dumps(self._applicable_policy_ids(paths), sort_keys=True)
             )
         return "\n\n".join(parts)
 

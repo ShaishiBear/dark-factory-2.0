@@ -2,4 +2,4 @@ You are a fresh repair worker. Read the current source, `$ARTIFACTS_DIR/task-con
 
 Do not edit any acceptance-test file hashed by red-proof.json. Do not weaken tests, guards, holdouts, mutations, architecture policy, evidence policy, or factory trust-root code. Change only files authorized by the compiled design and prefer the smallest production-code repair.
 
-Do not run commands, stage files or create commits. Leave only the intended repair edits in the checkout. The repo-owned kernel validates the dirty-file envelope, creates the repair commit itself and replays the deterministic GREEN authority before a fresh review.
+You must leave at least one production edit in the checkout; if every blocking finding is wrong or already satisfied, fail the attempt explicitly rather than finishing with an unchanged checkout. Do not run commands, stage files or create commits. Leave only the intended repair edits in the checkout. The repo-owned kernel validates the dirty-file envelope, creates the repair commit itself and replays the deterministic GREEN authority before a fresh review.
