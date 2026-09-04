@@ -308,3 +308,43 @@ describe('formatSources', () => {
     expect(result.split('- [Test Video]').length).toBe(3);
   });
 });
+
+describe('formatCitation fallback exports (issue #49)', () => {
+  const fallbackBase = {
+    chunk_id: 'chunk-1',
+    video_id: 'vid-1',
+    video_title: 'Test Video Title',
+    video_url: 'https://www.youtube.com/watch?v=abc123',
+    start_seconds: 10,
+    end_seconds: 20,
+    snippet: 'Test snippet text',
+  };
+
+  it('AC-1: unparseable video_url fallback keeps \'> "Relevant text"\' on its own line', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...fallbackBase, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toContain('> "Relevant text"');
+    const quoted = result.split('\n').filter((line) => line.trim() === '> "Relevant text"');
+    expect(quoted).toHaveLength(1);
+    warnSpy.mockRestore();
+  });
+
+  it('AC-2: unparseable video_url fallback starts with the list marker', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...fallbackBase, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result.slice(0, 2)).toBe('- ');
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-3: dynamous citation without lesson_url starts with the list marker', () => {
+    const citation = { ...fallbackBase, source_type: 'dynamous' as const, lesson_url: '' };
+    const result = formatCitation(citation);
+    expect(result.slice(0, 2)).toBe('- ');
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Test snippet text"');
+  });
+});
