@@ -822,3 +822,30 @@ and turns, tokens and dollars are summed across attempts. The dollar cap is a pe
 flag, so a stage's effective ceiling is `max_budget_usd × (1 + transient_retries)`; with the
 D-025 budgets that is at most 36 USD for a builder role. Three mutations attack the boundary:
 terminal errors retried, retry without the worktree restore, retries unbounded.
+
+---
+
+## D-032 · Scripts put the repository root on sys.path themselves
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Canary attempt 10 (worker run 33920886708) completed the entire autonomous build — investigate,
+deferred repro, contract, context, governor, RED, implement, both review axes, conformance,
+final GREEN, quick gate, push — and opened PR #74. The next step,
+`scripts/factory_provenance.py publish`, died with `ModuleNotFoundError: No module named
+'factory_kernel'`. The script imported the kernel by module path with no `sys.path` bootstrap;
+in CI and on a developer machine the cwd is the repository root so the import happened to work,
+but the kernel runs its scripts from a detached PR-head worktree with `_run_env`, which sets no
+PYTHONPATH. `scripts/factory_evidence_spine.py` had the same shape and the validator would have
+hit it one dispatch later.
+
+Both scripts now insert the repository root (derived from `__file__`) into `sys.path` before
+their first `factory_kernel` import. The alternative, having the kernel export PYTHONPATH from
+`_run_env`, was rejected: the scripts are run standalone by the CI quick gate and by humans, so
+their importability must not depend on the caller. A test runs every script from a temporary
+directory outside the repository with PYTHONPATH empty; a mutation strips the bootstrap from
+the provenance script and is caught.
+
+This is the eleventh canary defect and the first found after a complete build. PR #74 stands;
+it needs its provenance note published and the `factory:needs-review` label before validation,
+and does not need to be rebuilt.

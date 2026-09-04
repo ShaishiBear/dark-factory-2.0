@@ -1012,6 +1012,13 @@
       "find": "                if attempt < attempts_allowed:\n                    continue\n",
       "replace": "                if True:\n                    continue\n",
       "why": "A provider that keeps dropping streams would be re-launched forever; the stage would never fail closed and the dollar backstop would be paid per attempt without end."
+    },
+    {
+      "id": "provenance-script-imports-kernel-without-bootstrap",
+      "file": "scripts/factory_provenance.py",
+      "find": "ROOT = Path(__file__).resolve().parents[1]\nsys.path.insert(0, str(ROOT))\n",
+      "replace": "ROOT = Path(__file__).resolve().parents[1]\n",
+      "why": "The publish step runs from a detached PR-head worktree; without the bootstrap the kernel import fails there and a completed build never reaches review, as on canary attempt 10."
     }
   ]
 }

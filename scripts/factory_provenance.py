@@ -7,12 +7,17 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+
+# The repo-owned kernel is imported by module path. This script runs standalone (CI, humans) and
+# from the kernel's detached worktrees, whose cwd is not the repository root, so the root is
+# put on sys.path here rather than trusting the caller to export PYTHONPATH.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from factory_kernel.canonical import canonical_bytes
 from factory_kernel.provenance import NOTE_REF, build_pack, materialize, pack_sha256, verify_pack
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def fail(message: str) -> None:
