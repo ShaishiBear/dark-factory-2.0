@@ -138,6 +138,7 @@ class KernelWiring(unittest.TestCase):
                     state["round"] = 1
 
             rt._agent = fake_agent
+            rt._diff_context = lambda worktree, env: "MERGE-BASE DIFF (stub)"
             rt._exec = lambda *a, **k: calls.append("exec:" + a[0][2]) or ""
             rt._read_json = lambda path: json.loads(Path(path).read_text(encoding="utf-8"))
             rt._write_json = lambda path, value: Path(path).write_text(json.dumps(value), encoding="utf-8")
@@ -165,6 +166,7 @@ class KernelWiring(unittest.TestCase):
                         json.dumps(axis("standards", "fail", [finding("critical")])), encoding="utf-8")
 
             rt._agent = fake_agent
+            rt._diff_context = lambda worktree, env: "MERGE-BASE DIFF (stub)"
             rt._exec = lambda *a, **k: ""
             rt._read_json = lambda path: json.loads(Path(path).read_text(encoding="utf-8"))
             rt._write_json = lambda path, value: Path(path).write_text(json.dumps(value), encoding="utf-8")
@@ -186,6 +188,7 @@ class KernelWiring(unittest.TestCase):
                 # standards reviewer writes nothing
 
             rt._agent = fake_agent
+            rt._diff_context = lambda worktree, env: "MERGE-BASE DIFF (stub)"
             rt._read_json = lambda path: json.loads(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else None
             rt._write_json = lambda path, value: None
             with self.assertRaises(NeedsHuman):

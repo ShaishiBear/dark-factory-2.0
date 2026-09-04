@@ -172,20 +172,27 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         self.check_stop()
         # Workers load no plugins or skills (--bare). Whatever engineering discipline the role is
         # expected to follow arrives here as pinned, protected text from .factory/methods/.
-        prompt = prompt_text(
-            self.config.prompt_path(role, cwd),
-            preamble=(
-                "You are a replaceable reasoning worker inside Dark Factory. You are not a merge, "
-                "Git, test-execution or external-system authority. Obey repository and artifact "
-                "constraints exactly. The kernel owns Git commits and all command execution."
-            ),
-            methods=method_block(cwd, role),
-            context=context,
-        )
         # Prompts name outputs as `$ARTIFACTS_DIR/<file>` by contract. Nothing on the worker's
         # side expands that (no shell), so the kernel renders every placeholder to the absolute
-        # run path here and refuses any placeholder it cannot render (D-026).
-        prompt = render_prompt(prompt, env)
+        # run path here and refuses any placeholder it cannot render (D-026). Only the text the
+        # kernel itself wrote (preamble, role prompt, pinned methods) is rendered: the context
+        # carries untrusted material (the issue body, repro output, review JSON) that may mention
+        # `$PATH` or `$GITHUB_TOKEN` and must reach the worker verbatim, not refuse the run (D-028).
+        prompt = render_prompt(
+            prompt_text(
+                self.config.prompt_path(role, cwd),
+                preamble=(
+                    "You are a replaceable reasoning worker inside Dark Factory. You are not a "
+                    "merge, Git, test-execution or external-system authority. Obey repository and "
+                    "artifact constraints exactly. The kernel owns Git commits and all command "
+                    "execution."
+                ),
+                methods=method_block(cwd, role),
+            ),
+            env,
+        )
+        if context.strip():
+            prompt = prompt.rstrip("\n") + "\n\n" + context.strip() + "\n"
         started = time.time()
         result = self.provider.run(
             AgentRequest(
