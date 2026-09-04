@@ -18,14 +18,21 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS = sorted(ROOT.glob("scripts/factory_*.py")) + [ROOT / "scripts" / "frontier_filter.py"]
+SCRIPTS = (
+    sorted(ROOT.glob("scripts/factory_*.py"))
+    + [ROOT / "scripts" / "frontier_filter.py"]
+    # The two harness programs the kernel runs as authorities import the kernel too.
+    + [ROOT / "harness" / "merge_verify.py", ROOT / "harness" / "post_merge.py"]
+)
 KERNEL_IMPORT = re.compile(r"^\s*(?:from|import)\s+factory_kernel\b", re.M)
-BOOTSTRAP = "sys.path.insert(0, str(ROOT))"
+# The code root is put on sys.path from beside the script (D-036: the tree under test is the
+# working directory, so the import root must not be derived from it).
+BOOTSTRAP = re.compile(r"sys\.path\.insert\(0, str\(HERE\.parent\)\)")
 # Scripts whose --help needs no environment; the rest are exercised through a subcommand that
 # fails after imports, or through the import-only check below.
 HELP_OK = {"factory_provenance.py", "factory_evidence_spine.py", "factory_security.py",
            "factory_lease.py", "factory_protocol.py", "factory_artifacts.py",
-           "factory_architecture.py", "factory_impact.py"}
+           "factory_architecture.py", "factory_impact.py", "merge_verify.py", "post_merge.py"}
 
 
 def run_from_outside(script: Path, *args: str) -> subprocess.CompletedProcess:
@@ -48,11 +55,13 @@ class ScriptImportTests(unittest.TestCase):
                 continue
             found.append(script.name)
             with self.subTest(script=script.name):
-                boot = text.find(BOOTSTRAP)
-                self.assertNotEqual(boot, -1, f"{script.name} imports factory_kernel without the sys.path bootstrap")
-                self.assertLess(boot, match.start(), f"{script.name} bootstraps after its first factory_kernel import")
+                boot = BOOTSTRAP.search(text)
+                self.assertIsNotNone(boot, f"{script.name} imports factory_kernel without the sys.path bootstrap")
+                self.assertLess(boot.start(), match.start(), f"{script.name} bootstraps after its first factory_kernel import")
         self.assertIn("factory_provenance.py", found)
         self.assertIn("factory_evidence_spine.py", found)
+        self.assertIn("merge_verify.py", found)
+        self.assertIn("post_merge.py", found)
 
     def test_every_script_imports_from_a_cwd_outside_the_repo(self):
         """`--help` exits 0 after the module body ran, so any import error would surface."""

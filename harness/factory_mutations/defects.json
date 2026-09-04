@@ -1054,6 +1054,41 @@
       "find": "        if author.get(\"type\") != self.FACTORY_PR_AUTHOR[\"type\"] or author.get(\"login\") != self.FACTORY_PR_AUTHOR[\"login\"]:",
       "replace": "        if author.get(\"login\") != self.FACTORY_PR_AUTHOR[\"login\"]:",
       "why": "Identity would be a login string alone; a User account named like the bot would pass as the factory."
+    },
+    {
+      "id": "kernel-authority-run-from-subject-copy",
+      "file": "factory_kernel/runtime.py",
+      "find": "        argv = resolve_trusted_program(self._kernel_checkout, argv)\n",
+      "replace": "        argv = list(argv)\n",
+      "why": "The kernel would again run a trust-root program by relative path from the PR-head worktree, so the subject's copy of the authority (stale, or tampered) would be the program that judges it (D-036)."
+    },
+    {
+      "id": "kernel-authority-inspects-kernel-checkout",
+      "file": "factory_kernel/runtime.py",
+      "find": "        proc = subprocess.run(\n            argv,\n            cwd=cwd,\n            env=merged,",
+      "replace": "        proc = subprocess.run(\n            argv,\n            cwd=self.repo_root,\n            env=merged,",
+      "why": "Every authority would inspect the kernel's own checkout instead of the PR worktree it was handed: main's code would judge main's tree and pass any PR."
+    },
+    {
+      "id": "trusted-program-rule-disabled",
+      "file": "factory_kernel/trusted_programs.py",
+      "find": "    return posix.startswith(AUTHORITY_DIRS) or posix in AUTHORITY_PROGRAMS\n",
+      "replace": "    return False\n",
+      "why": "No repository-relative program would count as an authority, so none would be resolved to the kernel checkout."
+    },
+    {
+      "id": "evidence-loads-validators-from-subject",
+      "file": "scripts/factory_evidence.py",
+      "find": "    return load_module(HERE / \"factory_protocol.py\", \"factory_protocol_authoritative\")",
+      "replace": "    return load_module(ROOT / \"scripts\" / \"factory_protocol.py\", \"factory_protocol_authoritative\")",
+      "why": "The evidence authority would load the PR head's contract validator as 'authoritative', letting a PR ship the validator that certifies it."
+    },
+    {
+      "id": "protocol-sibling-from-subject",
+      "file": "scripts/factory_protocol.py",
+      "find": "        sys.executable, str(HERE / \"factory_impact.py\"), \"context\",",
+      "replace": "        sys.executable, str(ROOT / \"scripts\" / \"factory_impact.py\"), \"context\",",
+      "why": "A sibling authority would be invoked from the tree under test rather than from beside the calling program."
     }
   ]
 }

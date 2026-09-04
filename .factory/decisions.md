@@ -920,3 +920,51 @@ any decision. Type is part of the identity: a User account named like the bot is
 Twelfth canary defect. Grep of the kernel for other PR-author comparisons: none (`triage.py`
 compares issue authors for the daily cap, from the issue-list JSON, unchanged).
 
+---
+
+## D-036 · A kernel authority executes from the kernel's checkout, never from the subject's copy
+
+**Status:** recorded · **Raised:** 2026-09-05
+
+The second resume of the factory's first PR #74 (worker run 33927770223, after D-035) died in
+`factory_provenance.py publish` with the same `ModuleNotFoundError` that #75 had fixed on
+`main`. The kernel had run `python scripts/factory_provenance.py` with the working directory
+set to the PR-head worktree, and Python resolved that relative path against the worktree: the
+program that ran was the PR head's copy, which predates #75. Thirteenth canary defect, and the
+only one that names a property rather than a spelling: **the subject of a judgement was
+supplying the program that judged it.** Nothing stopped a PR from carrying a tampered
+`factory_proof.py` or `factory_evidence.py` into validation, re-head or resume and having the
+kernel run it. (On the autonomous lane the security guard refuses trust-root paths and the
+evidence bundle refuses trust-root drift, but both are defence in depth; a human-lane PR that
+edits a validator is validated by the kernel too, and it was judged by its own edit.)
+
+The rule now: `KernelRuntime._exec` rewrites every repository-relative trust-root program
+(`scripts/factory_*.py`, `harness/merge_verify.py`, `harness/post_merge.py`) to the kernel's
+own checkout of `main` (`factory_kernel/trusted_programs.py`) and leaves the working directory
+alone. Every one of those scripts derives the tree it inspects from its working directory
+(`ROOT = Path.cwd()`), imports the kernel and locates sibling programs from beside itself
+(`HERE`), and never through the tree under test. So main's code operates on the PR's tree: in
+the build path the two are identical (a fresh branch off main); in validation, re-head and
+resume they can differ, and now the difference is data in a diff, not a program.
+
+Two things deliberately stay in the tree under test. The canonical harness (`harness/ci.py`
+and what it runs) is the harness *under test*; the evidence bundle runs it inside the worktree
+only after `trust_root_drift` has refused any trust-root difference from `origin/main`, and
+that check is itself now computed by main's code. Policy files (`.factory/architecture.json`,
+`.factory/evidence-spine.json`, the floor) are read from the tree by the programs that judge
+it; they are data, protected by the same drift check and by the guard. `FACTORY_REPO_ROOT`,
+which four programs honoured as an override for the tree root and nothing ever set, is gone:
+one rule, the working directory.
+
+Also found: `harness/merge_verify.py` imported the kernel with no `sys.path` entry of its own,
+so the merge pre-authorisation would have failed the same way on the first validation. Both
+harness authorities now put their code root on `sys.path` like the scripts (#75).
+
+Detectors: the resolver's unit tests; the real `_exec` with a mocked subprocess (program under
+the kernel checkout, working directory the worktree); a real temporary repository whose
+`scripts/factory_security.py` is `raise SystemExit(99)` and whose `FACTORY_RULES.md` is dirty,
+where the kernel path must return the guard's verdict naming that file; the evidence loader
+against a tree of trapped validators; the rehearsal traces of validate, re-head and resume.
+Mutations: the resolver call removed, the working directory switched to the kernel checkout,
+the authority rule disabled, evidence loading a validator from the subject, a sibling invoked
+through the tree.

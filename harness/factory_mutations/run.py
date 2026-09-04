@@ -95,6 +95,7 @@ COPY_FILES = (
     "tests/factory/test_factory_worker_throughput.py",
     "tests/factory/test_factory_provider_retry.py",
     "tests/factory/test_factory_resume.py",
+    "tests/factory/test_factory_trusted_programs.py",
     "tests/factory/test_factory_methods.py",
     "tests/factory/test_factory_review_axes.py",
     "tests/factory/test_factory_repro_loop.py",

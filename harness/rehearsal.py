@@ -40,6 +40,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from factory_kernel.agents import AgentResult  # noqa: E402
+from factory_kernel.trusted_programs import resolve_trusted_program  # noqa: E402
 
 
 def _evidence_rules():
@@ -331,6 +332,9 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
     def _exec(argv: list[str], *, cwd: Path, env: Mapping[str, str] | None = None,
               credential_scope: str = "none", timeout: int = 300,
               transcript: Path | None = None) -> str:
+        # The recorder stands in for the subprocess layer only; program resolution is the
+        # kernel's own rule and is applied here exactly as the real `_exec` applies it.
+        argv = resolve_trusted_program(ROOT, argv)
         tool = Path(argv[1]).name if len(argv) > 1 else argv[0]
         phase = argv[2] if tool == "merge_verify.py" and len(argv) > 2 else ""
         name = f"{tool}:{phase}" if phase else tool

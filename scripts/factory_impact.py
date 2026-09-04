@@ -12,13 +12,17 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+HERE = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
+sys.path.insert(0, str(HERE))
 from factory_shapes import normalise_lists  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "app" / "backend"
 FRONTEND = ROOT / "app" / "frontend"
-TS_HELPER = ROOT / "scripts" / "factory_impact_ts.cjs"
+TS_HELPER = HERE / "factory_impact_ts.cjs"  # code, not part of the tree under test
 TEST_MARKERS = ("/tests/", "/__tests__/", ".test.", ".spec.")
 
 

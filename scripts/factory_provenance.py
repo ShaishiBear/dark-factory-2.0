@@ -10,11 +10,15 @@ import subprocess
 import sys
 import tempfile
 
-# The repo-owned kernel is imported by module path. This script runs standalone (CI, humans) and
-# from the kernel's detached worktrees, whose cwd is not the repository root, so the root is
-# put on sys.path here rather than trusting the caller to export PYTHONPATH.
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+# The repo-owned kernel is imported by module path from beside this file: the script runs
+# standalone (CI, humans) and from the kernel's detached worktrees, so the code root is put on
+# sys.path here rather than trusting the caller to export PYTHONPATH.
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+ROOT = Path.cwd().resolve()
 
 from factory_kernel.canonical import canonical_bytes
 from factory_kernel.provenance import NOTE_REF, build_pack, materialize, pack_sha256, verify_pack
