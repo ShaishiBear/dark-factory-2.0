@@ -1,0 +1,68 @@
+name: diag-model-routing
+
+# Throwaway diagnostic. Runs the pinned Claude Code CLI against OpenRouter for several models
+# and prints the real API error the kernel's provider boundary hides. Opened as a draft PR only;
+# never merged.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          token: ''
+      - name: Install pinned CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.245 && claude --version
+
+      - name: Raw endpoint probes (what the preflight checks, plus what the CLI sends)
+        env:
+          KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          for model in z-ai/glm-5.3-flash deepseek/deepseek-v4-pro-0813 anthropic/claude-haiku-4.5; do
+            echo "=== raw messages $model"
+            curl -sS -o /tmp/r.json -w 'http=%{http_code}\n' -X POST https://openrouter.ai/api/v1/messages \
+              -H "x-api-key: $KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+              -d "{\"model\":\"$model\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+            head -c 300 /tmp/r.json; echo
+            echo "=== raw messages with system+cache_control+beta header $model"
+            curl -sS -o /tmp/r.json -w 'http=%{http_code}\n' -X POST https://openrouter.ai/api/v1/messages \
+              -H "x-api-key: $KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+              -H 'anthropic-beta: claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14' \
+              -d "{\"model\":\"$model\",\"max_tokens\":8,\"system\":[{\"type\":\"text\",\"text\":\"You are a test.\",\"cache_control\":{\"type\":\"ephemeral\"}}],\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"metadata\":{\"user_id\":\"diag\"}}"
+            head -c 300 /tmp/r.json; echo
+            echo "=== count_tokens $model"
+            curl -sS -o /tmp/r.json -w 'http=%{http_code}\n' -X POST https://openrouter.ai/api/v1/messages/count_tokens \
+              -H "x-api-key: $KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+              -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+            head -c 200 /tmp/r.json; echo
+          done
+          echo "=== /v1/models (bearer) head"; curl -sS -o /tmp/m.json -w 'http=%{http_code}\n' https://openrouter.ai/api/v1/models -H "Authorization: Bearer $KEY"; python3 -c "import json;d=json.load(open('/tmp/m.json'));ids=[m['id'] for m in d.get('data',[])];print(len(ids),'models;', [i for i in ids if 'glm' in i or 'deepseek-v4' in i][:12])" || true
+
+      - name: CLI probes
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api/v1
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set +e
+          probe() {
+            echo "=============== $*"
+            timeout 120 claude --bare -p "Reply with exactly OK" --permission-mode dontAsk --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands "$@" 2>&1 | tail -c 1500
+            echo; echo "rc=${PIPESTATUS[0]}"
+          }
+          probe --model z-ai/glm-5.3-flash
+          probe --model deepseek/deepseek-v4-pro-0813
+          probe --model anthropic/claude-haiku-4.5
+          probe --model anthropic/claude-sonnet-4.6
+          echo "=============== glm with unknown-model enforcement disabled"
+          CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 probe --model z-ai/glm-5.3-flash
+          echo "=============== glm with --debug (api errors only)"
+          timeout 120 claude --bare -p "Reply with exactly OK" --permission-mode dontAsk --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands --model z-ai/glm-5.3-flash --debug 2>&1 | grep -i -E 'error|status|404|400|not_found|model' | head -40
