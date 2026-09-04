@@ -63,6 +63,7 @@ COPY_FILES = (
     "tests/factory/test_factory_methods.py",
     "tests/factory/test_factory_review_axes.py",
     "tests/factory/test_factory_repro_loop.py",
+    "tests/factory/test_factory_repro_boundary.py",
     "tests/factory/test_factory_issue_snapshot.py",
     "tests/factory/test_factory_triage.py",
     "tests/factory/test_factory_trust_root_authority.py",
