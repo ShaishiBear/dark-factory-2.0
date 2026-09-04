@@ -144,7 +144,9 @@ class PromptSkeletonTests(unittest.TestCase):
         self.assertIn('"findings": []', text)
         self.assertIn("`findings` is an array of plain strings (not objects): exactly `[]` when `verdict` is `conform`, non-empty when `deviates`", text)
         self.assertIn("`rationale` is an array of strings", text)
-        self.assertIn("prefix-overlaps any file in `context.json`'s `files` or `design.json`'s `planned_files`", text)
+        # D-030: the compiler's basis is the changed files of the diff, and the kernel supplies the sets.
+        self.assertIn("changed files of the supplied diff", text)
+        self.assertIn("APPLICABLE ARCHITECTURE POLICY IDS FOR THE CHANGED FILES", text)
         self.assertIn("the diff supplied in the invocation context (merge-base to HEAD)", text)
         self.assertNotIn("the merge-base diff,", text)
 
@@ -170,7 +172,9 @@ class PromptSkeletonTests(unittest.TestCase):
 
     def test_test_author_prompt_states_the_naming_rule(self):
         text = read(".factory/prompts/test-author.md")
-        self.assertIn("`*.test.*`, `*.spec.*`, `test_*` or `conftest.py`", text)
+        # D-030: the rule all three classifying authorities share (scripts/factory_shapes.test_shaped).
+        self.assertIn("`*.test.*`, `*.spec.*`, `test_*`, `conftest.py`", text)
+        self.assertIn("post-code architecture guard", text)
 
 
 # ---------------------------------------------------------------------------- R14 both authorities agree
@@ -255,8 +259,11 @@ class KernelSuppliesDiffTests(unittest.TestCase):
 
     def test_runtime_source_passes_diff_context_to_conformance(self):
         source = (ROOT / "factory_kernel" / "runtime.py").read_text(encoding="utf-8")
-        self.assertEqual(source.count('"conformance", worktree.path, paths,\n                context=self._diff_context(worktree.path, env), env=env,'), 2,
-                         "both the build and the re-head conformance invocations must carry the diff")
+        # D-030: the conformance worker's context is the diff PLUS the policy-ID sets computed
+        # from the changed files; _conformance_context wraps _diff_context.
+        self.assertEqual(source.count('"conformance", worktree.path, paths,\n                context=self._conformance_context(worktree.path, paths, env), env=env,'), 2,
+                         "both the build and the re-head conformance invocations must carry the diff and the ids")
+        self.assertIn("return (\n            self._diff_context(worktree, env)", source)
 
 
 # ---------------------------------------------------------------------------- R6 kernel supplies applicable ids

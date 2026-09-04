@@ -303,6 +303,11 @@ class WorkerBriefTests(unittest.TestCase):
             call = calls[role]
             context = next((k.value for k in call.keywords if k.arg == "context"), None)
             self.assertIsNotNone(context, f"{role} worker gets no context")
+            # D-030: the test author's brief is `_worker_brief(...) + _deferred_symptom_brief(...)`;
+            # the left operand must still be the brief.
+            if isinstance(context, ast.BinOp):
+                self.assertIsInstance(context.op, ast.Add, role)
+                context = context.left
             self.assertIsInstance(context, ast.Call, f"{role} context must be built by _worker_brief")
             self.assertIsInstance(context.func, ast.Attribute)
             self.assertEqual(context.func.attr, "_worker_brief", role)

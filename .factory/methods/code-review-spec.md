@@ -12,4 +12,4 @@ Work from the artifacts, not from the implementer's narrative:
 
 Severity: a missing or wrong AC is `critical` or `high`; scope creep and envelope drift are `high`; an AC satisfied at a different seam than designed is `medium` if behaviour is still correct through the public interface.
 
-Output exactly one JSON object: `{ "version": "1.0", "axis": "spec", "verdict": "pass|fail", "findings": [...] }`. Each finding has `severity` (`critical|high|medium|low`), `file`, `line` (integer or null) and a concise `description` that names the AC or design element it relates to. Any `critical` or `high` finding means verdict `fail`. Do not include Standards observations here.
+Write exactly one JSON object to the artifact path your role prompt names (your final message is not read): `{ "version": "1.0", "axis": "spec", "verdict": "pass|fail", "findings": [...] }`. Each finding has `severity` (`critical|high|medium|low`), `file`, `line` (integer or null) and a concise `description` that names the AC or design element it relates to. Any `critical` or `high` finding means verdict `fail`. Do not include Standards observations here.

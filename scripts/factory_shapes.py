@@ -16,6 +16,24 @@ puts the explanation in a top-level `notes` string, which every validator ignore
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import PurePosixPath
+
+# One test-path predicate for the three authorities that classify a path as a test: the
+# acceptance-test commit envelope (git_authority), the RED gate (factory_proof) and the post-code
+# architecture guard (factory_architecture_guard). Before D-030 the guard recognised only the
+# directory and infix markers, so `app/backend/routes/test_export.py` passed commit and RED and was
+# then refused two gates later as an unplanned production file, with a stray commit already made.
+TEST_MARKERS: tuple[str, ...] = ("/tests/", "/__tests__/", ".test.", ".spec.")
+
+
+def test_shaped(path: str) -> bool:
+    """True when every test-classifying authority treats `path` as a test file."""
+    low = "/" + path.replace("\\", "/").lower()
+    return (
+        "test" in PurePosixPath(path).name.lower()
+        or any(marker in low for marker in TEST_MARKERS)
+        or low.endswith("/conftest.py")
+    )
 
 # The keys a list entry may carry its value under, per list. The first is canonical.
 CANONICAL_KEYS: dict[str, tuple[str, ...]] = {

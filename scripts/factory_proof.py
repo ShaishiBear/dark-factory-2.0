@@ -9,7 +9,7 @@ DESIGN_BLOCK = re.compile(r"\n?<!-- factory-design:start -->.*?<!-- factory-desi
 
 def die(msg): print(f"PROOF_FAIL: {msg}", file=sys.stderr); raise SystemExit(1)
 CHECKPOINT_SCRUBBED_ENV=('GH_TOKEN','GITHUB_TOKEN')
-RED_TAIL_CHARS=2000
+RED_TAIL_CHARS=2000  # keep equal to factory_kernel.repro.RED_TAIL_CHARS; a test pins the pair
 def checkpoint_env():
     # The checkpoint argv is model-authored. The kernel already launches this program with no
     # GitHub credentials; scrubbing again here means a caller that forgets the scope still
@@ -53,11 +53,12 @@ def artifacts():
     if not isinstance(planned,list) or not planned or not isinstance(allowed_new,list):
         die('compiled design lacks implementation file envelope')
     return contract,design,ids
+sys.path.insert(0, str(ROOT / 'scripts'))
+from factory_shapes import test_shaped as _shared_test_shaped  # noqa: E402
 def test_oriented(path):
-    # Must accept every path git_authority.commit_acceptance_tests accepts, or a declared file is
-    # committed and then refused here, leaving a stray commit (D-028). Mirror of _test_oriented.
-    low=path.lower(); slashed='/'+low
-    return 'test' in low or '/tests/' in slashed or '/__tests__/' in slashed or '.spec.' in low or low.endswith('conftest.py')
+    # One predicate shared with git_authority.commit_acceptance_tests and the architecture guard
+    # (scripts/factory_shapes.test_shaped): a declared file is either a test to all three or to none.
+    return _shared_test_shaped(path)
 def checkpoint(value):
     required={'acceptance_id','cwd','argv','files','expected_failure'}
     if not isinstance(value,dict) or required-value.keys(): die('test checkpoint missing fields')
