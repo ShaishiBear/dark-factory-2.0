@@ -270,6 +270,40 @@ describe('formatCitation', () => {
     expect(result).toContain('0:10–0:20');
     expect(result).toContain('> "Test snippet text"');
   });
+
+  const fallbackCitation = {
+    ...baseCitation,
+    video_title: 'Test Video',
+    video_url: 'not-a-url',
+    snippet: 'Relevant text',
+  };
+
+  it('AC-1: fallback keeps the snippet blockquote', () => {
+    const blockquote = /^\s*> "Relevant text"$/m;
+    const result = formatCitation(fallbackCitation);
+    expect(result, 'AC-1: fallback keeps the snippet blockquote').toMatch(blockquote);
+  });
+  it('AC-2: fallback starts with the list marker', () => {
+    const result = formatCitation(fallbackCitation);
+    expect(result, 'AC-2: fallback starts with the list marker').toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+  });
+  it('AC-3: dynamous fallback starts with the list marker', () => {
+    const citation = { ...baseCitation, source_type: 'dynamous' as const, lesson_url: '   ' };
+    const result = formatCitation(citation);
+    expect(result, 'AC-3: dynamous fallback starts with the list marker').toMatch(/^- /);
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Test snippet text"');
+  });
+  it('AC-4: no-v-param fallback starts with the list marker', () => {
+    const result = formatCitation({ ...baseCitation, video_url: 'https://www.youtube.com/' });
+    expect(result, 'AC-4: no-v-param fallback starts with the list marker').toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    const blockquote = /^\s*> "Test snippet text"$/m;
+    expect(result).toMatch(blockquote);
+  });
 });
 
 describe('formatSources', () => {
