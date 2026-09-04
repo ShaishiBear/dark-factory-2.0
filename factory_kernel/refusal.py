@@ -70,6 +70,7 @@ STAGE_CODES: frozenset[str] = frozenset({
 
 REFUSAL_MARKER = "<!-- dark-factory-refusal:"
 REHEAD_MARKER = "<!-- dark-factory-rehead:"
+RESUME_MARKER = "<!-- dark-factory-resume:"
 _MARKER_END = "-->"
 _CERTIFIER = re.compile(r"independent (contract|design|architecture-governor) certifier")
 
@@ -239,6 +240,10 @@ def render_rehead_marker(payload: Mapping[str, object]) -> str:
     return f"{REHEAD_MARKER} {json.dumps(dict(payload), sort_keys=True)} {_MARKER_END}"
 
 
+def render_resume_marker(payload: Mapping[str, object]) -> str:
+    return f"{RESUME_MARKER} {json.dumps(dict(payload), sort_keys=True)} {_MARKER_END}"
+
+
 def _markers(bodies: Iterable[str], prefix: str) -> list[dict]:
     found: list[dict] = []
     for body in bodies:
@@ -271,6 +276,11 @@ def latest_refusal(bodies: Iterable[str]) -> dict | None:
 
 def rehead_count(bodies: Iterable[str]) -> int:
     return len(_markers(bodies, REHEAD_MARKER))
+
+
+def resume_count(bodies: Iterable[str]) -> int:
+    """How many times a pushed-but-unpublished PR has been resumed from uploaded artifacts."""
+    return len(_markers(bodies, RESUME_MARKER))
 
 
 def rehead_eligible(bodies: Iterable[str]) -> bool:

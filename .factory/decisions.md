@@ -849,3 +849,27 @@ the provenance script and is caught.
 This is the eleventh canary defect and the first found after a complete build. PR #74 stands;
 it needs its provenance note published and the `factory:needs-review` label before validation,
 and does not need to be rebuilt.
+
+---
+
+## D-033 · A pushed PR is resumed from its artifacts, not rebuilt
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Canary attempt 10 (worker run 33920886708) completed the whole build and opened PR #74, then
+died one step later in `factory_provenance.py publish` (D-032). The branch and PR were real;
+the run's artifacts survived only as the uploaded workflow artifact; the kernel had no path
+that finished such a PR, so the honest options were a full rebuild (nine model stages, ~40
+minutes, ~$25) or hand-editing GitHub state.
+
+`resume_pr` is the third option. It rebuilds nothing and runs no model. It refuses unless the
+supplied artifacts are complete, the final GREEN proof is bound to the exact PR head, and the
+RED-hashed tests are byte-identical at that head; then it runs the same attach/publish sequence
+the build path runs, finishes the lease, and hands the PR to validation, which reuses nothing.
+The attach programs already strip an existing block of their kind before appending, so a
+partial first attach leaves no duplicate. A resume marker on the PR caps it at one per PR.
+
+Deliberately human-invoked, not dispatched: the artifacts must be retrieved with
+`gh run download`, and a PR that cannot be finished from its own artifacts is a defect to
+diagnose, not a state to poll. Four mutations attack the boundary: proof-head binding dropped,
+RED check dropped, cap removed, human-authored PR accepted.

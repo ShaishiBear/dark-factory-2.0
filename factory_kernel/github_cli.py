@@ -54,9 +54,9 @@ class GitHubClient:
     def pr(self, number: int, *, holdout_safe: bool = False) -> Mapping[str, Any]:
         self._number(number, "PR")
         fields = (
-            "number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid,state,labels,changedFiles"
+            "number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid,state,labels,changedFiles,author"
             if holdout_safe
-            else "number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid,state,labels,changedFiles,mergeable"
+            else "number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid,state,labels,changedFiles,mergeable,author"
         )
         return self.json(
             ["pr", "view", str(number), "-R", self.repository, "--json", fields]

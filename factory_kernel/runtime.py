@@ -39,6 +39,8 @@ from .refusal import (
     rehead_eligible,
     render_refusal_marker,
     render_rehead_marker,
+    render_resume_marker,
+    resume_count,
 )
 from .repro import (
     RED_TAIL_CHARS,
@@ -1024,6 +1026,158 @@ class KernelRuntime:
                 remove(self.repo_root, worktree, force=True, require_clean=False)
             except RuntimeError:
                 pass
+
+    # ---------- resume: finish a pushed-but-unpublished PR from its uploaded artifacts ----------
+
+    ACTIONS_BOT_LOGIN = "github-actions"
+
+    def resume_pr(self, pr_number: int, artifacts_dir: Path) -> str:
+        """Finish a build that pushed its branch and opened its PR, then died before the
+        attach/publish/handoff steps completed.
+
+        Nothing is rebuilt and no model runs. The artifacts the ephemeral runner uploaded are the
+        only honest input: every builder artifact must be present, the final GREEN proof must be
+        bound to the exact PR head, and every RED-hashed acceptance test must be byte-identical
+        at that head. Then the same `_attach_and_publish` the build path uses re-binds the
+        contract, design, proof and provenance note to the head (each attach program replaces an
+        existing block of its kind rather than duplicating it), the pr-handoff lease finishes,
+        and the PR is handed to independent validation, which runs in full and reuses nothing.
+
+        A human invokes this after retrieving the run artifacts; it is not a dispatch action.
+        One resume per PR: a second attempt escalates, because a PR that cannot be finished from
+        its own artifacts twice is not a recoverable run.
+        """
+        self.check_stop()
+        artifacts_dir = Path(artifacts_dir).resolve()
+        if not artifacts_dir.is_dir():
+            raise NeedsHuman(f"resume artifacts directory does not exist: {artifacts_dir}")
+        info = self.github.pr(pr_number, holdout_safe=True)
+        if info.get("state") != "OPEN":
+            raise NeedsHuman(f"PR #{pr_number} is not open")
+        author = info.get("author") if isinstance(info.get("author"), Mapping) else {}
+        login = str(author.get("login") or "")
+        if login.removesuffix("[bot]") != self.ACTIONS_BOT_LOGIN:
+            raise NeedsHuman(
+                f"PR #{pr_number} was not opened by the factory (author {login!r}); "
+                "only an autonomous PR can be resumed"
+            )
+        head = str(info.get("headRefOid") or "")
+        base = str(info.get("baseRefOid") or "")
+        branch = str(info.get("headRefName") or "")
+        if (
+            not re.fullmatch(r"[0-9a-f]{40,64}", head)
+            or not re.fullmatch(r"[0-9a-f]{40,64}", base)
+            or not branch
+            or branch.startswith("-")
+        ):
+            raise NeedsHuman("PR lacks exact Git object identities")
+        linked_issue = self._linked_issue_number(str(info.get("body") or ""))
+        if not isinstance(linked_issue, int):
+            raise NeedsHuman(f"PR #{pr_number} does not link an issue")
+        issue = self.github.issue(linked_issue)
+        issue_labels = self.github.labels(issue)
+        if not issue_labels & {self.config.labels["needs_human"], self.config.labels["accepted"]}:
+            raise NeedsHuman(
+                f"issue #{linked_issue} is neither {self.config.labels['needs_human']} nor "
+                f"{self.config.labels['accepted']}; refusing to resume"
+            )
+        if resume_count(self.github.pr_comments(pr_number)) > 0:
+            raise NeedsHuman(f"PR #{pr_number} was already resumed once; a second resume needs a human")
+
+        self._verify_resume_artifacts(artifacts_dir, head=head)
+
+        self._git("fetch", "origin", branch, self.config.default_branch)
+        run_id = f"resume-{pr_number}-{uuid.uuid4().hex[:12]}"
+        paths = RunPaths.create(self.config.runtime.work_root, run_id)
+        # Blinded like a build worktree: no model runs here, but the attach programs run in it
+        # and the worktree must look exactly like the one that produced the artifacts.
+        worktree = create_detached(
+            self.repo_root,
+            head,
+            base_dir=self.config.runtime.work_root / "resume-worktrees",
+            blind=BUILDER_BLIND_PATHS,
+        )
+        try:
+            self._git("checkout", "-b", branch, cwd=worktree.path)
+            self._prepare_worktree(worktree.path, paths)
+            self._copy_resume_artifacts(artifacts_dir, paths.artifacts)
+            self._verify_red_unchanged(
+                {"artifacts": {"red-proof": {"content": self._read_json(paths.artifacts / "red-proof.json")}}},
+                worktree.path,
+            )
+            local = self._git("rev-parse", "HEAD", cwd=worktree.path)
+            if local != head:
+                raise NeedsHuman(f"resume worktree HEAD {local} is not the PR head {head}")
+
+            env = self._run_env(paths, base_ref=f"origin/{self.config.default_branch}")
+            self.github.cwd = str(worktree.path)
+            self._attach_and_publish(paths, worktree.path, env, pr_number)
+            self._lease_heartbeat(
+                "finish", linked_issue, "pr-handoff", paths, cwd=worktree.path, pr=pr_number
+            )
+            marker = render_resume_marker({
+                "version": "1.0", "pr": pr_number, "head": head, "base": base,
+                "issue": linked_issue, "timestamp": _utc_now(),
+            })
+            self.github.comment_pr(
+                pr_number,
+                marker + f"\nDark Factory resumed this PR from its uploaded build artifacts at head "
+                f"`{head}`: the attached contract, design and proof were re-bound and the provenance "
+                "note published without rebuilding or running a model. Independent validation now "
+                "runs in full.",
+            )
+            self._hand_to_review(pr_number)
+            # The failed run escalated the issue; put it back where a live handed-off build
+            # leaves it (accepted, not in progress) so validation's outcome moves it next.
+            self.github.remove_issue_label(linked_issue, self.config.labels["needs_human"])
+            self.github.remove_issue_label(linked_issue, self.config.labels["in_progress"])
+            self.github.add_issue_label(linked_issue, self.config.labels["accepted"])
+            print(f"FACTORY_RESUMED pr=#{pr_number} head={head} issue=#{linked_issue}")
+            return head
+        except NeedsHuman as exc:
+            self._mark_pr_human(pr_number, f"resume stopped: {exc}")
+            raise
+        except Exception as exc:
+            self._mark_pr_human(pr_number, f"resume failed closed: {exc}")
+            raise
+        finally:
+            self.github.cwd = str(self.repo_root)
+            try:
+                remove(self.repo_root, worktree, force=True, require_clean=False)
+            except RuntimeError:
+                pass
+
+    def _verify_resume_artifacts(self, artifacts_dir: Path, *, head: str) -> None:
+        """The supplied artifacts must be complete and belong to exactly this PR head."""
+        missing = [
+            rel for claim_id, rel in BUILDER_ARTIFACTS
+            if claim_id != "architecture-policy" and not (artifacts_dir / rel).is_file()
+        ]
+        if missing:
+            raise NeedsHuman(f"resume artifacts are incomplete; missing {sorted(missing)}")
+        proof = self._read_json(artifacts_dir / "final-green-proof.json")
+        if str(proof.get("green_commit") or "") != head:
+            raise NeedsHuman(
+                f"final GREEN proof is bound to {proof.get('green_commit')!r}, not the PR head {head}; "
+                "these artifacts belong to a different build"
+            )
+        red = self._read_json(artifacts_dir / "red-proof.json")
+        if not isinstance(red.get("files"), Mapping) or not red["files"]:
+            raise NeedsHuman("RED proof in the resume artifacts has no immutable file map")
+
+    @staticmethod
+    def _copy_resume_artifacts(source: Path, target: Path) -> None:
+        for claim_id, rel in BUILDER_ARTIFACTS:
+            if claim_id == "architecture-policy":
+                continue
+            data = (source / rel).read_bytes()
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            (target / rel).write_bytes(data)
+        # The lease record lets the pr-handoff heartbeat PATCH the original comment; without it
+        # the heartbeat program starts a fresh lease, which is also correct.
+        lease = source / "factory-lease.json"
+        if lease.is_file():
+            (target / "factory-lease.json").write_bytes(lease.read_bytes())
 
     def _rehead_green(
         self, paths: RunPaths, cwd: Path, env: Mapping[str, str], *, output: str, log: str
