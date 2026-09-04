@@ -122,6 +122,7 @@ COPY_FILES = (
     "tests/factory/test_factory_benchmark.py",
     "tests/factory/test_factory_immunity.py",
     "tests/factory/test_factory_provenance.py",
+    "tests/factory/test_factory_note_identity.py",
     "tests/factory/test_factory_evidence_closure.py",
     "tests/factory/test_factory_independence.py",
     "tests/factory/test_factory_bootstrap.py",

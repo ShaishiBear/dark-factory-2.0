@@ -968,3 +968,25 @@ against a tree of trapped validators; the rehearsal traces of validate, re-head 
 Mutations: the resolver call removed, the working directory switched to the kernel checkout,
 the authority rule disabled, evidence loading a validator from the subject, a sibling invoked
 through the tree.
+
+---
+
+## D-037 · Every object the kernel writes carries the kernel identity, notes included
+
+**Status:** recorded · **Raised:** 2026-09-05
+
+The fourteenth canary defect (worker run 33930385600, the first resume of PR #74 to reach
+provenance publish after #79 made the program run from the kernel checkout): `git notes add`
+failed with `Author identity unknown`. A note is a commit object on the notes ref and needs an
+author exactly as a worker commit does; the GitHub runner configures none. Worker commits
+(`git_authority`), the re-head rebase (#65) and the safe revert (`worker_runtime`) already splice
+`KERNEL_COMMIT_ARGS`; the notes write never had it because no run had reached that line before.
+No exact-head provenance note had ever been created in production.
+
+The rule: every git invocation that creates an object (`commit`, `notes add`, `rebase`, `revert`,
+`merge`, `tag -a`) is spelled `["git", *KERNEL_COMMIT_ARGS, ...]`. The inventory at this commit:
+`git_authority._commit`, `runtime.rehead_pr` rebase, `worker_runtime._create_safe_revert_pr`
+revert, `factory_provenance.publish` notes add. Reads (`notes show`, `rev-parse`, `diff`) carry
+no identity. The test runs the real script in a repository whose global and system config are
+empty, proves the note's author and committer are the kernel identity, and proves the same
+write without the args fails with the runner's exact error.
