@@ -11,7 +11,7 @@ from .git_authority import commit_acceptance_tests, commit_planned_changes
 from .methods import method_block
 from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
-from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, max_turns, may_change_repo
+from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, max_budget_usd, max_turns, may_change_repo
 from .worktree import create_detached, remove
 
 
@@ -193,6 +193,7 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 # A bounded loop: the CLI stops the worker at the role's cap and the provider
                 # turns that into a failed stage (D-020).
                 max_turns=max_turns(role),
+                max_budget_usd=max_budget_usd(role),
             )
         )
         self._record_agent(paths, role, result, started=started)
