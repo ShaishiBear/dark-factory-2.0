@@ -147,3 +147,28 @@ a future reader must check is real. The spine is the lifecycle. Control-plane st
 it are labels, applied and read by the runtime.
 
 This is a **judgement** structure and moved through the maintainer lane.
+
+---
+
+## D-007 · The unit floor is the observed value for the tree on `main`
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+`unit_tests` in `.factory/locks/floor.json` was 549, measured 2026-08-13 before the
+factory's own suite existed. The required `quick-authority` check has since observed 1024
+(#40), 1034 (#42) and 1033 (#43) on ubuntu. The floor moves to **1033**, the value for the
+head whose tree is `main` today (https://github.com/ShaishiBear/dark-factory-2.0/actions/runs/33870605247), with zero slack, per the
+file's own rule. Not 1034: a floor is what the current tree clears, not the highest number
+ever seen, and #43 deliberately removed five tests with an unexecuted state machine.
+
+`holdout_assertions` stays 9 (nine `expect()` calls across three scenarios in
+`.factory/holdout/run.py`) and the three mutation floors stay 9/3/3 (nine defects, three
+`must_catch=[security]`). Nothing structural changed.
+
+No E2E floor yet. `E2E_PASSED steps` has never been observed for a complete autonomous
+cycle under the current kernel; the first unattended canary produces it.
+
+While reading the enforcers, the claim in the floor file that a second program asserts
+floor(head) >= floor(base) turned out to be false. The note now says what is enforced and
+by which program, and FACTORY_RULES section 13 records the gap. This is a **judgement**
+value and moved through the maintainer lane.

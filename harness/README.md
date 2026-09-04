@@ -5,16 +5,16 @@ python harness/ci.py --quick   # static + unit. ~3 min. Runs anywhere.
 python harness/ci.py           # the whole gate. Needs the validation env (below).
 ```
 
-Measured 2026-08-13 on `main`:
+Measured 2026-09-04 on `main` by the required `quick-authority` check (ubuntu-24.04, https://github.com/ShaishiBear/dark-factory-2.0/actions/runs/33870605247):
 
 ```
 HARNESS_START mode=quick driver=http
-STATIC_OK
-UNIT_PASSED tests=549
+STATIC_OK checks=5
+UNIT_PASSED tests=1033
 GATE_OK mode=quick
 ```
 
-549 = 390 backend (pytest, 67 skipped) + 159 frontend (vitest).
+1033 = backend (pytest) + frontend (vitest) + the factory's own `tests/factory/` suite, as `harness/unit.py` counts them. The 2026-08-13 baseline was 549 (390 backend + 159 frontend) before the factory suite existed.
 
 ## What is in here, and where it came from
 
