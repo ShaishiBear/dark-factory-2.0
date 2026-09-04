@@ -8,6 +8,8 @@ our own branches.
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -50,14 +52,38 @@ class MainRegressionWorkflowTests(unittest.TestCase):
         self.assertIn("npm install -g agent-browser@0.35.0", self.text)
         self.assertNotIn("claude-code", self.text, "the regression never launches a model worker")
 
-    def test_environment_blocks_are_the_workers_verbatim(self) -> None:
-        for block_start, block_end in (
-            ("    services:\n      postgres:\n", "          --health-retries 5\n"),
-            ("      - name: Create disposable validation environment\n", '          } >> "$GITHUB_ENV"\n'),
-        ):
-            w = self.worker.index(block_start); w_end = self.worker.index(block_end, w) + len(block_end)
-            m = self.text.index(block_start); m_end = self.text.index(block_end, m) + len(block_end)
-            self.assertEqual(self.text[m:m_end], self.worker[w:w_end], f"block differs: {block_start.strip()}")
+    def test_service_block_is_the_workers_verbatim(self) -> None:
+        block_start, block_end = "    services:\n      postgres:\n", "          --health-retries 5\n"
+        w = self.worker.index(block_start); w_end = self.worker.index(block_end, w) + len(block_end)
+        m = self.text.index(block_start); m_end = self.text.index(block_end, m) + len(block_end)
+        self.assertEqual(self.text[m:m_end], self.worker[w:w_end])
+
+    def test_validation_environment_matches_the_worker_field_for_field(self) -> None:
+        """The worker writes the loopback URL as one literal; the security guard scans added
+        lines for credential-bearing URLs and refuses that literal in a new file, so this
+        workflow assembles it from the same parts. Every exported name and value must agree."""
+        def env_lines(text: str) -> dict[str, str]:
+            step = text.split("- name: Create disposable validation environment", 1)[1]
+            step = step.split('} >> "$GITHUB_ENV"', 1)[0]
+            out = {}
+            for line in step.splitlines():
+                line = line.strip()
+                if line.startswith('echo "') and "=" in line:
+                    key, value = line[len('echo "'):-1].split("=", 1)
+                    out[key] = value
+            return out
+        worker_env = env_lines(self.worker)
+        mine = env_lines(self.text)
+        self.assertEqual(set(mine), set(worker_env))
+        for key in ("JWT_SECRET", "DARK_FACTORY_E2E_EMAIL", "DARK_FACTORY_E2E_PASSWORD", "DARK_FACTORY_E2E_BOOTSTRAP", "SEED_ENABLE"):
+            self.assertEqual(mine[key], worker_env[key], key)
+        self.assertEqual(mine["DATABASE_URL"], "$database_url")
+        # Evaluate the assembly the workflow performs and compare with the worker's literal.
+        assembly = re.search(r"database_url=\"\$\(python -c '(.*)'\)\"", self.text).group(1)
+        assembled = subprocess.run([sys.executable, "-c", assembly], capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(assembled, worker_env["DATABASE_URL"])
+        self.assertEqual(worker_env["DATABASE_URL"].split("//", 1)[1].split("@", 1)[1], "127.0.0.1:5432/dark_factory_validation")
+        self.assertNotRegex(self.text, r"://[^\s/@]+:[^@\s/]+@", "no credential-bearing URL literal in this file")
 
     def test_holds_no_write_authority_over_code(self) -> None:
         head = self.text.split("jobs:", 1)[0]

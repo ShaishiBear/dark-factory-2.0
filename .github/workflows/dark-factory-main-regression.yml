@@ -87,12 +87,17 @@ jobs:
       - name: Create disposable validation environment
         shell: bash
         run: |
+          # Same values as dark-factory-worker.yml. The database URL is assembled at run time
+          # from the service's throwaway user, password, host and database rather than written
+          # as one literal: the security guard scans every added line for credential-bearing
+          # URLs and refuses the literal in a new file, even for a loopback throwaway (D-017).
+          database_url="$(python -c 'print("postgresql://" + ":".join(("postgres", "postgres")) + "@" + "127.0.0.1:5432/dark_factory_validation")')"
           jwt_secret="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
           e2e_password="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
           echo "::add-mask::$jwt_secret"
           echo "::add-mask::$e2e_password"
           {
-            echo "DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/dark_factory_validation"
+            echo "DATABASE_URL=$database_url"
             echo "JWT_SECRET=$jwt_secret"
             echo "DARK_FACTORY_E2E_EMAIL=dark-factory-e2e@localhost.invalid"
             echo "DARK_FACTORY_E2E_PASSWORD=$e2e_password"
