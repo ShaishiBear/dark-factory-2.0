@@ -34,10 +34,11 @@
     "architecture": ".factory/prompts/architecture.md",
     "test_author": ".factory/prompts/test-author.md",
     "implement": ".factory/prompts/implement.md",
-    "review": ".factory/prompts/review.md",
     "repair": ".factory/prompts/repair.md",
     "conformance": ".factory/prompts/conformance.md",
-    "holdout": ".factory/prompts/holdout.md"
+    "holdout": ".factory/prompts/holdout.md",
+    "review-spec": ".factory/prompts/review-spec.md",
+    "review-standards": ".factory/prompts/review-standards.md"
   },
   "validation": {
     "quick_command": [

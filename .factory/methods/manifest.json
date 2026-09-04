@@ -17,7 +17,12 @@
       "upstream_ref": null,
       "source_sha256": null,
       "adaptation": "Ponytail's ladder as an ordered decision procedure; shortest diff is a tie-breaker, never an authority; accessibility and security are excluded from minimisation.",
-      "roles": ["context", "implement", "repair", "review"]
+      "roles": [
+        "context",
+        "implement",
+        "repair",
+        "review-standards"
+      ]
     },
     {
       "id": "deep-module-design",
@@ -26,7 +31,11 @@
       "upstream_ref": "0ab1b63a410a03d3627979a109c8695de27af954",
       "source_sha256": null,
       "adaptation": "codebase-design as instructions for a worker that must name seams and planned files for a deterministic governor.",
-      "roles": ["context", "architecture", "review"]
+      "roles": [
+        "context",
+        "architecture",
+        "review-standards"
+      ]
     },
     {
       "id": "tdd",
@@ -35,7 +44,10 @@
       "upstream_ref": "0ab1b63a410a03d3627979a109c8695de27af954",
       "source_sha256": null,
       "adaptation": "Vertical-slice implementation discipline inside a frozen external acceptance contract; the worker cannot run commands, so the loop is read-and-reason.",
-      "roles": ["implement", "repair"]
+      "roles": [
+        "implement",
+        "repair"
+      ]
     },
     {
       "id": "diagnosing-bugs",
@@ -44,7 +56,9 @@
       "upstream_ref": "0ab1b63a410a03d3627979a109c8695de27af954",
       "source_sha256": null,
       "adaptation": "Red loop first; the kernel executes the repro, the worker proposes it and separates facts from hypotheses.",
-      "roles": ["investigate"]
+      "roles": [
+        "investigate"
+      ]
     },
     {
       "id": "code-review-spec",
@@ -53,7 +67,9 @@
       "upstream_ref": "0ab1b63a410a03d3627979a109c8695de27af954",
       "source_sha256": null,
       "adaptation": "The Spec axis of the two-axis review, bound to the validated contract and compiled design.",
-      "roles": ["review"]
+      "roles": [
+        "review-spec"
+      ]
     },
     {
       "id": "code-review-standards",
@@ -62,7 +78,9 @@
       "upstream_ref": "0ab1b63a410a03d3627979a109c8695de27af954",
       "source_sha256": null,
       "adaptation": "The Standards axis of the two-axis review, extended with the minimal-complexity and dependency rules the factory enforces.",
-      "roles": ["review"]
+      "roles": [
+        "review-standards"
+      ]
     }
   ]
 }

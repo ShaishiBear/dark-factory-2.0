@@ -599,6 +599,34 @@
       "find": "        or path.startswith(\".factory/methods/\")\n",
       "replace": "",
       "why": "An autonomous PR could rewrite the method text its own workers are judged against."
+    },
+    {
+      "id": "review-aggregator-ignores-standards",
+      "file": "factory_kernel/review.py",
+      "find": "    verdict = \"fail\" if any(validated[axis][\"verdict\"] == \"fail\" for axis in AXES) else \"pass\"",
+      "replace": "    verdict = validated[\"spec\"][\"verdict\"]",
+      "why": "A failing Standards review would no longer block; the two-axis review would collapse back to one."
+    },
+    {
+      "id": "review-aggregator-accepts-missing-axis",
+      "file": "factory_kernel/review.py",
+      "find": "    if missing:\n        raise ReviewInvalid(f\"review axes missing: {missing}\")",
+      "replace": "    if False:\n        raise ReviewInvalid(f\"review axes missing: {missing}\")",
+      "why": "An axis that never ran would be treated as absent rather than as a refusal."
+    },
+    {
+      "id": "review-verdict-findings-disagreement-tolerated",
+      "file": "factory_kernel/review.py",
+      "find": "    if blocking and verdict != \"fail\":\n        raise ReviewInvalid(f\"{axis} review passes despite a blocking finding\")",
+      "replace": "    if False:\n        raise ReviewInvalid(f\"{axis} review passes despite a blocking finding\")",
+      "why": "A reviewer could report a critical finding and still say pass, and the kernel would believe the verdict."
+    },
+    {
+      "id": "kernel-second-review-runs-one-axis",
+      "file": "factory_kernel/runtime.py",
+      "find": "        for axis in AXES:\n            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=context, env=env)",
+      "replace": "        for axis in AXES[:1]:\n            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=context, env=env)",
+      "why": "Only the Spec reviewer would run; the Standards artifact would be stale or absent."
     }
   ]
 }

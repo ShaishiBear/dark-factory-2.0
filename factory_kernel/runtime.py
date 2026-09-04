@@ -29,6 +29,7 @@ from .independence import (
     verify_certificate,
 )
 from .provenance import verify_pack
+from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
 from .worker_policy import BUILDER_BLIND_PATHS
 from .worktree import Worktree, create_detached, remove
@@ -458,15 +459,30 @@ class KernelRuntime:
             if handed_off:
                 remove(self.repo_root, worktree)
 
+    def _two_axis_review(
+        self, worktree: Worktree, paths: RunPaths, env: Mapping[str, str], *, context: str = ""
+    ) -> dict[str, Any]:
+        """Spec and Standards are judged by separate fresh processes; the kernel aggregates.
+
+        Each axis writes its own artifact. The deterministic aggregator refuses a missing,
+        malformed or mislabelled artifact and fails the review if either axis fails.
+        """
+        for axis in AXES:
+            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=context, env=env)
+        try:
+            outcome = aggregate(read_axes(paths.artifacts, self._read_json))
+        except ReviewInvalid as exc:
+            raise NeedsHuman(f"review worker returned an invalid artifact: {exc}") from exc
+        result = outcome.as_dict()
+        self._write_json(paths.artifacts / "code-review.json", result)
+        return result
+
     def _review_and_repair(
         self, worktree: Worktree, paths: RunPaths, env: Mapping[str, str]
     ) -> None:
-        self._agent("review", worktree.path, paths, env=env)
-        review = self._read_json(paths.artifacts / "code-review.json")
-        if review.get("verdict") == "pass":
+        review = self._two_axis_review(worktree, paths, env)
+        if review["verdict"] == "pass":
             return
-        if review.get("verdict") != "fail" or not isinstance(review.get("findings"), list):
-            raise NeedsHuman("review worker returned an invalid verdict")
         self._agent(
             "repair",
             worktree.path,
@@ -485,15 +501,10 @@ class KernelRuntime:
             credential_scope="none",
             timeout=600,
         )
-        self._agent(
-            "review",
-            worktree.path,
-            paths,
-            context="This is the fresh post-repair review.",
-            env=env,
+        second = self._two_axis_review(
+            worktree, paths, env, context="This is the fresh post-repair review."
         )
-        second = self._read_json(paths.artifacts / "code-review.json")
-        if second.get("verdict") != "pass":
+        if second["verdict"] != "pass":
             raise NeedsHuman("fresh post-repair review still contains blockers")
 
     # ---------- independent PR validator / merge authority ----------

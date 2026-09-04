@@ -68,7 +68,8 @@ class WorkerPolicyTests(unittest.TestCase):
         self.assertTrue(may_change_repo("implement"))
         self.assertTrue(may_change_repo("repair"))
         self.assertFalse(may_change_repo("architecture"))
-        self.assertFalse(may_change_repo("review"))
+        self.assertFalse(may_change_repo("review-spec"))
+        self.assertFalse(may_change_repo("review-standards"))
         self.assertEqual(allowed_tools("architecture-holdout"), ())
 
     def test_cli_uses_controlled_worker_runtime(self):
