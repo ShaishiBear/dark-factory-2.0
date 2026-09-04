@@ -136,6 +136,41 @@
       "find": "          required_labels=\"$(python3 -c 'import json; from factory_kernel.triage import label_vocabulary; print(\"\\n\".join(label_vocabulary(json.load(open(\".factory/kernel.json\"))[\"labels\"])))')\"\n",
       "replace": "          required_labels=\"factory:accepted factory:rejected factory:rate-limited factory:in-progress factory:needs-review factory:needs-fix factory:needs-human factory:stop\"\n",
       "why": "The preflight would again check a hand-typed subset, and triage would crash on the first priority:* or type:* label the repository lacks."
+    },
+    {
+      "id": "main-regression-runs-quick-gate",
+      "file": ".github/workflows/dark-factory-main-regression.yml",
+      "find": "          python harness/ci.py 2>&1 | tee /tmp/main-regression.log\n",
+      "replace": "          python harness/ci.py --quick 2>&1 | tee /tmp/main-regression.log\n",
+      "why": "The daily regression would run static+unit only and report main green without the browser journey, holdouts or mutations."
+    },
+    {
+      "id": "main-regression-full-marker-not-required",
+      "file": ".github/workflows/dark-factory-main-regression.yml",
+      "find": "if [ \"$rc\" = \"0\" ] && grep -q '^GATE_OK mode=full' /tmp/main-regression.log; then",
+      "replace": "if [ \"$rc\" = \"0\" ]; then",
+      "why": "A harness that exited zero without emitting the full-gate marker would be reported as a pass."
+    },
+    {
+      "id": "unattended-merge-draft-gate-removed",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "    if: needs.trust-root-authority.outputs.unattended == 'true' && github.event.pull_request.draft == false\n",
+      "replace": "    if: needs.trust-root-authority.outputs.unattended == 'true'\n",
+      "why": "A draft PR would attempt to arm auto-merge, which GitHub refuses, turning the optional job red for a correct outcome (observed on #50)."
+    },
+    {
+      "id": "merged-branch-delete-without-merged-guard",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "    if: github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository\n",
+      "replace": "    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository\n",
+      "why": "Closing a PR without merging would delete its branch and the unmerged work with it."
+    },
+    {
+      "id": "main-regression-applies-factory-control-label",
+      "file": ".github/workflows/dark-factory-main-regression.yml",
+      "find": "              --label \"priority:high\" --label \"type:bug\" \\\n",
+      "replace": "              --label \"priority:high\" --label \"type:bug\" --label \"factory:accepted\" \\\n",
+      "why": "The regression job would bypass triage by accepting its own issue."
     }
   ]
 }
