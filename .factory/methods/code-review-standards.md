@@ -14,4 +14,4 @@ Judge against `CLAUDE.md`, the architecture policy and the minimal-complexity me
 
 Severity: hard-invariant risk is `critical`; convention breaks that will mislead future readers, duplicated machinery and wrong-direction imports are `high`; readability and naming are `medium` or `low`.
 
-Output exactly one JSON object: `{ "version": "1.0", "axis": "standards", "verdict": "pass|fail", "findings": [...] }`. Each finding has `severity` (`critical|high|medium|low`), `file`, `line` (integer or null) and a concise `description` naming the convention or principle it relates to. Any `critical` or `high` finding means verdict `fail`. Do not include Spec observations here.
+Write exactly one JSON object to the artifact path your role prompt names (your final message is not read): `{ "version": "1.0", "axis": "standards", "verdict": "pass|fail", "findings": [...] }`. Each finding has `severity` (`critical|high|medium|low`), `file`, `line` (integer or null) and a concise `description` naming the convention or principle it relates to. Any `critical` or `high` finding means verdict `fail`. Do not include Spec observations here.

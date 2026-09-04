@@ -754,3 +754,40 @@ and must compile.
 
 This accepts an equivalent spelling; it drops no check. It is a **judgement** structure and
 moved through the maintainer lane.
+
+---
+
+## D-030 · The stages after the governor, audited before the run reached them
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Attempts 6, 7 and 8 of the first canary each died one stage later than the last on the same
+class of defect: a prompt described a validated artifact in prose, or omitted information only
+the kernel holds, and a deterministic gate refused correct work. D-028 and D-029 fixed every
+stage up to and including the architecture governor. A second read-only audit covered the
+stages after it, before attempt 9 could reach them. Findings, all landed together:
+
+1. The RED gate refuses a deferred repro unless some checkpoint's failing output carries the
+   promised symptom, but the test author, the one worker that shapes that output, was never
+   shown the symptom. The kernel now appends it to the test author's brief.
+2. The conformance compiler computes applicable policy IDs from the changed files; the prompt
+   told the worker to use the governor's context/planned basis, and the kernel passed only the
+   diff. The kernel now computes the sets from the changed files and supplies them; the prompt
+   states the real basis. `_applicable_policy_ids` takes an explicit file set.
+3. `test-spec.json` is the one worker-written list that accepts no object spelling (its `argv`
+   must stay exact); the prompt now says so instead of implying the D-029 rule applies.
+4. Three authorities classified test paths with three predicates; a `test_*.py` under a product
+   directory passed the commit envelope and RED and was then an unplanned production file to
+   the architecture guard. One predicate, `scripts/factory_shapes.test_shaped`, now serves all
+   three, and the prompt states that rule.
+5. The pinned review methods said "Output exactly one JSON object"; the kernel reads a file.
+   They now say "Write ... to the artifact path your role prompt names".
+6. Validator side: the architecture holdout is handed the ID sets computed from the changed
+   files (the basis the evidence verifier checks), and the three certifiers receive a literal
+   JSON skeleton with `certifies` filled in rather than a one-sentence schema.
+7. Cleanup ticket, not changed here: `scripts/factory_provenance.py publish` runs twice per
+   build (once inside `factory_protocol.py attach`, once from `_attach_and_publish`). Harmless
+   (`git notes add -f`), one redundant fetch/push.
+
+None of these relaxes a check. Items 1, 2 and 6 move information the kernel already computes to
+the worker that must echo it; 3, 4 and 5 make a prompt describe the validator that runs.

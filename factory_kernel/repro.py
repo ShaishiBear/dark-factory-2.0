@@ -53,6 +53,9 @@ from typing import Callable, Mapping
 
 REPRO_ARTIFACT = "repro.json"
 DEFERRED_ARTIFACT = "repro-deferred.json"
+# The RED gate keeps this many trailing characters of each checkpoint's output; the deferred
+# symptom is searched inside that window, and the test author is told the number (D-030).
+RED_TAIL_CHARS = 2000
 OBSERVED_ARTIFACT = "repro-observed.json"
 MIN_SYMPTOM_CHARS = 4
 MAX_DEFERRED_FIELD_CHARS = 2000

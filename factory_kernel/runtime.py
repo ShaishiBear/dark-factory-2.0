@@ -41,6 +41,7 @@ from .refusal import (
     render_rehead_marker,
 )
 from .repro import (
+    RED_TAIL_CHARS,
     DEFERRED_ARTIFACT, OBSERVED_ARTIFACT, REPRO_ARTIFACT, ReproRefused, default_runner,
     deferred_record, execute, load_deferred, load_repro, observed_record, verify_deferred_in_red,
 )
@@ -414,7 +415,7 @@ class KernelRuntime:
                 paths,
                 context=self._worker_brief(
                     paths, contract_hash=contract_hash, issue_context=issue_context
-                ),
+                ) + self._deferred_symptom_brief(paths.artifacts),
                 env=env,
             )
             self._exec(
@@ -459,7 +460,7 @@ class KernelRuntime:
             self._review_and_repair(worktree, paths, env)
             self._agent(
                 "conformance", worktree.path, paths,
-                context=self._diff_context(worktree.path, env), env=env,
+                context=self._conformance_context(worktree.path, paths, env), env=env,
             )
             self._exec(
                 [
@@ -650,6 +651,27 @@ class KernelRuntime:
         return "REPRO OBSERVED (kernel-executed, deterministic):\n" + json.dumps(
             {k: record[k] for k in ("argv", "cwd", "rc", "matched_symptom", "output_sha256")},
             sort_keys=True,
+        )
+
+    def _deferred_symptom_brief(self, artifacts: Path) -> str:
+        """The string the RED gate will demand of at least one checkpoint, told to its author.
+
+        `_close_deferred_repro` refuses the build unless some checkpoint's failing output carries
+        the deferred repro's `expected_symptom`; until D-030 the test author, the only worker that
+        shapes that output, was never shown it."""
+        observed = artifacts / OBSERVED_ARTIFACT
+        if not observed.is_file():
+            return ""
+        record = self._read_json(observed)
+        if record.get("mode") != "deferred":
+            return ""
+        symptom = str(record.get("expected_symptom") or "").strip()
+        if not symptom:
+            return ""
+        return (
+            "\n\nDEFERRED REPRO SYMPTOM (at least one checkpoint's failing output must contain "
+            "this string verbatim, case-insensitive, within its last "
+            f"{RED_TAIL_CHARS} characters):\n{symptom}"
         )
 
     def _close_deferred_repro(self, artifacts: Path) -> None:
@@ -938,7 +960,7 @@ class KernelRuntime:
             self._rehead_green(paths, worktree.path, env, output="green-proof.json", log=self.REHEAD_GREEN_LOG)
             self._agent(
                 "conformance", worktree.path, paths,
-                context=self._diff_context(worktree.path, env), env=env,
+                context=self._conformance_context(worktree.path, paths, env), env=env,
             )
             self._exec(
                 [
@@ -1204,10 +1226,19 @@ class KernelRuntime:
     def _run_precode_certifier(
         self, paths: RunPaths, *, claim_id: str, role: str, inputs: Mapping[str, Any]
     ) -> Mapping[str, Any]:
+        skeleton = json.dumps(
+            {
+                "version": "1.0",
+                "certifies": claim_id,
+                "verdict": "pass|fail",
+                "findings": [{"severity": "critical|high|medium|low", "description": "..."}],
+            },
+            sort_keys=True,
+        )
         suffix = (
-            f"Return ONLY JSON with version 1.0; certifies {claim_id!r}; verdict pass|fail; and "
-            "findings as objects with severity critical|high|medium|low and non-empty "
-            "description. " + self.CERTIFIER_QUESTIONS[claim_id]
+            "Return ONLY this JSON object, with `certifies` exactly as shown: "
+            + skeleton
+            + ". " + self.CERTIFIER_QUESTIONS[claim_id]
         )
         with tempfile.TemporaryDirectory(prefix=f"dark-factory-{role}-") as tmp:
             prompt = prompt_text(
@@ -1269,11 +1300,14 @@ class KernelRuntime:
         }
         context["changed_files"] = changed_files
         context["diff"] = diff
+        # The evidence verifier requires the ID sets computed from changed_files; hand the
+        # holdout the sets rather than the rule (D-030). The verifier still recomputes them.
+        context["applicable_policy_ids"] = self._applicable_policy_ids(paths, files=changed_files)
         suffix = (
             "Return ONLY JSON with version 1.0; verdict pass|fail; convergence "
             "improves|neutral|regresses; principles, migrations, debts arrays containing exactly "
-            "the policy IDs applicable to changed_files; and findings as objects with severity "
-            "critical|high|medium|low and non-empty description."
+            "the policy IDs in applicable_policy_ids (copy them verbatim); and findings as objects "
+            "with severity critical|high|medium|low and non-empty description."
         )
         with tempfile.TemporaryDirectory(prefix="dark-factory-arch-holdout-") as tmp:
             prompt = prompt_text(
@@ -1385,6 +1419,27 @@ class KernelRuntime:
         if not path.is_file() or not path.read_text(encoding="utf-8", errors="replace").strip():
             raise NeedsHuman(f"{role} worker wrote no {name}")
 
+    def _changed_files(self, worktree: Path, env: Mapping[str, str]) -> list[str]:
+        """The merge-base..HEAD changed-file set, the basis the conformance compiler judges."""
+        base_ref = str(env.get("FACTORY_BASE_REF") or "origin/main")
+        out = self._git("diff", "--name-only", f"{base_ref}...HEAD", cwd=worktree)
+        return sorted({line.strip() for line in out.splitlines() if line.strip()})
+
+    def _conformance_context(self, worktree: Path, paths: RunPaths, env: Mapping[str, str]) -> str:
+        """Diff plus the exact policy-ID sets the conformance compiler will require.
+
+        The compiler computes applicability from the changed files, not from the governor's
+        context/planned basis; a worker told the wrong basis fails the ID-set check by name
+        (run 33914596611 did, one gate earlier). The kernel computes the sets and the worker
+        copies them; the compiler still recomputes and refuses any mismatch (D-030)."""
+        ids = self._applicable_policy_ids(paths, files=self._changed_files(worktree, env))
+        return (
+            self._diff_context(worktree, env)
+            + "\n\nAPPLICABLE ARCHITECTURE POLICY IDS FOR THE CHANGED FILES (computed by the "
+            "kernel exactly as the compiler will; copy verbatim into principles, migrations, "
+            "debts):\n" + json.dumps(ids, sort_keys=True)
+        )
+
     def _diff_context(self, worktree: Path, env: Mapping[str, str]) -> str:
         """The merge-base..HEAD diff as text, with a stat, truncated past DIFF_CONTEXT_CHARS."""
         base_ref = str(env.get("FACTORY_BASE_REF") or "origin/main")
@@ -1399,18 +1454,25 @@ class KernelRuntime:
             f"{stat}\n\n{body}"
         )
 
-    def _applicable_policy_ids(self, paths: RunPaths) -> dict[str, list[str]]:
+    def _applicable_policy_ids(
+        self, paths: RunPaths, *, files: list[str] | None = None
+    ) -> dict[str, list[str]]:
         """The policy ID sets the architecture compiler will require, computed the same way.
 
         The governor worker cannot run the compiler; handing it the exact sets it must echo
-        removes the guess. The compiler still recomputes and refuses any mismatch."""
+        removes the guess. The compiler still recomputes and refuses any mismatch. The governor's
+        basis is context files plus planned files; the conformance compiler's basis is the changed
+        files of the diff, so callers on that path pass `files` explicitly (D-030)."""
         policy = self._read_json(self.repo_root / ".factory" / "architecture.json")
-        context = self._read_json(paths.artifacts / "context.json")
-        design = self._read_json(paths.artifacts / "design.json")
-        files = sorted(
-            {str(x) for x in (context.get("files") or [])}
-            | {str(x) for x in (design.get("planned_files") or [])}
-        )
+        if files is None:
+            context = self._read_json(paths.artifacts / "context.json")
+            design = self._read_json(paths.artifacts / "design.json")
+            files = sorted(
+                {str(x) for x in (context.get("files") or [])}
+                | {str(x) for x in (design.get("planned_files") or [])}
+            )
+        else:
+            files = sorted({str(x) for x in files})
 
         def overlaps(path: str, prefix: str) -> bool:
             p, q = path.rstrip("/"), prefix.rstrip("/")

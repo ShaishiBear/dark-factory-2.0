@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_PREFIXES = ("app/backend/", "app/frontend/")
 SOURCE_PREFIXES = ("app/backend/", "app/frontend/src/")
 SOURCE_EXTENSIONS = (".py", ".ts", ".tsx", ".js", ".jsx")
-TEST_MARKERS = ("/tests/", "/__tests__/", ".test.", ".spec.")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from factory_shapes import TEST_MARKERS, test_shaped  # noqa: E402  (shared with proof + commit authority)
 TS_IMPORT = re.compile(
     r"(?:import|export)\s+(?:[^'\"]*?\sfrom\s*)?['\"]([^'\"]+)['\"]|"
     r"import\(\s*['\"]([^'\"]+)['\"]\s*\)"
@@ -53,8 +54,9 @@ def safe_repo_file(path: str) -> bool:
 
 
 def is_product(path: str) -> bool:
-    value = "/" + path.replace("\\", "/")
-    return path.startswith(PRODUCT_PREFIXES) and not any(marker in value for marker in TEST_MARKERS)
+    # The same predicate the commit envelope and the RED gate use, so a path they accept as a test
+    # is never reclassified here as unplanned production code (D-030).
+    return path.startswith(PRODUCT_PREFIXES) and not test_shaped(path)
 
 
 def is_arch_source(path: str) -> bool:

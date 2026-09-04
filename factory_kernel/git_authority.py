@@ -53,13 +53,26 @@ def _safe_rel(path: str) -> bool:
     return bool(path) and not p.is_absolute() and ".." not in p.parts and p.as_posix() == path
 
 
+def _load_shared_test_predicate():
+    """scripts/factory_shapes.test_shaped, loaded by path so the kernel needs no sys.path entry.
+
+    The scripts are standalone programs and must not import the kernel; the kernel may load the
+    one shared predicate from them so all three test-classifying authorities agree (D-030)."""
+    import importlib.util
+
+    source = Path(__file__).resolve().parents[1] / "scripts" / "factory_shapes.py"
+    spec = importlib.util.spec_from_file_location("factory_shapes_shared", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.test_shaped
+
+
+_shared_test_shaped = _load_shared_test_predicate()
+
+
 def _test_oriented(path: str) -> bool:
-    low = "/" + path.lower()
-    return (
-        "test" in PurePosixPath(path).name.lower()
-        or any(marker in low for marker in TEST_MARKERS)
-        or low.endswith("/conftest.py")
-    )
+    # Shared with the RED gate and the architecture guard (scripts/factory_shapes.test_shaped).
+    return _shared_test_shaped(path)
 
 
 def dirty_paths(cwd: Path) -> list[str]:

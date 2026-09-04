@@ -956,6 +956,41 @@
       "find": "        if entry.get(APPLICABLE_FIELD) is False:\n            return None\n",
       "replace": "",
       "why": "A governor that lists every policy with applicable:false would be refused again for the ids it explicitly excluded (canary attempt 7)."
+    },
+    {
+      "id": "test-author-not-told-deferred-symptom",
+      "file": "factory_kernel/runtime.py",
+      "find": "                ) + self._deferred_symptom_brief(paths.artifacts),\n",
+      "replace": "                ),\n",
+      "why": "The RED gate would demand a symptom string the test author was never shown, refusing every deferred-repro bug after a full RED run."
+    },
+    {
+      "id": "conformance-brief-omits-policy-ids",
+      "file": "factory_kernel/runtime.py",
+      "find": "            + \"\\n\\nAPPLICABLE ARCHITECTURE POLICY IDS FOR THE CHANGED FILES (computed by the \"",
+      "replace": "            + \"\\n\\n(policy ids withheld) (computed by the \"",
+      "why": "The conformance worker would guess the ID sets from the wrong basis again, as run 33914596611's governor did, and the compiler would refuse by name."
+    },
+    {
+      "id": "architecture-guard-test-predicate-narrowed",
+      "file": "scripts/factory_architecture_guard.py",
+      "find": "    return path.startswith(PRODUCT_PREFIXES) and not test_shaped(path)\n",
+      "replace": "    return path.startswith(PRODUCT_PREFIXES) and not any(m in ('/' + path) for m in TEST_MARKERS)\n",
+      "why": "A test_*.py the commit envelope and RED accept would again be an unplanned production file to the GREEN architecture guard, two gates after a stray commit."
+    },
+    {
+      "id": "architecture-holdout-ids-withheld",
+      "file": "factory_kernel/runtime.py",
+      "find": "        context[\"applicable_policy_ids\"] = self._applicable_policy_ids(paths, files=changed_files)\n",
+      "replace": "",
+      "why": "The architecture holdout would have to derive the exact ID sets the evidence verifier checks from a prose rule."
+    },
+    {
+      "id": "certifier-skeleton-removed",
+      "file": "factory_kernel/runtime.py",
+      "find": "            \"Return ONLY this JSON object, with `certifies` exactly as shown: \"\n            + skeleton\n",
+      "replace": "            \"Return ONLY JSON with version 1.0; certifies the claim; verdict pass|fail. \"\n",
+      "why": "The load-bearing `certifies` field would again be stated once in prose with no skeleton; a certifier omitting it fails every validation."
     }
   ]
 }
