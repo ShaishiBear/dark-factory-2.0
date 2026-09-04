@@ -27,11 +27,12 @@ class RuntimeConfig:
 
 @dataclass(frozen=True)
 class ValidationConfig:
+    """Only what the kernel itself runs. The full gate, holdout and mutation runners are invoked
+    by the evidence and post-merge programs, not by the kernel, and the repair pass count is a
+    constitutional constant (exactly one) rather than configuration; keys for them here were
+    validated and never read, which is a claim without an enforcer."""
+
     quick_command: tuple[str, ...]
-    full_command: tuple[str, ...]
-    holdout_command: tuple[str, ...]
-    mutation_command: tuple[str, ...]
-    max_repair_attempts: int
 
 
 @dataclass(frozen=True)
@@ -162,11 +163,5 @@ def load_config(path: str | Path) -> KernelConfig:
         prompts=parsed_prompts,
         validation=ValidationConfig(
             quick_command=_command(validation.get("quick_command"), "validation.quick_command"),
-            full_command=_command(validation.get("full_command"), "validation.full_command"),
-            holdout_command=_command(validation.get("holdout_command"), "validation.holdout_command"),
-            mutation_command=_command(validation.get("mutation_command"), "validation.mutation_command"),
-            max_repair_attempts=_positive_int(
-                validation.get("max_repair_attempts"), "validation.max_repair_attempts"
-            ),
         ),
     )

@@ -40,10 +40,10 @@
     "holdout": ".factory/prompts/holdout.md"
   },
   "validation": {
-    "quick_command": ["python", "harness/ci.py", "--quick"],
-    "full_command": ["python", "harness/ci.py"],
-    "holdout_command": ["python", ".factory/holdout/run.py"],
-    "mutation_command": ["python", "harness/mutations/run.py"],
-    "max_repair_attempts": 1
+    "quick_command": [
+      "python",
+      "harness/ci.py",
+      "--quick"
+    ]
   }
 }
