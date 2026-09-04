@@ -346,7 +346,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION §10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION �10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -802,6 +802,27 @@
       "find": "    \"implement\": 30,\n",
       "replace": "    \"implement\": 120,\n",
       "why": "A cap the subprocess timeout would cut off first is fiction; the stage would die without telemetry instead of stopping cleanly at its cap."
+    },
+    {
+      "id": "prompt-placeholders-not-rendered",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        prompt = render_prompt(prompt, env)\n",
+      "replace": "",
+      "why": "Workers would again receive `$ARTIFACTS_DIR` literally and, having no shell, write into a directory of that name (canary run 33910993905)."
+    },
+    {
+      "id": "prompt-unknown-placeholder-forwarded",
+      "file": "factory_kernel/prompt_render.py",
+      "find": "    if unknown:\n        raise PromptRenderError(",
+      "replace": "    if False:\n        raise PromptRenderError(",
+      "why": "A placeholder the kernel cannot render would reach the worker unexpanded instead of refusing the launch."
+    },
+    {
+      "id": "prompt-literal-artifacts-dir-unnamed",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        self._refuse_literal_artifacts_dir(cwd)\n        self._assert_clean(cwd)\n",
+      "replace": "        self._assert_clean(cwd)\n",
+      "why": "A worker writing to a literal `$ARTIFACTS_DIR` would fail as an anonymous dirty tree instead of naming the class."
     }
   ]
 }
