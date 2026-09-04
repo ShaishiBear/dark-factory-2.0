@@ -129,6 +129,13 @@
       "find": "-X POST \"${ANTHROPIC_BASE_URL}/v1/messages\"",
       "replace": "-X POST \"https://openrouter.ai/api/v1/messages\"",
       "why": "The raw probe would again prove a different request than the one the worker makes."
+    },
+    {
+      "id": "worker-preflight-labels-hand-typed",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "          required_labels=\"$(python3 -c 'import json; from factory_kernel.triage import label_vocabulary; print(\"\\n\".join(label_vocabulary(json.load(open(\".factory/kernel.json\"))[\"labels\"])))')\"\n",
+      "replace": "          required_labels=\"factory:accepted factory:rejected factory:rate-limited factory:in-progress factory:needs-review factory:needs-fix factory:needs-human factory:stop\"\n",
+      "why": "The preflight would again check a hand-typed subset, and triage would crash on the first priority:* or type:* label the repository lacks."
     }
   ]
 }

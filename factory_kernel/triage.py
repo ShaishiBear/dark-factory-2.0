@@ -15,6 +15,33 @@ from .runtime import KernelRuntime
 PRIORITIES = {"critical", "high", "medium", "low"}
 CLASSIFICATIONS = {"bug", "enhancement", "chore", "docs"}
 VERDICTS = {"accept", "reject"}
+
+# The labels triage can apply, derived from the same sets the decision validator enforces. The
+# worker preflight requires every one of these to exist before dispatching, reading this list from
+# the kernel rather than from a second hand-typed list: the second canary dispatch accepted an
+# issue and then crashed on `--add-label priority:medium` because the repository had only the
+# eight factory:* control labels the workflow checked for (run 33880138411, D-011).
+PRIORITY_LABEL_PREFIX = "priority:"
+TYPE_LABEL_PREFIX = "type:"
+PRIORITY_LABELS = tuple(PRIORITY_LABEL_PREFIX + value for value in sorted(PRIORITIES))
+TYPE_LABELS = tuple(TYPE_LABEL_PREFIX + value for value in sorted(CLASSIFICATIONS))
+
+
+def priority_label(priority: str) -> str:
+    if priority not in PRIORITIES:
+        raise ValueError(f"priority outside the triage vocabulary: {priority!r}")
+    return PRIORITY_LABEL_PREFIX + priority
+
+
+def type_label(classification: str) -> str:
+    if classification not in CLASSIFICATIONS:
+        raise ValueError(f"classification outside the triage vocabulary: {classification!r}")
+    return TYPE_LABEL_PREFIX + classification
+
+
+def label_vocabulary(control_labels: Mapping[str, str]) -> tuple[str, ...]:
+    """Every label the kernel can apply: the configured factory:* controls plus priority/type."""
+    return tuple(sorted(set(control_labels.values()))) + PRIORITY_LABELS + TYPE_LABELS
 # How much of each issue body the triage worker sees. Triage judges accept/reject on this window
 # and FACTORY_RULES section 1 tells it to reject what looks underspecified, so a window shorter
 # than a well-specified issue turns good issues into rejections. 12000 characters holds a long
@@ -202,8 +229,8 @@ class TriageEngine:
         if decision["verdict"] == "accept":
             for label in (
                 self.config.labels["accepted"],
-                f"priority:{decision['priority']}",
-                f"type:{decision['classification']}",
+                priority_label(str(decision["priority"])),
+                type_label(str(decision["classification"])),
             ):
                 self.github.add_issue_label(number, label)
             self.github.comment_issue(

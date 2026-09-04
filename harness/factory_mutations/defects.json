@@ -536,6 +536,13 @@
       "find": "        if lock not in planned_set:\n",
       "replace": "        if False:\n",
       "why": "The kernel would write a lockfile the compiled design never authorized, outside the implementation envelope."
+    },
+    {
+      "id": "triage-label-outside-vocabulary",
+      "file": "factory_kernel/triage.py",
+      "find": "                type_label(str(decision[\"classification\"])),\n",
+      "replace": "                \"kind:\" + str(decision[\"classification\"]),\n",
+      "why": "Triage would apply a label the preflight never required to exist, so an accepted issue would crash the run half-labelled."
     }
   ]
 }

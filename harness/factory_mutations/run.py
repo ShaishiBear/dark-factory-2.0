@@ -56,6 +56,7 @@ COPY_FILES = (
     "harness/mutations/defects.json",
     "harness/focused.py",
     "tests/factory/test_factory_security.py",
+    "tests/factory/test_factory_triage.py",
     "tests/factory/test_factory_trust_root_authority.py",
     "tests/factory/test_factory_holdout_blind.py",
     "tests/factory/test_factory_lifecycle_authority.py",
