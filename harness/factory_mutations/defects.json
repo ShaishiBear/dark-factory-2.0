@@ -879,6 +879,13 @@
       "find": "            self.github.push_branch(branch, force_with_lease=head)\n",
       "replace": "            self.github.push_branch(branch)\n",
       "why": "The rewritten branch would be pushed without naming the judged head, so the remote could not refuse overwriting a head nobody judged."
+    },
+    {
+      "id": "contract-keyed-behaviors-refused",
+      "file": "scripts/factory_protocol.py",
+      "find": "    behaviors = c[\"behaviors\"] = normalise_behaviors(c[\"behaviors\"])\n",
+      "replace": "    behaviors = c[\"behaviors\"]\n",
+      "why": "A complete contract written with behaviors keyed by AC id would be refused again as having no behaviors, as on canary run 33912650468."
     }
   ]
 }
