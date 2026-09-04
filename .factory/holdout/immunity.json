@@ -497,7 +497,7 @@
         {
           "kind": "text_contains",
           "path": "factory_kernel/runtime.py",
-          "value": "argv = resolve_trusted_program(self.repo_root, argv)"
+          "value": "argv = resolve_trusted_program(self._kernel_checkout, argv)"
         },
         {
           "kind": "text_contains",

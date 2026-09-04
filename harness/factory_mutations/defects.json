@@ -1058,7 +1058,7 @@
     {
       "id": "kernel-authority-run-from-subject-copy",
       "file": "factory_kernel/runtime.py",
-      "find": "        argv = resolve_trusted_program(self.repo_root, argv)\n",
+      "find": "        argv = resolve_trusted_program(self._kernel_checkout, argv)\n",
       "replace": "        argv = list(argv)\n",
       "why": "The kernel would again run a trust-root program by relative path from the PR-head worktree, so the subject's copy of the authority (stale, or tampered) would be the program that judges it (D-036)."
     },

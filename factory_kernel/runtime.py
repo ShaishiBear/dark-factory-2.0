@@ -1722,8 +1722,9 @@ class KernelRuntime:
     ) -> str:
         # A trust-root program is executed from the kernel's own checkout of main; the working
         # directory stays the tree under test, so main's code judges the PR's tree and the PR
-        # head's copy of an authority is never run (D-036).
-        argv = resolve_trusted_program(self.repo_root, argv)
+        # head's copy of an authority is never run (D-036). The checkout is looked up only when
+        # argv names such a program; git/uv/bun and inline python never touch it.
+        argv = resolve_trusted_program(self._kernel_checkout, argv)
         merged = scoped_environment(env, scope=credential_scope)
         started = time.time()
         proc = subprocess.run(
@@ -1749,6 +1750,13 @@ class KernelRuntime:
         if proc.returncode:
             raise ToolRefused(argv, rc=proc.returncode, output=output)
         return output
+
+    def _kernel_checkout(self) -> Path:
+        """Where the kernel's own trust-root programs live: the configured repository root,
+        or, for a bare runtime with none, the checkout this module was loaded from. Both are
+        the kernel's copy; neither is ever the subject's."""
+        root = getattr(self, "repo_root", None)
+        return Path(root) if root else Path(__file__).resolve().parents[1]
 
     def _git(self, *args: str, cwd: Path | None = None) -> str:
         return self._exec(["git", *args], cwd=cwd or self.repo_root, timeout=180).strip()

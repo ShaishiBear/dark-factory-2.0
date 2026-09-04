@@ -21,7 +21,7 @@ trust root differs from `origin/main` before it runs that harness (`factory_evid
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
-from typing import Sequence
+from typing import Callable, Sequence
 
 # Repository-relative programs the kernel treats as authorities over a PR.
 AUTHORITY_DIRS: tuple[str, ...] = ("scripts/",)
@@ -40,12 +40,15 @@ def is_authority(program: str) -> bool:
     return posix.startswith(AUTHORITY_DIRS) or posix in AUTHORITY_PROGRAMS
 
 
-def resolve_trusted_program(repo_root: Path, argv: Sequence[str]) -> list[str]:
+def resolve_trusted_program(
+    repo_root: Path | str | Callable[[], Path | str], argv: Sequence[str]
+) -> list[str]:
     """Return argv with a trust-root program path rewritten to the kernel's checkout.
 
     Only `python <repo-relative program> ...` shapes are touched; `git`, `uv`, `bun`, the
-    quick-gate harness and absolute paths pass through unchanged. The working directory is
-    the caller's concern and is never changed here.
+    quick-gate harness and absolute paths pass through unchanged, and for those the kernel
+    checkout is never even looked up (`repo_root` may be a callable, resolved lazily). The
+    working directory is the caller's concern and is never changed here.
     """
     items = list(argv)
     if len(items) < 2 or items[0] != "python":
@@ -53,10 +56,11 @@ def resolve_trusted_program(repo_root: Path, argv: Sequence[str]) -> list[str]:
     program = items[1]
     if not is_authority(program):
         return items
-    target = (Path(repo_root) / program.replace("\\", "/")).resolve()
+    root = repo_root() if callable(repo_root) else repo_root
+    target = (Path(root) / program.replace("\\", "/")).resolve()
     if not target.is_file():
         raise TrustedProgramMissing(
-            f"trust-root program {program!r} is missing from the kernel checkout {Path(repo_root)}"
+            f"trust-root program {program!r} is missing from the kernel checkout {Path(root)}"
         )
     items[1] = str(target)
     return items

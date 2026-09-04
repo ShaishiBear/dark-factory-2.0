@@ -111,6 +111,32 @@ class ExecTests(unittest.TestCase):
         self.assertEqual(Path(argv[1]), (ROOT / "scripts" / "factory_provenance.py").resolve())
         self.assertEqual(Path(run.call_args.kwargs["cwd"]), worktree, "the tree under test is the worktree")
 
+    def test_a_bare_runtime_without_a_repo_root_still_runs_the_kernel_copy(self):
+        """Tests build KernelRuntime with object.__new__ and no repo_root; the module's own
+        checkout is the kernel's copy, and plain commands never look the checkout up."""
+        rt = object.__new__(KernelRuntime)
+        self.assertFalse(hasattr(rt, "repo_root"))
+        with mock.patch.object(runtime_module.subprocess, "run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            rt._exec(["true"], cwd=Path("/tmp"))
+            rt._exec(["python", "scripts/factory_security.py", "--worktree"], cwd=ROOT)
+        plain, authority = (call.args[0] for call in run.call_args_list)
+        self.assertEqual(plain, ["true"])
+        self.assertEqual(Path(authority[1]), (ROOT / "scripts" / "factory_security.py").resolve())
+
+    def test_the_checkout_is_looked_up_only_for_an_authority(self):
+        calls = []
+
+        def root():
+            calls.append(1)
+            return ROOT
+
+        self.assertEqual(resolve_trusted_program(root, ["git", "status"]), ["git", "status"])
+        self.assertEqual(resolve_trusted_program(root, ["python", "-c", "pass"]), ["python", "-c", "pass"])
+        self.assertEqual(calls, [])
+        resolve_trusted_program(root, ["python", "scripts/factory_security.py"])
+        self.assertEqual(calls, [1])
+
     def test_exec_leaves_git_and_the_quick_gate_alone(self):
         rt = bare_runtime()
         with mock.patch.object(runtime_module.subprocess, "run") as run:

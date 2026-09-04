@@ -195,7 +195,6 @@ class CredentialScopeTests(unittest.TestCase):
     def test_kernel_exec_defaults_to_zero_credentials(self, run):
         run.return_value = Mock(returncode=0, stdout="ok", stderr="")
         runtime = object.__new__(KernelRuntime)
-        runtime.repo_root = ROOT  # _exec resolves trust-root programs against it (D-036)
         with patch.dict(os.environ, self.source(), clear=True):
             runtime._exec(["true"], cwd=Path("/tmp"))
         env = run.call_args.kwargs["env"]
