@@ -29,6 +29,7 @@ from .independence import (
     verify_certificate,
 )
 from .provenance import verify_pack
+from .worker_policy import BUILDER_BLIND_PATHS
 from .worktree import Worktree, create_detached, remove
 
 
@@ -178,10 +179,13 @@ class KernelRuntime:
         base_sha = self._git("rev-parse", f"origin/{self.config.default_branch}")
         run_id = f"issue-{issue_number}-a{attempt}-{uuid.uuid4().hex[:10]}"
         paths = RunPaths.create(self.config.runtime.work_root, run_id)
+        # The builder never sees the holdout: its worktree is created without the scenario
+        # programs on disk. The validator worktree below is created without this argument.
         worktree = create_detached(
             self.repo_root,
             base_sha,
             base_dir=self.config.runtime.work_root / "worktrees",
+            blind=BUILDER_BLIND_PATHS,
         )
         branch = f"factory/issue-{issue_number}-a{attempt}-{run_id.rsplit('-', 1)[-1]}"
         handed_off = False
