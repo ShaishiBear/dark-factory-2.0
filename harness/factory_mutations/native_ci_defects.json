@@ -199,6 +199,13 @@
       "find": "      - name: Upload run transcripts and artifacts (observability)\n        if: always()\n",
       "replace": "      - name: Upload run transcripts and artifacts (observability)\n        if: false\n",
       "why": "Observability, not authority: without the upload no per-stage timing or transcript survives the runner, and a slow or failed stage cannot be read after the fact."
+    },
+    {
+      "id": "worker-preflight-pr-permission-refusal-advisory",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "              echo \"FACTORY_PREFLIGHT_REFUSED GitHub Actions may not create pull requests (Settings > Actions > General > Workflow permissions)\"\n              exit 1\n",
+      "replace": "              echo \"FACTORY_PREFLIGHT_REFUSED GitHub Actions may not create pull requests (Settings > Actions > General > Workflow permissions)\"\n",
+      "why": "An explicit 'Actions may not create pull requests' would be printed and ignored; the run would spend a full build before failing at gh pr create, exactly the two hours the fifth canary defect cost."
     }
   ]
 }

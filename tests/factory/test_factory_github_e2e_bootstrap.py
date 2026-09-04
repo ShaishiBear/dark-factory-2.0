@@ -138,6 +138,43 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
         self.assertIn("type:bug", vocabulary)
         self.assertIn("factory:stop", vocabulary)
 
+    def test_worker_preflight_checks_actions_may_create_pull_requests(self) -> None:
+        """The kernel opens the product PR with the Actions token. The first complete canary
+        build (D-022) burned two hours before `gh pr create` said Actions may not create pull
+        requests. The preflight now asks the setting: an explicit false refuses the run; a
+        readable true passes; a token that cannot read the setting says so and continues,
+        because a silent pass and a silent refusal are both worse than an honest unverified."""
+        workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        prerequisites = workflow.split("- name: Check operational prerequisites", 1)[1]
+        prerequisites = prerequisites.split("- name: Setup Python", 1)[0]
+        self.assertIn(
+            'gh api "repos/$GITHUB_REPOSITORY/actions/permissions/workflow"', prerequisites
+        )
+        self.assertIn("--jq '.can_approve_pull_request_reviews'", prerequisites)
+        self.assertRegex(
+            prerequisites,
+            r'false\)\n\s+echo "FACTORY_PREFLIGHT_REFUSED GitHub Actions may not create pull requests'
+            r' \(Settings > Actions > General > Workflow permissions\)"\n\s+exit 1',
+        )
+        self.assertRegex(prerequisites, r'true\)\n\s+echo "FACTORY_PREFLIGHT_PR_PERMISSION_OK"')
+        self.assertIn("FACTORY_PREFLIGHT_PR_PERMISSION_UNVERIFIED", prerequisites)
+        # The unverified branch must not exit: it is the honest fallback for a token that
+        # cannot read repository settings.
+        unverified = prerequisites.split("FACTORY_PREFLIGHT_PR_PERMISSION_UNVERIFIED", 1)[1]
+        unverified = unverified.split("esac", 1)[0]
+        self.assertNotIn("exit 1", unverified)
+        # Ordering: after the secret loop, before the route probes.
+        self.assertLess(
+            prerequisites.index('FACTORY_PREFLIGHT_REFUSED missing secret'),
+            prerequisites.index("actions/permissions/workflow"),
+        )
+        self.assertLess(
+            prerequisites.index("actions/permissions/workflow"),
+            prerequisites.index("routing_model="),
+        )
+
     def test_worker_model_route_is_the_request_the_sdk_makes(self) -> None:
         """The Anthropic SDK appends /v1/messages to ANTHROPIC_BASE_URL. With the versioned
         path as the base, the CLI hit /api/v1/v1/messages and got an HTML 404 for every model

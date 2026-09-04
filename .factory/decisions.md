@@ -501,3 +501,27 @@ waives the protected-path veto and nothing else, so this refusal binds maintaine
 check is a protected path with its own mutation; removing it fails the factory suite.
 
 `harness/harness.config.json` carries no floors (only `e2e_timeout_s`), so it is not compared.
+
+---
+
+## D-022 · A build that succeeds and cannot open its PR
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Canary attempt 3 on issue #49 (worker run 33899592399) was the first run to complete the
+whole build: executed repro, contract, context, governor, RED, implementation, both review
+axes, conformance, final GREEN, quick gate, and a push of
+`factory/issue-49-a1-dea37cd1cc` carrying a three-line fix and four acceptance tests. It
+then failed at `gh pr create`: "GitHub Actions is not permitted to create or approve pull
+requests". The repository setting `actions/permissions/workflow.can_approve_pull_request_reviews`
+had never been turned on; every autonomous PR would have died at the same step.
+
+The setting was flipped by hand with the owner's credentials. The worker preflight now asks
+for it before dispatching, honestly: an explicit `false` refuses the run; `true` prints
+`FACTORY_PREFLIGHT_PR_PERMISSION_OK`; a token that cannot read the setting prints
+`FACTORY_PREFLIGHT_PR_PERMISSION_UNVERIFIED` and continues. That last branch exists because
+the endpoint needs `administration:read` and the default `GITHUB_TOKEN` does not carry it,
+so on the canonical worker the check is expected to report unverified. What the preflight can
+prove is bounded by what its token can read; the requirement is recorded in FACTORY.md and
+FACTORY_RULES §8 so the next repository does not learn it from a two-hour build. A refusal
+made advisory is a factory mutation.
