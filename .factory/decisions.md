@@ -726,3 +726,31 @@ The rule: every prompt describing a validated artifact shows the exact JSON skel
 validator accepts, and the kernel supplies data the worker cannot compute (diffs, applicable
 policy IDs, hashes). Accepting an equivalent spelling is allowed; dropping a required field or
 check is not. Trust-root change through the maintainer lane.
+
+---
+
+## D-029 · Validators accept both spellings of a worker-written list
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Canary attempt 8 (run 33916377607) passed investigate, the deferred repro and the contract
+gate, then died at the context gate: `IMPACT_FAIL: context has no seed files`. The context
+worker had written every list as objects, `{"path": ..., "why": ...}` for files and
+`{"name": ..., "why": ...}` for symbols, and `scripts/factory_impact.py` kept only string
+entries. Attempt 7 (run 33914596611) had died the same way one stage later, at the governor
+gate, with principles spelled as `{"id": ..., "verdict": ..., "notes": ...}` objects. In both
+runs the content was right; the spelling was the whole defect. Earlier attempts had written
+plain strings by luck.
+
+The rule, applied to every remaining worker-written list in one change: a validator accepts
+each entry as either a plain string or an object carrying that list's canonical key (`path`
+for files/tests/adrs/planned files, `name` for symbols/callers/modules/seams, `id` for policy
+ids, `text` for prose lists), normalises to the string BEFORE it validates or hashes, refuses
+an object without the key, a non-string value, or a duplicate after normalisation, and ignores
+a top-level `notes` string. Compiled artifacts and every hash stay in the plain-string form, so
+nothing downstream changed. Prompts show the plain-string skeleton and name `notes` as the
+place for explanations. The refused raw artifacts from runs 7 and 8 are checked in as fixtures
+and must compile.
+
+This accepts an equivalent spelling; it drops no check. It is a **judgement** structure and
+moved through the maintainer lane.

@@ -4,6 +4,9 @@ from __future__ import annotations
 import argparse, hashlib, json, os, re, subprocess, sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from factory_shapes import normalise_lists  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 AC = re.compile(r"^AC-[1-9][0-9]*$")
 DEPENDENCY_ECOSYSTEMS = ("python", "javascript")
@@ -100,9 +103,15 @@ def validate_contract(c: dict, issue: int | None = None) -> str:
     return hashlib.sha256(canonical(c)).hexdigest()
 
 
+CONTEXT_LISTS = ("files", "symbols", "callers", "tests", "invariants", "adrs", "history")
+
+
 def validate_context(m: dict, contract_hash: str) -> dict:
-    required = {"version", "contract_sha256", "files", "symbols", "callers", "tests", "invariants", "adrs", "history"}
+    required = {"version", "contract_sha256", *CONTEXT_LISTS}
     if required - m.keys(): die(f"context missing {sorted(required - m.keys())}")
+    # Workers may spell any entry as an object with its canonical key; the compiled artifact
+    # and its hash are always the plain-string form (scripts/factory_shapes.py).
+    m = normalise_lists(m, CONTEXT_LISTS, "context", die)
     if m["version"] != "1.0" or m["contract_sha256"] != contract_hash: die("context is not bound to validated contract")
     if not isinstance(m["files"], list) or not m["files"]: die("context must identify relevant files")
     hashes = {}

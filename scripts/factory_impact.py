@@ -12,6 +12,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from factory_shapes import normalise_lists  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "app" / "backend"
 FRONTEND = ROOT / "app" / "frontend"
@@ -218,8 +221,13 @@ def analyze(files: set[str], ranges: dict[str, list[tuple[int, int]]] | None = N
     }
 
 
+CONTEXT_LISTS = ("files", "symbols", "callers", "tests", "invariants", "adrs", "history")
+
+
 def context_mode(args: argparse.Namespace) -> None:
-    raw = load(args.input)
+    # Entries may be plain strings or objects carrying the canonical key; the enriched
+    # artifact is always plain strings (scripts/factory_shapes.py).
+    raw = normalise_lists(load(args.input), CONTEXT_LISTS, "context", die)
     seed_files = {p for p in raw.get("files", []) if isinstance(p, str)}
     if not seed_files:
         die("context has no seed files")

@@ -1,0 +1,104 @@
+{
+  "version": "1.0",
+  "decision": "proceed",
+  "convergence": "improves",
+  "principles": [
+    {
+      "id": "ARCH-FRONTEND-BOUNDARIES",
+      "applicable": true,
+      "verdict": "complies",
+      "notes": "The repair lives entirely in app/frontend/src/lib (exportMarkdown.ts) as a pure citation-to-Markdown function with no new imports, no state, no I/O, and no network. frontend-lib has allowed_imports: [] in .factory/architecture.json and the design adds zero import edges; no formatting behavior leaks into components (ChatArea, Message, CitationModal) or hooks."
+    },
+    {
+      "id": "ARCH-DEEP-MODULES",
+      "applicable": true,
+      "verdict": "complies",
+      "notes": "The design extends the existing deep seam formatCitation in place rather than adding a parallel formatter, a wrapping helper, or a one-off abstraction beside it. Callers (formatSources at exportMarkdown.ts:63, ChatArea.handleExport) continue to pass a Citation and receive a finished Markdown list entry with no orchestration on their side. The repair actually deepens the module: today the interface silently emits two different entry shapes across branches (marker-less degraded returns vs '- '-prefixed success paths); after the fix the contract is uniform — every non-empty-snippet entry starts with '- ', carries the '— <range>' tail, and ends with the '> \"snippet\"' blockquote — so a caller can reason about the output from the interface alone, which is exactly the deep-module test."
+    },
+    {
+      "id": "ARCH-BACKEND-BOUNDARIES",
+      "applicable": false,
+      "verdict": "not-applicable",
+      "notes": "planned_files contains no backend paths; routes/db/rag/llm/services are untouched."
+    },
+    {
+      "id": "ARCH-FACTORY-TRUST",
+      "applicable": false,
+      "verdict": "not-violated",
+      "notes": "No trust-root paths (factory_kernel, .factory, harness, scripts/factory_*, tests/factory) are in planned_files. Independent validation observed: this governor re-verified the designer's factual claims against the working tree (current degraded return strings at exportMarkdown.ts:32, :46, :53; formatSources join semantics at :63; existing assertions at exportMarkdown.test.ts:215-227, 229-235, 260-272) instead of accepting builder reasoning, and confirmed design.json's contract_sha256 equals the validated contract sha256 3a3d954d075b96d0a73f70514823e3061337cb6def442b00d3f8f584e164df93."
+    }
+  ],
+  "migrations": [
+    {
+      "id": "MIG-FRONTEND-LARGE-COMPONENTS",
+      "applicable": true,
+      "verdict": "complies",
+      "notes": "ChatArea.tsx is the sole UI caller of exportConversationAsMarkdown (handleExport) and sits under this active migration plus DEBT-CHAT-AREA no-growth. The design refuses the tempting call-site repair and places the marker/snippet behavior in the lib seam instead; ChatArea.tsx is not in planned_files, so the large component does not grow and the migration direction (behavior belongs in hooks/lib, not the large UI component) is honored."
+    },
+    {
+      "id": "MIG-DB-REPOSITORY-SPLIT",
+      "applicable": false,
+      "notes": "No change to app/backend/db/repository.py or any backend persistence module."
+    },
+    {
+      "id": "MIG-LLM-OPENROUTER-SPLIT",
+      "applicable": false,
+      "notes": "No change to app/backend/llm/openrouter.py or any LLM path."
+    },
+    {
+      "id": "MIG-RAG-TOOLS-SPLIT",
+      "applicable": false,
+      "notes": "No change to app/backend/rag/tools.py or any retrieval path."
+    },
+    {
+      "id": "MIG-ROUTE-MESSAGES-THIN",
+      "applicable": false,
+      "notes": "No change to app/backend/routes/messages.py or any route."
+    },
+    {
+      "id": "MIG-FACTORY-RUNTIME-SPLIT",
+      "applicable": false,
+      "notes": "No change to factory_kernel/runtime.py or any kernel module."
+    }
+  ],
+  "debts": [
+    {
+      "id": "DEBT-CHAT-AREA",
+      "applicable": true,
+      "verdict": "no-growth-preserved",
+      "notes": "app/frontend/src/components/ChatArea.tsx is a no-growth hotspot and the call site of the affected export. It is not in planned_files; its byte footprint is unchanged. The design explicitly keeps the fix out of the component (matching the contract's out-of-scope list), which is the correct disposition for this debt."
+    },
+    {
+      "id": "DEBT-DB-REPOSITORY",
+      "applicable": false,
+      "notes": "app/backend/db/repository.py untouched."
+    },
+    {
+      "id": "DEBT-LLM-OPENROUTER",
+      "applicable": false,
+      "notes": "app/backend/llm/openrouter.py untouched."
+    },
+    {
+      "id": "DEBT-RAG-TOOLS",
+      "applicable": false,
+      "notes": "app/backend/rag/tools.py untouched."
+    },
+    {
+      "id": "DEBT-MESSAGES-ROUTE",
+      "applicable": false,
+      "notes": "app/backend/routes/messages.py untouched."
+    },
+    {
+      "id": "DEBT-FACTORY-RUNTIME",
+      "applicable": false,
+      "notes": "factory_kernel/runtime.py untouched."
+    },
+    {
+      "id": "DEBT-SIDEBAR",
+      "applicable": false,
+      "notes": "app/frontend/src/components/Sidebar.tsx untouched and not a caller of the export path."
+    }
+  ],
+  "rationale": "The design names the seam (app/frontend/src/lib/exportMarkdown.ts#formatCitation), keeps all behavior behind it, and changes exactly three return statements plus assertions in the existing test file — planned_files match the issue's 'Files expected to change' list with zero new files and zero new imports, so the frontend-lib layer (allowed_imports: []) stays closed and no new dependency edge or cycle can arise. I verified against the working tree that the claimed deficiency is real and exactly characterized: the two YouTube fallback returns (lines 46 and 53, 'new URL()' throwing and missing-v) emit '<title> (timestamp link unavailable) — <range>' with neither the '- ' marker nor the snippet blockquote, and the Dynamous empty-lesson_url return (line 32) keeps the blockquote but lacks the marker; because formatSources newline-joins entries, the marker-less entries merge into the previous list item when rendered, and the dropped blockquote violates MISSION.md's rich-citations bar for exports. The repair is additive and preserves every currently-passing assertion I could find: the invalid-URL test's exact console.warn payload and '(timestamp link unavailable)' wording, the no-v test's no-link assertion, and the Dynamous fallback test's not-contains-(](') plus blockquote assertions all remain satisfied once '- ' is prefixed and the '\\n  > \"<snippet>\"' shape (reusing the success-path two-space indent) is appended. The RED prediction is honest: on the unchanged tree the current suite is green and AC-1/AC-2 fail against the 'not-a-url' return (no blockquote, no leading '- '), AC-3's starts-with fails against the Dynamous return — the promised symptom '(timestamp link unavailable) — 0:10–0:20' will surface verbatim in vitest's received output provided the tests assert on the returned string with toMatch/toContain rather than boolean coercion; that condition is already pinned by the design's invariants and is bound here as a requirement of this proceed. Over a multi-ticket horizon this converges the architecture: the formatCitation interface becomes total and uniform (every surviving entry is a self-consistent Markdown list item carrying its snippet), which removes a silent trap for the already-flagged follow-up tickets (the empty-snippet guard oddity, the missing is_cited two-tier Sources rendering — correctly deferred to their own issues rather than bundled), and it demonstrates the right instinct of repairing the deep seam instead of the no-growth component that calls it. No cross-layer coupling is added, no parallel abstraction is created beside an established seam, no debt-listed hotspot is touched, and no active migration is worked against; exportMarkdown.ts is not itself in the debt registry, so its few-byte growth carries no no-growth constraint. Decision: proceed.",
+  "required_changes": []
+}
