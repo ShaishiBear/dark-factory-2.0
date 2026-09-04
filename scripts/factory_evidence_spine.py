@@ -9,13 +9,17 @@ import re
 import subprocess
 import sys
 
+# The repo-owned kernel is imported by module path. This script runs standalone (CI, humans) and
+# from the kernel's detached worktrees, whose cwd is not the repository root, so the root is
+# put on sys.path here rather than trusting the caller to export PYTHONPATH.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 from factory_kernel.canonical import canonical_bytes
 from factory_kernel.credential_env import scoped_environment
 from factory_kernel.evidence_closure import compile_full_spine
 from factory_kernel.independence import externally_supplied_claims
 from factory_kernel.provenance import verify_pack
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def fail(message: str) -> None:
