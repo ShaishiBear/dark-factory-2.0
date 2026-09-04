@@ -205,17 +205,20 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
         self.assertIn("-name final-green-proof.json", download)
         self.assertIn('test "$count" = "1" || {', download)
         self.assertIn("RESUME_ARTIFACTS=", download)
-        # The dispatch step branches: resume XOR dispatch --once, never both.
+        # Two mutually exclusive steps: resume XOR dispatch --once, never both in one run.
+        resume = workflow.split("- name: Resume the pushed PR from its artifacts", 1)[1]
+        resume = resume.split("- name: Dispatch exactly one factory action", 1)[0]
+        self.assertIn("if: inputs.resume_pr != '' && inputs.resume_run_id != ''", resume)
+        self.assertIn(
+            'run: python -m factory_kernel resume --pr "$RESUME_PR" --artifacts "$RESUME_ARTIFACTS"',
+            resume,
+        )
         dispatch = workflow.split("- name: Dispatch exactly one factory action", 1)[1]
         dispatch = dispatch.split("- name: Upload run transcripts", 1)[0]
-        self.assertIn('if [ -n "${RESUME_PR}" ]; then', dispatch)
-        self.assertIn(
-            'python -m factory_kernel resume --pr "$RESUME_PR" --artifacts "$RESUME_ARTIFACTS"',
-            dispatch,
-        )
-        self.assertIn("else\n            python -m factory_kernel dispatch --once\n          fi", dispatch)
-        self.assertEqual(dispatch.count("factory_kernel dispatch --once"), 1)
-        self.assertEqual(dispatch.count("factory_kernel resume"), 1)
+        self.assertIn("if: inputs.resume_pr == '' && inputs.resume_run_id == ''", dispatch)
+        self.assertIn("run: python -m factory_kernel dispatch --once", dispatch)
+        self.assertEqual(workflow.count("factory_kernel dispatch --once"), 1)
+        self.assertEqual(workflow.count("factory_kernel resume"), 1)
 
     def test_worker_model_route_is_the_request_the_sdk_makes(self) -> None:
         """The Anthropic SDK appends /v1/messages to ANTHROPIC_BASE_URL. With the versioned

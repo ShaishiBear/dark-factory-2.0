@@ -267,7 +267,20 @@ jobs:
           echo "RESUME_ARTIFACTS=$(dirname "$proofs")" >> "$GITHUB_ENV"
           echo "FACTORY_RESUME_ARTIFACTS_OK run=$RESUME_RUN_ID"
 
+      # A resume is the run's one action: the ordinary dispatch below is skipped by the
+      # inverse guard, so the same run can never both finish one PR and start another build.
+      - name: Resume the pushed PR from its artifacts
+        if: inputs.resume_pr != '' && inputs.resume_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+          FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
+          RESUME_PR: ${{ inputs.resume_pr }}
+        run: python -m factory_kernel resume --pr "$RESUME_PR" --artifacts "$RESUME_ARTIFACTS"
+
       - name: Dispatch exactly one factory action
+        if: inputs.resume_pr == '' && inputs.resume_run_id == ''
         env:
           GH_TOKEN: ${{ github.token }}
           # ClaudeCliProvider._worker_env forwards ANTHROPIC_* to the model subprocess, so the
@@ -278,16 +291,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
-          RESUME_PR: ${{ inputs.resume_pr }}
-        shell: bash
-        run: |
-          # Exactly one action per run: a resume is the action, and `dispatch --once` does not
-          # also run, or the same run could both finish one PR and start another build.
-          if [ -n "${RESUME_PR}" ]; then
-            python -m factory_kernel resume --pr "$RESUME_PR" --artifacts "$RESUME_ARTIFACTS"
-          else
-            python -m factory_kernel dispatch --once
-          fi
+        run: python -m factory_kernel dispatch --once
 
       # Observability only: nothing reads these to decide anything. Model transcripts, the
       # per-stage telemetry and timings, the deterministic gates' logs and the run's JSON
