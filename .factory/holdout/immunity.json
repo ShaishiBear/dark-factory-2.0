@@ -271,6 +271,38 @@
           "minimum": 1
         }
       ]
+    },
+    {
+      "id": "IMM-010",
+      "status": "active",
+      "source": {
+        "kind": "audit",
+        "ref": "2026-09-04-preflight-proved-a-different-request"
+      },
+      "failure_class": "a preflight that proves a different request than the one the worker makes",
+      "lesson": "The worker preflight curled the literal OpenRouter path and passed for weeks while the worker itself, through the Anthropic SDK that appends /v1/messages to ANTHROPIC_BASE_URL, requested /api/v1/v1/messages and got an HTML 404 for every model. The first canary dispatch was the first time the real request was ever made. A preflight must exercise the same binary, flags and URL construction as the thing it clears: the base URL is defined once at job level, the raw probe builds its URL the way the SDK does, and the pinned CLI is run as the kernel runs it against every configured model before dispatch.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": ".github/workflows/dark-factory-worker.yml",
+          "value": "ANTHROPIC_BASE_URL: https://openrouter.ai/api\n"
+        },
+        {
+          "kind": "text_contains",
+          "path": ".github/workflows/dark-factory-worker.yml",
+          "value": "-X POST \"${ANTHROPIC_BASE_URL}/v1/messages\""
+        },
+        {
+          "kind": "text_contains",
+          "path": ".github/workflows/dark-factory-worker.yml",
+          "value": "FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model $model"
+        },
+        {
+          "kind": "text_contains",
+          "path": ".github/workflows/dark-factory-worker.yml",
+          "value": "FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=$model"
+        }
+      ]
     }
   ]
 }

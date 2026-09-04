@@ -19,6 +19,14 @@ jobs:
     if: github.repository == 'ShaishiBear/dark-factory-2.0'
     runs-on: ubuntu-24.04
     timeout-minutes: 300
+    env:
+      # Model calls are routed to OpenRouter's Anthropic-compatible Messages endpoint rather than
+      # Anthropic's first-party API. The Anthropic SDK inside Claude Code appends `/v1/messages`
+      # to this value, so it must be the API root, not the versioned path: with `/api/v1` here
+      # the CLI requested `/api/v1/v1/messages`, received OpenRouter's HTML 404 page, and reported
+      # "there's an issue with the selected model" for every model (run 33876017910, D-010).
+      # Defined once at job level so the preflight probes and the dispatch cannot diverge.
+      ANTHROPIC_BASE_URL: https://openrouter.ai/api
     services:
       postgres:
         image: postgres:16
@@ -88,16 +96,12 @@ jobs:
               exit 1
             }
           done
-          # Model calls are routed to OpenRouter's Anthropic-compatible Messages endpoint
-          # rather than Anthropic's first-party API. The worker's whole authority boundary is
-          # enforced by Claude Code CLI flags, so the CLI stays the harness and only its base
-          # URL moves.
-          # A misrouted or unauthorised endpoint must refuse the run, not silently degrade every
-          # model judgement in it: model output is already non-authoritative, but a factory that
-          # cannot reason at all should stop rather than burn a validation ladder discovering it.
+          # Cheap early signal only: a raw request built the way the SDK builds it
+          # (base URL + /v1/messages). The authority for the route is the CLI probe below,
+          # which runs the pinned worker binary exactly as the kernel launches it.
           routing_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
           routing_code="$(curl -sS -o /tmp/routing-preflight.json -w '%{http_code}' \
-            -X POST "https://openrouter.ai/api/v1/messages" \
+            -X POST "${ANTHROPIC_BASE_URL}/v1/messages" \
             -H "x-api-key: $OPENROUTER_API_KEY" \
             -H 'anthropic-version: 2023-06-01' \
             -H 'content-type: application/json' \
@@ -141,6 +145,32 @@ jobs:
           agent-browser install --with-deps
           agent-browser --help >/dev/null
 
+      - name: Prove the worker's model route with the pinned CLI
+        shell: bash
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          # The preflight must prove the request the worker actually makes, not a lookalike.
+          # This runs the pinned CLI with the same flags factory_kernel/providers.py uses for a
+          # tool-less worker, against each configured model, and refuses the run unless the CLI
+          # itself reports a non-error result. A factory that cannot reason at all must stop
+          # here rather than burn a validation ladder discovering it.
+          for model in $(python3 -c 'import json;p=json.load(open(".factory/kernel.json"))["provider"];print(p["model"]);print(p.get("architecture_model") or "")'); do
+            set +e
+            timeout 180 claude --bare -p "Reply with exactly the word OK and nothing else." \
+              --model "$model" --permission-mode dontAsk --tools "" \
+              --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands \
+              --output-format json > /tmp/route-probe.json 2>/tmp/route-probe.err
+            set -e
+            ok="$(python3 -c 'import json;d=json.load(open("/tmp/route-probe.json"));print("true" if d.get("is_error") is False and d.get("result") else "false")' 2>/dev/null || echo false)"
+            test "$ok" = "true" || {
+              echo "FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model $model"
+              head -c 600 /tmp/route-probe.json; echo; head -c 400 /tmp/route-probe.err; echo
+              exit 1
+            }
+            echo "FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=$model"
+          done
+
       - name: Create disposable validation environment
         shell: bash
         run: |
@@ -171,9 +201,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # ClaudeCliProvider._worker_env forwards ANTHROPIC_* to the model subprocess, so the
-          # CLI picks the routing up without any provider-code change. OPENROUTER_API_KEY is kept
-          # separately because application validation uses it directly for embeddings/inference.
-          ANTHROPIC_BASE_URL: https://openrouter.ai/api/v1
+          # CLI picks up the job-level ANTHROPIC_BASE_URL and this token without any provider-code
+          # change. OPENROUTER_API_KEY is kept separately because application validation uses it
+          # directly for embeddings/inference.
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}

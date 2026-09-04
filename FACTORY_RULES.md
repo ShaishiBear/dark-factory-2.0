@@ -277,7 +277,7 @@ Ask a given decision once. A later issue that needs the same answer references t
 
 The canonical scheduler is `.github/workflows/dark-factory-worker.yml`: one `python -m factory_kernel dispatch --once` at minute 17 of every hour, plus manual `workflow_dispatch`, under a concurrency group so two dispatches never overlap. **There is no parallelism.** The kernel refuses to run without `--once`; scheduling belongs outside the kernel. The optional self-hosted `deploy/systemd/dark-factory.timer` is a scheduling alternative, not a second control plane.
 
-Every run first proves its prerequisites and refuses otherwise: Issues enabled, `main` protected, all eight `factory:*` labels present, `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` present, and a live routing probe of the configured model through OpenRouter returning 200.
+Every run first proves its prerequisites and refuses otherwise: Issues enabled, `main` protected, all eight `factory:*` labels present, `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` present, a raw request to `${ANTHROPIC_BASE_URL}/v1/messages` returning 200, and the pinned Claude Code CLI, launched as the kernel launches a worker, returning a non-error result from every configured model (`FACTORY_PREFLIGHT_MODEL_ROUTE_OK`). The first canary dispatch showed a probe that proves a different request than the worker makes proves nothing (D-010).
 
 ### Dispatch priority order
 
@@ -400,3 +400,4 @@ Rules earlier versions of this file stated that have **no implementation** today
 - **No program asserts floor(head) >= floor(base).** `.factory/locks/floor.json` used to claim a second check with that shape. What exists: `scripts/factory_evidence.py` reads the floors from `origin/main` (so a PR cannot lower the bar it is judged against), the security guard refuses the file on the autonomous lane, and `harness/immunity.py` pins two of the six keys with `json_number_min`. A maintainer PR that lowered a floor would pass every check; the human lane is the control.
 - **No E2E floor in `.factory/locks/floor.json`.** The browser journey has not been observed end-to-end under the current kernel with a recorded step count (see `.factory/decisions.md` D-001).
 - **No worker is told to consult `.factory/decisions.md`.** The product/judgement distinction in section 7 is policy, not yet mechanism.
+- **A maintainer PR that becomes CONFLICTING with `main` stalls silently.** GitHub runs no `pull_request` workflow on an unmergeable PR, so `quick-authority` never reports while `trust-root-authority` (from the base) stays green; the PR sits with one green check until someone rebases. Observed on #46. A merge queue or an up-to-date-branch requirement would remove this; not yet adopted.

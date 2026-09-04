@@ -115,6 +115,48 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
         self.assertIn('test "$main_protected" = "true" || {', workflow)
         self.assertIn("FACTORY_PREFLIGHT_REFUSED main branch is not protected", workflow)
 
+    def test_worker_model_route_is_the_request_the_sdk_makes(self) -> None:
+        """The Anthropic SDK appends /v1/messages to ANTHROPIC_BASE_URL. With the versioned
+        path as the base, the CLI hit /api/v1/v1/messages and got an HTML 404 for every model
+        while a hard-coded curl probe passed (run 33876017910, D-010)."""
+        workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(workflow.count("ANTHROPIC_BASE_URL: https://openrouter.ai/api\n"), 1,
+                         "base URL must be defined exactly once, at job level")
+        self.assertNotIn("openrouter.ai/api/v1", workflow, "a versioned base doubles /v1")
+        self.assertIn('-X POST "${ANTHROPIC_BASE_URL}/v1/messages"', workflow,
+                      "the curl probe must build its URL the way the SDK does")
+        self.assertIn('ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}', workflow)
+
+    def test_worker_preflight_proves_the_route_with_the_pinned_cli(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        probe = workflow.split("Prove the worker's model route with the pinned CLI", 1)
+        self.assertEqual(len(probe), 2, "CLI route probe step missing")
+        step = probe[1].split("- name:", 1)[0]
+        for needle in (
+            "claude --bare -p",
+            '--permission-mode dontAsk --tools ""',
+            "--strict-mcp-config --mcp-config '{\"mcpServers\":{}}' --disable-slash-commands",
+            "--output-format json",
+            'p["model"]',
+            'p.get("architecture_model")',
+            'd.get("is_error") is False',
+            "FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=$model",
+        ):
+            self.assertIn(needle, step, needle)
+        self.assertRegex(
+            step,
+            r'echo "FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model \$model"\n(?:.*\n)?\s+exit 1',
+            "a failed CLI probe must refuse the run, not warn",
+        )
+        install = workflow.index("Install pinned worker and browser CLIs")
+        dispatch = workflow.index("Dispatch exactly one factory action")
+        self.assertLess(install, workflow.index("Prove the worker's model route"))
+        self.assertLess(workflow.index("Prove the worker's model route"), dispatch)
+
     def test_worker_provisions_disposable_validation_state(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
             encoding="utf-8"
