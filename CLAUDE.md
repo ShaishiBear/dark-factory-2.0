@@ -56,7 +56,7 @@ dark-factory-2.0/
 ├── harness/                 # TRUST ROOT — canonical CI ladder, E2E journey, mutation suites, immunity registry
 ├── scripts/factory_*.py     # TRUST ROOT — deterministic authorities (security guard, evidence, protocol, architecture)
 ├── tests/factory/           # TRUST ROOT — the factory's own detector tests
-├── .github/workflows/       # TRUST ROOT — dark-factory-ci.yml (PR quick authority), dark-factory-worker.yml (hourly dispatch)
+├── .github/workflows/       # TRUST ROOT — dark-factory-trust-root.yml (base-anchored authority + unattended merge), dark-factory-ci.yml (head quick gate), dark-factory-worker.yml (hourly dispatch)
 ├── deploy/                  # Docker Compose stack, Caddy, blue/green deploy script, optional systemd units
 ├── .archon/                 # Legacy Archon prompt sources kept for provenance; the kernel does NOT load them
 ├── app/
