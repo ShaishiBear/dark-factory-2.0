@@ -126,3 +126,24 @@ This is a **judgement** mechanism and lives in protected files; it moves only th
 maintainer lane. Maintainer merges still get no post-merge full harness and the
 `require_extra_approval_for_unattributed_changes` ruleset flag is unverified against kernel
 commits (FACTORY_RULES.md §13). The first unattended canary settles the second.
+
+---
+
+## D-006 · One executable lifecycle
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+`factory_kernel/state.py` defined a twenty-one-stage happy path with wait, decompose, stop and
+needs-human outcomes, and `FACTORY.md` listed it as the kernel's "State machine". Nothing
+consumed it: `KernelRuntime.build_issue` and `validate_pr` are procedural, and the only caller
+was a `state-next` CLI helper that printed the next abstract stage. The stages it named are,
+almost one for one, the `required_claims` of `.factory/evidence-spine.json`, which the runtime
+does execute and which `harness/merge_verify.py` enforces as an exact sequence before merge.
+
+Two representations of the lifecycle, one executed and one not, is how a document drifts
+into a false claim. The unexecuted one is removed rather than wired in: wiring it would add
+a parallel trajectory the spine already proves, and every extra authority is another thing
+a future reader must check is real. The spine is the lifecycle. Control-plane states outside
+it are labels, applied and read by the runtime.
+
+This is a **judgement** structure and moved through the maintainer lane.

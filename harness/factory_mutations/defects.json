@@ -466,6 +466,13 @@
       "find": "    if still_present:\n        raise WorktreeError(f\"blinded paths are still on disk: {sorted(still_present)}\")",
       "replace": "    if False:\n        raise WorktreeError(f\"blinded paths are still on disk: {sorted(still_present)}\")",
       "why": "A sparse checkout that did not take on some git version would hand a visible holdout to the worker without refusing."
+    },
+    {
+      "id": "lifecycle-shadow-command-returns",
+      "file": "factory_kernel/cli.py",
+      "find": "    sub.add_parser(\"config-check\")\n",
+      "replace": "    sub.add_parser(\"state-next\")\n    sub.add_parser(\"config-check\")\n",
+      "why": "A lifecycle command the runtime does not consume would return to the control surface, reopening a second representation of the lifecycle."
     }
   ]
 }

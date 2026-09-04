@@ -47,7 +47,7 @@ If the GitHub stop state cannot be read, the factory stops. An unreadable stop b
 |---|---|
 | Runtime policy | `.factory/kernel.json` |
 | Worker prompts | `.factory/prompts/*.md` |
-| State machine | `factory_kernel/state.py` |
+| Lifecycle (the only executable lifecycle definition) | `.factory/evidence-spine.json` `required_claims`, closed in order by `scripts/factory_evidence_spine.py`, sequence enforced by `harness/merge_verify.py` |
 | Dispatch/build/validate/merge orchestration | `factory_kernel/runtime.py` |
 | Bounded triage + flood control | `factory_kernel/triage.py` |
 | Model worker boundary | `factory_kernel/agents.py`, `factory_kernel/providers.py` |
@@ -61,6 +61,8 @@ If the GitHub stop state cannot be read, the factory stops. An unreadable stop b
 | Trust-root authority + unattended merge (runs from the base) | `.github/workflows/dark-factory-trust-root.yml` |
 
 The model provider is replaceable. The checked-in default is the Claude Code CLI. Provider output is untrusted reasoning; it never directly authorizes a merge.
+
+There is exactly one lifecycle definition and it is executable. The ordered `required_claims` in `.factory/evidence-spine.json` are what a PR must close, one artifact per claim, before it may merge; `scripts/factory_evidence_spine.py` closes them and `harness/merge_verify.py pre` refuses any spine that is not at 100 percent with the exact required claim sequence. Control-plane states outside that sequence (in progress, needs review, needs fix, needs human, stopped) are GitHub labels applied and read by `factory_kernel/runtime.py`. An earlier `factory_kernel/state.py` described an abstract stage machine that nothing executed; it was retired on 2026-09-04 (`.factory/decisions.md` D-006) because a second representation of the lifecycle that the runtime does not consume is a claim, not an authority.
 
 ## Build path
 
