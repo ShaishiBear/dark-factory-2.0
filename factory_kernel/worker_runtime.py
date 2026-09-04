@@ -9,6 +9,7 @@ import uuid
 from .agents import AgentRequest
 from .git_authority import commit_acceptance_tests, commit_planned_changes
 from .methods import method_block
+from .prompt_render import literal_artifacts_dir_entries, render_prompt
 from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
 from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, max_budget_usd, max_turns, may_change_repo
@@ -181,6 +182,10 @@ class WorkerControlledRuntime(BaseKernelRuntime):
             methods=method_block(cwd, role),
             context=context,
         )
+        # Prompts name outputs as `$ARTIFACTS_DIR/<file>` by contract. Nothing on the worker's
+        # side expands that (no shell), so the kernel renders every placeholder to the absolute
+        # run path here and refuses any placeholder it cannot render (D-026).
+        prompt = render_prompt(prompt, env)
         started = time.time()
         result = self.provider.run(
             AgentRequest(
@@ -223,4 +228,15 @@ class WorkerControlledRuntime(BaseKernelRuntime):
 
         if may_change_repo(role):
             raise RuntimeError(f"unhandled repository-mutation role: {role}")
+        self._refuse_literal_artifacts_dir(cwd)
         self._assert_clean(cwd)
+
+    def _refuse_literal_artifacts_dir(self, cwd: Path) -> None:
+        """Name the failure class when a worker wrote to a literal `$ARTIFACTS_DIR` path."""
+        status = self._git("status", "--porcelain", "--untracked-files=all", cwd=cwd)
+        hits = literal_artifacts_dir_entries(status)
+        if hits:
+            raise RuntimeError(
+                "worker wrote to a literal $ARTIFACTS_DIR path; the kernel must substitute the "
+                "artifacts directory into the prompt: " + ", ".join(hits)
+            )

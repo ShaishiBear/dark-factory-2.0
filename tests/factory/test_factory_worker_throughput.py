@@ -243,7 +243,7 @@ class TimingAndTelemetryTests(unittest.TestCase):
             paths = RunPaths.create(Path(tmp), "run")
             rt = self._runtime(Path(tmp))
             with mock.patch("factory_kernel.worker_runtime.method_block", return_value=""):
-                rt._agent("conformance", ROOT, paths, env={})
+                rt._agent("conformance", ROOT, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
             request = rt.provider.requests[0]
             self.assertEqual(request.max_turns, ROLE_MAX_TURNS["conformance"])
             self.assertEqual((paths.transcripts / "agent-conformance.log").read_text(encoding="utf-8"), "worker text\n")

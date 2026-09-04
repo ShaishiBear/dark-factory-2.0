@@ -594,3 +594,30 @@ it read. The rules are now stated flat, and the prompt says not to read kernel s
 to check them.
 
 These are **judgement** values and moved through the maintainer lane.
+## D-026 · Prompts are rendered with absolute run paths; `$ARTIFACTS_DIR` is a placeholder, not a variable
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Canary attempt 5 (worker run 33910993905, issue #49) failed at the first model stage with
+`factory worker left the worktree dirty: ?? $ARTIFACTS_DIR/`. The investigate worker had done
+its job: seven turns, the deferred-repro shape from D-024 chosen correctly. Then it wrote the
+record to a directory literally named `$ARTIFACTS_DIR` inside the build worktree, because that is
+what the prompt said and nothing on the worker's side expands a shell variable. Every prompt
+under `.factory/prompts/` and the methods under `.factory/methods/` name outputs that way, 37
+times. Earlier attempts had inferred the real path from the environment; the capped, briefed
+worker of D-020 followed the text literally instead of guessing, which is the behaviour we want
+from a worker and exactly why the prompt must not need guessing.
+
+The kernel now renders every placeholder itself. `factory_kernel/prompt_render.py` substitutes
+`$ARTIFACTS_DIR` / `${ARTIFACTS_DIR}` (and the other request-local names the provider forwards:
+`FACTORY_BASE_REF`, `FACTORY_REPO`, `FACTORY_WORKDIR`) into the assembled prompt in
+`WorkerControlledRuntime._agent`, before `provider.run`. The artifacts path must be absolute and
+exist, because it is also the one directory the CLI is told it may write to. Any other
+`$UPPER_NAME` left in a prompt refuses the launch, so a new placeholder can never reach a worker
+unexpanded. After a non-mutating role runs, a literal `$ARTIFACTS_DIR` entry in the porcelain
+status is named as this failure class rather than as an anonymous dirty tree.
+
+The prompts keep `$ARTIFACTS_DIR` as their placeholder by contract; a test pins that the set of
+placeholders in the checked-in prompts is a subset of what the kernel renders, and that the
+renderable set equals the provider's request environment. Three trust-root mutations attack the
+substitution, the unknown-placeholder refusal and the named failure.
