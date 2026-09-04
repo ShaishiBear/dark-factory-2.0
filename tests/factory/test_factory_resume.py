@@ -135,8 +135,44 @@ class RefusalTests(unittest.TestCase):
         self.assertIn("RED-hashed", t.error)
         self.assertEqual(t.execs("factory_protocol.py", "attach"), [])
 
+    # Live shapes from canary run 33927106276 (PR #74): the REST `pulls/74` endpoint reports the
+    # factory's PR as user {login: "github-actions[bot]", type: "Bot"}; `gh pr view --json author`
+    # (GraphQL) reports the same PR as {login: "app/github-actions"}. The kernel decides only from
+    # the REST shape, which is what the trust-root guard decides lanes from too.
+    REST_FACTORY_AUTHOR = {"login": "github-actions[bot]", "type": "Bot"}
+    GRAPHQL_FACTORY_AUTHOR = {"login": "app/github-actions"}
+    REST_HUMAN_AUTHOR = {"login": "ShaishiBear", "type": "User"}
+
+    def test_the_factory_author_is_decided_from_the_rest_shape(self):
+        t = rehearse(resume_scenario(
+            "rest-bot", author=self.REST_FACTORY_AUTHOR["login"], author_type=self.REST_FACTORY_AUTHOR["type"]))
+        self.assertEqual(t.outcome, "returned", t.error)
+        self.assertIn("pr_author", t.names("github"))
+
+    def test_the_graphql_spelling_is_never_what_decides(self):
+        """The GraphQL `app/github-actions` login is what refused PR #74. It must not be consulted:
+        the REST author is the sole input, so a GraphQL-only spelling supplied as the REST login is
+        refused (it is not the actor GitHub's REST API names), and the real REST login is accepted
+        regardless of what the GraphQL view says."""
+        t = rehearse(resume_scenario("graphql-as-rest", author=self.GRAPHQL_FACTORY_AUTHOR["login"], author_type="Bot"))
+        self.assertEqual(t.outcome, "NeedsHuman")
+        self.assertIn("not opened by the factory", t.error)
+        self.assertFalse(t.happened("merge_squash"))
+
+    def test_a_bot_that_is_not_the_factory_is_refused(self):
+        t = rehearse(resume_scenario("other-bot", author="dependabot[bot]", author_type="Bot"))
+        self.assertEqual(t.outcome, "NeedsHuman")
+        self.assertIn("not opened by the factory", t.error)
+
+    def test_a_user_with_the_factory_login_is_refused(self):
+        """Type is part of the identity: a User account named like the bot is not the factory."""
+        t = rehearse(resume_scenario("user-named-like-bot", author="github-actions[bot]", author_type="User"))
+        self.assertEqual(t.outcome, "NeedsHuman")
+        self.assertIn("not opened by the factory", t.error)
+
     def test_a_pr_not_opened_by_the_factory_is_refused(self):
-        t = rehearse(resume_scenario("human-pr", author="ShaishiBear"))
+        t = rehearse(resume_scenario("human-pr", author=self.REST_HUMAN_AUTHOR["login"],
+                                     author_type=self.REST_HUMAN_AUTHOR["type"]))
         self.assertEqual(t.outcome, "NeedsHuman")
         self.assertIn("not opened by the factory", t.error)
 
