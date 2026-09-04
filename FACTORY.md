@@ -217,7 +217,7 @@ Before unattended Level-4 dispatch is enabled, repository configuration must sat
 
 - GitHub Issues are enabled. Issues are the intake, state and remote emergency-stop surface.
 - `main` is protected by GitHub branch protection/rules so a direct push cannot bypass the in-repo evidence and exact-tree merge authority. The `main-protection` ruleset requires a pull request, linear history, and the status checks `quick-authority` and `trust-root-authority`, with an empty bypass list. The repository setting **Allow auto-merge** is on; without it the unattended-merge job cannot arm a merge and maintainer PRs would wait for a click.
-- all eight factory control labels exist: `factory:accepted`, `factory:rejected`, `factory:rate-limited`, `factory:in-progress`, `factory:needs-review`, `factory:needs-fix`, `factory:needs-human`, `factory:stop`.
+- every label the kernel can apply exists: the eight `factory:*` control labels from `.factory/kernel.json` (`factory:accepted`, `factory:rejected`, `factory:rate-limited`, `factory:in-progress`, `factory:needs-review`, `factory:needs-fix`, `factory:needs-human`, `factory:stop`) plus the `priority:{critical,high,medium,low}` and `type:{bug,enhancement,chore,docs}` labels triage attaches on accept. The preflight reads that list from `factory_kernel.triage.label_vocabulary` so the code cannot outrun the check.
 - repository Actions secrets `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` are configured. Model
   calls are routed to OpenRouter's Anthropic-compatible Messages endpoint, so no separate
   Anthropic credential is required. `ANTHROPIC_BASE_URL` is `https://openrouter.ai/api` (the SDK

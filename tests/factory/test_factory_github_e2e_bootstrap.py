@@ -115,6 +115,29 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
         self.assertIn('test "$main_protected" = "true" || {', workflow)
         self.assertIn("FACTORY_PREFLIGHT_REFUSED main branch is not protected", workflow)
 
+    def test_worker_preflight_requires_every_label_the_kernel_can_apply(self) -> None:
+        """The list is read from the kernel, not typed into YAML, and a missing label refuses."""
+        workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "label_vocabulary(json.load(open(\".factory/kernel.json\"))[\"labels\"])", workflow,
+            "preflight must derive the required labels from the kernel",
+        )
+        self.assertIn('for label in $required_labels', workflow)
+        self.assertIn('echo "FACTORY_PREFLIGHT_REFUSED missing label $label"', workflow)
+        self.assertIn('FACTORY_PREFLIGHT_REFUSED kernel label vocabulary is empty', workflow)
+        self.assertNotIn("factory:accepted \\\n", workflow, "no second hand-typed label list")
+        # Read the control labels straight from the policy file: load_config also validates the
+        # work root, which is a POSIX path and fails on a Windows developer machine.
+        import json
+        from factory_kernel.triage import label_vocabulary
+        policy = json.loads((ROOT / ".factory" / "kernel.json").read_text(encoding="utf-8"))
+        vocabulary = label_vocabulary(policy["labels"])
+        self.assertIn("priority:medium", vocabulary)
+        self.assertIn("type:bug", vocabulary)
+        self.assertIn("factory:stop", vocabulary)
+
     def test_worker_model_route_is_the_request_the_sdk_makes(self) -> None:
         """The Anthropic SDK appends /v1/messages to ANTHROPIC_BASE_URL. With the versioned
         path as the base, the CLI hit /api/v1/v1/messages and got an HTML 404 for every model

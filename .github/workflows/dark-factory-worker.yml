@@ -72,16 +72,13 @@ jobs:
             exit 1
           }
 
+          # Every label the kernel can apply must exist: the factory:* controls from kernel.json
+          # plus the priority:* and type:* labels triage attaches on accept. The list comes from
+          # the kernel itself so a new label in the code cannot outrun this check (D-011).
           labels="$(gh label list -R "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name')"
-          for label in \
-            factory:accepted \
-            factory:rejected \
-            factory:rate-limited \
-            factory:in-progress \
-            factory:needs-review \
-            factory:needs-fix \
-            factory:needs-human \
-            factory:stop
+          required_labels="$(python3 -c 'import json; from factory_kernel.triage import label_vocabulary; print("\n".join(label_vocabulary(json.load(open(".factory/kernel.json"))["labels"])))')"
+          test -n "$required_labels" || { echo "FACTORY_PREFLIGHT_REFUSED kernel label vocabulary is empty"; exit 1; }
+          for label in $required_labels
           do
             grep -Fx -- "$label" <<<"$labels" >/dev/null || {
               echo "FACTORY_PREFLIGHT_REFUSED missing label $label"

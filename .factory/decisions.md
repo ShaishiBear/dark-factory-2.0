@@ -238,3 +238,21 @@ reaches each configured model and returns a non-error result. What it does not p
 any model is good enough to build, review or judge; that is what the canary measures.
 
 This is a **judgement** mechanism in a protected workflow and moved through the maintainer lane.
+
+---
+
+## D-011 · The preflight must require every label the kernel can apply
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Second canary dispatch (run 33880138411): the model route was fixed, triage accepted issue #49,
+the kernel applied `factory:accepted` and then crashed on `gh issue edit --add-label
+priority:medium` because the repository had never had the `priority:*` and `type:*` labels
+that `TriageEngine._apply` attaches. The worker preflight checked only the eight `factory:*`
+control labels. The issue was left half-applied: accepted, no priority or type label, no triage
+comment. The eight missing labels were created by hand so the canary could continue.
+
+The fix makes the label vocabulary a kernel fact (`label_vocabulary`, derived from the same
+sets the decision validator enforces) and has the preflight read it from the kernel rather than
+from a second hand-typed list, so a label added in code cannot outrun the check. Same class as
+D-010: a prerequisite check that verifies something other than what the run will do.
