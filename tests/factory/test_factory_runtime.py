@@ -21,7 +21,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.provider.model, "z-ai/glm-5.3-flash")
         self.assertEqual(config.provider.architecture_model, "deepseek/deepseek-v4-pro-0813")
         self.assertNotEqual(config.provider.model, config.provider.architecture_model)
-        self.assertEqual(config.validation.full_command, ("python", "harness/ci.py"))
+        self.assertEqual(config.validation.quick_command, ("python", "harness/ci.py", "--quick"))
         for role in config.prompts:
             self.assertTrue(config.prompt_path(role, ROOT).is_file())
 
