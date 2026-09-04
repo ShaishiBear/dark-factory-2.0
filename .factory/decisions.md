@@ -873,3 +873,27 @@ Deliberately human-invoked, not dispatched: the artifacts must be retrieved with
 `gh run download`, and a PR that cannot be finished from its own artifacts is a defect to
 diagnose, not a state to poll. Four mutations attack the boundary: proof-head binding dropped,
 RED check dropped, cap removed, human-authored PR accepted.
+
+---
+
+## D-034 · The worker resumes a pushed PR on GitHub-hosted infrastructure
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+D-033 added `python -m factory_kernel resume --pr N --artifacts <dir>`. Running it needs the
+kernel's toolchain, the worker's disposable validation environment and the Actions token
+with `contents: write` for the provenance note push; the local Windows machine cannot run the
+kernel at all (`work root must be absolute`), and a `workflow_dispatch` workflow must exist
+on the default branch before it can be dispatched, so a throwaway workflow on a branch does
+not work either.
+
+The canonical worker therefore takes two optional dispatch inputs, `resume_pr` and
+`resume_run_id`. With both set, the run keeps every preflight and setup step, downloads that
+run's uploaded artifact (the only new permission is `actions: read`), requires exactly one
+`final-green-proof.json` inside it, and runs `resume` **instead of** `dispatch --once`. A lone
+input refuses at preflight; running both actions in one run is a mutation the structure
+test catches. Authentication is unchanged: `factory_provenance.py publish` and
+`github_cli.push_branch` already take the Actions token from `GH_TOKEN` through their own
+askpass helpers.
+
+First use: PR #74 (canary attempt 10, run 33920886708).
