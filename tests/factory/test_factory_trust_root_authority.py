@@ -309,6 +309,26 @@ class TrustRootWorkflowStructureTests(unittest.TestCase):
         self.assertIn("    permissions:\n      contents: read\n      pull-requests: read\n      issues: read", self.authority)
         self.assertNotIn("contents: write", self.authority)
 
+    def test_conflicting_pr_turns_the_required_check_red_after_the_verdict(self):
+        """A dirty PR gets no pull_request run, so only this base-run job can make it visible."""
+        judge = self.authority.index("id: judge")
+        mergeable = self.authority.index("id: mergeable")
+        self.assertLess(judge, mergeable, "mergeability is asked after the verdict, not instead of it")
+        step = self.authority[mergeable:]
+        self.assertIn('--jq \'.mergeable_state // "unknown"\'', step)
+        self.assertIn('if [ "$state" = "dirty" ]; then', step)
+        self.assertIn("TRUST_ROOT_REFUSED pr is not mergeable (conflicting with base); rebase", step)
+        # The refusal is an exit, not a warning: the ruleset only sees a red check.
+        refused = step.index("TRUST_ROOT_REFUSED")
+        self.assertIn("exit 1", step[refused:refused + 200])
+        self.assertIn("for attempt in 1 2 3 4 5 6; do", step)
+        self.assertIn("TRUST_ROOT_MERGEABILITY_UNKNOWN", step)
+        # unknown after retries must not exit: the verdict on the diff is still valid.
+        unknown = step.index("TRUST_ROOT_MERGEABILITY_UNKNOWN")
+        self.assertNotIn("exit 1", step[unknown:unknown + 200])
+        # The merge job depends on the whole authority job, so a red mergeability step arms nothing.
+        self.assertIn("needs: trust-root-authority", self.merge)
+
     def test_unattended_merge_is_gated_on_the_trusted_decision_and_the_stop_button(self):
         self.assertIn("if: needs.trust-root-authority.outputs.unattended == 'true'", self.merge)
         self.assertIn("bash scripts/factory-stop.sh", self.authority)

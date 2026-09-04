@@ -171,6 +171,20 @@
       "find": "              --label \"priority:high\" --label \"type:bug\" \\\n",
       "replace": "              --label \"priority:high\" --label \"type:bug\" --label \"factory:accepted\" \\\n",
       "why": "The regression job would bypass triage by accepting its own issue."
+    },
+    {
+      "id": "trust-root-mergeability-check-removed",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "          if [ \"$state\" = \"dirty\" ]; then\n            echo \"TRUST_ROOT_REFUSED pr is not mergeable (conflicting with base); rebase\"\n            exit 1\n          fi\n",
+      "replace": "",
+      "why": "A conflicting maintainer PR would again sit silently with one green required check and no quick gate."
+    },
+    {
+      "id": "trust-root-conflict-downgraded-to-warning",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "            echo \"TRUST_ROOT_REFUSED pr is not mergeable (conflicting with base); rebase\"\n            exit 1\n",
+      "replace": "            echo \"TRUST_ROOT_REFUSED pr is not mergeable (conflicting with base); rebase\"\n",
+      "why": "The refusal would be printed but the required check would stay green, so the ruleset would learn nothing."
     }
   ]
 }
