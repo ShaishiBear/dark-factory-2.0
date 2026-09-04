@@ -33,6 +33,15 @@ ROLE_TOOLS: dict[str, tuple[str, ...]] = {
 
 REPO_MUTATION_ROLES = frozenset({"test_author", "implement", "repair"})
 
+# Paths that do not exist in a build worktree. Workers get Read/Glob/Grep over the checkout, and
+# a protected file is only tamper-resistant, not secret: the holdout scenarios under
+# .factory/holdout/ were readable by the very worker whose output they judge. The kernel creates
+# every build worktree as a sparse checkout that excludes these patterns, so the files are absent
+# from disk rather than merely denied. The validator worktree is never blinded: the full harness
+# runs the holdout there. The immunity registry (immunity.json) stays visible; it is a record of
+# lessons, not a set of assertions a builder could optimise against.
+BUILDER_BLIND_PATHS: tuple[str, ...] = (".factory/holdout/**/*.py",)
+
 
 def allowed_tools(role: str) -> tuple[str, ...]:
     try:

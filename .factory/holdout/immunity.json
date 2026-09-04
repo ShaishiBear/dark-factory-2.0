@@ -214,6 +214,33 @@
           "value": "\"--trusted-base\", \"--expect-head\", head,"
         }
       ]
+    },
+    {
+      "id": "IMM-008",
+      "status": "active",
+      "source": {
+        "kind": "audit",
+        "ref": "2026-09-04-holdout-readable-by-the-builder"
+      },
+      "failure_class": "a holdout the subject can read",
+      "lesson": ".factory/holdout/run.py said the builder was blocked from reading it, but protection from modification is not protection from reading: build-side workers hold Read/Glob/Grep over the checkout, and the scenarios sat in it. An assertion the subject can read is inside its optimisation loop and is a regression suite, not a holdout. The kernel now creates every build worktree as a sparse checkout with the holdout programs absent from disk (BUILDER_BLIND_PATHS), verifies the blind took, and never blinds the validator worktree where the full harness runs them.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/worker_policy.py",
+          "value": "BUILDER_BLIND_PATHS: tuple[str, ...] = (\".factory/holdout/**/*.py\",)"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/worktree.py",
+          "value": "blinded paths are still on disk"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "blind=BUILDER_BLIND_PATHS,"
+        }
+      ]
     }
   ]
 }

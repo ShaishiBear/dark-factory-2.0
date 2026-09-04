@@ -57,6 +57,7 @@ COPY_FILES = (
     "harness/focused.py",
     "tests/factory/test_factory_security.py",
     "tests/factory/test_factory_trust_root_authority.py",
+    "tests/factory/test_factory_holdout_blind.py",
     "tests/factory/test_factory_security_evidence.py",
     "tests/factory/test_factory_evidence.py",
     "tests/factory/test_factory_architecture_guard.py",

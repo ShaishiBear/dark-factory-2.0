@@ -201,6 +201,8 @@ Ordinary autonomous product PRs may not modify the machinery that judges them. `
 
 Changes to that set are human-reviewed trust-root work, like the rewrite that introduced this runtime.
 
+The holdout programs under `.factory/holdout/` are additionally **absent from every build worktree**: `build_issue` creates the worktree as a sparse checkout excluding `BUILDER_BLIND_PATHS` (`factory_kernel/worker_policy.py`), and `factory_kernel/worktree.py` refuses the worktree if the blind did not take. The validator worktree is never blinded; the full harness runs the holdout there.
+
 ## Archon history
 
 The earlier experiment used Archon YAML workflows and command files. Active `.archon/workflows/dark-factory-*.yaml` files have been removed. Historical benchmark material and legacy prompt sources may remain temporarily for provenance/comparison, but the kernel does not load or execute them. `THIRD_PARTY_NOTICES.md` keeps the Archon MIT attribution for ideas/code reviewed during the migration.

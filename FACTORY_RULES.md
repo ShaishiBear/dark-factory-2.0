@@ -331,9 +331,11 @@ They cannot read the repository, the builder's transcript, prior PR discussion, 
 
 The validator's deterministic programs (`factory_evidence.py`, `factory_evidence_spine.py`, `merge_verify.py`) fetch the builder's published contract, design, governor verdict, proofs, impact and conformance artifacts. They do so to **recompute** them from the PR head and refuse on any mismatch — never to take them on trust. This is deliberate and is not a violation of the line: a deterministic replay cannot be persuaded.
 
-### Protected but readable
+### Absent from the builder's worktree
 
-`.factory/holdout/run.py` is protected from modification, and build-side workers cannot commit changes to it. Build-side workers with `Read` can, however, read it. Treat it as a **tamper-resistant adversarial regression suite**, not as a secret; the blinded authorities above are the independence line. Making it builder-opaque is an open item (section 13).
+`.factory/holdout/run.py` and `.factory/holdout/citations.py` are protected from modification, and they do not exist in a build worktree. `KernelRuntime.build_issue` creates the worktree with `create_detached(..., blind=BUILDER_BLIND_PATHS)` (`factory_kernel/worker_policy.py`: every `*.py` under `.factory/holdout/`), a non-cone sparse checkout that marks those index entries skip-worktree and removes them from disk. `factory_kernel/worktree.py` verifies afterwards that every matching index entry is skip-worktree and absent, and refuses the worktree otherwise. Commits made there still carry the files, so the PR head is complete; the validator worktree is created without the blind and the full harness runs the scenarios there. The immunity registry `.factory/holdout/immunity.json` stays visible: it records lessons, not assertions.
+
+What this does and does not claim: the builder's tools (`Read`, `Glob`, `Grep`, `Write`, `Edit`, no Bash, no network) cannot reach the scenario programs during a build. It does not claim the scenarios are unknown to the model in general; this is a public repository. The scenarios are a floor the builder cannot inspect or tune against inside a run, and the blinded model authorities above remain the independence line for judgement.
 
 ### State sharing
 
@@ -395,6 +397,5 @@ Rules earlier versions of this file stated that have **no implementation** today
 - **`max_repair_attempts`, `full_command`, `holdout_command`, `mutation_command` in `.factory/kernel.json` are validated but not consumed by the kernel.** The repair count is hardcoded to one; the full gate and holdout are invoked directly by the evidence and post-merge programs.
 - **Maintainer merges get no post-merge full harness.** Only autonomous merges run `harness/post_merge.py`. A maintainer PR is verified by its head's required checks (static + unit), not by the browser E2E, and if `main` moved under it the merged tree was never tested as a whole.
 - **`require_extra_approval_for_unattributed_changes` is on in the ruleset and unverified against kernel commits.** Kernel commits use an unmapped noreply identity. If GitHub treats them as unattributed and demands an approval, the autonomous merge path is blocked; the first canary will show it.
-- **`.factory/holdout/` is builder-readable** (section 9).
 - **No E2E floor in `.factory/locks/floor.json`.** The browser journey has not been observed end-to-end under the current kernel with a recorded step count (see `.factory/decisions.md` D-001).
 - **No worker is told to consult `.factory/decisions.md`.** The product/judgement distinction in section 7 is policy, not yet mechanism.

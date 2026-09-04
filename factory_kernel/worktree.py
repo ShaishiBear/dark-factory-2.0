@@ -25,6 +25,7 @@ class WorktreeError(RuntimeError):
 class Worktree:
     path: Path
     head_sha: str
+    blind: tuple[str, ...] = ()
 
 
 def _run(repo: Path, argv: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -55,12 +56,41 @@ def is_clean(path: str | Path) -> bool:
     return not _run(root, ["status", "--porcelain"]).stdout.strip()
 
 
+def blind_paths(worktree: Path, patterns: tuple[str, ...]) -> None:
+    """Make every file matching `patterns` absent from the worktree without changing the tree.
+
+    A non-cone sparse checkout marks the matching index entries skip-worktree and removes them
+    from disk. Commits made in the worktree still carry the files, `git status` stays clean, and
+    the pattern list is verified afterwards: if any matching path is still on disk, or any
+    matching index entry is not skip-worktree, the worktree is refused rather than handed to a
+    worker with a blind that quietly did not take.
+    """
+    if not patterns:
+        return
+    _run(worktree, ["sparse-checkout", "set", "--no-cone", "/*", *[f"!/{p}" for p in patterns]])
+    flagged = {
+        line[2:]
+        for line in _run(worktree, ["ls-files", "-t", "--", *patterns]).stdout.splitlines()
+        if line.startswith("S ")
+    }
+    listed = set(_run(worktree, ["ls-files", "--", *patterns]).stdout.split())
+    unflagged = listed - flagged
+    if unflagged:
+        raise WorktreeError(f"blind did not take for index entries: {sorted(unflagged)}")
+    still_present = [rel for rel in listed if (worktree / rel).exists()]
+    if still_present:
+        raise WorktreeError(f"blinded paths are still on disk: {sorted(still_present)}")
+    if not is_clean(worktree):
+        raise WorktreeError("worktree is dirty after blinding")
+
+
 def create_detached(
     repo: str | Path,
     ref: str,
     *,
     base_dir: str | Path,
     prefix: str = "df2",
+    blind: tuple[str, ...] = (),
 ) -> Worktree:
     root = Path(repo).resolve()
     base = Path(base_dir).resolve()
@@ -78,7 +108,8 @@ def create_detached(
             raise WorktreeError(f"worktree HEAD mismatch: expected {expected}, got {actual}")
         if not is_clean(target):
             raise WorktreeError("new worktree is unexpectedly dirty")
-        return Worktree(path=target, head_sha=actual)
+        blind_paths(target, tuple(blind))
+        return Worktree(path=target, head_sha=actual, blind=tuple(blind))
     except Exception:
         _run(root, ["worktree", "remove", "--force", str(target)], check=False)
         shutil.rmtree(target, ignore_errors=True)

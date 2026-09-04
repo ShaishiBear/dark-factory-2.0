@@ -438,6 +438,34 @@
       "find": "                cwd=self.repo_root,\n                env=env,\n                credential_scope=\"github\",\n                timeout=180,\n                transcript=paths.transcripts / \"security.log\",",
       "replace": "                cwd=worktree.path,\n                env=env,\n                credential_scope=\"github\",\n                timeout=180,\n                transcript=paths.transcripts / \"security.log\",",
       "why": "The guard would execute from the PR head worktree; the trusted-base flag alone does not choose the program."
+    },
+    {
+      "id": "worker-blind-paths-empty",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "BUILDER_BLIND_PATHS: tuple[str, ...] = (\".factory/holdout/**/*.py\",)",
+      "replace": "BUILDER_BLIND_PATHS: tuple[str, ...] = ()",
+      "why": "Build worktrees would contain the holdout scenarios again; the builder could read the assertions it is judged by."
+    },
+    {
+      "id": "kernel-build-worktree-sees-holdout",
+      "file": "factory_kernel/runtime.py",
+      "find": "            blind=BUILDER_BLIND_PATHS,\n",
+      "replace": "",
+      "why": "The build worktree would be created unblinded even though the policy names the paths."
+    },
+    {
+      "id": "worktree-blind-ignored",
+      "file": "factory_kernel/worktree.py",
+      "find": "    if not patterns:\n        return\n    _run(worktree, [\"sparse-checkout\"",
+      "replace": "    if True:\n        return\n    _run(worktree, [\"sparse-checkout\"",
+      "why": "The primitive would accept a blind list and silently create a fully visible worktree."
+    },
+    {
+      "id": "worktree-blind-verification-dropped",
+      "file": "factory_kernel/worktree.py",
+      "find": "    if still_present:\n        raise WorktreeError(f\"blinded paths are still on disk: {sorted(still_present)}\")",
+      "replace": "    if False:\n        raise WorktreeError(f\"blinded paths are still on disk: {sorted(still_present)}\")",
+      "why": "A sparse checkout that did not take on some git version would hand a visible holdout to the worker without refusing."
     }
   ]
 }
