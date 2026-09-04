@@ -389,6 +389,36 @@
           "value": "raise NeedsHuman(\"bug repro refused: repro modified the worktree\")"
         }
       ]
+    },
+    {
+      "id": "IMM-014",
+      "status": "active",
+      "source": {
+        "kind": "audit",
+        "ref": "2026-09-04-ratchet-monotonicity-documented-not-enforced"
+      },
+      "failure_class": "a ratchet whose monotonicity was documented but never enforced",
+      "lesson": "The floor file said a second check asserted floor(head) >= floor(base). No such program existed; PR #44 corrected the note and FACTORY_RULES section 13 recorded that a maintainer PR lowering a floor would pass every check. A ratchet that can be lowered by anyone with the maintenance lane is a dial, not a ratchet. The base-anchored trust-root guard now compares every numeric floor at base and head whenever the file is in the diff and refuses any lowered or removed key on both lanes; the check is protected and mutation-tested.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "scripts/factory_security.py",
+          "value": "def ratchet_regressions("
+        },
+        {
+          "kind": "text_contains",
+          "path": "scripts/factory_security.py",
+          "value": "findings.extend(ratchet_regressions(base_floor, head_floor))"
+        },
+        {
+          "kind": "json_array_match_min",
+          "path": "harness/factory_mutations/defects.json",
+          "pointer": "/defects",
+          "field": "id",
+          "contains": "security-ratchet-regression-unchecked",
+          "minimum": 1
+        }
+      ]
     }
   ]
 }

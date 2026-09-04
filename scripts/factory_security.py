@@ -260,9 +260,44 @@ def secret_findings(lines: list[tuple[str, str]]) -> list[dict[str, str]]:
     return findings
 
 
+FLOOR_FILE = ".factory/locks/floor.json"
+
+
+def ratchet_regressions(base_text: str, head_text: str) -> list[dict[str, str]]:
+    """The ratchet is monotonic: every numeric floor present at the base must be present at the
+    head and at least as high. Notes (keys starting with `_`) are free text. New keys may be
+    added; that is how a floor is first measured. This runs on both lanes: the human lane waives
+    the protected-path veto and nothing else, so a maintainer PR that lowers a floor fails here
+    just as a factory PR would.
+    """
+    try:
+        base = json.loads(base_text) if base_text.strip() else {}
+    except json.JSONDecodeError:
+        base = {}
+    try:
+        head = json.loads(head_text)
+    except json.JSONDecodeError:
+        return [{"kind": "ratchet_regression", "path": FLOOR_FILE, "detail": "floor file is not valid JSON at the head"}]
+    if not isinstance(base, dict) or not isinstance(head, dict):
+        return [{"kind": "ratchet_regression", "path": FLOOR_FILE, "detail": "floor file is not a JSON object"}]
+    findings: list[dict[str, str]] = []
+    for key, value in sorted(base.items()):
+        if key.startswith("_") or isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        after = head.get(key)
+        if isinstance(after, bool) or not isinstance(after, (int, float)):
+            findings.append({"kind": "ratchet_regression", "path": FLOOR_FILE,
+                             "detail": f"{key} removed (was {value})"})
+        elif after < value:
+            findings.append({"kind": "ratchet_regression", "path": FLOOR_FILE,
+                             "detail": f"{key} lowered from {value} to {after}"})
+    return findings
+
+
 def evaluate(*, changed_files: list[str], base_backend: str, head_backend: str,
              base_frontend: str, head_frontend: str, diff: str, body: str,
-             author: dict | None = None, commits: list[dict] | None = None) -> dict:
+             author: dict | None = None, commits: list[dict] | None = None,
+             base_floor: str = "", head_floor: str = "") -> dict:
     protected = sorted(path for path in changed_files if protected_path(path))
     lane = "human-maintenance" if human_maintainer(author) else "autonomous"
     py_changes = dependency_changes(backend_dependencies(base_backend), backend_dependencies(head_backend), "python")
@@ -307,6 +342,9 @@ def evaluate(*, changed_files: list[str], base_backend: str, head_backend: str,
     for secret in secrets:
         findings.append({"kind": "secret", "path": secret["path"],
                          "detail": f"high-confidence {secret['kind']} pattern in added line"})
+
+    if FLOOR_FILE in changed_files:
+        findings.extend(ratchet_regressions(base_floor, head_floor))
 
     verdict = "pass" if not findings else "fail"
     return {
@@ -404,6 +442,7 @@ def verify_pr(pr: str) -> dict:
         base_frontend=git_show(base, FRONTEND_MANIFEST), head_frontend=git_show(head, FRONTEND_MANIFEST),
         diff=diff, body=meta.get("body") or "",
         author=author, commits=commits,
+        base_floor=git_show(base, FLOOR_FILE), head_floor=git_show(head, FLOOR_FILE),
     )
     return bound(result, mode="head", pr=pr, base=base, head=head, changed=changed)
 
@@ -444,6 +483,7 @@ def verify_pr_trusted_base(pr: str, *, expect_base: str | None, expect_head: str
         base_frontend=git_show(local, FRONTEND_MANIFEST), head_frontend=git_show(head, FRONTEND_MANIFEST),
         diff=diff, body=meta.get("body") or "",
         author=author, commits=commits,
+        base_floor=git_show(local, FLOOR_FILE), head_floor=git_show(head, FLOOR_FILE),
     )
     return bound(result, mode="trusted-base", pr=pr, base=local, head=head, changed=changed)
 
@@ -456,6 +496,7 @@ def verify_worktree() -> dict:
         base_backend=git_show("HEAD", BACKEND_MANIFEST), head_backend=worktree_text(BACKEND_MANIFEST),
         base_frontend=git_show("HEAD", FRONTEND_MANIFEST), head_frontend=worktree_text(FRONTEND_MANIFEST),
         diff=diff, body="",
+        base_floor=git_show("HEAD", FLOOR_FILE), head_floor=worktree_text(FLOOR_FILE),
     )
 
 
