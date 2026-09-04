@@ -419,6 +419,33 @@
           "minimum": 1
         }
       ]
+    },
+    {
+      "id": "IMM-015",
+      "status": "active",
+      "source": {
+        "kind": "audit",
+        "ref": "2026-09-04-repro-gate-refused-behavioural-bugs"
+      },
+      "failure_class": "a red-loop gate shaped only for bugs that already crash",
+      "lesson": "The kernel-executed repro (D-015) required an existing test-runner command to fail on the unchanged tree. Canary attempt 4 (run 33908589032) was a wrong return value that no test covered; the investigate worker correctly refused to invent a passing command and the build escalated at its first stage, though the factory proves exactly that red loop two stages later when the independent acceptance tests go RED. A gate that only crashes can pass rejects the commonest bug. The red loop is still mandatory: an executed repro when one exists, otherwise a deferred record whose promised symptom must appear in a RED checkpoint's output or the build stops.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/repro.py",
+          "value": "def verify_deferred_in_red"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "self._close_deferred_repro(paths.artifacts)"
+        },
+        {
+          "kind": "text_contains",
+          "path": ".factory/prompts/investigate.md",
+          "value": "repro-deferred.json"
+        }
+      ]
     }
   ]
 }

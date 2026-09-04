@@ -22,6 +22,15 @@ RUNTIME = ROOT / "factory_kernel" / "runtime.py"
 PROMPT = ROOT / ".factory" / "prompts" / "investigate.md"
 
 
+def deferred(**over):
+    base = {"version": "1.0",
+            "reason": "No existing test asserts the fallback return value of formatCitation, so no runner fails today.",
+            "seam": "app/frontend/src/lib/exportMarkdown.ts:formatCitation",
+            "expected_symptom": "Test Video (timestamp link unavailable)"}
+    base.update(over)
+    return base
+
+
 def good(**over):
     base = {"version": "1.0", "argv": ["pytest", "tests/test_x.py"], "cwd": ".",
             "expect_failure_containing": "boom happened"}
@@ -180,6 +189,116 @@ class KernelWiringTests(unittest.TestCase):
             self.assertIn("REPRO OBSERVED", ctx)
             rec = json.loads((artifacts / "repro-observed.json").read_text(encoding="utf-8"))
             self.assertEqual(rec["rc"], 2)
+
+    def test_deferred_record_is_accepted_and_handed_to_the_contract(self):
+        from factory_kernel.runtime import KernelRuntime
+
+        rt = KernelRuntime.__new__(KernelRuntime)
+        rt._write_json = lambda path, value: Path(path).write_text(json.dumps(value), encoding="utf-8")
+        rt._git = lambda *args, cwd=None: ""
+        with tempfile.TemporaryDirectory() as tmp:
+            artifacts = Path(tmp) / "a"; artifacts.mkdir()
+            wt = Path(tmp) / "wt"; wt.mkdir()
+            (artifacts / "repro-deferred.json").write_text(json.dumps(deferred()), encoding="utf-8")
+            ctx = rt._observe_repro(artifacts, wt, runner=lambda *a: self.fail("nothing must execute"))
+            self.assertIn("REPRO DEFERRED TO RED", ctx)
+            self.assertIn("Test Video (timestamp link unavailable)", ctx)
+            rec = json.loads((artifacts / "repro-observed.json").read_text(encoding="utf-8"))
+            self.assertEqual(rec["mode"], "deferred")
+            self.assertIsNone(rec["observed_in_red"])
+
+    def test_both_records_or_neither_are_refused(self):
+        from factory_kernel.runtime import KernelRuntime, NeedsHuman
+
+        rt = KernelRuntime.__new__(KernelRuntime)
+        rt._write_json = lambda path, value: Path(path).write_text(json.dumps(value), encoding="utf-8")
+        rt._git = lambda *args, cwd=None: ""
+        with tempfile.TemporaryDirectory() as tmp:
+            artifacts = Path(tmp) / "a"; artifacts.mkdir()
+            wt = Path(tmp) / "wt"; wt.mkdir()
+            with self.assertRaisesRegex(NeedsHuman, "wrote no repro"):
+                rt._observe_repro(artifacts, wt, runner=lambda *a: None)
+            (artifacts / "repro.json").write_text(json.dumps(good()), encoding="utf-8")
+            (artifacts / "repro-deferred.json").write_text(json.dumps(deferred()), encoding="utf-8")
+            with self.assertRaisesRegex(NeedsHuman, "both repro.json and repro-deferred.json"):
+                rt._observe_repro(artifacts, wt, runner=fake_pytest_runner(2, "boom happened"))
+            self.assertFalse((artifacts / "repro-observed.json").exists())
+
+    def test_deferred_record_is_validated(self):
+        for broken, message in (
+            (deferred(reason="short"), "reason"),
+            (deferred(seam=""), "seam"),
+            (deferred(seam="/etc/passwd"), "seam"),
+            (deferred(expected_symptom="abc"), "expected_symptom"),
+            ({"version": "0.9"}, "version 1.0"),
+        ):
+            with self.subTest(message=message), self.assertRaisesRegex(r.ReproRefused, message):
+                r.validate_deferred(broken)
+
+    def test_deferred_loop_is_closed_against_red_output(self):
+        record = r.deferred_record(r.validate_deferred(deferred()))
+        proof = {"checkpoints": [
+            {"acceptance_id": "AC-1", "red_exit": 1, "red_output_tail": "expected '- Test Video (timestamp link unavailable) — 0:10' ..."},
+            {"acceptance_id": "AC-2", "red_exit": 1, "red_output_tail": "other failure"},
+        ]}
+        match = r.verify_deferred_in_red(record, proof)
+        self.assertEqual(match, {"checkpoint": "AC-1", "matched": True,
+                                 "symptom": "Test Video (timestamp link unavailable)"})
+        with self.assertRaisesRegex(r.ReproRefused, "never observed in RED"):
+            r.verify_deferred_in_red(record, {"checkpoints": [
+                {"acceptance_id": "AC-1", "red_exit": 1, "red_output_tail": "something else entirely"}]})
+        with self.assertRaisesRegex(r.ReproRefused, "no checkpoints"):
+            r.verify_deferred_in_red(record, {"checkpoints": []})
+        with self.assertRaisesRegex(r.ReproRefused, "only a deferred"):
+            r.verify_deferred_in_red({"mode": "executed"}, proof)
+
+    def test_kernel_closes_the_deferred_loop_after_red_and_records_the_match(self):
+        from factory_kernel.runtime import KernelRuntime, NeedsHuman
+
+        rt = KernelRuntime.__new__(KernelRuntime)
+        rt._write_json = lambda path, value: Path(path).write_text(json.dumps(value), encoding="utf-8")
+        rt._read_json = lambda path: json.loads(Path(path).read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            artifacts = Path(tmp)
+            rt._close_deferred_repro(artifacts)  # not a bug issue: nothing to close
+            record = r.deferred_record(r.validate_deferred(deferred()))
+            (artifacts / "repro-observed.json").write_text(json.dumps(record), encoding="utf-8")
+            (artifacts / "red-proof.json").write_text(json.dumps({"checkpoints": [
+                {"acceptance_id": "AC-3", "red_exit": 1, "red_output_tail": "no symptom here"}]}), encoding="utf-8")
+            with self.assertRaisesRegex(NeedsHuman, "never observed in RED"):
+                rt._close_deferred_repro(artifacts)
+            (artifacts / "red-proof.json").write_text(json.dumps({"checkpoints": [
+                {"acceptance_id": "AC-3", "red_exit": 1, "red_output_tail": "got: Test Video (timestamp link unavailable) — 0:10"}]}), encoding="utf-8")
+            rt._close_deferred_repro(artifacts)
+            rec = json.loads((artifacts / "repro-observed.json").read_text(encoding="utf-8"))
+            self.assertEqual(rec["observed_in_red"]["checkpoint"], "AC-3")
+            self.assertTrue(rec["observed_in_red"]["matched"])
+            executed = {"mode": "executed", "rc": 2}
+            (artifacts / "repro-observed.json").write_text(json.dumps(executed), encoding="utf-8")
+            (artifacts / "red-proof.json").write_text(json.dumps({"checkpoints": []}), encoding="utf-8")
+            rt._close_deferred_repro(artifacts)  # executed mode was observed before the contract
+
+    def test_build_issue_closes_the_deferred_loop_after_red_before_implement(self):
+        src = RUNTIME.read_text(encoding="utf-8")
+        red = src.index('"python", "scripts/factory_proof.py", "red"')
+        close = src.index("self._close_deferred_repro(paths.artifacts)")
+        implement = src.index('self._agent(\n                "implement"')
+        self.assertLess(red, close)
+        self.assertLess(close, implement)
+
+    def test_red_proof_records_a_bounded_output_tail(self):
+        source = (ROOT / "scripts" / "factory_proof.py").read_text(encoding="utf-8")
+        self.assertIn("red_output_tail=out[-RED_TAIL_CHARS:]", source)
+        self.assertIn("RED_TAIL_CHARS=2000", source)
+
+    @unittest.skipUnless(PROMPT.exists(), "repo-shaped copy without prompts (mutation runner)")
+    def test_prompt_names_both_shapes(self):
+        text = PROMPT.read_text(encoding="utf-8")
+        self.assertIn("repro-deferred.json", text)
+        self.assertIn("expected_symptom", text)
+        self.assertIn("never both, never neither", text)
+        contract = (ROOT / ".factory" / "prompts" / "contract.md").read_text(encoding="utf-8")
+        self.assertIn("REPRO DEFERRED TO RED", contract)
 
     @unittest.skipUnless(PROMPT.exists(), "repo-shaped copy without prompts (mutation runner)")
     def test_prompt_names_the_allowed_shapes(self):

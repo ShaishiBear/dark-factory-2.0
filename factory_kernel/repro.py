@@ -25,6 +25,20 @@ What bounds a model-authored command here, and what does not:
 Together these bound the damage of a hostile or careless repro to: reading the checkout, using
 the runner's CPU for `timeout` seconds, and printing. They do not make the command trusted; its
 output is evidence only of what it printed and its exit status.
+
+Two modes, one red loop
+-----------------------
+
+An executed repro only fits a bug that an *existing* runner already fails on: a crash, an
+exception, a test that is red today. The commonest bug is a wrong behaviour no test covers, and
+for that no allowlisted command can fail on the unchanged tree, so the investigate worker must
+not invent one. It writes `repro-deferred.json` instead: why no existing command can fail, the
+seam the acceptance tests will exercise, and the exact symptom those tests will demonstrate.
+The kernel validates the record and hands it to the contract worker as a deferred red loop,
+then closes the loop where the factory already proves RED: after `factory_proof.py red`, at
+least one checkpoint's failing output must contain the promised symptom
+(`verify_deferred_in_red`), or the run escalates. The red loop is mandatory in both modes;
+only where it is observed moves. Exactly one of the two artifacts may exist.
 """
 from __future__ import annotations
 
@@ -38,7 +52,10 @@ import subprocess
 from typing import Callable, Mapping
 
 REPRO_ARTIFACT = "repro.json"
+DEFERRED_ARTIFACT = "repro-deferred.json"
 OBSERVED_ARTIFACT = "repro-observed.json"
+MIN_SYMPTOM_CHARS = 4
+MAX_DEFERRED_FIELD_CHARS = 2000
 MAX_ARGV = 40
 MAX_OUTPUT_CHARS = 200_000
 
@@ -189,6 +206,7 @@ def execute(repro: Repro, *, worktree: Path, timeout: int = 600, runner: Runner 
 def observed_record(repro: Repro, observation: Observation) -> dict:
     return {
         "version": "1.0",
+        "mode": "executed",
         "argv": list(repro.argv),
         "cwd": repro.cwd,
         "rc": observation.rc,
@@ -196,3 +214,82 @@ def observed_record(repro: Repro, observation: Observation) -> dict:
         "matched_symptom": observation.matched_symptom,
         "output_tail": observation.output_tail,
     }
+
+
+@dataclass(frozen=True)
+class Deferred:
+    reason: str
+    seam: str
+    expected_symptom: str
+
+
+def _bounded_text(raw: object, name: str, *, minimum: int = 1) -> str:
+    if not isinstance(raw, str):
+        raise ReproRefused(f"deferred repro {name} must be a string")
+    value = raw.strip()
+    if len(value) < minimum:
+        raise ReproRefused(f"deferred repro {name} must be at least {minimum} characters")
+    if len(value) > MAX_DEFERRED_FIELD_CHARS:
+        raise ReproRefused(f"deferred repro {name} exceeds {MAX_DEFERRED_FIELD_CHARS} characters")
+    if any(ch in value for ch in ("\x00",)):
+        raise ReproRefused(f"deferred repro {name} contains control characters")
+    return value
+
+
+def validate_deferred(raw: object) -> Deferred:
+    """A deferred record promises a symptom the RED tests will show; nothing here executes."""
+    if not isinstance(raw, Mapping) or raw.get("version") != "1.0":
+        raise ReproRefused("repro-deferred.json must be a version 1.0 object")
+    reason = _bounded_text(raw.get("reason"), "reason", minimum=20)
+    seam = _bounded_text(raw.get("seam"), "seam", minimum=3)
+    if "\n" in seam or seam.startswith(("/", "\\", "~")) or ".." in Path(seam).parts:
+        raise ReproRefused("deferred repro seam must be a repo-relative path or a symbol name")
+    symptom = _bounded_text(raw.get("expected_symptom"), "expected_symptom", minimum=MIN_SYMPTOM_CHARS)
+    return Deferred(reason=reason, seam=seam, expected_symptom=symptom)
+
+
+def load_deferred(path: Path) -> Deferred:
+    if not path.is_file():
+        raise ReproRefused("investigate worker wrote no repro-deferred.json")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ReproRefused(f"repro-deferred.json is unreadable: {exc}") from exc
+    return validate_deferred(raw)
+
+
+def deferred_record(deferred: Deferred) -> dict:
+    return {
+        "version": "1.0",
+        "mode": "deferred",
+        "reason": deferred.reason,
+        "seam": deferred.seam,
+        "expected_symptom": deferred.expected_symptom,
+        "observed_in_red": None,
+    }
+
+
+def verify_deferred_in_red(record: Mapping, red_proof: Mapping) -> dict:
+    """Close a deferred red loop against the RED proof: some checkpoint must have shown the symptom.
+
+    `factory_proof.py red` records a bounded tail of each checkpoint's failing output. The
+    promised symptom must appear in at least one of them, case-insensitively, exactly as the
+    executed mode requires it to appear in the repro's own output.
+    """
+    if record.get("mode") != "deferred":
+        raise ReproRefused("only a deferred repro is closed against RED")
+    symptom = str(record.get("expected_symptom") or "").strip()
+    if len(symptom) < MIN_SYMPTOM_CHARS:
+        raise ReproRefused("deferred repro record lacks a symptom")
+    checkpoints = red_proof.get("checkpoints")
+    if not isinstance(checkpoints, list) or not checkpoints:
+        raise ReproRefused("RED proof has no checkpoints to close the deferred repro against")
+    needle = symptom.lower()
+    for cp in checkpoints:
+        if not isinstance(cp, Mapping):
+            continue
+        tail = cp.get("red_output_tail")
+        if isinstance(tail, str) and needle in tail.lower():
+            return {"checkpoint": str(cp.get("acceptance_id") or ""), "matched": True,
+                    "symptom": symptom}
+    raise ReproRefused("deferred repro symptom never observed in RED output")

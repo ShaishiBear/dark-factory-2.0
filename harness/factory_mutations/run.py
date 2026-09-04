@@ -33,6 +33,7 @@ COPY_FILES = (
     ".factory/architecture.json",
     ".factory/prompts/holdout.md",
     ".factory/prompts/investigate.md",
+    ".factory/prompts/contract.md",
     ".factory/prompts/plan.md",
     ".factory/prompts/review-standards.md",
     ".factory/prompts/context.md",

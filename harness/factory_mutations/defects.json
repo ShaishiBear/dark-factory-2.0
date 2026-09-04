@@ -753,6 +753,34 @@
       "find": "    if FLOOR_FILE in changed_files:\n        findings.extend(ratchet_regressions(base_floor, head_floor))\n",
       "replace": "",
       "why": "A maintainer PR could lower a ratchet floor and pass every check; the monotonicity the floor file documents would again be unenforced."
+    },
+    {
+      "id": "repro-deferred-accepted-unvalidated",
+      "file": "factory_kernel/runtime.py",
+      "find": "                record = deferred_record(load_deferred(artifacts / DEFERRED_ARTIFACT))",
+      "replace": "                record = dict(json.loads((artifacts / DEFERRED_ARTIFACT).read_text(encoding=\"utf-8\")), mode=\"deferred\")",
+      "why": "A deferred record would reach the contract worker without validation, so an empty symptom or an arbitrary seam could enter the build."
+    },
+    {
+      "id": "repro-deferred-symptom-not-verified-in-red",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._close_deferred_repro(paths.artifacts)\n",
+      "replace": "",
+      "why": "A deferred red loop would never be closed: the promised symptom could be absent from every RED checkpoint and the build would continue."
+    },
+    {
+      "id": "repro-both-records-accepted",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if executed and deferred:\n            raise NeedsHuman(\"bug repro refused: investigate wrote both repro.json and repro-deferred.json\")",
+      "replace": "        if False:\n            raise NeedsHuman(\"bug repro refused: investigate wrote both repro.json and repro-deferred.json\")",
+      "why": "A worker could write a deferred record as a fallback beside an executed repro, so the weaker record would be taken when the command did not fail."
+    },
+    {
+      "id": "repro-deferred-symptom-match-forced",
+      "file": "factory_kernel/repro.py",
+      "find": "        if isinstance(tail, str) and needle in tail.lower():",
+      "replace": "        if isinstance(tail, str):",
+      "why": "Any RED output would close a deferred repro, so the promised symptom would never actually have to appear."
     }
   ]
 }

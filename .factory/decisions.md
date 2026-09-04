@@ -525,3 +525,33 @@ so on the canonical worker the check is expected to report unverified. What the 
 prove is bounded by what its token can read; the requirement is recorded in FACTORY.md and
 FACTORY_RULES §8 so the next repository does not learn it from a two-hour build. A refusal
 made advisory is a factory mutation.
+
+---
+
+## D-024 · The red loop is mandatory; where it is observed is not fixed
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Canary attempt 4 on issue #49 (worker run 33908589032, the first run on the capped kernel)
+failed at its first model stage: `bug repro refused: investigate worker wrote no repro.json`.
+The worker was right. The bug is a wrong return value from `formatCitation`; no existing test
+covers it, so no allowlisted runner can fail on the unchanged tree, and a `repro.json` would
+have asserted an expectation the worker had source-level evidence against. The D-015 gate, as
+written, admitted only bugs that already crash an existing command. That is the rarer kind.
+
+The factory already proves the red loop for the other kind: the independent test author writes
+acceptance tests and `factory_proof.py red` proves them failing on the unchanged tree. The gate
+was demanding, two stages early, evidence the pipeline produces two stages later.
+
+The investigate worker now writes exactly one of two records. `repro.json` when an existing
+command fails today; the kernel executes it as before. `repro-deferred.json` when none can: the
+reason, the seam, and the exact symptom the acceptance tests will print. The kernel validates
+the deferred record, hands it to the contract worker as a deferred red loop (the contract must
+state the symptom in the relevant `then`), and after RED refuses to continue unless at least one
+checkpoint's recorded failing output contains the symptom (`verify_deferred_in_red`;
+`factory_proof.py red` now keeps a bounded output tail per checkpoint). Both records present, or
+neither, escalates.
+
+What stays true: a bug that cannot be made to go red cannot be contracted, and the red loop is
+observed by a deterministic program, never believed. What changed: the observation happens where
+the tests that demonstrate it exist.
