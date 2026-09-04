@@ -718,6 +718,34 @@
       "find": "        if before != after:\n            raise NeedsHuman(\"bug repro refused: repro modified the worktree\")",
       "replace": "        if False:\n            raise NeedsHuman(\"bug repro refused: repro modified the worktree\")",
       "why": "A repro that edits a source file and then prints the symptom would contaminate what the contract worker reads next."
+    },
+    {
+      "id": "worker-turn-cap-dropped-for-role",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "    \"conformance\": 30,\n",
+      "replace": "",
+      "why": "A role without a turn cap is an unbounded loop again; only the 20-minute timeout would end it."
+    },
+    {
+      "id": "provider-max-turns-not-passed",
+      "file": "factory_kernel/providers.py",
+      "find": "            argv.extend([\"--max-turns\", str(request.max_turns)])",
+      "replace": "            pass",
+      "why": "The cap would be computed and never reach the CLI; every worker would run unbounded while the policy claimed otherwise."
+    },
+    {
+      "id": "provider-error-envelope-accepted",
+      "file": "factory_kernel/providers.py",
+      "find": "    if raw.get(\"is_error\") is True or subtype.startswith(\"error\"):",
+      "replace": "    if False:",
+      "why": "A worker that hit its cap, ran out of budget or died on an API error would be treated as a successful stage with empty output."
+    },
+    {
+      "id": "context-worker-brief-reduced-to-hash",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._agent(\n                \"context\",\n                worktree.path,\n                paths,\n                context=self._worker_brief(",
+      "replace": "            self._agent(\n                \"context\",\n                worktree.path,\n                paths,\n                context=(f\"Validated contract sha256: {contract_hash}\" or self._worker_brief(",
+      "why": "The context worker would again receive only the hash and have to rediscover the whole task from disk, the slowest stage of the first canary."
     }
   ]
 }

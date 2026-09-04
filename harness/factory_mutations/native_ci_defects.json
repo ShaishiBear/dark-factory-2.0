@@ -160,10 +160,10 @@
     },
     {
       "id": "merged-branch-delete-without-merged-guard",
-      "file": ".github/workflows/dark-factory-trust-root.yml",
-      "find": "    if: github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository\n",
-      "replace": "    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository\n",
-      "why": "Closing a PR without merging would delete its branch and the unmerged work with it."
+      "file": ".github/workflows/dark-factory-branch-cleanup.yml",
+      "find": "            if [ \"$merged_oid\" != \"$tip\" ]; then\n",
+      "replace": "            if false; then\n",
+      "why": "A branch with commits pushed after its merged PR would be deleted with the unmerged work on it; only a tip that is exactly the merged PR head may go."
     },
     {
       "id": "main-regression-applies-factory-control-label",
@@ -185,6 +185,20 @@
       "find": "            echo \"TRUST_ROOT_REFUSED pr is not mergeable (conflicting with base); rebase\"\n            exit 1\n",
       "replace": "            echo \"TRUST_ROOT_REFUSED pr is not mergeable (conflicting with base); rebase\"\n",
       "why": "The refusal would be printed but the required check would stay green, so the ruleset would learn nothing."
+    },
+    {
+      "id": "branch-cleanup-without-merged-pr",
+      "file": ".github/workflows/dark-factory-branch-cleanup.yml",
+      "find": "            if [ -z \"$merged_head\" ] || [ \"$merged_oid\" = \"null\" ]; then\n",
+      "replace": "            if false; then\n",
+      "why": "A branch with no merged PR at all (an open PR, or work never proposed) would be deleted."
+    },
+    {
+      "id": "worker-transcript-upload-removed",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "      - name: Upload run transcripts and artifacts (observability)\n        if: always()\n",
+      "replace": "      - name: Upload run transcripts and artifacts (observability)\n        if: false\n",
+      "why": "Observability, not authority: without the upload no per-stage timing or transcript survives the runner, and a slow or failed stage cannot be read after the fact."
     }
   ]
 }

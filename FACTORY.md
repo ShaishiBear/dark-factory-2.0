@@ -235,7 +235,11 @@ The worker checks out current `main` without persisting checkout credentials, ru
 
 Application validation state is disposable per run rather than a persistent secret surface. The worker provisions local `postgres:16` database `dark_factory_validation`, a random JWT secret, a synthetic E2E account/password, and `DARK_FACTORY_E2E_BOOTSTRAP=1`. The locked browser fixture is ingested through the real Supadata/OpenRouter application path.
 
-The GitHub-hosted toolchain is pinned to Ubuntu 24.04, Python 3.12.14, Node 24, uv 0.12.5, Bun 1.4.0, Claude Code 2.1.245 and agent-browser 0.35.0.
+The GitHub-hosted toolchain is pinned to Ubuntu 24.04, Python 3.12.14, Node 24, uv 0.12.5, Bun 1.4.0, Claude Code 2.1.245 and agent-browser 0.35.0. The uv wheel cache and the Bun package store are cached between runs keyed on the lockfiles; every install still runs frozen against the lockfile, so the cache only avoids re-downloading hash-verified artifacts.
+
+### Run transcripts and per-stage timing
+
+Every worker is launched with a per-role turn cap (`ROLE_MAX_TURNS`, `factory_kernel/worker_policy.py`) and `--output-format json`, so the CLI returns one result envelope with `num_turns`, `duration_ms` and cost; the kernel unwraps it and refuses error envelopes as failed stages. Each run writes `transcripts/agent-<role>.log` (the worker's text), `transcripts/agent-<role>.json` (its telemetry and wall time) and `transcripts/stage-timings.jsonl` (one row per model stage and per deterministic gate that keeps a transcript). The worker workflow uploads those, the gate logs and the run's JSON artifacts as a 7-day artifact, on success and on failure; logs of programs that hold credentials are excluded. This is observability only; nothing reads it to decide anything (D-020).
 
 ### Daily regression on `main`
 
@@ -243,7 +247,7 @@ The GitHub-hosted toolchain is pinned to Ubuntu 24.04, Python 3.12.14, Node 24, 
 
 ### Merged-branch cleanup
 
-GitHub's `delete_branch_on_merge` setting did not delete branches merged by GitHub's own auto-merge on behalf of the Actions app. The trust-root workflow's `delete-merged-branch` job deletes the head ref on the `closed` event, only when the PR was actually merged and only when the head lives in this repository. Drafts are judged but never armed for auto-merge.
+GitHub's `delete_branch_on_merge` setting does not delete branches merged by GitHub's own auto-merge on behalf of the Actions app, and a `closed`-event job cannot see that close either: events caused by `GITHUB_TOKEN` start no workflows (D-020). `.github/workflows/dark-factory-branch-cleanup.yml` therefore runs hourly (and on dispatch) with `contents: write` and no checkout: it lists this repository's `human/*` and `factory/*` branches and deletes a branch only when a merged PR from this repository has it as head and the branch tip is exactly that PR's head commit. `main` is never a candidate; a branch with commits past its merged PR is kept and reported. Drafts are judged by the trust-root workflow but never armed for auto-merge.
 
 ### Optional self-hosted scheduler
 

@@ -445,3 +445,42 @@ bounds limit what that code can reach (the checkout, CPU for the timeout, stdout
 can leave behind (nothing). The command's output is evidence of what it printed and how it
 exited, not a trusted judgement. Six mutations attack the three bounds; IMM-013 records the
 class.
+
+---
+
+## D-020 · Workers are bounded, briefed and measured
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+The first canary build (issue #49, worker run 33899592399) spent about twelve minutes per model
+stage. A read-only audit found the prompts small (the largest assembled prompt under 10k chars)
+and the time elsewhere: no turn cap on the CLI, so the only backstop was the 20-minute subprocess
+timeout; the `context` worker handed only the contract's hash and told to name every file the
+implementation may touch, so it rediscovered the whole task from a 400-file checkout; three
+prompts ordering CLAUDE.md and FACTORY_RULES.md (87k chars) read before anything else, and one
+ordering "recent history" a Bash-less worker cannot obtain; cold `uv` and Bun caches on every
+hourly run; and no per-stage timing anywhere, so none of this could be read after the run.
+
+Five changes, none touching an authority, an isolation flag, the tool policy, the blinding or an
+evidence step. Each role gets a turn cap (`ROLE_MAX_TURNS`) passed as `--max-turns`; the CLI
+returns a JSON result envelope and an error envelope is a failed stage. Post-contract workers
+receive the validated contract and the original issue in the prompt, hash first. The prompts say
+"search before reading whole files" and point at the sections that matter. The workflows cache the
+uv wheel store and the Bun package store keyed on the lockfiles, still installing frozen. Every
+stage writes its wall time and the model's own telemetry, and the worker uploads transcripts as a
+7-day artifact.
+
+What this claims: the loop is bounded and the time is visible. What it does not claim: that any
+cap is the right number. The caps are first estimates; the next canary's `stage-timings.jsonl`
+is the evidence for adjusting them, and a cap is a trust-root change.
+
+**Merged-branch cleanup, corrected.** D-017 added a `delete-merged-branch` job on the trust-root
+workflow's `closed` event. It never ran: on #59, #60 and #61 no workflow run was created for the
+`closed` event at all. GitHub's auto-merge closes the PR with the Actions token, and events
+caused by `GITHUB_TOKEN` do not start workflows, so neither `pull_request_target` nor
+`pull_request` can see that close. The dead job and the `closed` trigger are removed. Cleanup is
+now a small hourly workflow (`dark-factory-branch-cleanup.yml`) that lists this repository's
+`human/*` and `factory/*` branches, keeps only those whose tip is exactly the head of a merged
+PR from this repository, and deletes them; `main` is never a candidate and a branch with commits
+past its merged PR is left alone. Chosen over a PAT because no new credential is needed, and over
+a step in the daily regression because that workflow deliberately holds `contents: read`.

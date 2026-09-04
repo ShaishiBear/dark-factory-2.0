@@ -34,6 +34,31 @@ ROLE_TOOLS: dict[str, tuple[str, ...]] = {
 
 REPO_MUTATION_ROLES = frozenset({"test_author", "implement", "repair"})
 
+# Every worker is a bounded agentic loop. Before this table the only backstop was the
+# 20-minute subprocess timeout, so a worker that kept exploring burned the whole budget
+# silently; the first canary spent ~12 minutes per stage that way (D-020). A role that exceeds
+# its cap fails the stage, which is the ordinary fail-closed path. Roles that only read a named
+# artifact list get tight caps; the roles that must map a task onto the repository get room.
+ROLE_MAX_TURNS: dict[str, int] = {
+    "triage": 20,
+    "plan": 60,
+    "investigate": 60,
+    "contract": 30,
+    "context": 80,
+    "architecture": 30,
+    "test_author": 60,
+    "implement": 120,
+    "review-spec": 40,
+    "review-standards": 40,
+    "repair": 80,
+    "conformance": 30,
+    "holdout": 10,
+    "architecture-holdout": 10,
+    "contract-certifier": 10,
+    "design-certifier": 10,
+    "governor-certifier": 10,
+}
+
 # The identity every kernel-made commit carries. It is the GitHub Actions bot's own noreply
 # address, which GitHub attributes to the `github-actions[bot]` account (type Bot). An earlier
 # invented noreply address mapped to no account at all, so kernel commits resolved to null:
@@ -62,6 +87,16 @@ def allowed_tools(role: str) -> tuple[str, ...]:
         return ROLE_TOOLS[role]
     except KeyError as exc:
         raise ValueError(f"no least-privilege worker policy for role {role!r}") from exc
+
+
+def max_turns(role: str) -> int:
+    try:
+        cap = ROLE_MAX_TURNS[role]
+    except KeyError as exc:
+        raise ValueError(f"no turn cap for role {role!r}") from exc
+    if not isinstance(cap, int) or isinstance(cap, bool) or cap <= 0:
+        raise ValueError(f"turn cap for role {role!r} must be a positive integer")
+    return cap
 
 
 def may_change_repo(role: str) -> bool:

@@ -35,6 +35,7 @@ class AgentRequest:
     structured_schema: Mapping[str, Any] | None = None
     allowed_tools: tuple[str, ...] | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
+    max_turns: int | None = None
 
     def __post_init__(self) -> None:
         if not self.role.strip():
@@ -43,6 +44,10 @@ class AgentRequest:
             raise ValueError("agent prompt must be non-empty")
         if not self.cwd.strip():
             raise ValueError("agent cwd must be non-empty")
+        if self.max_turns is not None and (
+            isinstance(self.max_turns, bool) or not isinstance(self.max_turns, int) or self.max_turns <= 0
+        ):
+            raise ValueError("agent max_turns must be a positive integer when set")
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,8 @@ class AgentResult:
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
+    num_turns: int | None = None
+    duration_ms: int | None = None
 
 
 class AgentProvider(Protocol):
