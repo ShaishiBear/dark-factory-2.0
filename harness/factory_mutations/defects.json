@@ -1089,6 +1089,13 @@
       "find": "        sys.executable, str(HERE / \"factory_impact.py\"), \"context\",",
       "replace": "        sys.executable, str(ROOT / \"scripts\" / \"factory_impact.py\"), \"context\",",
       "why": "A sibling authority would be invoked from the tree under test rather than from beside the calling program."
+    },
+    {
+      "id": "provenance-note-written-without-identity",
+      "file": "scripts/factory_provenance.py",
+      "find": "[\"git\", *KERNEL_COMMIT_ARGS, \"notes\", f\"--ref={NOTE_REF}\", \"add\", \"-f\", \"-F\", str(note_file), head],",
+      "replace": "[\"git\", \"notes\", f\"--ref={NOTE_REF}\", \"add\", \"-f\", \"-F\", str(note_file), head],",
+      "why": "The provenance note would be written without the kernel identity and fail on a runner that configures none, so no exact-head provenance could ever be published."
     }
   ]
 }

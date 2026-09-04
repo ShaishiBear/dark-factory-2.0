@@ -22,6 +22,7 @@ ROOT = Path.cwd().resolve()
 
 from factory_kernel.canonical import canonical_bytes
 from factory_kernel.provenance import NOTE_REF, build_pack, materialize, pack_sha256, verify_pack
+from factory_kernel.worker_policy import KERNEL_COMMIT_ARGS
 
 
 def fail(message: str) -> None:
@@ -159,8 +160,11 @@ def publish(args: argparse.Namespace) -> None:
         tmp.write(canonical_bytes(pack))
         note_file = Path(tmp.name)
     try:
+        # `git notes add` writes a commit object on the notes ref, so it needs an author the
+        # same way a worker commit does. The GitHub runner configures none; every kernel-made
+        # object carries the kernel identity (D-037).
         note = subprocess.run(
-            ["git", "notes", f"--ref={NOTE_REF}", "add", "-f", "-F", str(note_file), head],
+            ["git", *KERNEL_COMMIT_ARGS, "notes", f"--ref={NOTE_REF}", "add", "-f", "-F", str(note_file), head],
             cwd=ROOT,
             capture_output=True,
             text=True,
