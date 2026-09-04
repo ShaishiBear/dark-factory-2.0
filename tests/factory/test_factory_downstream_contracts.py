@@ -213,7 +213,7 @@ class ValidatorSideBriefTests(unittest.TestCase):
         captured = {}
 
         class Provider:
-            def run(self, request):
+            def run(self, request, **_kwargs):
                 captured["prompt"] = request.prompt
                 return mock.Mock(structured_output={"version": "1.0", "certifies": "contract", "verdict": "pass", "findings": []})
 

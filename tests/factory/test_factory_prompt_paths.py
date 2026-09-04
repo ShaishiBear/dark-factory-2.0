@@ -112,7 +112,7 @@ class _Provider:
     def __init__(self) -> None:
         self.requests: list[AgentRequest] = []
 
-    def run(self, request: AgentRequest) -> AgentResult:
+    def run(self, request: AgentRequest, **_kwargs: object) -> AgentResult:
         self.requests.append(request)
         return AgentResult(
             provider_id="fake", model="fake", content="ok", session_id="s",
@@ -176,10 +176,10 @@ class LauncherTests(unittest.TestCase):
             _git(repo, "init", "-q")
 
             class Dirtying(_Provider):
-                def run(self, request: AgentRequest) -> AgentResult:
+                def run(self, request: AgentRequest, **_kwargs: object) -> AgentResult:
                     (repo / "$ARTIFACTS_DIR").mkdir()
                     (repo / "$ARTIFACTS_DIR" / "repro-deferred.json").write_text("{}", encoding="utf-8")
-                    return super().run(request)
+                    return super().run(request, **_kwargs)
 
             rt = self._runtime(Path(tmp), Dirtying())
             with mock.patch("factory_kernel.worker_runtime.method_block", return_value=""):

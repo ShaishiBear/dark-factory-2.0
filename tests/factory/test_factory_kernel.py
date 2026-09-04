@@ -24,7 +24,7 @@ class DummyProvider:
     provider_id = "dummy"
     capabilities = ProviderCapabilities(structured_output=True)
 
-    def run(self, request: AgentRequest) -> AgentResult:
+    def run(self, request: AgentRequest, **_kwargs: object) -> AgentResult:
         return AgentResult(provider_id="dummy", model=request.model or "dummy-1", content="ok")
 
 

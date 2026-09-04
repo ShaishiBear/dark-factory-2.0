@@ -791,3 +791,34 @@ stages after it, before attempt 9 could reach them. Findings, all landed togethe
 
 None of these relaxes a check. Items 1, 2 and 6 move information the kernel already computes to
 the worker that must echo it; 3, 4 and 5 make a prompt describe the validator that runs.
+
+---
+
+## D-031 · A dropped stream is not a verdict
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Attempt 9 of the first canary (run 33918953996) was the first to clear the architecture
+governor on the audited kernel. The `test_author` worker then returned an error envelope after
+seven turns and 11.6 seconds of API time: `API Error: stream closed before completion`. The
+provider refused it as a failed stage, as it should for a turn cap or a budget stop, and the
+whole build, about fifty minutes of certified work, was thrown away for a network hiccup.
+
+The provider now retries a stage whose CLI process ends in an explicitly TRANSIENT error, and
+only then. The list is short and literal: `stream closed before completion`, `overloaded`,
+`rate limit`, `429`, `502`, `503`, `504`, `ECONNRESET`, `ETIMEDOUT`, `socket hang up`. An
+envelope whose `subtype` starts with `error` (`error_max_turns`, `error_max_budget`) is a
+verdict about the worker, not the network, and stays terminal even if a transient word appears
+in its text; so does a missing model, unparseable output, a non-zero exit or a timeout.
+
+Each retry is a fresh CLI process with the same prompt, after a 5 s then 15 s backoff, at most
+`provider.transient_retries` times (2, bounded 0..3 in `.factory/kernel.json`). Before a retry
+of a mutation role the kernel restores the worktree (`checkout -- .`, `clean -fd`) so the
+commit envelope never judges the union of two half-finished attempts; for any other role it
+asserts the tree is still clean. The provider itself never touches Git.
+
+Telemetry is honest about the cost: `attempts` and `transient_errors` are recorded per stage,
+and turns, tokens and dollars are summed across attempts. The dollar cap is a per-process CLI
+flag, so a stage's effective ceiling is `max_budget_usd × (1 + transient_retries)`; with the
+D-025 budgets that is at most 36 USD for a builder role. Three mutations attack the boundary:
+terminal errors retried, retry without the worktree restore, retries unbounded.

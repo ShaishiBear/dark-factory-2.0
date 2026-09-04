@@ -71,6 +71,11 @@ class AgentResult:
     duration_ms: int | None = None
     cache_creation_input_tokens: int | None = None
     cache_read_input_tokens: int | None = None
+    # How many CLI processes this stage took (1 unless a transient provider error was retried),
+    # and the error text of each attempt that was retried. Token/turn/cost fields above are the
+    # sum across attempts.
+    attempts: int = 1
+    transient_errors: tuple[str, ...] = ()
 
 
 class AgentProvider(Protocol):
@@ -83,7 +88,16 @@ class AgentProvider(Protocol):
     provider_id: str
     capabilities: ProviderCapabilities
 
-    def run(self, request: AgentRequest) -> AgentResult: ...
+    def run(
+        self,
+        request: AgentRequest,
+        *,
+        before_retry: Callable[[int], None] | None = None,
+    ) -> AgentResult:
+        """`before_retry(attempt)` is called by a provider that re-launches a stage after a
+        transient provider error, before the new process starts; the kernel uses it to restore
+        the worktree. A provider that never retries may ignore it."""
+        ...
 
 
 @dataclass(frozen=True)

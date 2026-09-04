@@ -15,6 +15,12 @@ class ProviderConfig:
     model: str
     timeout_seconds: int
     architecture_model: str = ""
+    # How many times a stage is re-launched after an explicitly transient provider error
+    # (a dropped stream, a 5xx, a rate limit). 0..3; terminal errors are never retried (D-031).
+    transient_retries: int = 2
+
+
+TRANSIENT_RETRIES_MAX = 3
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,12 @@ def _mapping(raw: object, name: str) -> Mapping[str, object]:
 def _positive_int(raw: object, name: str) -> int:
     if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
         raise ValueError(f"kernel {name} must be a positive integer")
+    return raw
+
+
+def _bounded_int(raw: object, name: str, *, low: int, high: int) -> int:
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw < low or raw > high:
+        raise ValueError(f"kernel {name} must be an integer between {low} and {high}")
     return raw
 
 
@@ -149,6 +161,10 @@ def load_config(path: str | Path) -> KernelConfig:
                 provider.get("architecture_model"), "provider.architecture_model"
             ),
             timeout_seconds=_positive_int(provider.get("timeout_seconds"), "provider.timeout_seconds"),
+            transient_retries=_bounded_int(
+                provider.get("transient_retries"), "provider.transient_retries",
+                low=0, high=TRANSIENT_RETRIES_MAX,
+            ),
         ),
         runtime=RuntimeConfig(
             max_attempts=_positive_int(runtime.get("max_attempts"), "runtime.max_attempts"),

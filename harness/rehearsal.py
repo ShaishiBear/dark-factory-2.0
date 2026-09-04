@@ -255,7 +255,7 @@ class FakeProvider:
         self.trace = trace
         self.reject = reject
 
-    def run(self, request: Any) -> AgentResult:
+    def run(self, request: Any, **_provider_kwargs: Any) -> AgentResult:
         role = request.role
         self.trace.record("agent", role)
         if role not in AUTHORITY_ROLES:

@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .agents import AgentRequest, AgentResult, ProviderCapabilities
 from .config import ProviderConfig
@@ -66,7 +66,12 @@ class ClaudeCliProvider:
         )
         return env
 
-    def run(self, request: AgentRequest) -> AgentResult:
+    def run(
+        self,
+        request: AgentRequest,
+        *,
+        before_retry: Callable[[int], None] | None = None,
+    ) -> AgentResult:
         # The final semantic architecture holdout deliberately uses a different model family
         # from ordinary build/review workers. It is still an untrusted model judgment; the
         # deterministic architecture guard and Evidence Bundle remain authoritative.
@@ -116,6 +121,68 @@ class ClaudeCliProvider:
         if tools:
             argv.extend(["--allowedTools", tool_names])
         env = self._worker_env(request.environment)
+
+        # A dropped stream is not a verdict. The tenth canary defect (D-031) was a `test_author`
+        # worker that returned `API Error: stream closed before completion` after 12 seconds of
+        # API time, refused as a failed stage, and cost the whole 50-minute build. Only the
+        # explicit TRANSIENT patterns below are retried, each attempt a fresh CLI process with
+        # the same prompt; a cap, a budget stop, a missing model or any other error stays
+        # terminal and is refused exactly as before. The dollar budget is a per-process CLI flag,
+        # so the effective ceiling for a stage is max_budget_usd * (1 + transient_retries).
+        # Before a retry the kernel calls `before_retry` (the worker runtime restores the
+        # worktree for mutation roles); this provider never touches Git itself.
+        transient_errors: list[str] = []
+        spent = _Spent()
+        attempts_allowed = 1 + self.config.transient_retries
+        for attempt in range(1, attempts_allowed + 1):
+            if attempt > 1:
+                if before_retry is not None:
+                    before_retry(attempt)
+                _sleep(TRANSIENT_BACKOFF_SECONDS[min(attempt - 2, len(TRANSIENT_BACKOFF_SECONDS) - 1)])
+            stdout = self._launch(argv, request)
+            try:
+                envelope = unwrap_result_envelope(stdout, role=request.role)
+            except TransientProviderError as exc:
+                spent.add(exc.envelope)
+                transient_errors.append(exc.detail)
+                if attempt < attempts_allowed:
+                    continue
+                raise RuntimeError(
+                    f"agent worker role={request.role!r} failed on a transient provider error "
+                    f"{attempt} time(s) (transient_retries={self.config.transient_retries}): "
+                    f"{exc.detail}"
+                ) from exc
+            spent.add(envelope)
+            break
+        output = envelope.content
+
+        structured: Any | None = None
+        if request.structured_schema is not None:
+            structured = _extract_json(output)
+            if structured is None:
+                raise RuntimeError(
+                    f"agent worker role={request.role!r} did not return parseable JSON"
+                )
+        return AgentResult(
+            provider_id=self.provider_id,
+            model=model,
+            content=output,
+            structured_output=structured,
+            session_id=envelope.session_id,
+            input_tokens=spent.input_tokens,
+            output_tokens=spent.output_tokens,
+            cost_usd=spent.cost_usd,
+            num_turns=spent.num_turns,
+            duration_ms=spent.duration_ms,
+            cache_creation_input_tokens=spent.cache_creation_input_tokens,
+            cache_read_input_tokens=spent.cache_read_input_tokens,
+            attempts=attempt,
+            transient_errors=tuple(transient_errors),
+        )
+
+    def _launch(self, argv: list[str], request: AgentRequest) -> str:
+        """One CLI process. Returns its stdout; a non-zero exit or a timeout is terminal."""
+        env = self._worker_env(request.environment)
         started = time.monotonic()
         try:
             proc = subprocess.run(
@@ -146,30 +213,69 @@ class ClaudeCliProvider:
             raise RuntimeError(
                 f"agent worker failed role={request.role!r} rc={proc.returncode}: {detail}"
             )
-        envelope = unwrap_result_envelope(stdout, role=request.role)
-        output = envelope.content
+        return stdout
 
-        structured: Any | None = None
-        if request.structured_schema is not None:
-            structured = _extract_json(output)
-            if structured is None:
-                raise RuntimeError(
-                    f"agent worker role={request.role!r} did not return parseable JSON"
-                )
-        return AgentResult(
-            provider_id=self.provider_id,
-            model=model,
-            content=output,
-            structured_output=structured,
-            session_id=envelope.session_id,
-            input_tokens=envelope.input_tokens,
-            output_tokens=envelope.output_tokens,
-            cost_usd=envelope.cost_usd,
-            num_turns=envelope.num_turns,
-            duration_ms=envelope.duration_ms,
-            cache_creation_input_tokens=envelope.cache_creation_input_tokens,
-            cache_read_input_tokens=envelope.cache_read_input_tokens,
-        )
+
+# Retried only when the CLI's error text matches one of these. The list is deliberately short
+# and literal: anything not on it is a verdict about the worker, not the network, and is refused.
+TRANSIENT_ERROR_PATTERNS: tuple[str, ...] = (
+    "stream closed before completion",
+    "overloaded",
+    "rate limit",
+    "429",
+    "502",
+    "503",
+    "504",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "socket hang up",
+)
+# Backoff before attempt 2, then attempt 3 (and any further, capped at the last value).
+TRANSIENT_BACKOFF_SECONDS: tuple[float, ...] = (5.0, 15.0)
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def is_transient_error(detail: str, subtype: str) -> bool:
+    """A stream drop or a provider-side capacity error, never a cap, budget or model error."""
+    if subtype.startswith("error"):
+        return False
+    lowered = detail.lower()
+    return any(pattern.lower() in lowered for pattern in TRANSIENT_ERROR_PATTERNS)
+
+
+class TransientProviderError(RuntimeError):
+    """An error envelope the provider may retry. Carries the envelope so its cost is counted."""
+
+    def __init__(self, detail: str, envelope: "ResultEnvelope") -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.envelope = envelope
+
+
+class _Spent:
+    """Telemetry summed across every attempt of one stage, so a retried stage reports what
+    it actually cost rather than only its final successful process."""
+
+    def __init__(self) -> None:
+        self.num_turns = 0
+        self.duration_ms = 0
+        self.cost_usd = 0.0
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.cache_creation_input_tokens = 0
+        self.cache_read_input_tokens = 0
+
+    def add(self, envelope: "ResultEnvelope") -> None:
+        self.num_turns += envelope.num_turns or 0
+        self.duration_ms += envelope.duration_ms or 0
+        self.cost_usd += envelope.cost_usd or 0.0
+        self.input_tokens += envelope.input_tokens or 0
+        self.output_tokens += envelope.output_tokens or 0
+        self.cache_creation_input_tokens += envelope.cache_creation_input_tokens or 0
+        self.cache_read_input_tokens += envelope.cache_read_input_tokens or 0
 
 
 class ResultEnvelope:
@@ -230,10 +336,13 @@ def unwrap_result_envelope(stdout: str, *, role: str) -> ResultEnvelope:
     subtype = str(raw.get("subtype") or "")
     if raw.get("is_error") is True or subtype.startswith("error"):
         detail = str(raw.get("result") or "")[-1500:]
-        raise RuntimeError(
+        message = (
             f"agent worker role={role!r} ended in error "
             f"(subtype={subtype or 'unknown'} num_turns={raw.get('num_turns')}): {detail}"
         )
+        if is_transient_error(detail, subtype):
+            raise TransientProviderError(message, ResultEnvelope(raw))
+        raise RuntimeError(message)
     return ResultEnvelope(raw)
 
 

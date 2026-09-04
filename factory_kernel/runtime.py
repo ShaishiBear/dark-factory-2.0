@@ -1398,6 +1398,10 @@ class KernelRuntime:
             "input_tokens": getattr(result, "input_tokens", None),
             "output_tokens": getattr(result, "output_tokens", None),
             "wall_seconds": round(ended - started, 3),
+            # A stage retried after a transient provider error reports every process it took
+            # and why; the counts above are summed across them (D-031).
+            "attempts": getattr(result, "attempts", 1),
+            "transient_errors": list(getattr(result, "transient_errors", ()) or ()),
         }
         (paths.transcripts / f"agent-{role}.json").write_text(
             json.dumps(telemetry, sort_keys=True, indent=2) + "\n", encoding="utf-8"
