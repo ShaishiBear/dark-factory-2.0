@@ -13,11 +13,15 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-ROOT = Path(__file__).resolve().parents[1]
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+HERE = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
 PRODUCT_PREFIXES = ("app/backend/", "app/frontend/")
 SOURCE_PREFIXES = ("app/backend/", "app/frontend/src/")
 SOURCE_EXTENSIONS = (".py", ".ts", ".tsx", ".js", ".jsx")
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(HERE))
 from factory_shapes import TEST_MARKERS, test_shaped  # noqa: E402  (shared with proof + commit authority)
 TS_IMPORT = re.compile(
     r"(?:import|export)\s+(?:[^'\"]*?\sfrom\s*)?['\"]([^'\"]+)['\"]|"

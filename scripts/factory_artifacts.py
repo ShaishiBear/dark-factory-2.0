@@ -9,12 +9,16 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+HERE = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
+sys.path.insert(0, str(HERE))
 from factory_shapes import normalise_list, normalise_lists  # noqa: E402
 
-from factory_protocol import canonical, validate_contract
+from factory_protocol import canonical, validate_contract  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
 PART_OF = re.compile(r"(?im)^Part of\s+#([1-9][0-9]*)\s*$")
 BLOCKED = re.compile(r"(?im)^Blocked by:\s+#([1-9][0-9]*)\s*$")
 DESIGN_BLOCK = re.compile(

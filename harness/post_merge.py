@@ -16,12 +16,17 @@ import re
 import subprocess
 import sys
 
-ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+HERE = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
 OID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
-# Ensure repo-owned helpers are importable even when executed as `python harness/post_merge.py`.
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+# Repo-owned helpers are imported from beside this file even when executed as
+# `python harness/post_merge.py` from another working directory.
+if str(HERE.parent) not in sys.path:
+    sys.path.insert(0, str(HERE.parent))
 
 from factory_kernel.credential_env import scoped_environment  # noqa: E402
 from factory_kernel.worktree import create_detached, remove  # noqa: E402

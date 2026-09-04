@@ -10,9 +10,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from factory_kernel.spine import load_policy
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+# The kernel package is imported from beside this file; the caller need not export PYTHONPATH.
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from factory_kernel.spine import load_policy  # noqa: E402
 
-ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
+ROOT = Path.cwd().resolve()
 GIT_OID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 

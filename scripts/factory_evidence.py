@@ -4,7 +4,13 @@ from __future__ import annotations
 import argparse, hashlib, importlib.util, json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
-ROOT = Path(os.environ.get("FACTORY_REPO_ROOT", Path(__file__).resolve().parents[1])).resolve()
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+# The authoritative validators below are loaded from beside this file, never from ROOT: a PR
+# head's copy of a validator must not be the program that judges that PR.
+HERE = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
 BLOCK = re.compile(
     r"<!-- factory-(contract|proof|design):start -->\s*```factory-\1\s*(\{.*?\})\s*```\s*"
     r"\1-sha256:\s*([0-9a-f]{64})\s*<!-- factory-\1:end -->", re.S
@@ -99,16 +105,16 @@ def load_module(path: Path, name: str):
 
 
 def load_protocol():
-    return load_module(ROOT / "scripts" / "factory_protocol.py", "factory_protocol_authoritative")
+    return load_module(HERE / "factory_protocol.py", "factory_protocol_authoritative")
 
 
 def load_security():
-    return load_module(ROOT / "scripts" / "factory_security.py", "factory_security_authoritative")
+    return load_module(HERE / "factory_security.py", "factory_security_authoritative")
 
 
 def load_architecture_guard():
     return load_module(
-        ROOT / "scripts" / "factory_architecture_guard.py",
+        HERE / "factory_architecture_guard.py",
         "factory_architecture_guard_authoritative",
     )
 

@@ -9,7 +9,10 @@ import sys
 import tomllib
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+ROOT = Path.cwd().resolve()
 BACKEND_MANIFEST = "app/backend/pyproject.toml"
 BACKEND_LOCK = "app/backend/uv.lock"
 FRONTEND_MANIFEST = "app/frontend/package.json"

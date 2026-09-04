@@ -49,6 +49,7 @@ from .repro import (
 )
 from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
+from .trusted_programs import resolve_trusted_program
 from .worker_policy import BUILDER_BLIND_PATHS, KERNEL_COMMIT_NAME, KERNEL_COMMIT_ARGS, max_turns
 from .worktree import Worktree, create_detached, remove
 
@@ -1719,6 +1720,10 @@ class KernelRuntime:
         timeout: int = 300,
         transcript: Path | None = None,
     ) -> str:
+        # A trust-root program is executed from the kernel's own checkout of main; the working
+        # directory stays the tree under test, so main's code judges the PR's tree and the PR
+        # head's copy of an authority is never run (D-036).
+        argv = resolve_trusted_program(self.repo_root, argv)
         merged = scoped_environment(env, scope=credential_scope)
         started = time.time()
         proc = subprocess.run(

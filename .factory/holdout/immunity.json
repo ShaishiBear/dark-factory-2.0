@@ -483,6 +483,38 @@
           "value": "push_branch(branch, force_with_lease=head)"
         }
       ]
+    },
+    {
+      "id": "IMM-017",
+      "status": "active",
+      "source": {
+        "kind": "decision",
+        "ref": "D-036"
+      },
+      "failure_class": "a kernel authority executed from the subject's copy",
+      "lesson": "The kernel named its deterministic programs by repository-relative path and ran them with the working directory set to the PR-head worktree, so Python resolved scripts/factory_provenance.py against the PR's tree and the PR head's copy of the authority judged the PR. The resume of the factory's first PR ran a copy that predated a fix already on main and died on it; a PR that edited a validator would have been judged by its own edit. A trust-root program now executes from the kernel's checkout of main, the working directory stays the tree under test, and every script derives that tree from its working directory rather than from its own location. The canonical harness inside the worktree is the one deliberate exception, and it runs only after main's evidence code has refused any trust-root drift from origin/main.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "argv = resolve_trusted_program(self.repo_root, argv)"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/trusted_programs.py",
+          "value": "never from the subject's copy"
+        },
+        {
+          "kind": "text_contains",
+          "path": "scripts/factory_evidence.py",
+          "value": "load_module(HERE / \"factory_protocol.py\""
+        },
+        {
+          "kind": "text_contains",
+          "path": "scripts/factory_provenance.py",
+          "value": "ROOT = Path.cwd().resolve()"
+        }
+      ]
     }
   ]
 }

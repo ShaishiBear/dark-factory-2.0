@@ -112,7 +112,7 @@ The build path is `KernelRuntime.build_issue` in `factory_kernel/runtime.py`. It
 
 ## 3. Quality Gates for Auto-Merge
 
-Validation is `KernelRuntime.validate_pr`. It starts from the exact PR head SHA in a fresh detached worktree with frozen dependencies, and it re-derives everything; it does not trust the builder's narrative, the PR description, or prior review discussion. A merge is authorized only when **every** step below is true, in this order:
+Validation is `KernelRuntime.validate_pr`. Every deterministic program it runs (`scripts/factory_*.py`, `harness/merge_verify.py`, `harness/post_merge.py`) executes from the kernel's checkout of `main` and operates on the PR worktree through its working directory; the PR head's copy of a trust-root program is never run (`factory_kernel/trusted_programs.py`, D-036). It starts from the exact PR head SHA in a fresh detached worktree with frozen dependencies, and it re-derives everything; it does not trust the builder's narrative, the PR description, or prior review discussion. A merge is authorized only when **every** step below is true, in this order:
 
 1. **Preconditions.** Emergency stop is clear (section 8). The PR is open and carries `factory:needs-review`. Head and base are exact commit IDs.
 2. **Deterministic security guard, base-anchored.** `scripts/factory_security.py --pr N --trusted-base --expect-head <head>` runs from the kernel's `main` checkout, never from the PR-head worktree, and passes: no protected path (for autonomous PRs), no secret pattern in added lines, lockfile coupled to manifest, registry-only dependency sources, named dependency justification.
@@ -276,7 +276,7 @@ Validation then runs **in full** from the new head and reuses nothing validator-
 
 ### A build that pushed and opened its PR, then died: resumed from its artifacts, not rebuilt
 
-If a build fails after `push` and `gh pr create` but before the attach/publish/handoff steps complete (canary attempt 10 died in `factory_provenance.py publish` with PR #74 already open), the certified work is on the branch and every builder artifact is in the run's uploaded workflow artifact. `python -m factory_kernel resume --pr N --artifacts <dir>` (`KernelRuntime.resume_pr`) finishes it without rebuilding and without a model:
+If a build fails after `push` and `gh pr create` but before the attach/publish/handoff steps complete (canary attempt 10 died in `factory_provenance.py publish` with PR #74 already open), the certified work is on the branch and every builder artifact is in the run's uploaded workflow artifact. `python -m factory_kernel resume --pr N --artifacts <dir>` (`KernelRuntime.resume_pr`) finishes it without rebuilding and without a model: Every attach and publish program runs from the kernel's checkout of `main` against the resume worktree, so the head's own copies of those programs are never what executes (D-036).
 
 1. Preconditions: the PR is open and was opened by the factory's Bot identity; head and base are exact object ids; the linked issue is `factory:needs-human` or `factory:accepted`; the PR carries no resume marker (one resume per PR; a second attempt escalates).
 2. The artifacts directory must hold every builder artifact; `final-green-proof.json`'s `green_commit` must equal the PR head (artifacts from another build are refused); every RED-hashed acceptance test must be byte-identical at the head.

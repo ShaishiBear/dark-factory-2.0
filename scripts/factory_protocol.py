@@ -4,10 +4,14 @@ from __future__ import annotations
 import argparse, hashlib, json, os, re, subprocess, sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+HERE = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
+sys.path.insert(0, str(HERE))
 from factory_shapes import normalise_lists  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
 AC = re.compile(r"^AC-[1-9][0-9]*$")
 DEPENDENCY_ECOSYSTEMS = ("python", "javascript")
 DEPENDENCY_FIELDS = ("name", "purpose", "why_existing_insufficient", "maintenance_evidence")
@@ -137,20 +141,20 @@ def run_context(args: argparse.Namespace) -> None:
     artifacts = Path(args.output).parent
     enriched = artifacts / "context.enriched.json"
     subprocess.check_call([
-        sys.executable, str(ROOT / "scripts" / "factory_impact.py"), "context",
+        sys.executable, str(HERE / "factory_impact.py"), "context",
         "--input", args.input, "--output", str(enriched),
     ], cwd=ROOT)
     m = validate_context(load(str(enriched)), h)
     Path(args.output).write_bytes(canonical(m))
     subprocess.check_call([
-        sys.executable, str(ROOT / "scripts" / "factory_artifacts.py"), "ticket",
+        sys.executable, str(HERE / "factory_artifacts.py"), "ticket",
         "--issue", str(c["issue"]["number"]), "--contract", args.contract,
         "--issue-json", str(artifacts / "issue-frontier.json"),
         "--ticket-output", str(artifacts / "ticket.json"),
         "--frontier-output", str(artifacts / "frontier.json"),
     ], cwd=ROOT)
     subprocess.check_call([
-        sys.executable, str(ROOT / "scripts" / "factory_artifacts.py"), "design",
+        sys.executable, str(HERE / "factory_artifacts.py"), "design",
         "--input", str(artifacts / "design.raw.json"), "--contract", args.contract,
         "--context", args.output, "--output", str(artifacts / "design.json"),
     ], cwd=ROOT)
@@ -166,7 +170,7 @@ def run_attach(args: argparse.Namespace) -> None:
     subprocess.check_call(["gh", "pr", "edit", str(args.pr), "--body-file", str(tmp)])
     artifacts = os.environ.get("ARTIFACTS_DIR", "").strip() or str(Path(args.contract).resolve().parent)
     subprocess.check_call([
-        sys.executable, str(ROOT / "scripts" / "factory_provenance.py"), "publish",
+        sys.executable, str(HERE / "factory_provenance.py"), "publish",
         "--pr", str(args.pr), "--artifacts", artifacts,
     ], cwd=ROOT)
     print(f"CONTRACT_ATTACHED pr={args.pr} sha256={h}")

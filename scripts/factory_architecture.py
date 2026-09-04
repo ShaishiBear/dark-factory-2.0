@@ -9,13 +9,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+HERE = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
+sys.path.insert(0, str(HERE))
 from factory_shapes import normalise_lists  # noqa: E402
 
-from factory_architecture_guard import layer_table
-from factory_protocol import canonical, validate_contract
+from factory_architecture_guard import layer_table  # noqa: E402
+from factory_protocol import canonical, validate_contract  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
 DECISIONS = {"proceed", "prefactor", "decompose"}
 CONVERGENCE = {"improves", "neutral", "regresses"}
 CONFORMANCE = {"conform", "deviates"}
@@ -312,7 +316,7 @@ def ensure_compiled_design(args: argparse.Namespace) -> None:
         die(f"compiled design is missing and raw design was not found at {raw}")
     proc = subprocess.run(
         [
-            sys.executable, str(ROOT / "scripts" / "factory_artifacts.py"), "design",
+            sys.executable, str(HERE / "factory_artifacts.py"), "design",
             "--input", str(raw), "--contract", args.contract,
             "--context", args.context, "--output", str(target),
         ],

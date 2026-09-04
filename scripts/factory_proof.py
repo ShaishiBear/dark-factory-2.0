@@ -3,7 +3,11 @@ from __future__ import annotations
 import argparse, hashlib, json, os, re, subprocess, sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
+# The kernel runs every trust-root program from its own checkout of main with cwd set to the
+# PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
+HERE = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
 PROOF_BLOCK = re.compile(r"\n?<!-- factory-proof:start -->.*?<!-- factory-proof:end -->\n?", re.S)
 DESIGN_BLOCK = re.compile(r"\n?<!-- factory-design:start -->.*?<!-- factory-design:end -->\n?", re.S)
 
@@ -32,7 +36,7 @@ def ensure_design(base):
     if not raw.is_file() or not contract.is_file() or not context.is_file():
         die('validated contract/context and raw design are required before RED')
     p=subprocess.run([
-        sys.executable,str(ROOT/'scripts'/'factory_artifacts.py'),'design',
+        sys.executable,str(HERE/'factory_artifacts.py'),'design',
         '--input',str(raw),'--contract',str(contract),'--context',str(context),
         '--output',str(design_path),
     ],cwd=ROOT,text=True,capture_output=True,timeout=120)
@@ -53,7 +57,7 @@ def artifacts():
     if not isinstance(planned,list) or not planned or not isinstance(allowed_new,list):
         die('compiled design lacks implementation file envelope')
     return contract,design,ids
-sys.path.insert(0, str(ROOT / 'scripts'))
+sys.path.insert(0, str(HERE))
 from factory_shapes import test_shaped as _shared_test_shaped  # noqa: E402
 def test_oriented(path):
     # One predicate shared with git_authority.commit_acceptance_tests and the architecture guard
@@ -100,7 +104,7 @@ def impact_check(output):
     context=Path(root)/'context.json'
     if not context.is_file(): die('factory context missing before GREEN impact check')
     target=Path(output).with_suffix('.impact.json')
-    argv=[sys.executable,str(ROOT/'scripts'/'factory_impact.py'),'diff','--context',str(context),'--output',str(target)]
+    argv=[sys.executable,str(HERE/'factory_impact.py'),'diff','--context',str(context),'--output',str(target)]
     base=os.environ.get('FACTORY_BASE_REF','').strip()
     if base: argv.extend(['--base-ref',base])
     p=subprocess.run(argv,cwd=ROOT,text=True,capture_output=True)
@@ -117,7 +121,7 @@ def architecture_guard_check(output):
     if not design.is_file(): die('compiled design missing before architecture guard')
     target=Path(output).with_suffix('.architecture.json')
     argv=[
-        sys.executable,str(ROOT/'scripts'/'factory_architecture_guard.py'),
+        sys.executable,str(HERE/'factory_architecture_guard.py'),
         '--policy','.factory/architecture.json','--design',str(design),
         '--head-ref','HEAD','--output',str(target),
     ]
