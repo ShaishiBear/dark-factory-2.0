@@ -8,8 +8,14 @@ PROOF_BLOCK = re.compile(r"\n?<!-- factory-proof:start -->.*?<!-- factory-proof:
 DESIGN_BLOCK = re.compile(r"\n?<!-- factory-design:start -->.*?<!-- factory-design:end -->\n?", re.S)
 
 def die(msg): print(f"PROOF_FAIL: {msg}", file=sys.stderr); raise SystemExit(1)
+CHECKPOINT_SCRUBBED_ENV=('GH_TOKEN','GITHUB_TOKEN')
+def checkpoint_env():
+    # The checkpoint argv is model-authored. The kernel already launches this program with no
+    # GitHub credentials; scrubbing again here means a caller that forgets the scope still
+    # cannot hand a repository token to a command the model wrote.
+    return {k:v for k,v in os.environ.items() if k not in CHECKPOINT_SCRUBBED_ENV}
 def run(argv, cwd):
-    p=subprocess.run(argv,cwd=ROOT/cwd,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)
+    p=subprocess.run(argv,cwd=ROOT/cwd,env=checkpoint_env(),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)
     return p.returncode,(p.stdout or '')+(p.stderr or '')
 def sha(p): return hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
 def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False)+'\n'
@@ -18,17 +24,6 @@ def load(p):
     try: v=json.loads(Path(p).read_text(encoding='utf-8'))
     except Exception as e: die(f"cannot read {p}: {e}")
     return v
-def heartbeat(action, stage, pr=None):
-    artifacts=os.environ.get('ARTIFACTS_DIR','').strip()
-    if not artifacts: return
-    contract=Path(artifacts)/'task-contract.json'; lease_file=Path(artifacts)/'factory-lease.json'
-    if not contract.is_file() or not lease_file.is_file(): die('factory lease artifacts missing')
-    issue=load(str(contract)).get('issue',{}).get('number')
-    if not isinstance(issue,int): die('factory contract lacks issue number for lease')
-    argv=[sys.executable,str(ROOT/'scripts'/'factory_lease.py'),action,
-          '--issue',str(issue),'--stage',stage,'--lease-file',str(lease_file)]
-    if pr is not None: argv.extend(['--pr',str(pr)])
-    subprocess.check_call(argv,cwd=ROOT)
 def ensure_design(base):
     design_path=base/'design.json'
     if design_path.is_file(): return
@@ -183,7 +178,7 @@ def red(a):
     plan=plan_from(base,before)
     root=Path(os.environ['ARTIFACTS_DIR']); write(root/'test-plan.json',plan)
     proof=dict(base,test_plan_sha256=digest(plan))
-    write(a.output,proof); heartbeat('touch','red')
+    write(a.output,proof)
     print(f"RED_PROVED criteria={len(results)} tests={len(files)} commit={before}")
 def green(a):
     clean(); p=load(a.proof)
@@ -206,7 +201,6 @@ def green(a):
     stage='final-green' if 'final' in Path(a.output).name else 'green'
     if stage=='final-green': result=bind_architecture(result,before)
     write(a.output,result)
-    heartbeat('touch',stage)
     print(f"GREEN_PROVED criteria={len(green_results)} tests={len(p['files'])} commit={before}")
 def attach(a):
     clean(); p=load(a.proof)
@@ -233,7 +227,6 @@ def attach(a):
     body=DESIGN_BLOCK.sub('\n',PROOF_BLOCK.sub('\n',info.get('body') or '')).rstrip()+design_block+proof_block
     q=subprocess.run(['gh','pr','edit',str(a.pr),'--body',body],cwd=ROOT,text=True,capture_output=True)
     if q.returncode: die('could not attach proof/design: '+q.stderr[-1000:])
-    heartbeat('finish','proof-attached',a.pr)
     print(f"PROOF_ATTACHED pr={a.pr} head={head} sha256={digest(p)} design_sha256={digest(design)}")
 def main():
     p=argparse.ArgumentParser(); sub=p.add_subparsers(dest='cmd',required=True)

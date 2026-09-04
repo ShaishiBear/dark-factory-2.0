@@ -303,6 +303,38 @@
           "value": "FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=$model"
         }
       ]
+    },
+    {
+      "id": "IMM-011",
+      "status": "active",
+      "source": {
+        "kind": "audit",
+        "ref": "2026-09-04-script-owned-heartbeat-needed-a-token-it-must-not-have"
+      },
+      "failure_class": "a subprocess that runs model-authored commands and also needs a repository credential",
+      "lesson": "factory_protocol.py and factory_proof.py started and touched the issue lease themselves, which needs gh and therefore GH_TOKEN, while the kernel launched them with no credentials because factory_proof.py executes checkpoint commands the model wrote. The third canary dispatch died at LEASE_ERROR. The two responsibilities cannot share a process: the kernel alone heartbeats the lease with GitHub scope, contract/context/RED/GREEN run with none, and the checkpoint runner scrubs both token names from its child even if a caller forgets the scope.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "scripts/factory_proof.py",
+          "value": "env=checkpoint_env()"
+        },
+        {
+          "kind": "text_contains",
+          "path": "scripts/factory_proof.py",
+          "value": "CHECKPOINT_SCRUBBED_ENV=('GH_TOKEN','GITHUB_TOKEN')"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "def _lease_heartbeat("
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "transcript=paths.transcripts / f\"lease-{stage}.log\""
+        }
+      ]
     }
   ]
 }
