@@ -241,6 +241,36 @@
           "value": "blind=BUILDER_BLIND_PATHS,"
         }
       ]
+    },
+    {
+      "id": "IMM-009",
+      "status": "active",
+      "source": {
+        "kind": "decision",
+        "ref": "D-006"
+      },
+      "failure_class": "a second representation of the lifecycle that nothing executes, presented as authority",
+      "lesson": "factory_kernel/state.py was listed as the kernel's state machine while the runtime never consulted it; the evidence spine was the lifecycle the runtime actually executed and the merge verifier actually enforced. A representation nobody executes is a claim, not an authority, and it drifts. There is one lifecycle definition, the ordered required_claims of the evidence spine, and the documentation names it.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "FACTORY.md",
+          "value": "the only executable lifecycle definition"
+        },
+        {
+          "kind": "text_contains",
+          "path": "harness/merge_verify.py",
+          "value": "exact required claim sequence"
+        },
+        {
+          "kind": "json_array_match_min",
+          "path": ".factory/evidence-spine.json",
+          "pointer": "/required_claims",
+          "field": "id",
+          "contains": "green-proof",
+          "minimum": 1
+        }
+      ]
     }
   ]
 }
