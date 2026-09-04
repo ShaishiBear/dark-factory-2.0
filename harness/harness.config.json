@@ -11,7 +11,7 @@
   "unit": "python harness/unit.py",
   "_unit_count_pattern": [
     "unit.py requires backend, frontend, and factory trust-boundary suites to run.",
-    "Measured floor remains 549 until the validation host records the expanded suite."
+    "Floor is 1033, observed by quick-authority on ubuntu for the tree on main (2026-09-04)."
   ],
   "unit_count_pattern": "UNIT_PASSED tests=(\\d+)",
 
