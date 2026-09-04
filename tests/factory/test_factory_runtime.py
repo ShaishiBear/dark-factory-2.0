@@ -165,6 +165,28 @@ class DispatchTests(unittest.TestCase):
             rt.check_stop()
 
 
+class ExecCredentialScopeTests(unittest.TestCase):
+    @patch("factory_kernel.runtime.subprocess.run")
+    def test_exec_preserves_gh_token_when_credential_scope_is_github(self, run):
+        run.return_value = Mock(returncode=0, stdout="ok", stderr="")
+        rt = KernelRuntime(repo_root=ROOT, config=load_config(ROOT / ".factory/kernel.json"))
+        with patch.dict("os.environ", {"GH_TOKEN": "test_token_123"}, clear=True):
+            output = rt._exec(["python", "scripts/factory_protocol.py", "contract"], cwd=ROOT, credential_scope="github")
+            self.assertEqual(output, "ok")
+            child_env = run.call_args.kwargs["env"]
+            self.assertEqual(child_env.get("GH_TOKEN"), "test_token_123")
+
+    @patch("factory_kernel.runtime.subprocess.run")
+    def test_exec_strips_gh_token_when_credential_scope_is_none(self, run):
+        run.return_value = Mock(returncode=0, stdout="ok", stderr="")
+        rt = KernelRuntime(repo_root=ROOT, config=load_config(ROOT / ".factory/kernel.json"))
+        with patch.dict("os.environ", {"GH_TOKEN": "test_token_123"}, clear=True):
+            output = rt._exec(["python", "some_script.py"], cwd=ROOT, credential_scope="none")
+            self.assertEqual(output, "ok")
+            child_env = run.call_args.kwargs["env"]
+            self.assertNotIn("GH_TOKEN", child_env)
+
+
 class AttachedEvidenceTests(unittest.TestCase):
     def test_contract_and_proof_blocks_parse_without_discussion_context(self):
         body = (

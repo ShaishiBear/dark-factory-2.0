@@ -211,6 +211,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=120,
                 transcript=paths.transcripts / "contract-gate.log",
             )
@@ -234,6 +235,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=180,
                 transcript=paths.transcripts / "context-gate.log",
             )
@@ -282,6 +284,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=600,
                 transcript=paths.transcripts / "red-gate.log",
             )
@@ -301,6 +304,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=600,
                 transcript=paths.transcripts / "green-gate.log",
             )
@@ -332,6 +336,7 @@ class KernelRuntime:
                 ],
                 cwd=worktree.path,
                 env=env,
+                credential_scope="github",
                 timeout=600,
                 transcript=paths.transcripts / "final-green-gate.log",
             )
@@ -439,6 +444,7 @@ class KernelRuntime:
             ],
             cwd=worktree.path,
             env=env,
+            credential_scope="github",
             timeout=600,
         )
         self._agent(
