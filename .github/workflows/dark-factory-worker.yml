@@ -4,11 +4,24 @@ on:
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
+    inputs:
+      # Operator recovery (D-034): finish a build that pushed its branch and opened its PR but
+      # died before publish/handoff, from the artifacts that run uploaded. Both or neither.
+      resume_pr:
+        description: PR number to resume (requires resume_run_id)
+        required: false
+        default: ''
+      resume_run_id:
+        description: Worker run id whose uploaded artifacts hold the build (requires resume_pr)
+        required: false
+        default: ''
 
 permissions:
   contents: write
   issues: write
   pull-requests: write
+  # Only for `gh run download` of a previous run's artifacts on a resume.
+  actions: read
 
 concurrency:
   group: dark-factory-worker
@@ -56,8 +69,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+          RESUME_PR: ${{ inputs.resume_pr }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          # A resume needs the PR and the run whose artifacts hold its build; one without the
+          # other is a typo, not a request, and must not fall through to an ordinary dispatch.
+          if { [ -n "${RESUME_PR}" ] && [ -z "${RESUME_RUN_ID}" ]; } || { [ -z "${RESUME_PR}" ] && [ -n "${RESUME_RUN_ID}" ]; }; then
+            echo "FACTORY_PREFLIGHT_REFUSED resume needs both resume_pr and resume_run_id"
+            exit 1
+          fi
           test "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues')" = "true" || {
             echo "FACTORY_PREFLIGHT_REFUSED GitHub Issues are disabled"
             exit 1
@@ -227,6 +248,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python -m factory_kernel stop-check
 
+      - name: Download the build's artifacts
+        if: inputs.resume_pr != '' && inputs.resume_run_id != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+        run: |
+          # The uploaded artifact of the run that built the PR is the only honest input to a
+          # resume; the runner that produced it is gone. Exactly one build must be inside it.
+          gh run download "$RESUME_RUN_ID" -R "$GITHUB_REPOSITORY" -D "$RUNNER_TEMP/resume-build"
+          proofs="$(find "$RUNNER_TEMP/resume-build" -name final-green-proof.json)"
+          count="$(printf '%s\n' "$proofs" | grep -c . || true)"
+          test "$count" = "1" || {
+            echo "FACTORY_PREFLIGHT_REFUSED run $RESUME_RUN_ID artifacts hold $count builds (need exactly one final-green-proof.json)"
+            exit 1
+          }
+          echo "RESUME_ARTIFACTS=$(dirname "$proofs")" >> "$GITHUB_ENV"
+          echo "FACTORY_RESUME_ARTIFACTS_OK run=$RESUME_RUN_ID"
+
       - name: Dispatch exactly one factory action
         env:
           GH_TOKEN: ${{ github.token }}
@@ -238,7 +278,16 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
-        run: python -m factory_kernel dispatch --once
+          RESUME_PR: ${{ inputs.resume_pr }}
+        shell: bash
+        run: |
+          # Exactly one action per run: a resume is the action, and `dispatch --once` does not
+          # also run, or the same run could both finish one PR and start another build.
+          if [ -n "${RESUME_PR}" ]; then
+            python -m factory_kernel resume --pr "$RESUME_PR" --artifacts "$RESUME_ARTIFACTS"
+          else
+            python -m factory_kernel dispatch --once
+          fi
 
       # Observability only: nothing reads these to decide anything. Model transcripts, the
       # per-stage telemetry and timings, the deterministic gates' logs and the run's JSON

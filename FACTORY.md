@@ -275,3 +275,13 @@ python -m factory_kernel dispatch --once
 ```
 
 `--no-merge` is the controlled validation mode. Production dispatch omits it only when the full Level-4 autonomous loop is intentionally enabled.
+
+### Resuming a build that died after opening its PR
+
+A build that pushed its branch and opened its PR, then failed before provenance publish and handoff, is finished from the artifacts that run uploaded, not rebuilt (`KernelRuntime.resume_pr`, FACTORY_RULES §7). The canonical worker takes the two dispatch inputs and does it on GitHub-hosted infrastructure, with the same toolchain, credentials and validation environment as a dispatch:
+
+```bash
+gh workflow run dark-factory-worker.yml -f resume_pr=<PR> -f resume_run_id=<run id of the build>
+```
+
+The run downloads that run's artifact (`actions: read`), requires exactly one build inside it, runs `python -m factory_kernel resume` in place of `dispatch --once` (never both), and then the hourly dispatch validates the PR like any other. One input without the other refuses at preflight.

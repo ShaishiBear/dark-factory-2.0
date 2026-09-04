@@ -206,6 +206,13 @@
       "find": "              echo \"FACTORY_PREFLIGHT_REFUSED GitHub Actions may not create pull requests (Settings > Actions > General > Workflow permissions)\"\n              exit 1\n",
       "replace": "              echo \"FACTORY_PREFLIGHT_REFUSED GitHub Actions may not create pull requests (Settings > Actions > General > Workflow permissions)\"\n",
       "why": "An explicit 'Actions may not create pull requests' would be printed and ignored; the run would spend a full build before failing at gh pr create, exactly the two hours the fifth canary defect cost."
+    },
+    {
+      "id": "worker-resume-also-dispatches",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "          else\n            python -m factory_kernel dispatch --once\n          fi\n",
+      "replace": "          fi\n          python -m factory_kernel dispatch --once\n",
+      "why": "A resume would also run dispatch --once, so one worker run could finish one PR and start another build; the run must take exactly one action."
     }
   ]
 }

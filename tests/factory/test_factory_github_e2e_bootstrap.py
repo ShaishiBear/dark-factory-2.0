@@ -175,6 +175,48 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             prerequisites.index("routing_model="),
         )
 
+    def test_worker_can_resume_a_pushed_pr_from_its_artifacts(self) -> None:
+        """`factory_kernel resume` (#76) needs GitHub-hosted infrastructure: a workflow must be
+        on the default branch to be dispatched, and the local machine cannot run the kernel.
+        Two optional dispatch inputs turn the worker into a resume; exactly one action runs."""
+        workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        inputs = workflow.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
+        for name in ("resume_pr:", "resume_run_id:"):
+            self.assertIn(name, inputs)
+        self.assertEqual(inputs.count("required: false"), 2)
+        self.assertEqual(inputs.count("default: ''"), 2)
+        self.assertIn("actions: read", workflow.split("permissions:", 1)[1].split("concurrency:", 1)[0])
+        # Lone input refuses, in the preflight, before any toolchain is installed.
+        prerequisites = workflow.split("- name: Check operational prerequisites", 1)[1]
+        prerequisites = prerequisites.split("- name: Setup Python", 1)[0]
+        self.assertIn("RESUME_PR: ${{ inputs.resume_pr }}", prerequisites)
+        self.assertIn("RESUME_RUN_ID: ${{ inputs.resume_run_id }}", prerequisites)
+        self.assertRegex(
+            prerequisites,
+            r'echo "FACTORY_PREFLIGHT_REFUSED resume needs both resume_pr and resume_run_id"\n\s+exit 1',
+        )
+        # The download step runs only for a resume and must find exactly one build.
+        download = workflow.split("- name: Download the build's artifacts", 1)[1]
+        download = download.split("- name: Dispatch exactly one factory action", 1)[0]
+        self.assertIn("if: inputs.resume_pr != '' && inputs.resume_run_id != ''", download)
+        self.assertIn('gh run download "$RESUME_RUN_ID" -R "$GITHUB_REPOSITORY"', download)
+        self.assertIn("-name final-green-proof.json", download)
+        self.assertIn('test "$count" = "1" || {', download)
+        self.assertIn("RESUME_ARTIFACTS=", download)
+        # The dispatch step branches: resume XOR dispatch --once, never both.
+        dispatch = workflow.split("- name: Dispatch exactly one factory action", 1)[1]
+        dispatch = dispatch.split("- name: Upload run transcripts", 1)[0]
+        self.assertIn('if [ -n "${RESUME_PR}" ]; then', dispatch)
+        self.assertIn(
+            'python -m factory_kernel resume --pr "$RESUME_PR" --artifacts "$RESUME_ARTIFACTS"',
+            dispatch,
+        )
+        self.assertIn("else\n            python -m factory_kernel dispatch --once\n          fi", dispatch)
+        self.assertEqual(dispatch.count("factory_kernel dispatch --once"), 1)
+        self.assertEqual(dispatch.count("factory_kernel resume"), 1)
+
     def test_worker_model_route_is_the_request_the_sdk_makes(self) -> None:
         """The Anthropic SDK appends /v1/messages to ANTHROPIC_BASE_URL. With the versioned
         path as the base, the CLI hit /api/v1/v1/messages and got an HTML 404 for every model

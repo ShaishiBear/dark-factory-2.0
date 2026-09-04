@@ -282,7 +282,7 @@ If a build fails after `push` and `gh pr create` but before the attach/publish/h
 2. The artifacts directory must hold every builder artifact; `final-green-proof.json`'s `green_commit` must equal the PR head (artifacts from another build are refused); every RED-hashed acceptance test must be byte-identical at the head.
 3. In a fresh blinded worktree at the head, the same `_attach_and_publish` the build path uses re-binds contract, design and proof in the PR body (each attach program replaces an existing block of its kind) and publishes the provenance note; the pr-handoff lease finishes; the PR is labelled `factory:needs-review`; the issue returns to `factory:accepted`.
 
-A human runs this after `gh run download <run id>`; it is not a dispatch action. Validation then runs in full and reuses nothing.
+A human triggers it; it is not a dispatch action. On the canonical worker the command is `gh workflow run dark-factory-worker.yml -f resume_pr=<PR> -f resume_run_id=<run id>`: the worker downloads that run's uploaded artifact, requires exactly one build inside it, and runs `resume` instead of `dispatch --once` (never both in one run; a lone input refuses at preflight). Validation then runs in full and reuses nothing.
 
 ### Attempt budget exhausted, or any build-time failure
 
