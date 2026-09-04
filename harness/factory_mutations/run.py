@@ -59,6 +59,7 @@ COPY_FILES = (
     "tests/factory/test_factory_trust_root_authority.py",
     "tests/factory/test_factory_holdout_blind.py",
     "tests/factory/test_factory_lifecycle_authority.py",
+    "tests/factory/test_factory_dependency_justification.py",
     "tests/factory/test_factory_commit_identity.py",
     "tests/factory/test_factory_config_consumed.py",
     "tests/factory/test_factory_triage_window.py",

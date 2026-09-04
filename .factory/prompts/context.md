@@ -6,4 +6,6 @@ Also write `$ARTIFACTS_DIR/design.raw.json` with version `1.0`, non-empty arrays
 
 The design must additionally contain `planned_files` and `allowed_new_files`. `planned_files` is the complete repo-relative set of production files the implementation is authorized to change for this design. Every existing planned file must already be in the validated context. `allowed_new_files` is the explicit subset of `planned_files` that does not yet exist and may be created. Do not use broad directories or speculative files: name exact files.
 
+When the contract declares `dependencies`, `planned_files` must include the manifest the implementer will edit (`app/backend/pyproject.toml` or `app/frontend/package.json`) and its lockfile (`app/backend/uv.lock` or `app/frontend/bun.lock`); the kernel refreshes the lockfile itself and refuses the commit if it is unplanned.
+
 Prefer a small, high-signal context and the smallest deep-module design satisfying the contract. Do not edit product code. A deterministic compiler and post-code architecture guard will reject implementation outside this file envelope.

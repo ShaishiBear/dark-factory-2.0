@@ -91,7 +91,7 @@ The build path is `KernelRuntime.build_issue` in `factory_kernel/runtime.py`. It
 
 1. **Never modify acceptance tests to make them pass.** They are RED-hashed; the design envelope refuses the commit. If a test is wrong, the contract was wrong: the run escalates and a human fixes the issue text.
 2. **Never touch a protected file** (section 5). The security guard refuses the PR.
-3. **Never change dependencies without justification.** A manifest change requires its lockfile in the same PR, a registry source (no git/URL/path dependencies), and a PR-body heading titled exactly `## Dependency justification` naming each added or version-changed package. `scripts/factory_security.py` fails the PR otherwise. Since the kernel writes the PR body, a factory PR that needs a new dependency cannot currently pass this rule; treat "needs a new dependency" as a human-lane task (tracked in issue #39).
+3. **Never change dependencies the contract does not declare.** A manifest change requires its lockfile in the same PR, a registry source (no git/URL/path dependencies), and a PR-body heading titled exactly `## Dependency justification` naming each added or version-changed package. `scripts/factory_security.py` fails the PR otherwise. An autonomous PR satisfies this only through the contract: the `contract` worker declares each needed package under `dependencies` with its purpose, why existing dependencies are insufficient and maintenance evidence, `scripts/factory_protocol.py` validates every field fail-closed, the design must plan both the manifest and its lockfile, the implementer edits only the manifest, and the kernel (`factory_kernel/git_authority.py`) runs `uv lock` or `bun install` itself, refuses if the refresh touched anything but the lockfile, commits both, and renders the declaration into the PR body (`factory_kernel/pr_body.py`) in the exact form the guard parses. An undeclared package, an unplanned lockfile or a thin justification stops the run before a PR exists.
 4. **Never declare success without the deterministic authorities.** The build cannot reach a PR without RED, GREEN, review, conformance, the final proof and the quick gate.
 5. **Never write outside the compiled design.** The design envelope refuses the commit. If the design was wrong, the run escalates; the worker does not widen it.
 6. **Never commit secrets, API keys, tokens, or `.env` files.** The security guard scans every added line for high-confidence secret patterns and refuses `.env*` paths.
@@ -102,7 +102,7 @@ The build path is `KernelRuntime.build_issue` in `factory_kernel/runtime.py`. It
 
 - **The kernel links the issue.** The PR body starts with `Fixes #N` and an attempt marker; the validator refuses a PR whose link does not match the attached contract's issue.
 - **Acceptance tests come first and are independent.** They are written by a separate worker from a contract, before the implementation worker exists.
-- **The diff stays inside the design.** Scope creep is not reviewed away; it is refused at commit time.
+- **The diff stays inside the design.** Scope creep is not reviewed away; it is refused at commit time. The only file the kernel itself changes inside that envelope is a planned lockfile, refreshed after a declared dependency change.
 - **Attempt budget:** `max_attempts` in `.factory/kernel.json` (currently 2) bounds how many fresh builds an issue gets. The attempt number is one plus the count of validation-failure markers on the issue. Exceeding it escalates the issue (section 7).
 
 ---
