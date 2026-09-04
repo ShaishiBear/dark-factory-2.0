@@ -152,9 +152,12 @@ The journey needs a database, a signed-in account and one real ingested video. T
 ### When it runs
 
 - Inside the full harness during validation (section 3 step 8) and again post-merge (step 13).
+- Once a day on current `main`, by `.github/workflows/dark-factory-main-regression.yml`, with the same toolchain pins, disposable database and validation environment as the worker (a test asserts the two files agree). It runs `python harness/ci.py` and requires `GATE_OK mode=full`.
 - Not on the PR quick gate, which is static + unit only.
 
-There is no separate periodic regression job on `main` (section 13).
+### Failure on `main`
+
+A failed daily regression files one issue titled `regression: main failed the full harness on <date>` labelled `priority:high` and `type:bug`, carrying the run URL, the head SHA and the failing marker lines. It never applies a `factory:*` label, so the issue goes through ordinary triage. If an open regression issue already exists it is commented on instead of duplicated; a second consecutive failure adds `factory:needs-human` (section 7). The job itself has no write access to code and never merges anything.
 
 ---
 
@@ -395,10 +398,10 @@ Rules earlier versions of this file stated that have **no implementation** today
 - **No PR size cap.** Nothing counts additions or deletions. Scope is bounded by the design envelope, not by line count.
 - **No triage-time `factory:needs-human`.** Triage returns only accept or reject.
 - **No validation-side fix loop.** `factory:needs-fix` is applied and never read by the kernel (only the lease reaper treats it as a handoff marker). A failed PR is superseded by a fresh build, not repaired.
-- **No periodic regression on `main`.** The full harness runs only inside the worker dispatch that performs a merge (validation and post-merge). There is no weekly comprehensive job and no auto-filed bug issue on a `main` regression.
 - **Maintainer merges get no post-merge full harness.** Only autonomous merges run `harness/post_merge.py`. A maintainer PR is verified by its head's required checks (static + unit), not by the browser E2E, and if `main` moved under it the merged tree was never tested as a whole.
 - **`require_extra_approval_for_unattributed_changes` is on in the ruleset and unobserved against kernel commits.** Kernel commits now attribute to `github-actions[bot]` (D-008) rather than to no account, but whether GitHub counts a Bot-attributed commit as attributed for this rule has not been observed; the first canary will show it.
 - **No program asserts floor(head) >= floor(base).** `.factory/locks/floor.json` used to claim a second check with that shape. What exists: `scripts/factory_evidence.py` reads the floors from `origin/main` (so a PR cannot lower the bar it is judged against), the security guard refuses the file on the autonomous lane, and `harness/immunity.py` pins two of the six keys with `json_number_min`. A maintainer PR that lowered a floor would pass every check; the human lane is the control.
 - **No E2E floor in `.factory/locks/floor.json`.** The browser journey has not been observed end-to-end under the current kernel with a recorded step count (see `.factory/decisions.md` D-001).
 - **No worker is told to consult `.factory/decisions.md`.** The product/judgement distinction in section 7 is policy, not yet mechanism.
+- **A regression issue is filed, not fixed.** The daily regression on `main` (section 4) files or updates one issue and escalates on the second consecutive failure; nothing reverts `main` or bisects. A human decides.
 - **A maintainer PR that becomes CONFLICTING with `main` stalls silently.** GitHub runs no `pull_request` workflow on an unmergeable PR, so `quick-authority` never reports while `trust-root-authority` (from the base) stays green; the PR sits with one green check until someone rebases. Observed on #46. A merge queue or an up-to-date-branch requirement would remove this; not yet adopted.

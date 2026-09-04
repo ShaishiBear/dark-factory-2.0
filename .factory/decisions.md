@@ -365,3 +365,33 @@ kernel gives exactly those GitHub scope.
 Each canary defect so far was a program that worked when everything held one credential and
 broke the moment the boundary was drawn. That is the boundary doing its job; the canary is
 finding every place the old design leaned on it.
+
+---
+
+## D-017 · The full harness re-runs on `main` daily; drafts are judged but not armed; merged branches are deleted by the workflow
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Three operational gaps, each found by watching the factory run rather than by reading it.
+
+**Periodic regression.** FACTORY_RULES section 13 recorded that nothing re-ran the full
+harness on `main` after a merge. A maintainer merge lands on the head-based quick gate only,
+and a drift outside the repository (the locked fixture video, a model, an API, the runner
+image) would surface only on the next autonomous cycle. `dark-factory-main-regression.yml`
+now runs `python harness/ci.py` on current `main` once a day with the worker's exact pins
+and disposable environment, copied verbatim and pinned by a test that parses both files.
+On failure it files one issue for ordinary triage, comments rather than duplicates, and
+escalates to `factory:needs-human` on a second consecutive failure. It fixes nothing and
+merges nothing; that is a **judgement** boundary. The count it observes is not written into
+the floor file by the job: an observed E2E step count is a judgement value and moves only
+through the human lane.
+
+**Drafts.** GitHub refuses `enablePullRequestAutoMerge` on a draft, so the diagnostic draft
+PR #50 turned the optional `unattended-merge` job red for a correct outcome. The job is now
+skipped for drafts; the required `trust-root-authority` verdict is unchanged.
+
+**Merged branches.** `delete_branch_on_merge` is on, yet ten `human/*` branches accumulated
+and were deleted by hand. The setting evidently does not fire when GitHub's auto-merge
+completes a merge on behalf of the Actions app. The trust-root workflow now deletes the
+head ref on the `closed` event, only if the PR merged and only if the head is in this
+repository.

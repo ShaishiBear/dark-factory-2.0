@@ -60,6 +60,7 @@ If the GitHub stop state cannot be read, the factory stops. An unreadable stop b
 | Optional self-hosted scheduler | `deploy/systemd/dark-factory.*` |
 | PR quick authority (runs from the PR head) | `.github/workflows/dark-factory-ci.yml` |
 | Trust-root authority + unattended merge (runs from the base) | `.github/workflows/dark-factory-trust-root.yml` |
+| Daily full-harness regression on `main` | `.github/workflows/dark-factory-main-regression.yml` |
 
 The model provider is replaceable. The checked-in default is the Claude Code CLI. Provider output is untrusted reasoning; it never directly authorizes a merge.
 
@@ -233,6 +234,14 @@ The worker checks out current `main` without persisting checkout credentials, ru
 Application validation state is disposable per run rather than a persistent secret surface. The worker provisions local `postgres:16` database `dark_factory_validation`, a random JWT secret, a synthetic E2E account/password, and `DARK_FACTORY_E2E_BOOTSTRAP=1`. The locked browser fixture is ingested through the real Supadata/OpenRouter application path.
 
 The GitHub-hosted toolchain is pinned to Ubuntu 24.04, Python 3.12.14, Node 24, uv 0.12.5, Bun 1.4.0, Claude Code 2.1.245 and agent-browser 0.35.0.
+
+### Daily regression on `main`
+
+`.github/workflows/dark-factory-main-regression.yml` runs the full canonical harness against current `main` once a day (03:41 UTC) and on manual dispatch, with the worker's pins, postgres service and disposable validation environment copied verbatim (`tests/factory/test_factory_workflow_hygiene.py` asserts they agree). It holds `contents: read` and `issues: write` only. Success prints `MAIN_REGRESSION_OK head=<sha>`. Failure files one `priority:high` / `type:bug` issue for ordinary triage, comments on an existing one instead of duplicating, and adds `factory:needs-human` on the second consecutive failure. It never merges and never applies any other `factory:*` label.
+
+### Merged-branch cleanup
+
+GitHub's `delete_branch_on_merge` setting did not delete branches merged by GitHub's own auto-merge on behalf of the Actions app. The trust-root workflow's `delete-merged-branch` job deletes the head ref on the `closed` event, only when the PR was actually merged and only when the head lives in this repository. Drafts are judged but never armed for auto-merge.
 
 ### Optional self-hosted scheduler
 
