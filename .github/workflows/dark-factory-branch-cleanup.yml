@@ -1,0 +1,66 @@
+name: dark-factory-branch-cleanup
+
+# Delete branches whose pull request has merged.
+#
+# The repository setting delete_branch_on_merge does not fire for merges GitHub's own
+# auto-merge performs on behalf of the Actions app, and a `closed` job on the trust-root
+# workflow never ran either: that close is caused by GITHUB_TOKEN, and events caused by
+# GITHUB_TOKEN do not start workflows (D-020). So this is a schedule, not an event.
+#
+# Only this repository's `human/*` and `factory/*` branches are candidates. A branch is deleted
+# only when a merged PR from this repository has that branch as its head AND the branch's
+# current tip is exactly that PR's head commit: a branch with commits pushed after its merge is
+# left alone. `main` is never a candidate. No checkout, no third-party action, no code runs.
+
+on:
+  schedule:
+    - cron: '53 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: dark-factory-branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.repository == 'ShaishiBear/dark-factory-2.0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Delete branches whose merged PR head is exactly their tip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          owner="${GITHUB_REPOSITORY%%/*}"
+          deleted=0
+          kept=0
+          branches="$(gh api "repos/$GITHUB_REPOSITORY/branches" --paginate --jq '.[] | "\(.name) \(.commit.sha)"')"
+          while read -r name tip; do
+            test -n "$name" || continue
+            case "$name" in
+              main) continue ;;
+              human/*|factory/*) ;;
+              *) continue ;;
+            esac
+            merged_head="$(gh pr list -R "$GITHUB_REPOSITORY" --state merged --head "$name" \
+              --json headRefOid,headRepositoryOwner,number \
+              --jq "[.[] | select(.headRepositoryOwner.login == \"$owner\")] | .[0] | \"\(.headRefOid) \(.number)\"")"
+            merged_oid="${merged_head%% *}"
+            merged_pr="${merged_head##* }"
+            if [ -z "$merged_head" ] || [ "$merged_oid" = "null" ]; then
+              kept=$((kept + 1)); continue
+            fi
+            if [ "$merged_oid" != "$tip" ]; then
+              echo "BRANCH_CLEANUP_KEPT branch=$name reason=tip-past-merged-pr pr=#$merged_pr"
+              kept=$((kept + 1)); continue
+            fi
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$name" \
+              && { echo "BRANCH_CLEANUP_DELETED branch=$name pr=#$merged_pr"; deleted=$((deleted + 1)); } \
+              || echo "BRANCH_CLEANUP_ALREADY_GONE branch=$name"
+          done <<<"$branches"
+          echo "BRANCH_CLEANUP_OK deleted=$deleted kept=$kept"

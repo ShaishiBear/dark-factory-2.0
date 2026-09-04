@@ -80,7 +80,7 @@ class WorkerPolicyTests(unittest.TestCase):
 class ProviderBoundaryTests(unittest.TestCase):
     @patch("factory_kernel.providers.subprocess.run")
     def test_headless_worker_has_fixed_tool_surface_and_no_github_secrets(self, run):
-        run.return_value = Mock(returncode=0, stdout="done\n", stderr="")
+        run.return_value = Mock(returncode=0, stdout='{"type": "result", "subtype": "success", "is_error": false, "result": "done", "num_turns": 1, "duration_ms": 10, "total_cost_usd": 0.0, "session_id": "s", "usage": {"input_tokens": 1, "output_tokens": 1}}', stderr="")
         with tempfile.TemporaryDirectory() as tmp:
             artifacts = Path(tmp) / "artifacts"
             artifacts.mkdir()
@@ -131,7 +131,7 @@ class ProviderBoundaryTests(unittest.TestCase):
 
     @patch("factory_kernel.providers.subprocess.run")
     def test_no_tool_worker_stays_noninteractive_and_tool_empty(self, run):
-        run.return_value = Mock(returncode=0, stdout='{"version":"1.0"}\n', stderr="")
+        run.return_value = Mock(returncode=0, stdout='{"type": "result", "subtype": "success", "is_error": false, "result": "{\\"version\\":\\"1.0\\"}", "num_turns": 1, "duration_ms": 10, "total_cost_usd": 0.0, "session_id": "s", "usage": {"input_tokens": 1, "output_tokens": 1}}', stderr="")
         provider = ClaudeCliProvider(
             ProviderConfig(
                 provider_id="claude-cli", binary="claude", model="sonnet", timeout_seconds=60

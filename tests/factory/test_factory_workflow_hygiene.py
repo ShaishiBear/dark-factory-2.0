@@ -18,6 +18,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 REGRESSION = WORKFLOWS / "dark-factory-main-regression.yml"
 WORKER = WORKFLOWS / "dark-factory-worker.yml"
 TRUST_ROOT = WORKFLOWS / "dark-factory-trust-root.yml"
+CLEANUP = WORKFLOWS / "dark-factory-branch-cleanup.yml"
 
 
 def uses_lines(text: str) -> set[str]:
@@ -120,8 +121,7 @@ class TrustRootHygieneTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.text = TRUST_ROOT.read_text(encoding="utf-8")
-        cls.authority, rest = cls.text.split("\n  unattended-merge:\n", 1)
-        cls.merge, cls.cleanup = rest.split("\n  delete-merged-branch:\n", 1)
+        cls.authority, cls.merge = cls.text.split("\n  unattended-merge:\n", 1)
 
     def test_merge_job_skips_drafts(self) -> None:
         self.assertIn(
@@ -129,24 +129,56 @@ class TrustRootHygieneTests(unittest.TestCase):
             self.merge,
         )
 
-    def test_authority_job_still_runs_on_every_non_close_event(self) -> None:
-        self.assertIn("types: [opened, synchronize, reopened, ready_for_review, closed]", self.text)
-        self.assertIn("if: github.event.action != 'closed'", self.authority)
+    def test_authority_job_runs_on_every_event_it_subscribes_to(self) -> None:
+        self.assertIn("types: [opened, synchronize, reopened, ready_for_review]", self.text)
         self.assertNotIn("draft", self.authority.split("steps:", 1)[1], "drafts are still judged")
 
-    def test_cleanup_runs_only_for_real_merges_of_our_own_branches(self) -> None:
-        self.assertIn(
-            "if: github.event.action == 'closed' && github.event.pull_request.merged == true "
-            "&& github.event.pull_request.head.repo.full_name == github.repository",
-            self.cleanup,
-        )
-        self.assertIn('test "$HEAD_REF" != "main"', self.cleanup)
-        self.assertIn('gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$HEAD_REF"', self.cleanup)
-        self.assertNotIn("actions/checkout", self.cleanup)
-        self.assertNotIn("uses:", self.cleanup)
-        self.assertIn("    permissions:\n      contents: write\n", self.cleanup)
-        self.assertNotIn("pull-requests: write", self.cleanup)
+    def test_no_dead_closed_event_job(self) -> None:
+        """A close performed by GitHub's auto-merge is caused by GITHUB_TOKEN and starts no
+        workflow run (none existed for #59, #60, #61), so a `closed` job here is a claim that
+        can never be kept. Cleanup lives on a schedule instead (D-020)."""
+        self.assertNotIn("delete-merged-branch", self.text)
+        self.assertNotIn("closed", self.text.split("jobs:", 1)[0])
+        self.assertNotIn("github.event.action", self.text)
 
+
+class BranchCleanupWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = CLEANUP.read_text(encoding="utf-8")
+        cls.head, cls.jobs = cls.text.split("jobs:", 1)
+
+    def test_runs_on_a_schedule_and_on_dispatch_only(self) -> None:
+        self.assertIn("schedule:\n    - cron: '53 * * * *'", self.head)
+        self.assertIn("workflow_dispatch:", self.head)
+        self.assertNotIn("pull_request", self.head)
+        self.assertNotIn("cron: '17 * * * *'", self.head, "must not collide with the worker's slot")
+
+    def test_holds_exactly_the_authority_it_needs(self) -> None:
+        self.assertIn("permissions:\n  contents: write\n  pull-requests: read\n", self.head)
+        self.assertNotIn("issues: write", self.text)
+        self.assertNotIn("actions/checkout", self.text)
+        self.assertNotIn("uses:", self.text, "no code, no third-party action; gh only")
+
+    def test_only_our_short_lived_branches_are_candidates(self) -> None:
+        self.assertIn("main) continue ;;", self.jobs)
+        self.assertIn("human/*|factory/*) ;;", self.jobs)
+        self.assertIn("*) continue ;;", self.jobs)
+
+    def test_deletes_only_a_tip_that_is_exactly_a_merged_pr_head_from_this_repository(self) -> None:
+        self.assertIn('--state merged --head "$name"', self.jobs)
+        self.assertIn(r'select(.headRepositoryOwner.login == \"$owner\")', self.jobs)
+        self.assertIn('if [ -z "$merged_head" ] || [ "$merged_oid" = "null" ]; then', self.jobs)
+        self.assertIn('if [ "$merged_oid" != "$tip" ]; then', self.jobs)
+        self.assertIn("reason=tip-past-merged-pr", self.jobs)
+        self.assertIn('gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$name"', self.jobs)
+        # The delete is reachable only after both guards.
+        guard_pr = self.jobs.index('[ "$merged_oid" = "null" ]')
+        guard_tip = self.jobs.index('"$merged_oid" != "$tip"')
+        delete = self.jobs.index("gh api -X DELETE")
+        self.assertLess(guard_pr, guard_tip)
+        self.assertLess(guard_tip, delete)
+        self.assertIn("BRANCH_CLEANUP_OK deleted=$deleted kept=$kept", self.jobs)
 
 if __name__ == "__main__":
     unittest.main()

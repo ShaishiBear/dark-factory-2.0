@@ -20,7 +20,7 @@ name: dark-factory-trust-root
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review, closed]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions: {}
 
@@ -30,7 +30,6 @@ concurrency:
 
 jobs:
   trust-root-authority:
-    if: github.event.action != 'closed'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -173,25 +172,3 @@ jobs:
             -f query='mutation($id: ID!, $head: GitObjectID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH}) { pullRequest { autoMergeRequest { enabledAt mergeMethod } } } }' \
             -f id="$PR_NODE_ID" -f head="$EXPECTED_HEAD"
           echo "UNATTENDED_MERGE_ARMED head=$EXPECTED_HEAD"
-
-  delete-merged-branch:
-    # The repository setting delete_branch_on_merge did not fire for merges performed by
-    # GitHub's own auto-merge on behalf of the Actions app (ten human/* branches accumulated
-    # and were removed by hand, D-017). Delete the head ref here instead, only after a real
-    # merge and only when the head lives in this repository; a fork's branch is not ours.
-    if: github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Delete the merged head branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          test -n "$HEAD_REF"
-          test "$HEAD_REF" != "main"
-          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$HEAD_REF" \
-            && echo "MERGED_BRANCH_DELETED ref=$HEAD_REF" \
-            || echo "MERGED_BRANCH_ALREADY_GONE ref=$HEAD_REF"

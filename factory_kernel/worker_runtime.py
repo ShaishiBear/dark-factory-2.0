@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Mapping
 import uuid
 
@@ -10,7 +11,7 @@ from .git_authority import commit_acceptance_tests, commit_planned_changes
 from .methods import method_block
 from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
-from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, may_change_repo
+from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, max_turns, may_change_repo
 from .worktree import create_detached, remove
 
 
@@ -180,6 +181,7 @@ class WorkerControlledRuntime(BaseKernelRuntime):
             methods=method_block(cwd, role),
             context=context,
         )
+        started = time.time()
         result = self.provider.run(
             AgentRequest(
                 role=role,
@@ -188,11 +190,12 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 model=self.config.provider.model,
                 environment=dict(env),
                 allowed_tools=allowed_tools(role),
+                # A bounded loop: the CLI stops the worker at the role's cap and the provider
+                # turns that into a failed stage (D-020).
+                max_turns=max_turns(role),
             )
         )
-        (paths.transcripts / f"agent-{role}.log").write_text(
-            result.content + "\n", encoding="utf-8"
-        )
+        self._record_agent(paths, role, result, started=started)
 
         if role == "test_author":
             commit_acceptance_tests(cwd, paths.artifacts / "test-spec.json")

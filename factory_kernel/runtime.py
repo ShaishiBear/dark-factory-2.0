@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 import uuid
 from typing import Any, Mapping
 
@@ -32,8 +33,35 @@ from .provenance import verify_pack
 from .repro import OBSERVED_ARTIFACT, REPRO_ARTIFACT, ReproRefused, default_runner, execute, load_repro, observed_record
 from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
-from .worker_policy import BUILDER_BLIND_PATHS
+from .worker_policy import BUILDER_BLIND_PATHS, max_turns
 from .worktree import Worktree, create_detached, remove
+
+STAGE_TIMINGS = "stage-timings.jsonl"
+
+
+def record_stage_timing(
+    transcripts: Path, *, kind: str, name: str, started: float, ended: float, **extra: Any
+) -> None:
+    """Append one line per stage so a run's wall time can be read back per stage.
+
+    Observability only: nothing reads this file to decide anything. `started`/`ended` are
+    `time.time()` values; the ISO forms are for humans reading the artifact.
+    """
+    transcripts.mkdir(parents=True, exist_ok=True)
+    row = {
+        "kind": kind,
+        "name": name,
+        "started_at": _iso(started),
+        "ended_at": _iso(ended),
+        "seconds": round(ended - started, 3),
+    }
+    row.update({k: v for k, v in extra.items() if v is not None})
+    with (transcripts / STAGE_TIMINGS).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def _iso(timestamp: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(timestamp))
 
 # `Blocked by: #N` lines in an issue body name the issues that must be CLOSED before this one
 # is on the ready frontier. The kernel resolves them with its own GitHub authority and writes
@@ -276,11 +304,17 @@ class KernelRuntime:
             contract_hash = (paths.artifacts / "task-contract.sha256").read_text(
                 encoding="utf-8"
             ).strip()
+            # The worker used to receive only the hash and had to rediscover the task from
+            # disk; that was the slowest stage of the first canary (D-020). The validated
+            # contract is what the kernel is already holding, so it travels in the prompt. The
+            # hash stays first: it is the binding the deterministic compiler re-verifies.
             self._agent(
                 "context",
                 worktree.path,
                 paths,
-                context=f"Validated contract sha256: {contract_hash}",
+                context=self._worker_brief(
+                    paths, contract_hash=contract_hash, issue_context=issue_context
+                ),
                 env=env,
             )
             self._exec(
@@ -298,7 +332,16 @@ class KernelRuntime:
             )
             self._lease_heartbeat("touch", issue_number, "design-context", paths, cwd=worktree.path)
 
-            self._agent("architecture", worktree.path, paths, env=env)
+            self._agent(
+                "architecture",
+                worktree.path,
+                paths,
+                context=self._worker_brief(
+                    paths, contract_hash=contract_hash, issue_context=issue_context,
+                    include_design=True,
+                ),
+                env=env,
+            )
             self._exec(
                 [
                     "python", "scripts/factory_architecture.py", "compile",
@@ -333,7 +376,15 @@ class KernelRuntime:
             )
 
             # A fresh model process authors acceptance checkpoints; deterministic RED is authority.
-            self._agent("test_author", worktree.path, paths, env=env)
+            self._agent(
+                "test_author",
+                worktree.path,
+                paths,
+                context=self._worker_brief(
+                    paths, contract_hash=contract_hash, issue_context=issue_context
+                ),
+                env=env,
+            )
             self._exec(
                 [
                     "python", "scripts/factory_proof.py", "red",
@@ -735,6 +786,7 @@ class KernelRuntime:
                     model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
+                    max_turns=max_turns("holdout"),
                 )
             )
             value = result.structured_output
@@ -893,6 +945,7 @@ class KernelRuntime:
                     model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
+                    max_turns=max_turns(role),
                 )
             )
             value = result.structured_output
@@ -953,6 +1006,7 @@ class KernelRuntime:
                     model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
+                    max_turns=max_turns("architecture-holdout"),
                 )
             )
             value = result.structured_output
@@ -997,6 +1051,7 @@ class KernelRuntime:
             ),
             context=context,
         )
+        started = time.time()
         result = self.provider.run(
             AgentRequest(
                 role=role,
@@ -1004,11 +1059,71 @@ class KernelRuntime:
                 cwd=str(cwd),
                 model=self.config.provider.model,
                 environment=dict(env),
+                max_turns=max_turns(role),
             )
         )
+        self._record_agent(paths, role, result, started=started)
+
+    def _record_agent(self, paths: RunPaths, role: str, result: Any, *, started: float) -> None:
+        """Write the worker's text, its telemetry, and the stage's wall time."""
+        ended = time.time()
+        paths.transcripts.mkdir(parents=True, exist_ok=True)
         (paths.transcripts / f"agent-{role}.log").write_text(
             result.content + "\n", encoding="utf-8"
         )
+        telemetry = {
+            "role": role,
+            "model": getattr(result, "model", None),
+            "session_id": getattr(result, "session_id", None),
+            "num_turns": getattr(result, "num_turns", None),
+            "duration_ms": getattr(result, "duration_ms", None),
+            "total_cost_usd": getattr(result, "cost_usd", None),
+            "input_tokens": getattr(result, "input_tokens", None),
+            "output_tokens": getattr(result, "output_tokens", None),
+            "wall_seconds": round(ended - started, 3),
+        }
+        (paths.transcripts / f"agent-{role}.json").write_text(
+            json.dumps(telemetry, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
+        record_stage_timing(
+            paths.transcripts, kind="agent", name=role, started=started, ended=ended,
+            num_turns=telemetry["num_turns"], duration_ms=telemetry["duration_ms"],
+        )
+
+    def _worker_brief(
+        self,
+        paths: RunPaths,
+        *,
+        contract_hash: str,
+        issue_context: str,
+        include_design: bool = False,
+    ) -> str:
+        """What a post-contract worker is told in its prompt, so it need not rediscover it.
+
+        The hash comes first because it is the integrity binding the deterministic compilers
+        re-verify. The validated contract and the original issue are the kernel's own artifacts;
+        handing them over changes nothing about authority. With `include_design`, the compiled
+        context file list and the design's planned files follow. Never the holdout.
+        """
+        contract_text = (paths.artifacts / "task-contract.json").read_text(encoding="utf-8")
+        parts = [
+            f"Validated contract sha256: {contract_hash}",
+            issue_context,
+            "VALIDATED CONTRACT (task-contract.json, deterministic-compiled):\n" + contract_text.strip(),
+        ]
+        if include_design:
+            context_files = self._read_json(paths.artifacts / "context.json").get("files")
+            design = self._read_json(paths.artifacts / "design.json")
+            summary = {
+                "context_files": context_files if isinstance(context_files, list) else [],
+                "planned_files": design.get("planned_files"),
+                "allowed_new_files": design.get("allowed_new_files"),
+                "seams": design.get("seams"),
+            }
+            parts.append(
+                "COMPILED CONTEXT AND DESIGN SUMMARY:\n" + json.dumps(summary, sort_keys=True)
+            )
+        return "\n\n".join(parts)
 
     def _run_env(self, paths: RunPaths, *, base_ref: str) -> dict[str, str]:
         return {
@@ -1032,6 +1147,7 @@ class KernelRuntime:
         transcript: Path | None = None,
     ) -> str:
         merged = scoped_environment(env, scope=credential_scope)
+        started = time.time()
         proc = subprocess.run(
             argv,
             cwd=cwd,
@@ -1046,6 +1162,12 @@ class KernelRuntime:
         if transcript is not None:
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text(output, encoding="utf-8")
+            # Only stages that keep a transcript are timed: those are the deterministic gates
+            # and the per-stage picture is what the file is for.
+            record_stage_timing(
+                transcript.parent, kind="exec", name=transcript.stem,
+                started=started, ended=time.time(), rc=proc.returncode,
+            )
         if proc.returncode:
             raise RuntimeError(f"{' '.join(argv)} failed rc={proc.returncode}: {output[-4000:]}")
         return output

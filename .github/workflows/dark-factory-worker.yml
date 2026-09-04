@@ -127,12 +127,22 @@ jobs:
         with:
           version: '0.12.5'
           github-token: ''
+          # The wheel cache only avoids re-downloading hash-verified artifacts; every install
+          # still runs `uv sync --frozen`, so the lockfile stays the sole resolution (D-020).
+          enable-cache: true
+          cache-dependency-glob: app/backend/uv.lock
 
       - name: Setup Bun 1.4.0
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: '1.4.0'
           token: ''
+
+      - name: Cache the Bun package store
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('app/frontend/bun.lock') }}
 
       - name: Install pinned worker and browser CLIs
         run: |
@@ -157,7 +167,7 @@ jobs:
             timeout 180 claude --bare -p "Reply with exactly the word OK and nothing else." \
               --model "$model" --permission-mode dontAsk --tools "" \
               --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands \
-              --output-format json > /tmp/route-probe.json 2>/tmp/route-probe.err
+              --output-format json --max-turns 2 > /tmp/route-probe.json 2>/tmp/route-probe.err
             set -e
             ok="$(python3 -c 'import json;d=json.load(open("/tmp/route-probe.json"));print("true" if d.get("is_error") is False and d.get("result") else "false")' 2>/dev/null || echo false)"
             test "$ok" = "true" || {
@@ -206,3 +216,26 @@ jobs:
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
         run: python -m factory_kernel dispatch --once
+
+      # Observability only: nothing reads these to decide anything. Model transcripts, the
+      # per-stage telemetry and timings, the deterministic gates' logs and the run's JSON
+      # artifacts are kept for a week so a slow or failed stage can be read after the runner is
+      # gone. Logs of programs that hold credentials (evidence, merge, post-merge, security) and
+      # the dependency installs are excluded; the kernel never writes a secret into artifacts.
+      - name: Upload run transcripts and artifacts (observability)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-run-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/dark-factory/runs/*/transcripts/agent-*.log
+            ${{ runner.temp }}/dark-factory/runs/*/transcripts/agent-*.json
+            ${{ runner.temp }}/dark-factory/runs/*/transcripts/stage-timings.jsonl
+            ${{ runner.temp }}/dark-factory/runs/*/transcripts/*-gate.log
+            ${{ runner.temp }}/dark-factory/runs/*/artifacts/*.json
+            !${{ runner.temp }}/dark-factory/runs/*/transcripts/evidence.log
+            !${{ runner.temp }}/dark-factory/runs/*/transcripts/merge-*.log
+            !${{ runner.temp }}/dark-factory/runs/*/transcripts/post-merge.log
+            !${{ runner.temp }}/dark-factory/runs/*/transcripts/security.log
