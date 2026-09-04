@@ -7,7 +7,8 @@
     "binary": "claude",
     "model": "z-ai/glm-5.3-flash",
     "architecture_model": "deepseek/deepseek-v4-pro-0813",
-    "timeout_seconds": 1200
+    "timeout_seconds": 1200,
+    "transient_retries": 2
   },
   "runtime": {
     "max_attempts": 2,

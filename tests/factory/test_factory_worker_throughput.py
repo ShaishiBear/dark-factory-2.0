@@ -214,7 +214,7 @@ class _FakeProvider:
     def __init__(self) -> None:
         self.requests: list[AgentRequest] = []
 
-    def run(self, request: AgentRequest) -> AgentResult:
+    def run(self, request: AgentRequest, **_kwargs: object) -> AgentResult:
         self.requests.append(request)
         return AgentResult(
             provider_id="fake", model="fake", content="worker text", session_id="s",

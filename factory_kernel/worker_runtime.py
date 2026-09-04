@@ -206,7 +206,11 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 # turns that into a failed stage (D-020).
                 max_turns=max_turns(role),
                 max_budget_usd=max_budget_usd(role),
-            )
+            ),
+            # A transient provider error is retried by the provider with a fresh process. A
+            # mutation role may have half-written the checkout before the stream dropped, so
+            # the kernel restores the worktree first; the provider itself never touches Git.
+            before_retry=lambda attempt: self._restore_worktree_before_retry(role, cwd, attempt),
         )
         self._record_agent(paths, role, result, started=started)
 
@@ -236,6 +240,21 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         if may_change_repo(role):
             raise RuntimeError(f"unhandled repository-mutation role: {role}")
         self._refuse_literal_artifacts_dir(cwd)
+        self._assert_clean(cwd)
+
+    def _restore_worktree_before_retry(self, role: str, cwd: Path, attempt: int) -> None:
+        """Put the checkout back to the pre-attempt state before a transient retry.
+
+        A retried `test_author`/`implement`/`repair` process must start from the same tree the
+        first one did, or the kernel's commit envelope would be judging the union of two
+        half-finished attempts. Tracked edits are discarded and untracked files removed, within
+        this worktree only; the run's ARTIFACTS_DIR lives outside it and is left for the worker
+        to overwrite. A non-mutation role must not have changed anything, so for those the
+        restore is an assertion, not a cleanup (D-031).
+        """
+        if may_change_repo(role):
+            self._git("checkout", "--", ".", cwd=cwd)
+            self._git("clean", "-fd", "--", ".", cwd=cwd)
         self._assert_clean(cwd)
 
     def _refuse_literal_artifacts_dir(self, cwd: Path) -> None:

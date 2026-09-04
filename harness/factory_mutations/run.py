@@ -91,6 +91,7 @@ COPY_FILES = (
     "tests/factory/fixtures/context/run-33914596611-issue-49-task-contract.json",
     "tests/factory/test_factory_workflow_hygiene.py",
     "tests/factory/test_factory_worker_throughput.py",
+    "tests/factory/test_factory_provider_retry.py",
     "tests/factory/test_factory_methods.py",
     "tests/factory/test_factory_review_axes.py",
     "tests/factory/test_factory_repro_loop.py",

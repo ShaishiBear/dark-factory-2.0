@@ -991,6 +991,27 @@
       "find": "            \"Return ONLY this JSON object, with `certifies` exactly as shown: \"\n            + skeleton\n",
       "replace": "            \"Return ONLY JSON with version 1.0; certifies the claim; verdict pass|fail. \"\n",
       "why": "The load-bearing `certifies` field would again be stated once in prose with no skeleton; a certifier omitting it fails every validation."
+    },
+    {
+      "id": "provider-terminal-errors-retried",
+      "file": "factory_kernel/providers.py",
+      "find": "    if subtype.startswith(\"error\"):\n        return False\n    lowered = detail.lower()\n    return any(pattern.lower() in lowered for pattern in TRANSIENT_ERROR_PATTERNS)",
+      "replace": "    return True",
+      "why": "Every error envelope, including a turn cap, a budget stop and a missing model, would be re-launched as if the network had dropped; a worker's verdict would be retried up to the cap and paid for each time."
+    },
+    {
+      "id": "provider-retry-without-worktree-restore",
+      "file": "factory_kernel/providers.py",
+      "find": "                if before_retry is not None:\n                    before_retry(attempt)\n",
+      "replace": "",
+      "why": "A mutation role retried after a dropped stream would start from a half-written checkout; the kernel's commit envelope would judge the union of two attempts."
+    },
+    {
+      "id": "provider-transient-retries-unbounded",
+      "file": "factory_kernel/providers.py",
+      "find": "                if attempt < attempts_allowed:\n                    continue\n",
+      "replace": "                if True:\n                    continue\n",
+      "why": "A provider that keeps dropping streams would be re-launched forever; the stage would never fail closed and the dollar backstop would be paid per attempt without end."
     }
   ]
 }

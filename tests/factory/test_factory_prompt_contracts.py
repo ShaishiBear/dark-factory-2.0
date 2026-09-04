@@ -51,7 +51,7 @@ class ContextIsNotRenderedTests(unittest.TestCase):
         seen: dict[str, str] = {}
 
         class Provider:
-            def run(self, request):
+            def run(self, request, **_kwargs):
                 seen["prompt"] = request.prompt
                 return AgentResult(provider_id="fake", model="m", content="{}")
 
