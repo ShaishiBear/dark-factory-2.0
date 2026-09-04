@@ -324,3 +324,20 @@ artifacts. `factory_kernel/review.py` aggregates deterministically and fails clo
 malformed or mislabelled artifact, or a verdict that contradicts its own findings, escalates;
 either axis failing fails the review. The rest of the ladder (one repair, second review, GREEN
 replay, conformance, holdouts, certifiers) is unchanged.
+
+---
+
+## D-015 · A bug goes red before it is contracted
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+The investigate worker could not run commands, so it proposed a repro and a root-cause
+hypothesis without ever seeing the failure. For simple bugs that is fine; for ugly ones it is
+a confident guess. The worker now also writes `repro.json` (an allowlisted program, no shell, a
+repo-relative cwd, and the exact symptom substring), and the kernel executes it in the build
+worktree with no credentials before the contract stage. The run continues only if the command
+fails and its output contains the symptom; the observation (`repro-observed.json`: argv, cwd,
+exit code, output digest, matched symptom) is passed to the contract worker as fact, while the
+investigation's hypotheses remain hypotheses. A repro that passes, misses the symptom, names a
+non-allowlisted program or escapes the checkout escalates the issue: a bug that cannot be made
+to go red cannot be contracted, and escalating early is cheaper than a confident wrong fix.

@@ -1,4 +1,4 @@
-You are the specification worker. Read the original issue supplied in the invocation context and `$ARTIFACTS_DIR/plan.md` or `$ARTIFACTS_DIR/investigation.md`. The issue remains source of truth.
+You are the specification worker. Read the original issue supplied in the invocation context and `$ARTIFACTS_DIR/plan.md` or `$ARTIFACTS_DIR/investigation.md`. For a bug, the invocation context also carries a kernel-executed repro observation (`$ARTIFACTS_DIR/repro-observed.json`): the command, its non-zero exit and the matched symptom are facts you may rely on; the investigation's hypotheses are not. The issue remains source of truth.
 
 Write only `$ARTIFACTS_DIR/task-contract.raw.json` with version `2.0`, issue `{number,title}`, concise `summary`, `behaviors` as `AC-N` objects containing `given`, `when`, `then` and an observable public `seam`, plus arrays `invariants`, `out_of_scope`, `risks`, `ambiguities`. Do not invent requirements. Put any genuinely unresolved product decision in `ambiguities`; the deterministic compiler will stop rather than guess. Every requested behavior must map to a testable seam.
 

@@ -627,6 +627,34 @@
       "find": "        for axis in AXES:\n            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=context, env=env)",
       "replace": "        for axis in AXES[:1]:\n            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=context, env=env)",
       "why": "Only the Spec reviewer would run; the Standards artifact would be stale or absent."
+    },
+    {
+      "id": "repro-allowlist-removed",
+      "file": "factory_kernel/repro.py",
+      "find": "    if program not in ALLOWED_PROGRAMS or program != argv[0]:",
+      "replace": "    if False:",
+      "why": "A model-authored repro could name any program, including a shell, and the kernel would execute it."
+    },
+    {
+      "id": "repro-passing-command-accepted",
+      "file": "factory_kernel/repro.py",
+      "find": "    if proc.returncode == 0:\n        raise ReproRefused(\"repro passed; a bug that does not go red cannot be contracted\")",
+      "replace": "    if False:\n        raise ReproRefused(\"repro passed; a bug that does not go red cannot be contracted\")",
+      "why": "A bug that never went red would be contracted on a hypothesis."
+    },
+    {
+      "id": "repro-symptom-check-dropped",
+      "file": "factory_kernel/repro.py",
+      "find": "    if repro.expect_failure_containing not in output:",
+      "replace": "    if False:",
+      "why": "Any failing command, for any reason, would count as reproducing the reported bug."
+    },
+    {
+      "id": "kernel-repro-not-executed-for-bugs",
+      "file": "factory_kernel/runtime.py",
+      "find": "            if role == \"investigate\":\n                # The red loop",
+      "replace": "            if False:\n                # The red loop",
+      "why": "Bug builds would proceed to the contract without the red loop the rules describe."
     }
   ]
 }

@@ -76,7 +76,7 @@ The build path is `KernelRuntime.build_issue` in `factory_kernel/runtime.py`. It
 
 ### The build sequence
 
-1. **`plan`** (features) or **`investigate`** (bugs, decided by a `bug` / `type:bug` label). Artifact only.
+1. **`plan`** (features) or **`investigate`** (bugs, decided by a `bug` / `type:bug` label). For bugs the worker also writes `repro.json` (allowlisted program, no shell, named symptom) and the kernel **executes it** (`factory_kernel/repro.py`, no credentials, inside the worktree): the run continues only if the command fails and its output contains the symptom, and `repro-observed.json` is handed to the contract worker as fact. A repro that passes, does not show the symptom, uses a non-allowlisted program or escapes the checkout escalates: a bug that cannot be made to go red cannot be contracted.
 2. **`contract`** → `scripts/factory_protocol.py contract` compiles and hashes the execution contract. Ambiguity fails closed; every acceptance criterion must be stated so an independent test can prove it.
 3. **`context`** (fed the contract hash) → `scripts/factory_protocol.py context` compiles the design: the exact set of `planned_files` the implementation may touch.
 4. **`architecture`** governor → `scripts/factory_architecture.py compile` against the protected `.factory/architecture.json` (layers, legal dependency directions, no new cycles, no-growth debt hotspots). Any decision other than `proceed` escalates the issue to a human. `scope --action implement` then records the permitted change surface.

@@ -72,8 +72,8 @@ For an accepted issue the kernel creates a dedicated exact-SHA Git worktree and 
 ```text
 issue
  ↓
-plan OR reproduce/investigate
- ↓
+plan OR investigate
+ ↓ bugs: kernel executes the proposed repro; must fail with the named symptom
 raw execution contract
  ↓ deterministic factory_protocol.py
 validated contract
