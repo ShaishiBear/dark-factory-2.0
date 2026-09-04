@@ -494,6 +494,48 @@
       "find": "TRIAGE_BODY_CHARS = 12000",
       "replace": "TRIAGE_BODY_CHARS = 2000",
       "why": "Triage would judge long, well-specified issues on a 2000-character prefix and reject them as underspecified."
+    },
+    {
+      "id": "contract-dependencies-unvalidated",
+      "file": "scripts/factory_protocol.py",
+      "find": "    validate_dependencies(c.get(\"dependencies\", []))\n",
+      "replace": "",
+      "why": "A contract could declare a dependency with no justification and the kernel would render an empty section the guard accepts by name alone."
+    },
+    {
+      "id": "pr-body-dependency-heading-renamed",
+      "file": "factory_kernel/pr_body.py",
+      "find": "DEPENDENCY_HEADING = \"## Dependency justification\"",
+      "replace": "DEPENDENCY_HEADING = \"## Dependencies\"",
+      "why": "The kernel would render a heading the security guard does not parse; every autonomous dependency change would fail at merge again."
+    },
+    {
+      "id": "pr-body-dependency-names-omitted",
+      "file": "factory_kernel/pr_body.py",
+      "find": "lines.append(f\"- `{name}` ({dep.get('ecosystem')}): {str(dep.get('purpose') or '').strip()}\")",
+      "replace": "lines.append(f\"- ({dep.get('ecosystem')}): {str(dep.get('purpose') or '').strip()}\")",
+      "why": "The guard requires each package to be named under the heading; an unnamed justification is a missing justification."
+    },
+    {
+      "id": "kernel-pr-body-ignores-contract",
+      "file": "factory_kernel/runtime.py",
+      "find": "                    issue_number, attempt, self._read_json(paths.artifacts / \"task-contract.json\")\n",
+      "replace": "                    issue_number, attempt, {}\n",
+      "why": "The PR body would stop carrying the contract's declared dependencies and the guard would refuse the manifest change."
+    },
+    {
+      "id": "lockfile-refresh-skipped",
+      "file": "factory_kernel/git_authority.py",
+      "find": "    refresh_lockfiles(cwd, [str(path) for path in planned_raw], runner=lock_runner)\n",
+      "replace": "",
+      "why": "A manifest change would be committed without its lockfile; the guard refuses manifest-without-lock, so every dependency change fails."
+    },
+    {
+      "id": "lockfile-not-planned-accepted",
+      "file": "factory_kernel/git_authority.py",
+      "find": "        if lock not in planned_set:\n",
+      "replace": "        if False:\n",
+      "why": "The kernel would write a lockfile the compiled design never authorized, outside the implementation envelope."
     }
   ]
 }

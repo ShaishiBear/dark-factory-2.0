@@ -6,6 +6,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 AC = re.compile(r"^AC-[1-9][0-9]*$")
+DEPENDENCY_ECOSYSTEMS = ("python", "javascript")
+DEPENDENCY_FIELDS = ("name", "purpose", "why_existing_insufficient", "maintenance_evidence")
+PACKAGE_NAME = re.compile(r"^[A-Za-z0-9@][A-Za-z0-9._/@\[\]-]*$")
 
 
 def die(msg: str) -> None:
@@ -41,6 +44,24 @@ def lease(action: str, issue: int, stage: str, pr: str | None = None) -> None:
     subprocess.check_call(argv, cwd=ROOT)
 
 
+def validate_dependencies(deps: object) -> list[dict]:
+    """A contract may declare the packages the change needs. Each declaration carries the three
+    justifications the security guard requires under `## Dependency justification`; the kernel
+    renders them into the PR body verbatim, so a thin declaration fails here, not at merge."""
+    if not isinstance(deps, list): die("contract dependencies must be a list")
+    seen: set[tuple[str, str]] = set()
+    for d in deps:
+        if not isinstance(d, dict): die("contract dependency must be an object")
+        if d.get("ecosystem") not in DEPENDENCY_ECOSYSTEMS: die(f"dependency ecosystem must be one of {DEPENDENCY_ECOSYSTEMS}")
+        for k in DEPENDENCY_FIELDS:
+            if not isinstance(d.get(k), str) or len(d[k].strip()) < (1 if k == "name" else 10): die(f"dependency {d.get('name')!r} needs a substantive {k}")
+        if not PACKAGE_NAME.match(d["name"].strip()): die(f"invalid dependency name {d['name']!r}")
+        key = (d["ecosystem"], d["name"].strip().lower())
+        if key in seen: die(f"duplicate dependency {d['name']!r}")
+        seen.add(key)
+    return deps
+
+
 def validate_contract(c: dict, issue: int | None = None) -> str:
     required = {"version", "issue", "summary", "behaviors", "invariants", "out_of_scope", "risks", "ambiguities"}
     missing = sorted(required - c.keys())
@@ -63,6 +84,7 @@ def validate_contract(c: dict, issue: int | None = None) -> str:
             die(f"behavior {b['id']} has an empty field")
     for key in ("invariants", "out_of_scope", "risks"):
         if not isinstance(c[key], list) or any(not isinstance(x, str) or not x.strip() for x in c[key]): die(f"{key} must be strings")
+    validate_dependencies(c.get("dependencies", []))
     return hashlib.sha256(canonical(c)).hexdigest()
 
 

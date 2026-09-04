@@ -193,3 +193,27 @@ strengthens the fence rather than weakening it. The identity lives in one place,
 
 Whether the ruleset rule accepts a Bot-attributed commit is still unobserved; the canary
 decides it. This is a **judgement** value and moved through the maintainer lane.
+
+---
+
+## D-009 · A dependency is declared in the contract, never discovered in the diff
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Issue #39: the security guard requires `## Dependency justification` naming each changed
+package, the kernel writes every autonomous PR body, and nothing rendered that heading, so an
+autonomous PR that needed a package could not merge. Two ways to fix it: let the implementer
+write justification prose into an artifact the kernel pastes, or make the dependency part of
+the contract. The second is chosen. A package is a product decision with a blast radius, and
+the contract is where the factory already refuses ambiguity: `scripts/factory_protocol.py`
+validates each declaration's purpose, why existing dependencies are insufficient and
+maintenance evidence, fail-closed, before any design exists. The kernel renders the
+declaration verbatim (`factory_kernel/pr_body.py`), so the guard and the contract agree by
+construction, and it refreshes the lockfile itself (`refresh_lockfiles` in
+`factory_kernel/git_authority.py`) because workers have no shell. The refresh runs only when a
+planned manifest changed, requires the lockfile to be planned, and refuses if it touched
+anything else.
+
+What this does not do: decide whether a package is wise. The contract certifier, the
+architecture governor and the blinded holdout still judge that; this only makes an honest
+declaration mergeable and a silent one impossible.
