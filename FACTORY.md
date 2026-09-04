@@ -153,7 +153,7 @@ Two questions are decided for every PR, and they are decided by different progra
 
 **Exact-head binding.** The verdict names the head it judged; the merge job refuses if the judged head differs from the event head; GitHub refuses to arm auto-merge if the PR head differs from `expectedHeadOid`; required checks are per commit, so a head pushed after the checks ran has no green checks and cannot merge until it is judged in turn; and the kernel's merge passes `--match-head-commit`. There is no window in which a head other than the one that was checked can be the one that merges.
 
-**Bootstrap.** A `pull_request_target` workflow runs only once it exists on `main`. The PR that introduced this file could not be judged by it, so it was merged through the maintainer lane by a delegated maintainer session with an expected-head squash, and `trust-root-authority` was added to the ruleset's required checks immediately afterwards. Every later PR, including the one that proved the mechanism, merges without a click.
+**Bootstrap (done 2026-09-04).** A `pull_request_target` workflow runs only once it exists on `main`. PR #40, which introduced this workflow, could not be judged by it, so a delegated maintainer session merged its exact head `3ddf0b0` with `gh pr merge --squash --match-head-commit` under the owner's account, producing `dfa3d96` with a tree byte-identical to the judged head. `trust-root-authority` was added to the ruleset's required checks immediately afterwards, with the bypass list still empty. Every later PR merges without a click; the first to do so was the PR that added this sentence.
 
 ## Canonical harness
 

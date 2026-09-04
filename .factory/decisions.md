@@ -101,3 +101,28 @@ correcting this log, was unmergeable: the required `quick-authority` check refus
 protected paths for everyone and the ruleset forbade direct pushes. `FACTORY_RULES.md` §5
 now records the two authorities and §13 lists what the rules describe but the kernel does
 not yet enforce.
+
+---
+
+## D-005 · The judge runs from `main`, and nobody presses Merge
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+PR #40 moved trust-root authority to `.github/workflows/dark-factory-trust-root.yml`, a
+`pull_request_target` workflow that checks out the base tip and runs the guard in
+`--trusted-base` mode, and armed GitHub auto-merge for maintainer-lane PRs bound to the
+exact judged head. It could not be judged by itself, so a delegated maintainer session
+merged its exact head with an expected-head squash and the required check was added to the
+ruleset afterwards, bypass list still empty.
+
+This PR (#41) is the proof. Its first head was judged from `main` by run 33866228355
+(`lane=human-maintenance`, `binding.mode=trusted-base`), armed, then deliberately
+superseded by this commit before `quick-authority` could go green on it. The earlier
+authorisation merged nothing; the workflow re-judged and re-armed this head; GitHub merged
+it once both required checks were green here. A manual attempt to arm auto-merge with a
+wrong `expectedHeadOid` was refused by GitHub.
+
+This is a **judgement** mechanism and lives in protected files; it moves only through the
+maintainer lane. Maintainer merges still get no post-merge full harness and the
+`require_extra_approval_for_unattributed_changes` ruleset flag is unverified against kernel
+commits (FACTORY_RULES.md §13). The first unattended canary settles the second.
