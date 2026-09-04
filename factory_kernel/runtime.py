@@ -30,7 +30,10 @@ from .independence import (
     verify_certificate,
 )
 from .provenance import verify_pack
-from .repro import OBSERVED_ARTIFACT, REPRO_ARTIFACT, ReproRefused, default_runner, execute, load_repro, observed_record
+from .repro import (
+    DEFERRED_ARTIFACT, OBSERVED_ARTIFACT, REPRO_ARTIFACT, ReproRefused, default_runner,
+    deferred_record, execute, load_deferred, load_repro, observed_record, verify_deferred_in_red,
+)
 from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
 from .worker_policy import BUILDER_BLIND_PATHS, max_turns
@@ -397,6 +400,10 @@ class KernelRuntime:
                 timeout=600,
                 transcript=paths.transcripts / "red-gate.log",
             )
+            # A deferred repro promised that the acceptance tests would show the symptom; RED
+            # has now run them on the unchanged tree, so the promise is checked here, not
+            # believed.
+            self._close_deferred_repro(paths.artifacts)
             self._lease_heartbeat("touch", issue_number, "red", paths, cwd=worktree.path)
 
             self._agent(
@@ -563,6 +570,22 @@ class KernelRuntime:
         (tracked and untracked files alike): a repro that edits a source file and then prints
         the symptom would otherwise contaminate every later reasoning stage.
         """
+        executed = (artifacts / REPRO_ARTIFACT).is_file()
+        deferred = (artifacts / DEFERRED_ARTIFACT).is_file()
+        if executed and deferred:
+            raise NeedsHuman("bug repro refused: investigate wrote both repro.json and repro-deferred.json")
+        if deferred:
+            # No existing runner can fail on the unchanged tree for this bug. The worker names
+            # the symptom the acceptance tests will show; `_close_deferred_repro` verifies it
+            # against the RED proof, so the red loop still gates the build, two stages later.
+            try:
+                record = deferred_record(load_deferred(artifacts / DEFERRED_ARTIFACT))
+            except ReproRefused as exc:
+                raise NeedsHuman(f"bug repro refused: {exc}") from exc
+            self._write_json(artifacts / OBSERVED_ARTIFACT, record)
+            return "REPRO DEFERRED TO RED (no existing command can fail on this tree; the acceptance tests must show this symptom):\n" + json.dumps(
+                {k: record[k] for k in ("reason", "seam", "expected_symptom")}, sort_keys=True,
+            )
         try:
             repro = load_repro(artifacts / REPRO_ARTIFACT)
             before = self._git("status", "--porcelain", "--untracked-files=all", cwd=worktree)
@@ -578,6 +601,21 @@ class KernelRuntime:
             {k: record[k] for k in ("argv", "cwd", "rc", "matched_symptom", "output_sha256")},
             sort_keys=True,
         )
+
+    def _close_deferred_repro(self, artifacts: Path) -> None:
+        """After RED, a deferred repro's promised symptom must appear in a checkpoint's output."""
+        observed = artifacts / OBSERVED_ARTIFACT
+        if not observed.is_file():
+            return  # not a bug issue
+        record = self._read_json(observed)
+        if record.get("mode") != "deferred":
+            return  # executed mode was already observed before the contract
+        try:
+            match = verify_deferred_in_red(record, self._read_json(artifacts / "red-proof.json"))
+        except ReproRefused as exc:
+            raise NeedsHuman(f"bug repro refused: {exc}") from exc
+        record["observed_in_red"] = match
+        self._write_json(observed, record)
 
     def _review_and_repair(
         self, worktree: Worktree, paths: RunPaths, env: Mapping[str, str]

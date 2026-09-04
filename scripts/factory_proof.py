@@ -9,6 +9,7 @@ DESIGN_BLOCK = re.compile(r"\n?<!-- factory-design:start -->.*?<!-- factory-desi
 
 def die(msg): print(f"PROOF_FAIL: {msg}", file=sys.stderr); raise SystemExit(1)
 CHECKPOINT_SCRUBBED_ENV=('GH_TOKEN','GITHUB_TOKEN')
+RED_TAIL_CHARS=2000
 def checkpoint_env():
     # The checkpoint argv is model-authored. The kernel already launches this program with no
     # GitHub credentials; scrubbing again here means a caller that forgets the scope still
@@ -169,7 +170,9 @@ def red(a):
         rc,out=run(cp['argv'],cp['cwd'])
         if rc==0: die(f"{cp['acceptance_id']} RED command unexpectedly passed")
         if cp['expected_failure'].lower() not in out.lower(): die(f"{cp['acceptance_id']} RED failed for the wrong reason")
-        results.append(dict(cp,red_exit=rc,red_output_sha256=hashlib.sha256(out.encode()).hexdigest()))
+        # A bounded tail of the failing output travels with the proof so a deferred repro can be
+        # closed against it (factory_kernel.repro.verify_deferred_in_red) without re-running.
+        results.append(dict(cp,red_exit=rc,red_output_sha256=hashlib.sha256(out.encode()).hexdigest(),red_output_tail=out[-RED_TAIL_CHARS:]))
     after=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(); clean()
     if before!=after: die('RED commands moved HEAD')
     files={f:sha(f) for f in declared}
