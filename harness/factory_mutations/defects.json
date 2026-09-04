@@ -823,6 +823,62 @@
       "find": "        self._refuse_literal_artifacts_dir(cwd)\n        self._assert_clean(cwd)\n",
       "replace": "        self._assert_clean(cwd)\n",
       "why": "A worker writing to a literal `$ARTIFACTS_DIR` would fail as an anonymous dirty tree instead of naming the class."
+    },
+    {
+      "id": "refusal-classifier-always-unknown",
+      "file": "factory_kernel/refusal.py",
+      "find": "    text = str(exc)\n    if is_stale_base(text):\n        return \"stale_base\"\n",
+      "replace": "    return \"unknown\"\n    text = str(exc)\n    if is_stale_base(text):\n        return \"stale_base\"\n",
+      "why": "Every refusal would again reach GitHub as an unclassified failure; nothing downstream could tell a moved base from a security veto."
+    },
+    {
+      "id": "refusal-scrub-removed",
+      "file": "factory_kernel/refusal.py",
+      "find": "        detail=scrub(tail)[-2000:],\n",
+      "replace": "        detail=tail[-2000:],\n",
+      "why": "A tool tail holding a token would be written into the durable refusal record and uploaded."
+    },
+    {
+      "id": "refusal-stale-base-consumes-attempt",
+      "file": "factory_kernel/runtime.py",
+      "find": "            if linked_issue is not None and reason_code != \"stale_base\":\n",
+      "replace": "            if linked_issue is not None:\n",
+      "why": "A base that moved under the PR would charge the issue's rebuild budget, exhausting it on nothing the build did."
+    },
+    {
+      "id": "rehead-skips-green",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._rehead_green(paths, worktree.path, env, output=\"green-proof.json\", log=self.REHEAD_GREEN_LOG)\n",
+      "replace": "",
+      "why": "The re-headed tip would go to conformance and the final proof without the GREEN replay that a new head invalidates."
+    },
+    {
+      "id": "rehead-worktree-not-blinded",
+      "file": "factory_kernel/runtime.py",
+      "find": "            base_dir=self.config.runtime.work_root / \"rehead-worktrees\",\n            blind=BUILDER_BLIND_PATHS,\n",
+      "replace": "            base_dir=self.config.runtime.work_root / \"rehead-worktrees\",\n",
+      "why": "The conformance worker would run in a worktree that contains the holdout scenarios."
+    },
+    {
+      "id": "rehead-accepts-any-reason",
+      "file": "factory_kernel/refusal.py",
+      "find": "    if refusal is None or refusal.get(\"reason_code\") != \"stale_base\":\n        return False\n",
+      "replace": "    if refusal is None:\n        return False\n",
+      "why": "A PR refused by a certifier or the holdout would be re-headed and handed back to validation as if the base had merely moved."
+    },
+    {
+      "id": "rehead-cap-removed",
+      "file": "factory_kernel/refusal.py",
+      "find": "    return rehead_count(bodies) == 0\n",
+      "replace": "    return True\n",
+      "why": "A PR whose base keeps moving would be re-headed forever instead of escalating on the second stale refusal."
+    },
+    {
+      "id": "rehead-force-push-without-lease",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self.github.push_branch(branch, force_with_lease=head)\n",
+      "replace": "            self.github.push_branch(branch)\n",
+      "why": "The rewritten branch would be pushed without naming the judged head, so the remote could not refuse overwriting a head nobody judged."
     }
   ]
 }

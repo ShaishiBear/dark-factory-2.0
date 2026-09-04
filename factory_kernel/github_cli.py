@@ -62,6 +62,15 @@ class GitHubClient:
             ["pr", "view", str(number), "-R", self.repository, "--json", fields]
         )
 
+    def pr_comments(self, number: int) -> list[str]:
+        """Comment bodies in creation order; the kernel's own markers live in them."""
+        self._number(number, "PR")
+        value = self.json(["pr", "view", str(number), "-R", self.repository, "--json", "comments"])
+        raw = value.get("comments") if isinstance(value, Mapping) else None
+        if not isinstance(raw, list):
+            raise RuntimeError("GitHub PR comments were not an array")
+        return [str(item.get("body") or "") for item in raw if isinstance(item, Mapping)]
+
     def list_issues(self, label: str, *, limit: int = 100) -> list[Mapping[str, Any]]:
         value = self.json(
             [
@@ -161,9 +170,18 @@ class GitHubClient:
             raise RuntimeError("created issue could not be resolved")
         return int(value[0]["number"])
 
-    def push_branch(self, branch: str) -> None:
+    def push_branch(self, branch: str, *, force_with_lease: str | None = None) -> None:
+        """Push HEAD to the branch. Plain pushes are fast-forward only.
+
+        `force_with_lease` is the exact old head the caller judged; it is accepted only for the
+        kernel's re-head, whose rebase rewrites history by construction. The remote refuses the
+        push unless the branch still points at that head, so nothing pushed by anyone else can be
+        overwritten.
+        """
         if not branch.strip() or branch.startswith("-"):
             raise ValueError("unsafe branch name")
+        if force_with_lease is not None and not re.fullmatch(r"[0-9a-f]{40,64}", force_with_lease):
+            raise ValueError("force-with-lease requires the exact old head object id")
         github_env = scoped_environment(scope="github")
         token = github_env.get("GH_TOKEN") or github_env.get("GITHUB_TOKEN")
         if not token:
@@ -188,12 +206,15 @@ class GitHubClient:
                     "FACTORY_GIT_TOKEN": token,
                 }
             )
+            argv = ["git", "push"]
+            if force_with_lease is not None:
+                argv.append(f"--force-with-lease=refs/heads/{branch}:{force_with_lease}")
+            argv += [
+                f"https://github.com/{self.repository}.git",
+                f"HEAD:refs/heads/{branch}",
+            ]
             proc = subprocess.run(
-                [
-                    "git", "push",
-                    f"https://github.com/{self.repository}.git",
-                    f"HEAD:refs/heads/{branch}",
-                ],
+                argv,
                 cwd=self.cwd,
                 env=env,
                 capture_output=True,

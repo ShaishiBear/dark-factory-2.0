@@ -48,6 +48,9 @@ def main() -> int:
     validate.add_argument("--pr", type=int, required=True)
     validate.add_argument("--no-merge", action="store_true")
 
+    rehead = sub.add_parser("rehead", help="re-head a stale-base refused PR onto current main")
+    rehead.add_argument("--pr", type=int, required=True)
+
     args = parser.parse_args()
     if args.command == "manifest-validate":
         return manifest_validate(str(args.path))
@@ -95,6 +98,10 @@ def main() -> int:
         if args.command == "validate":
             output = rt.validate_pr(args.pr, merge=not args.no_merge)
             print(f"KERNEL_VALIDATE_OK pr={args.pr} output={output}")
+            return 0
+        if args.command == "rehead":
+            new_head = rt.rehead_pr(args.pr)
+            print(f"KERNEL_REHEAD_OK pr={args.pr} head={new_head}")
             return 0
     except FactoryStopped as exc:
         print(f"KERNEL_STOPPED {exc}")

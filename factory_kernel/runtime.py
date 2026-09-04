@@ -19,6 +19,7 @@ import uuid
 from typing import Any, Mapping
 
 from .agents import AgentRequest
+from .canonical import canonical_bytes
 from .config import KernelConfig
 from .credential_env import scoped_environment
 from .github_cli import GitHubClient
@@ -29,14 +30,23 @@ from .independence import (
     claims_for_authority,
     verify_certificate,
 )
-from .provenance import verify_pack
+from .provenance import BUILDER_ARTIFACTS, verify_pack
+from .refusal import (
+    ToolRefused,
+    describe,
+    refusal_record,
+    rehead_count,
+    rehead_eligible,
+    render_refusal_marker,
+    render_rehead_marker,
+)
 from .repro import (
     DEFERRED_ARTIFACT, OBSERVED_ARTIFACT, REPRO_ARTIFACT, ReproRefused, default_runner,
     deferred_record, execute, load_deferred, load_repro, observed_record, verify_deferred_in_red,
 )
 from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
-from .worker_policy import BUILDER_BLIND_PATHS, max_turns
+from .worker_policy import BUILDER_BLIND_PATHS, KERNEL_COMMIT_ARGS, max_turns
 from .worktree import Worktree, create_detached, remove
 
 STAGE_TIMINGS = "stage-timings.jsonl"
@@ -183,6 +193,19 @@ class KernelRuntime:
                 "validate-pr", self._oldest_number(review), "PR validation has priority"
             )
 
+        # A refused PR whose only fault is that main moved under it is re-headed without a
+        # model, before any new build starts: finishing certified work outranks starting more.
+        # Every other refusal leaves the PR where it is (section 7).
+        for pr in sorted(
+            self.github.list_prs(self.config.labels["needs_fix"]),
+            key=lambda row: (str(row.get("updatedAt") or ""), int(row["number"])),
+        ):
+            number = int(pr["number"])
+            if rehead_eligible(self.github.pr_comments(number)):
+                return DispatchDecision(
+                    "rehead-pr", number, "stale-base refusal; model-free re-head onto current main"
+                )
+
         accepted = self.github.list_issues(self.config.labels["accepted"])
         idle = [
             issue
@@ -200,6 +223,8 @@ class KernelRuntime:
         decision = self.choose_dispatch()
         if decision.kind == "validate-pr" and decision.number is not None:
             self.validate_pr(decision.number, merge=merge)
+        elif decision.kind == "rehead-pr" and decision.number is not None:
+            self.rehead_pr(decision.number)
         elif decision.kind == "build-issue" and decision.number is not None:
             self.build_issue(decision.number)
         return decision
@@ -485,46 +510,11 @@ class KernelRuntime:
                 body_file=body,
             )
             pr_number = int(pr["number"])
-            # The two attach programs edit the PR body through gh, so they keep GitHub scope.
-            # Neither runs a model-authored command: attach binds already-proven artifacts.
-            self._exec(
-                [
-                    "python", "scripts/factory_protocol.py", "attach",
-                    "--contract", str(paths.artifacts / "task-contract.json"),
-                    "--pr", str(pr_number),
-                ],
-                cwd=worktree.path,
-                env=env,
-                credential_scope="github",
-                timeout=120,
-            )
-            self._exec(
-                [
-                    "python", "scripts/factory_proof.py", "attach",
-                    "--proof", str(paths.artifacts / "final-green-proof.json"),
-                    "--pr", str(pr_number),
-                ],
-                cwd=worktree.path,
-                env=env,
-                credential_scope="github",
-                timeout=180,
-            )
-            self._exec(
-                [
-                    "python", "scripts/factory_provenance.py", "publish",
-                    "--pr", str(pr_number),
-                    "--artifacts", str(paths.artifacts),
-                ],
-                cwd=worktree.path,
-                env=env,
-                credential_scope="github",
-                timeout=240,
-                transcript=paths.transcripts / "provenance-publish.log",
-            )
+            self._attach_and_publish(paths, worktree.path, env, pr_number)
             self._lease_heartbeat(
                 "finish", issue_number, "pr-handoff", paths, cwd=worktree.path, pr=pr_number
             )
-            self.github.add_pr_label(pr_number, self.config.labels["needs_review"])
+            self._hand_to_review(pr_number)
             self.github.remove_issue_label(issue_number, self.config.labels["in_progress"])
             handed_off = True
             current_head = self._git("rev-parse", "HEAD", cwd=worktree.path)
@@ -543,6 +533,56 @@ class KernelRuntime:
             self.github.cwd = str(self.repo_root)
             if handed_off:
                 remove(self.repo_root, worktree)
+
+    def _attach_and_publish(
+        self, paths: RunPaths, cwd: Path, env: Mapping[str, str], pr_number: int
+    ) -> None:
+        """Bind the proven artifacts to the exact PR head: contract and final proof in the PR
+        body, the provenance pack in a Git note on the head object.
+
+        The two attach programs edit the PR body through gh, so they keep GitHub scope. None of
+        the three runs a model-authored command. The build path and the stale-base re-head are
+        the only callers; both push the head first, because every program here refuses unless
+        the local HEAD is the PR head GitHub reports.
+        """
+        self._exec(
+            [
+                "python", "scripts/factory_protocol.py", "attach",
+                "--contract", str(paths.artifacts / "task-contract.json"),
+                "--pr", str(pr_number),
+            ],
+            cwd=cwd,
+            env=env,
+            credential_scope="github",
+            timeout=120,
+        )
+        self._exec(
+            [
+                "python", "scripts/factory_proof.py", "attach",
+                "--proof", str(paths.artifacts / "final-green-proof.json"),
+                "--pr", str(pr_number),
+            ],
+            cwd=cwd,
+            env=env,
+            credential_scope="github",
+            timeout=180,
+        )
+        self._exec(
+            [
+                "python", "scripts/factory_provenance.py", "publish",
+                "--pr", str(pr_number),
+                "--artifacts", str(paths.artifacts),
+            ],
+            cwd=cwd,
+            env=env,
+            credential_scope="github",
+            timeout=240,
+            transcript=paths.transcripts / "provenance-publish.log",
+        )
+
+    def _hand_to_review(self, pr_number: int) -> None:
+        """The one place a PR is handed to independent validation."""
+        self.github.add_pr_label(pr_number, self.config.labels["needs_review"])
 
     def _two_axis_review(
         self, worktree: Worktree, paths: RunPaths, env: Mapping[str, str], *, context: str = ""
@@ -673,6 +713,9 @@ class KernelRuntime:
             base_dir=self.config.runtime.work_root / "validator-worktrees",
         )
         linked_issue = self._linked_issue_number(str(info.get("body") or ""))
+        # The stage the validator is in when it refuses is what turns a refusal into a reason
+        # code (factory_kernel/refusal.py); a bare exception class never could.
+        stage = "security_guard"
         try:
             self._prepare_worktree(worktree.path, paths)
             env = self._run_env(paths, base_ref=base)
@@ -692,6 +735,7 @@ class KernelRuntime:
                 transcript=paths.transcripts / "security.log",
             )
 
+            stage = "attached_evidence"
             contract, proof = self._extract_attached(str(info.get("body") or ""))
             contract_issue = contract.get("issue")
             if isinstance(contract_issue, Mapping) and isinstance(contract_issue.get("number"), int):
@@ -715,11 +759,14 @@ class KernelRuntime:
                     "green_results": proof.get("green_results"),
                 },
             }
+            stage = "code_holdout"
             verdict = self._run_blinded_holdout(paths, holdout_context)
             if verdict.get("verdict") != "pass":
                 raise NeedsHuman("blinded holdout rejected PR")
 
+            stage = "provenance"
             pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)
+            stage = "architecture_holdout"
             architecture_holdout = self._run_architecture_holdout(
                 paths,
                 pack=pack,
@@ -727,9 +774,11 @@ class KernelRuntime:
                 changed_files=sorted(x for x in changed if x),
                 diff=patch,
             )
+            stage = "certifier"
             self._certify_precode_claims(
                 paths, pack=pack, head=head, base=base, issue=linked_issue
             )
+            stage = "evidence_spine"
             self._write_json(
                 paths.artifacts / "validator-verdict.json",
                 {
@@ -752,6 +801,7 @@ class KernelRuntime:
                 timeout=2400,
                 transcript=paths.transcripts / "evidence.log",
             )
+            stage = "merge_preauth"
             self._exec(
                 [
                     "python", "harness/merge_verify.py", "pre", "--pr", str(pr_number),
@@ -796,7 +846,9 @@ class KernelRuntime:
             self._raise_post_merge_incident(pr_number, linked_issue, exc)
             raise
         except Exception as exc:
-            self._record_validation_failure(pr_number, linked_issue, exc)
+            self._record_validation_failure(
+                pr_number, linked_issue, exc, stage=stage, paths=paths, head=head, base=base
+            )
             raise
         finally:
             self.github.cwd = str(self.repo_root)
@@ -804,6 +856,186 @@ class KernelRuntime:
                 remove(self.repo_root, worktree)
             except RuntimeError:
                 pass
+
+    # ---------- model-free re-head ----------
+
+    REHEAD_GREEN_LOG = "rehead-green-gate.log"
+    REHEAD_FINAL_GREEN_LOG = "rehead-final-green-gate.log"
+
+    def rehead_pr(self, pr_number: int) -> str:
+        """Move a refused PR onto current main without a model, then hand it back to validation.
+
+        This is not a repair. It runs only for a `stale_base` refusal -- the three programs that
+        say main moved under the PR -- and it changes nothing the builder was certified on: the
+        contract, context, design, governor verdict and RED-hashed acceptance tests travel
+        through the verified provenance pack and must be byte-identical at the new head. What is
+        recomputed is exactly what a new head invalidates: GREEN, impact, drift, conformance, the
+        quick gate, the attached proof and the provenance note. Validation then runs in full from
+        the new head and reuses nothing. One re-head per PR; a second stale refusal escalates.
+        """
+        self.check_stop()
+        info = self.github.pr(pr_number, holdout_safe=True)
+        if info.get("state") != "OPEN":
+            raise NeedsHuman(f"PR #{pr_number} is not open")
+        labels = self.github.labels(info)
+        if self.config.labels["needs_fix"] not in labels:
+            raise NeedsHuman(f"PR #{pr_number} is not marked {self.config.labels['needs_fix']}")
+        comments = self.github.pr_comments(pr_number)
+        if not rehead_eligible(comments):
+            raise NeedsHuman(
+                f"PR #{pr_number} is not a first stale-base refusal; re-head is not a repair"
+            )
+        head = str(info.get("headRefOid") or "")
+        branch = str(info.get("headRefName") or "")
+        if not re.fullmatch(r"[0-9a-f]{40,64}", head) or not branch or branch.startswith("-"):
+            raise NeedsHuman("PR lacks exact Git object identities")
+        linked_issue = self._linked_issue_number(str(info.get("body") or ""))
+        default = self.config.default_branch
+
+        self._git("fetch", "origin", branch, default)
+        # main is linear (required_linear_history) and the builder branched from its exact tip,
+        # so the merge-base is the base the provenance pack was built from.
+        old_base = self._git("merge-base", f"origin/{default}", head)
+        run_id = f"rehead-{pr_number}-{uuid.uuid4().hex[:12]}"
+        paths = RunPaths.create(self.config.runtime.work_root, run_id)
+        # Blinded like a build worktree: the conformance worker runs here and must not see the
+        # holdout. Validation, which does need it, starts its own unblinded worktree later.
+        worktree = create_detached(
+            self.repo_root,
+            head,
+            base_dir=self.config.runtime.work_root / "rehead-worktrees",
+            blind=BUILDER_BLIND_PATHS,
+        )
+        try:
+            self._git("checkout", "-b", branch, cwd=worktree.path)
+            self._prepare_worktree(worktree.path, paths)
+            pack = self._builder_pack(paths, head=head, base=old_base, issue=linked_issue)
+            self._materialize_builder_artifacts(pack, paths.artifacts)
+
+            try:
+                self._git(*KERNEL_COMMIT_ARGS, "rebase", f"origin/{default}", cwd=worktree.path)
+            except RuntimeError as exc:
+                try:
+                    self._git("rebase", "--abort", cwd=worktree.path)
+                except RuntimeError:
+                    pass
+                raise NeedsHuman(f"rebase conflict; re-head needs a human: {exc}") from exc
+            new_base = self._git("rev-parse", f"origin/{default}", cwd=worktree.path)
+            new_head = self._git("rev-parse", "HEAD", cwd=worktree.path)
+            self._verify_red_unchanged(pack, worktree.path)
+
+            env = self._run_env(paths, base_ref=f"origin/{default}")
+            self._rehead_green(paths, worktree.path, env, output="green-proof.json", log=self.REHEAD_GREEN_LOG)
+            self._agent("conformance", worktree.path, paths, env=env)
+            self._exec(
+                [
+                    "python", "scripts/factory_architecture.py", "conformance",
+                    "--policy", ".factory/architecture.json",
+                    "--input", str(paths.artifacts / "architecture-conformance.raw.json"),
+                    "--contract", str(paths.artifacts / "task-contract.json"),
+                    "--context", str(paths.artifacts / "context.json"),
+                    "--design", str(paths.artifacts / "design.json"),
+                    "--governor", str(paths.artifacts / "architecture-governor.json"),
+                    "--output", str(paths.artifacts / "architecture-conformance.json"),
+                    "--base-ref", f"origin/{default}",
+                ],
+                cwd=worktree.path,
+                env=env,
+                timeout=180,
+                transcript=paths.transcripts / "rehead-conformance-gate.log",
+            )
+            self._rehead_green(
+                paths, worktree.path, env, output="final-green-proof.json", log=self.REHEAD_FINAL_GREEN_LOG
+            )
+            self._exec(
+                list(self.config.validation.quick_command),
+                cwd=worktree.path,
+                env=env,
+                timeout=900,
+                transcript=paths.transcripts / "rehead-quick-gate.log",
+            )
+            self._assert_clean(worktree.path)
+
+            # The one legitimate non-fast-forward push in the kernel: the branch was rebased, so
+            # its history is rewritten by construction. The lease names the head that was
+            # judged, so a push that would overwrite anything else is refused by the remote.
+            self.github.cwd = str(worktree.path)
+            self.github.push_branch(branch, force_with_lease=head)
+            self._attach_and_publish(paths, worktree.path, env, pr_number)
+            marker = render_rehead_marker({
+                "version": "1.0", "pr": pr_number, "old_head": head, "new_head": new_head,
+                "old_base": old_base, "new_base": new_base, "timestamp": _utc_now(),
+            })
+            self.github.comment_pr(
+                pr_number,
+                marker + f"\nDark Factory re-headed this PR onto `{new_base}` without a model "
+                f"(old head `{head}`, new head `{new_head}`). The certified contract, design and "
+                "RED tests are unchanged; GREEN, conformance and the quick gate were re-run at the "
+                "new head. Independent validation now runs again in full.",
+            )
+            self.github.remove_pr_label(pr_number, self.config.labels["needs_fix"])
+            self._hand_to_review(pr_number)
+            print(f"FACTORY_REHEAD_OK pr=#{pr_number} old_head={head} new_head={new_head} base={new_base}")
+            return new_head
+        except NeedsHuman as exc:
+            self._mark_pr_human(pr_number, f"re-head stopped: {exc}")
+            raise
+        except Exception as exc:
+            self._mark_pr_human(pr_number, f"re-head failed closed: {exc}")
+            raise
+        finally:
+            self.github.cwd = str(self.repo_root)
+            try:
+                remove(self.repo_root, worktree, force=True, require_clean=False)
+            except RuntimeError:
+                pass
+
+    def _rehead_green(
+        self, paths: RunPaths, cwd: Path, env: Mapping[str, str], *, output: str, log: str
+    ) -> None:
+        self._exec(
+            [
+                "python", "scripts/factory_proof.py", "green",
+                "--proof", str(paths.artifacts / "red-proof.json"),
+                "--output", str(paths.artifacts / output),
+            ],
+            cwd=cwd,
+            env=env,
+            credential_scope="none",
+            timeout=600,
+            transcript=paths.transcripts / log,
+        )
+
+    @staticmethod
+    def _materialize_builder_artifacts(pack: Mapping[str, Any], artifacts: Path) -> None:
+        """Write the verified pack back under the file names the builder programs expect."""
+        records = pack["artifacts"]
+        for claim_id, rel in BUILDER_ARTIFACTS:
+            if claim_id == "architecture-policy":
+                continue  # read from the checkout's trust root, never from a pack
+            target = artifacts / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(canonical_bytes(records[claim_id]["content"]))
+
+    @staticmethod
+    def _verify_red_unchanged(pack: Mapping[str, Any], worktree: Path) -> None:
+        """The RED-hashed acceptance tests must be byte-identical at the re-headed tip."""
+        files = pack["artifacts"]["red-proof"]["content"].get("files")
+        if not isinstance(files, Mapping) or not files:
+            raise NeedsHuman("RED proof in the provenance pack has no immutable file map")
+        for rel, expected in files.items():
+            target = worktree / str(rel)
+            actual = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else ""
+            if actual != expected:
+                raise NeedsHuman(f"RED-hashed acceptance test differs after rebase: {rel}")
+
+    def _mark_pr_human(self, pr_number: int, reason: str) -> None:
+        try:
+            self.github.cwd = str(self.repo_root)
+            self.github.add_pr_label(pr_number, self.config.labels["needs_human"])
+            self.github.comment_pr(pr_number, "Dark Factory " + reason[:1500])
+        except Exception:
+            pass
 
     # ---------- independent holdouts ----------
 
@@ -1207,7 +1439,7 @@ class KernelRuntime:
                 started=started, ended=time.time(), rc=proc.returncode,
             )
         if proc.returncode:
-            raise RuntimeError(f"{' '.join(argv)} failed rc={proc.returncode}: {output[-4000:]}")
+            raise ToolRefused(argv, rc=proc.returncode, output=output)
         return output
 
     def _git(self, *args: str, cwd: Path | None = None) -> str:
@@ -1237,23 +1469,62 @@ class KernelRuntime:
         return failures + 1
 
     def _record_validation_failure(
-        self, pr_number: int, linked_issue: int | None, exc: Exception
+        self,
+        pr_number: int,
+        linked_issue: int | None,
+        exc: Exception,
+        *,
+        stage: str,
+        paths: RunPaths,
+        head: str,
+        base: str,
     ) -> None:
+        """Make the refusal a durable fact: a reason code on the PR, a scrubbed record in the
+        run's artifacts, and the issue's rebuild budget charged only when the build was at fault."""
+        refusal = describe(stage, exc)
+        record = refusal_record(
+            refusal, pr=pr_number, head=head, base=base, stage=stage, timestamp=_utc_now()
+        )
+        try:
+            self._write_json(paths.artifacts / "validation-refusal.json", record)
+        except Exception:
+            pass
         try:
             self.github.cwd = str(self.repo_root)
             self.github.remove_pr_label(pr_number, self.config.labels["needs_review"])
             self.github.add_pr_label(pr_number, self.config.labels["needs_fix"])
-            self.github.comment_pr(
-                pr_number,
-                "Dark Factory validation failed closed. No merge was authorized. "
-                f"Failure class: `{type(exc).__name__}`. The validator transcript remains on the host.",
+            reason_code = record["reason_code"]
+            summary = (
+                render_refusal_marker(record)
+                + "\nDark Factory validation failed closed. No merge was authorized. "
+                f"Refused by: {record['authority']} (`{reason_code}`, `{record['exception']}`). "
+                "The scrubbed refusal record is `validation-refusal.json` in the run's uploaded "
+                "artifacts."
             )
-            if linked_issue is not None:
+            if reason_code == "stale_base":
+                second = rehead_count(self.github.pr_comments(pr_number)) >= 1
+                if second:
+                    summary += (
+                        "\nmain moved under this PR again after a re-head. The re-head budget is "
+                        "one per PR, so this needs a human."
+                    )
+                    self.github.add_pr_label(pr_number, self.config.labels["needs_human"])
+                else:
+                    summary += (
+                        "\nmain moved under this PR. This is not the build's fault: the next "
+                        "dispatch re-heads the branch onto current main without a model, and the "
+                        "issue's rebuild budget is not charged."
+                    )
+            self.github.comment_pr(pr_number, summary)
+            # A stale base is the repository's motion, not the build's defect; charging the
+            # issue's rebuild budget for it would exhaust the budget on nothing.
+            if linked_issue is not None and reason_code != "stale_base":
                 self.github.comment_issue(
                     linked_issue,
                     self.VALIDATION_FAILURE_MARKER
-                    + "\nDark Factory independent validation rejected the latest build. "
-                    "The issue remains eligible for a bounded fresh rebuild from current main.",
+                    + "\nDark Factory independent validation rejected the latest build "
+                    f"(`{reason_code}`). The issue remains eligible for a bounded fresh rebuild "
+                    "from current main.",
                 )
         except Exception:
             pass
