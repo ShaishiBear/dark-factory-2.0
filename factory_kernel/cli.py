@@ -51,6 +51,14 @@ def main() -> int:
     rehead = sub.add_parser("rehead", help="re-head a stale-base refused PR onto current main")
     rehead.add_argument("--pr", type=int, required=True)
 
+    resume = sub.add_parser(
+        "resume",
+        help="finish a pushed-but-unpublished factory PR from its uploaded build artifacts",
+    )
+    resume.add_argument("--pr", type=int, required=True)
+    resume.add_argument("--artifacts", type=Path, required=True,
+                        help="directory holding the run's artifacts/*.json (gh run download)")
+
     args = parser.parse_args()
     if args.command == "manifest-validate":
         return manifest_validate(str(args.path))
@@ -102,6 +110,10 @@ def main() -> int:
         if args.command == "rehead":
             new_head = rt.rehead_pr(args.pr)
             print(f"KERNEL_REHEAD_OK pr={args.pr} head={new_head}")
+            return 0
+        if args.command == "resume":
+            head = rt.resume_pr(args.pr, args.artifacts)
+            print(f"KERNEL_RESUME_OK pr={args.pr} head={head}")
             return 0
     except FactoryStopped as exc:
         print(f"KERNEL_STOPPED {exc}")

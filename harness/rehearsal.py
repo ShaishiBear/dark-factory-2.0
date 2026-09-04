@@ -163,11 +163,15 @@ class FakeGitHub:
     def __init__(self, trace: Trace, *, state: str = "OPEN", labels: tuple[str, ...] = (),
                  head: str = HEAD, base: str = BASE, body: str | None = None,
                  refuse_issue_creation: bool = False, comments: tuple[str, ...] = (),
-                 prs: tuple[Mapping[str, Any], ...] = ()) -> None:
+                 prs: tuple[Mapping[str, Any], ...] = (),
+                 author: str = "github-actions[bot]",
+                 issue_labels: tuple[str, ...] = ("factory:needs-human",)) -> None:
         self.trace = trace
         self.cwd = "."
         self._state = state
         self._labels = labels
+        self._author = author
+        self._issue_labels = issue_labels
         self._head = head
         self._base = base
         self._body = body if body is not None else _pr_body()
@@ -187,11 +191,13 @@ class FakeGitHub:
             "baseRefName": "main", "baseRefOid": self._base,
             "state": self._state, "changedFiles": 1,
             "labels": [{"name": name} for name in self._labels],
+            "author": {"login": self._author},
         }
 
     def issue(self, number: int) -> Mapping[str, Any]:
         self.trace.record("github", "issue")
-        return {"number": number, "title": "rehearsal issue", "body": "please do the thing"}
+        return {"number": number, "title": "rehearsal issue", "body": "please do the thing",
+                "labels": [{"name": name} for name in self._issue_labels]}
 
     def pr_comments(self, number: int) -> list[str]:
         self.trace.record("github", "pr_comments")
@@ -364,13 +370,16 @@ class Scenario:
     head: str = HEAD
     body: str | None = None
     refuse_issue_creation: bool = False
-    command: str = "validate"            # validate | rehead | dispatch
+    command: str = "validate"            # validate | rehead | dispatch | resume
     fail_detail: str = "rehearsed failure"
     comments: tuple[str, ...] = ()       # PR comments that already exist (markers live here)
     prs: tuple[Mapping[str, Any], ...] = ()  # what list_prs returns, for dispatch
     red_files: Mapping[str, str] | None = None   # RED-hashed files the pack declares
     worktree_files: Mapping[str, str] | None = None  # files present in the rehearsed worktree
     rebase_conflict: bool = False
+    author: str = "github-actions[bot]"  # who opened the PR, for resume
+    issue_labels: tuple[str, ...] = ("factory:needs-human",)  # linked issue's labels, for resume
+    artifacts: Mapping[str, dict] | None = None  # resume: builder artifacts by relative name
 
 
 def rehearse(scenario: Scenario) -> Trace:
@@ -410,7 +419,15 @@ def rehearse(scenario: Scenario) -> Trace:
             trace, state=scenario.state, labels=scenario.labels,
             head=scenario.head, body=scenario.body,
             refuse_issue_creation=scenario.refuse_issue_creation,
-            comments=scenario.comments, prs=scenario.prs)
+            comments=scenario.comments, prs=scenario.prs,
+            author=scenario.author, issue_labels=scenario.issue_labels)
+        artifacts_dir = home / "uploaded-artifacts"
+        if scenario.artifacts is not None:
+            artifacts_dir.mkdir()
+            for rel, value in scenario.artifacts.items():
+                target = artifacts_dir / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps(value), encoding="utf-8")
         runtime.provider = FakeProvider(trace, reject=scenario.reject)
         runtime._exec = exec_recorder(  # type: ignore[method-assign]
             trace, fail=scenario.fail, fail_detail=scenario.fail_detail,
@@ -464,6 +481,8 @@ def rehearse(scenario: Scenario) -> Trace:
                 elif scenario.command == "dispatch":
                     decision = runtime.dispatch_once(merge=scenario.merge)
                     trace.record("control", f"dispatch:{decision.kind}")
+                elif scenario.command == "resume":
+                    runtime.resume_pr(PR_NUMBER, artifacts_dir)
                 else:
                     raise ValueError(f"unknown rehearsal command {scenario.command!r}")
                 trace.outcome = "returned"

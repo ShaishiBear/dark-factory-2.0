@@ -274,6 +274,16 @@ For every reason code except `stale_base`, the validator also comments on the li
 
 Validation then runs **in full** from the new head and reuses nothing validator-side; the head-bound certificates and provenance bindings would refuse reuse anyway. One re-head per PR: a second `stale_base` refusal adds `factory:needs-human`.
 
+### A build that pushed and opened its PR, then died: resumed from its artifacts, not rebuilt
+
+If a build fails after `push` and `gh pr create` but before the attach/publish/handoff steps complete (canary attempt 10 died in `factory_provenance.py publish` with PR #74 already open), the certified work is on the branch and every builder artifact is in the run's uploaded workflow artifact. `python -m factory_kernel resume --pr N --artifacts <dir>` (`KernelRuntime.resume_pr`) finishes it without rebuilding and without a model:
+
+1. Preconditions: the PR is open and was opened by the factory's Bot identity; head and base are exact object ids; the linked issue is `factory:needs-human` or `factory:accepted`; the PR carries no resume marker (one resume per PR; a second attempt escalates).
+2. The artifacts directory must hold every builder artifact; `final-green-proof.json`'s `green_commit` must equal the PR head (artifacts from another build are refused); every RED-hashed acceptance test must be byte-identical at the head.
+3. In a fresh blinded worktree at the head, the same `_attach_and_publish` the build path uses re-binds contract, design and proof in the PR body (each attach program replaces an existing block of its kind) and publishes the provenance note; the pr-handoff lease finishes; the PR is labelled `factory:needs-review`; the issue returns to `factory:accepted`.
+
+A human runs this after `gh run download <run id>`; it is not a dispatch action. Validation then runs in full and reuses nothing.
+
 ### Attempt budget exhausted, or any build-time failure
 
 `_mark_issue_human` removes `factory:in-progress` and `factory:accepted`, adds **`factory:needs-human`**, and comments "Dark Factory stopped this run without merging" with the reason. This fires for: a governor decision other than `proceed`, an unsatisfiable contract, RED or GREEN replay failure, a failed second review, a conformance failure, a quick-gate failure, and exceeding `max_attempts`.

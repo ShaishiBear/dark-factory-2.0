@@ -1019,6 +1019,34 @@
       "find": "ROOT = Path(__file__).resolve().parents[1]\nsys.path.insert(0, str(ROOT))\n",
       "replace": "ROOT = Path(__file__).resolve().parents[1]\n",
       "why": "The publish step runs from a detached PR-head worktree; without the bootstrap the kernel import fails there and a completed build never reaches review, as on canary attempt 10."
+    },
+    {
+      "id": "resume-green-commit-binding-dropped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if str(proof.get(\"green_commit\") or \"\") != head:",
+      "replace": "        if False:",
+      "why": "A resume would accept artifacts from a different build and bind another build's proof to this PR head."
+    },
+    {
+      "id": "resume-red-hash-check-dropped",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._verify_red_unchanged(\n                {\"artifacts\": {\"red-proof\": {\"content\": self._read_json(paths.artifacts / \"red-proof.json\")}}},\n                worktree.path,\n            )\n",
+      "replace": "",
+      "why": "A resume would publish provenance for a head whose acceptance tests no longer match the RED proof."
+    },
+    {
+      "id": "resume-cap-removed",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if resume_count(self.github.pr_comments(pr_number)) > 0:",
+      "replace": "        if False:",
+      "why": "A PR could be resumed indefinitely instead of escalating after one attempt."
+    },
+    {
+      "id": "resume-accepts-human-authored-pr",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if login.removesuffix(\"[bot]\") != self.ACTIONS_BOT_LOGIN:",
+      "replace": "        if False:",
+      "why": "A human-authored PR could be handed to autonomous validation with attached artifacts it did not build."
     }
   ]
 }
