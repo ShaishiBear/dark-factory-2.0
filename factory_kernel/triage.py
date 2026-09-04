@@ -15,6 +15,12 @@ from .runtime import KernelRuntime
 PRIORITIES = {"critical", "high", "medium", "low"}
 CLASSIFICATIONS = {"bug", "enhancement", "chore", "docs"}
 VERDICTS = {"accept", "reject"}
+# How much of each issue body the triage worker sees. Triage judges accept/reject on this window
+# and FACTORY_RULES section 1 tells it to reject what looks underspecified, so a window shorter
+# than a well-specified issue turns good issues into rejections. 12000 characters holds a long
+# issue with background, Given/When/Then criteria, file list and out-of-scope section several
+# times over; no prompt or provider budget in this kernel argues for less.
+TRIAGE_BODY_CHARS = 12000
 
 
 class TriageEngine:
@@ -236,7 +242,7 @@ class TriageEngine:
         return {
             "number": int(issue["number"]),
             "title": str(issue.get("title") or ""),
-            "body": str(issue.get("body") or "")[:2000],
+            "body": str(issue.get("body") or "")[:TRIAGE_BODY_CHARS],
             "author": author,
             "createdAt": str(issue.get("createdAt") or ""),
             "labels": sorted(TriageEngine._labels(issue)),

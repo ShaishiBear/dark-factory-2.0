@@ -57,6 +57,7 @@ Every accepted issue gets exactly one of `priority:critical`, `priority:high`, `
 
 - **Three issues per non-owner author per UTC day.** Issues beyond that, ordered by creation time, get `factory:rate-limited` and a `**Dark Factory triage:**` comment. The repository owner is exempt; the kernel resolves the owner from GitHub (`gh repo view --json owner`) at run time, never from a hardcoded login. Before each triage run the kernel removes `factory:rate-limited` from any open issue created before today (UTC), so the issue is re-evaluated the next day.
 - **Batch size is 10** per run, drawn from the 100 most recent open issues. Larger backlogs take multiple dispatch cycles.
+- **The worker sees the first 12,000 characters of each issue body** (`TRIAGE_BODY_CHARS` in `factory_kernel/triage.py`). Keep the decision-critical specification inside that window; the build stages later read the full body.
 - **Blocked issues never reach the worker.** `scripts/frontier_filter.py` drops any candidate whose body contains a line `Blocked by: #N` where issue N is still open. It filters nothing else, and it fails closed.
 
 ---

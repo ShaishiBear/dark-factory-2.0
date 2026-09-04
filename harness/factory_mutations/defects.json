@@ -487,6 +487,13 @@
       "find": "    quick_command: tuple[str, ...]\n",
       "replace": "    quick_command: tuple[str, ...]\n    full_command: tuple[str, ...] = ()\n",
       "why": "A validation setting nothing reads would return to the schema: a configuration claim with no enforcer."
+    },
+    {
+      "id": "triage-body-window-shrunk",
+      "file": "factory_kernel/triage.py",
+      "find": "TRIAGE_BODY_CHARS = 12000",
+      "replace": "TRIAGE_BODY_CHARS = 2000",
+      "why": "Triage would judge long, well-specified issues on a 2000-character prefix and reject them as underspecified."
     }
   ]
 }
