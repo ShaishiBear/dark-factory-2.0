@@ -555,3 +555,42 @@ neither, escalates.
 What stays true: a bug that cannot be made to go red cannot be contracted, and the red loop is
 observed by a deterministic program, never believed. What changed: the observation happens where
 the tests that demonstrate it exist.
+
+---
+
+## D-025 · A cap the timeout would beat is not a cap
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+The first per-stage telemetry (worker run 33908589032, issue #49, investigate on
+`z-ai/glm-5.3-flash`): 25 turns, 846 s, 419,517 input and 62,844 output tokens, CLI-reported
+$4.00. That is 33.85 s per turn. `provider.timeout_seconds` is 1200, so the subprocess timeout
+fires at roughly 35 turns. The caps D-020 set (investigate 60, context 80, test_author 60,
+implement 120, repair 80, plan 60, reviews 40) could never be reached, and the way the timeout
+ended a stage was the worst available: `subprocess.TimeoutExpired` escaped the provider with no
+result envelope and no telemetry, whereas the CLI stopping at `--max-turns` returns an envelope
+the kernel records as a clean, measured failed stage.
+
+Changes: every cap now fits under the timeout at a 35 s/turn ceiling (`OBSERVED_SECONDS_PER_TURN_CEILING`,
+`assert_caps_fit_timeout`, tested against the checked-in config); implement 120 → 30, context
+80 → 24, investigate/plan/test_author 60 → 30, repair 80 → 30, reviews 40 → 30. The provider
+now catches the timeout and raises with the role, elapsed seconds, the configured timeout and
+the partial output. A per-role `--max-budget-usd` (`ROLE_MAX_BUDGET_USD`) backstops the cost
+that turns alone do not bound: each turn resends the conversation, so cost grows with the
+square of the turn count. The preflight probe proves the pinned CLI accepts the flag.
+
+What the cost figure is and is not. Arithmetic on the observed run rules out 25 uncached full
+resends (that would exceed the billed input alone). Either `num_turns` counts messages rather
+than round-trips, or a cached prefix is invisible in `input_tokens`. The envelope now keeps
+`cache_creation_input_tokens` and `cache_read_input_tokens`, which decides between those
+readings on the next run. Separately, `total_cost_usd` for a model the CLI does not price is
+almost certainly a fallback-table figure ($8.29 per million counted tokens, an order of magnitude
+above a flash-class list price). **No budgeting or model decision may be made on it until it is
+reconciled against the OpenRouter dashboard for a known run.**
+
+The investigate prompt's paragraph describing the executor's refusal rules provoked the worker
+to read `factory_kernel/repro.py` and `.factory/decisions.md` to verify them, 64% of everything
+it read. The rules are now stated flat, and the prompt says not to read kernel source or this log
+to check them.
+
+These are **judgement** values and moved through the maintainer lane.

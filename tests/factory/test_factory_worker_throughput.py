@@ -26,7 +26,10 @@ from factory_kernel.agents import AgentRequest, AgentResult  # noqa: E402
 from factory_kernel.config import ProviderConfig  # noqa: E402
 from factory_kernel.providers import ClaudeCliProvider, unwrap_result_envelope  # noqa: E402
 from factory_kernel.runtime import KernelRuntime, RunPaths, STAGE_TIMINGS  # noqa: E402
-from factory_kernel.worker_policy import ROLE_MAX_TURNS, ROLE_TOOLS, max_turns  # noqa: E402
+from factory_kernel.worker_policy import (  # noqa: E402
+    OBSERVED_SECONDS_PER_TURN_CEILING, ROLE_MAX_BUDGET_USD, ROLE_MAX_TURNS, ROLE_TOOLS,
+    assert_caps_fit_timeout, max_budget_usd, max_turns,
+)
 
 RUNTIME = ROOT / "factory_kernel" / "runtime.py"
 PROMPTS = ROOT / ".factory" / "prompts"
@@ -77,7 +80,70 @@ class TurnCapPolicyTests(unittest.TestCase):
             AgentRequest(role="implement", prompt="x", cwd="/tmp", max_turns=True)
 
 
+class CapsFitTimeoutTests(unittest.TestCase):
+    """Worker run 33908589032 measured 33.85 s per turn; the 1200 s timeout fires near 35 turns.
+    A cap above that is unreachable, and a timeout records no envelope and no telemetry (D-025)."""
+
+    def test_every_cap_fits_under_the_checked_in_timeout(self):
+        kernel = json.loads((ROOT / ".factory" / "kernel.json").read_text(encoding="utf-8"))
+        timeout = int(kernel["provider"]["timeout_seconds"])
+        assert_caps_fit_timeout(timeout)
+        for role, cap in ROLE_MAX_TURNS.items():
+            self.assertLessEqual(cap * OBSERVED_SECONDS_PER_TURN_CEILING, timeout, role)
+
+    def test_a_cap_the_timeout_would_beat_is_refused(self):
+        with mock.patch.dict(ROLE_MAX_TURNS, {"implement": 120}):
+            with self.assertRaisesRegex(ValueError, "implement"):
+                assert_caps_fit_timeout(1200)
+
+    def test_ceiling_is_at_least_the_measured_rate(self):
+        self.assertGreaterEqual(OBSERVED_SECONDS_PER_TURN_CEILING, 34)
+
+    def test_every_role_has_a_positive_budget(self):
+        self.assertEqual(set(ROLE_MAX_BUDGET_USD), set(ROLE_TOOLS))
+        for role in ROLE_TOOLS:
+            self.assertGreater(max_budget_usd(role), 0, role)
+        with self.assertRaises(ValueError):
+            max_budget_usd("not-a-role")
+        with self.assertRaises(ValueError):
+            AgentRequest(role="implement", prompt="x", cwd="/tmp", max_budget_usd=0)
+
+
 class ProviderArgvTests(unittest.TestCase):
+    @mock.patch("factory_kernel.providers.subprocess.run")
+    def test_argv_carries_the_budget_cap(self, run):
+        run.return_value = mock.Mock(returncode=0, stdout=envelope(), stderr="")
+        provider().run(AgentRequest(role="implement", prompt="p", cwd="/tmp", max_turns=30, max_budget_usd=12.0))
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "12")
+        self.assertEqual(argv[argv.index("--max-turns") + 1], "30")
+
+    @mock.patch("factory_kernel.providers.subprocess.run")
+    def test_cache_fields_are_kept_and_default_to_zero(self, run):
+        run.return_value = mock.Mock(returncode=0, stdout=envelope(
+            usage={"input_tokens": 50, "output_tokens": 7,
+                   "cache_creation_input_tokens": 11, "cache_read_input_tokens": 900}), stderr="")
+        result = provider().run(AgentRequest(role="implement", prompt="p", cwd="/tmp"))
+        self.assertEqual(result.cache_creation_input_tokens, 11)
+        self.assertEqual(result.cache_read_input_tokens, 900)
+        env = unwrap_result_envelope(envelope(), role="implement")
+        self.assertEqual(env.cache_creation_input_tokens, 0)
+        self.assertEqual(env.cache_read_input_tokens, 0)
+        self.assertIn("cache_read_input_tokens", env.telemetry())
+
+    @mock.patch("factory_kernel.providers.subprocess.run")
+    def test_timeout_raises_a_failed_stage_naming_the_role(self, run):
+        import subprocess as sp
+        run.side_effect = sp.TimeoutExpired(cmd=["claude"], timeout=60, output="partial text so far")
+        with self.assertRaisesRegex(RuntimeError, r"timed out role='context' after .*timeout_seconds=60.*partial text") as ctx:
+            provider().run(AgentRequest(role="context", prompt="p", cwd="/tmp", max_turns=24))
+        self.assertIsInstance(ctx.exception.__cause__, sp.TimeoutExpired)
+
+    def test_budget_stopped_envelope_fails_the_stage(self):
+        with self.assertRaisesRegex(RuntimeError, "error_max_budget"):
+            unwrap_result_envelope(envelope(subtype="error_max_budget_usd", result=""), role="implement")
+
+
     @mock.patch("factory_kernel.providers.subprocess.run")
     def test_argv_carries_the_cap_and_structured_output(self, run):
         run.return_value = mock.Mock(returncode=0, stdout=envelope(), stderr="")
@@ -345,6 +411,16 @@ class WorkflowCacheAndUploadTests(unittest.TestCase):
     def test_preflight_probe_proves_the_cap_flag_on_the_pinned_cli(self):
         probe = self.worker.split("Prove the worker's model route with the pinned CLI", 1)[1].split("- name:", 1)[0]
         self.assertIn("--max-turns 2", probe)
+        self.assertIn("--max-budget-usd 1", probe)
+
+    def test_investigate_prompt_states_rules_flat_and_forbids_verifying_them_in_source(self):
+        text = (PROMPTS / "investigate.md").read_text(encoding="utf-8")
+        self.assertIn("do not read factory_kernel/ or .factory/decisions.md to verify them", text)
+        self.assertIn("use Grep to locate a section", text)
+        self.assertNotIn("The kernel executes this command deterministically", text)
+        self.assertNotIn("Consult the specific sections of CLAUDE.md and FACTORY_RULES.md", text)
+        for shape in ("repro.json", "repro-deferred.json", "expect_failure_containing", "expected_symptom"):
+            self.assertIn(shape, text)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ class AgentRequest:
     allowed_tools: tuple[str, ...] | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
     max_turns: int | None = None
+    max_budget_usd: float | None = None
 
     def __post_init__(self) -> None:
         if not self.role.strip():
@@ -48,6 +49,12 @@ class AgentRequest:
             isinstance(self.max_turns, bool) or not isinstance(self.max_turns, int) or self.max_turns <= 0
         ):
             raise ValueError("agent max_turns must be a positive integer when set")
+        if self.max_budget_usd is not None and (
+            isinstance(self.max_budget_usd, bool)
+            or not isinstance(self.max_budget_usd, (int, float))
+            or self.max_budget_usd <= 0
+        ):
+            raise ValueError("agent max_budget_usd must be a positive number when set")
 
 
 @dataclass(frozen=True)
@@ -62,6 +69,8 @@ class AgentResult:
     cost_usd: float | None = None
     num_turns: int | None = None
     duration_ms: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
 
 
 class AgentProvider(Protocol):

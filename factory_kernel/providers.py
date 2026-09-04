@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 from typing import Any, Mapping
 
 from .agents import AgentRequest, AgentResult, ProviderCapabilities
@@ -97,6 +98,11 @@ class ClaudeCliProvider:
         # envelope, which the unwrap below turns into a failed stage.
         if request.max_turns is not None:
             argv.extend(["--max-turns", str(request.max_turns)])
+        # A turn cap bounds iterations; the cost is in the conversation resent every turn, which
+        # grows with the turn count. The dollar cap bounds that directly. The CLI stops the
+        # session and returns an error envelope, which the unwrap below refuses (D-025).
+        if request.max_budget_usd is not None:
+            argv.extend(["--max-budget-usd", f"{request.max_budget_usd:g}"])
         # Run artifacts live outside the checkout. Explicitly grant only that one additional
         # directory so workers can emit their requested JSON/Markdown without broad filesystem
         # write access. Claude's normal working-directory boundary still applies to repository
@@ -110,16 +116,29 @@ class ClaudeCliProvider:
         if tools:
             argv.extend(["--allowedTools", tool_names])
         env = self._worker_env(request.environment)
-        proc = subprocess.run(
-            argv,
-            cwd=request.cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=self.config.timeout_seconds,
-        )
+        started = time.monotonic()
+        try:
+            proc = subprocess.run(
+                argv,
+                cwd=request.cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.config.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # A timeout used to escape as a bare TimeoutExpired: no envelope, no telemetry, and
+            # the stage that most needed measuring recorded nothing. Name the role, the timeout
+            # and what the worker had printed so far; the turn cap is meant to fire before this.
+            elapsed = round(time.monotonic() - started, 1)
+            partial = exc.stdout if isinstance(exc.stdout, str) else (exc.stdout or b"").decode("utf-8", "replace")
+            raise RuntimeError(
+                f"agent worker timed out role={request.role!r} after {elapsed}s "
+                f"(timeout_seconds={self.config.timeout_seconds}, max_turns={request.max_turns}); "
+                f"partial output: {(partial or '').strip()[-1500:]}"
+            ) from exc
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
         if proc.returncode:
@@ -148,6 +167,8 @@ class ClaudeCliProvider:
             cost_usd=envelope.cost_usd,
             num_turns=envelope.num_turns,
             duration_ms=envelope.duration_ms,
+            cache_creation_input_tokens=envelope.cache_creation_input_tokens,
+            cache_read_input_tokens=envelope.cache_read_input_tokens,
         )
 
 
@@ -156,7 +177,8 @@ class ResultEnvelope:
 
     __slots__ = (
         "content", "session_id", "num_turns", "duration_ms", "cost_usd",
-        "input_tokens", "output_tokens", "subtype",
+        "input_tokens", "output_tokens", "cache_creation_input_tokens",
+        "cache_read_input_tokens", "subtype",
     )
 
     def __init__(self, raw: Mapping[str, Any]) -> None:
@@ -168,6 +190,11 @@ class ResultEnvelope:
         self.cost_usd = _optional_float(raw.get("total_cost_usd"))
         self.input_tokens = _optional_int(usage.get("input_tokens"))
         self.output_tokens = _optional_int(usage.get("output_tokens"))
+        # Whether each turn resends the whole conversation uncached, or the prefix is served
+        # from cache, decides what a turn cap is worth in money. These two fields answer it;
+        # dropping them was why the first telemetry could not (D-025).
+        self.cache_creation_input_tokens = _optional_int(usage.get("cache_creation_input_tokens")) or 0
+        self.cache_read_input_tokens = _optional_int(usage.get("cache_read_input_tokens")) or 0
         self.subtype = _optional_str(raw.get("subtype"))
 
     def telemetry(self) -> dict[str, Any]:
@@ -178,6 +205,8 @@ class ResultEnvelope:
             "total_cost_usd": self.cost_usd,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_creation_input_tokens": self.cache_creation_input_tokens,
+            "cache_read_input_tokens": self.cache_read_input_tokens,
             "subtype": self.subtype,
         }
 

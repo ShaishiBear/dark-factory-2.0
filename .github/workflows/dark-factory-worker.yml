@@ -190,7 +190,7 @@ jobs:
             timeout 180 claude --bare -p "Reply with exactly the word OK and nothing else." \
               --model "$model" --permission-mode dontAsk --tools "" \
               --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands \
-              --output-format json --max-turns 2 > /tmp/route-probe.json 2>/tmp/route-probe.err
+              --output-format json --max-turns 2 --max-budget-usd 1 > /tmp/route-probe.json 2>/tmp/route-probe.err
             set -e
             ok="$(python3 -c 'import json;d=json.load(open("/tmp/route-probe.json"));print("true" if d.get("is_error") is False and d.get("result") else "false")' 2>/dev/null || echo false)"
             test "$ok" = "true" || {

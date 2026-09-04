@@ -781,6 +781,27 @@
       "find": "        if isinstance(tail, str) and needle in tail.lower():",
       "replace": "        if isinstance(tail, str):",
       "why": "Any RED output would close a deferred repro, so the promised symptom would never actually have to appear."
+    },
+    {
+      "id": "provider-max-budget-not-passed",
+      "file": "factory_kernel/providers.py",
+      "find": "        if request.max_budget_usd is not None:\n            argv.extend([\"--max-budget-usd\", f\"{request.max_budget_usd:g}\"])\n",
+      "replace": "",
+      "why": "The dollar backstop would be configured and never reach the CLI; cost would be bounded only by the turn cap, which does not bound the resent conversation."
+    },
+    {
+      "id": "provider-timeout-swallowed",
+      "file": "factory_kernel/providers.py",
+      "find": "        except subprocess.TimeoutExpired as exc:\n",
+      "replace": "        except subprocess.TimeoutExpired as exc:\n            return AgentResult(provider_id=self.provider_id, model=model, content=\"\")\n",
+      "why": "A timed-out worker would be reported as a successful empty result instead of a failed stage."
+    },
+    {
+      "id": "worker-cap-exceeds-timeout",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "    \"implement\": 30,\n",
+      "replace": "    \"implement\": 120,\n",
+      "why": "A cap the subprocess timeout would cut off first is fiction; the stage would die without telemetry instead of stopping cleanly at its cap."
     }
   ]
 }
