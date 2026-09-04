@@ -21,25 +21,20 @@ jobs:
       - name: Install pinned CLI
         run: npm install -g @anthropic-ai/claude-code@2.1.245 && claude --version
 
-      - name: Probe 3
+      - name: Probe 4 - corrected base URL
         env:
-          KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set +e
-          redact() { sed -E 's/sk-or-[A-Za-z0-9_-]+/[REDACTED]/g; s/Bearer [A-Za-z0-9_-]+/Bearer [REDACTED]/g' | cut -c1-400; }
-          echo "=============== 1. glm via ANTHROPIC_AUTH_TOKEN, debug file"
-          ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 ANTHROPIC_AUTH_TOKEN="$KEY" timeout 120 claude --bare -p "Reply OK" --model z-ai/glm-5.3-flash --permission-mode dontAsk --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands --output-format json --debug-file /tmp/d1.log > /tmp/o1.json 2>/dev/null
-          echo "rc=$?"; python3 -c "import json;d=json.load(open('/tmp/o1.json'));print('result:',str(d.get('result'))[:600])"
-          echo "--- debug lines (status/error/http/model):"; grep -i -E 'status|error|http|model|401|403|404|400' /tmp/d1.log | redact | head -40
-          echo "=============== 2. glm via ANTHROPIC_API_KEY"
-          ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 ANTHROPIC_API_KEY="$KEY" timeout 120 claude --bare -p "Reply OK" --model z-ai/glm-5.3-flash --permission-mode dontAsk --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands --output-format json --debug-file /tmp/d2.log > /tmp/o2.json 2>/dev/null
-          echo "rc=$?"; python3 -c "import json;d=json.load(open('/tmp/o2.json'));print('is_error:',d.get('is_error'),'result:',str(d.get('result'))[:600])"
-          echo "--- debug lines:"; grep -i -E 'status|error|http|401|403|404|400' /tmp/d2.log | redact | head -30
-          echo "=============== 3. haiku via ANTHROPIC_API_KEY"
-          ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 ANTHROPIC_API_KEY="$KEY" timeout 120 claude --bare -p "Reply OK" --model anthropic/claude-haiku-4.5 --permission-mode dontAsk --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands --output-format json > /tmp/o3.json 2>/dev/null
-          echo "rc=$?"; python3 -c "import json;d=json.load(open('/tmp/o3.json'));print('is_error:',d.get('is_error'),'result:',str(d.get('result'))[:300])"
-          echo "=============== 4. curl ?beta=true with x-api-key / bearer"
-          for auth in "x-api-key: $KEY" "Authorization: Bearer $KEY"; do
-            curl -sS -o /tmp/r.json -w 'http=%{http_code}\n' -X POST 'https://openrouter.ai/api/v1/messages?beta=true' -H "$auth" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d '{"model":"z-ai/glm-5.3-flash","max_tokens":8,"messages":[{"role":"user","content":"ping"}]}'; head -c 200 /tmp/r.json | redact; echo
+          mkdir -p /tmp/art
+          for model in z-ai/glm-5.3-flash deepseek/deepseek-v4-pro-0813 anthropic/claude-haiku-4.5; do
+            echo "=============== $model (no tools)"
+            timeout 150 claude --bare -p "Reply with exactly the word OK and nothing else." --model "$model" --permission-mode dontAsk --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands --output-format json > /tmp/o.json 2>/tmp/e.txt
+            echo "rc=$?"; python3 -c "import json;d=json.load(open('/tmp/o.json'));print('is_error:',d.get('is_error'),'| result:',str(d.get('result'))[:200],'| api_ms:',d.get('duration_api_ms'),'| usage in:',d.get('usage',{}).get('input_tokens'))"
           done
-          echo "=============== 5. env the CLI honours?"; claude --help 2>/dev/null | grep -i -E 'api-key|auth|base-url|bearer' | head -5; true
+          echo "=============== glm with worker tools + add-dir, a Read of a real file"
+          echo "hello from the checkout" > /tmp/art/note.txt
+          timeout 150 claude --bare -p "Read the file /tmp/art/note.txt and reply with its exact contents." --model z-ai/glm-5.3-flash --permission-mode dontAsk --tools "Read,Glob,Grep,Write,Edit" --allowedTools "Read,Glob,Grep,Write,Edit" --add-dir /tmp/art --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands --output-format json > /tmp/o.json 2>/tmp/e.txt
+          echo "rc=$?"; python3 -c "import json;d=json.load(open('/tmp/o.json'));print('is_error:',d.get('is_error'),'| result:',str(d.get('result'))[:200],'| turns:',d.get('num_turns'))"
+          echo "=============== stderr sample"; head -c 400 /tmp/e.txt; echo
