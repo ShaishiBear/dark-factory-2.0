@@ -47,6 +47,7 @@ If the GitHub stop state cannot be read, the factory stops. An unreadable stop b
 |---|---|
 | Runtime policy | `.factory/kernel.json` |
 | Worker prompts | `.factory/prompts/*.md` |
+| Engineering methods injected per role (pinned text; workers load no plugins) | `.factory/methods/manifest.json`, `factory_kernel/methods.py` |
 | Lifecycle (the only executable lifecycle definition) | `.factory/evidence-spine.json` `required_claims`, closed in order by `scripts/factory_evidence_spine.py`, sequence enforced by `harness/merge_verify.py` |
 | Dispatch/build/validate/merge orchestration | `factory_kernel/runtime.py` |
 | Bounded triage + flood control | `factory_kernel/triage.py` |
@@ -193,6 +194,7 @@ Ordinary autonomous product PRs may not modify the machinery that judges them. `
 - `.factory/kernel.json`
 - `.factory/evidence-spine.json`
 - `.factory/prompts/`
+- `.factory/methods/`
 - `.factory/holdout/`
 - `harness/`
 - `scripts/factory_*`

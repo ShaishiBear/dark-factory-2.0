@@ -571,6 +571,34 @@
       "find": "            self._lease_heartbeat(\"touch\", issue_number, \"design-context\", paths, cwd=worktree.path)\n",
       "replace": "",
       "why": "A stage would run with no heartbeat, so a long context/design phase could be reaped as stale mid-build."
+    },
+    {
+      "id": "methods-injection-skipped",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "            methods=method_block(cwd, role),\n",
+      "replace": "",
+      "why": "Workers would run on the bare role prompt again while the documentation says they receive the pinned methods."
+    },
+    {
+      "id": "methods-manifest-unknown-role-accepted",
+      "file": "factory_kernel/methods.py",
+      "find": "            if role not in ROLE_TOOLS:\n                raise ValueError(f\"methods manifest names an unknown role {role!r} for {method_id}\")",
+      "replace": "            if False:\n                raise ValueError(f\"methods manifest names an unknown role {role!r} for {method_id}\")",
+      "why": "A typo in a role name would silently drop a method from every worker instead of refusing the run."
+    },
+    {
+      "id": "methods-empty-text-accepted",
+      "file": "factory_kernel/methods.py",
+      "find": "        if not path.read_text(encoding=\"utf-8\").strip():\n            raise ValueError(f\"method text is empty: {file_name}\")",
+      "replace": "        if False:\n            raise ValueError(f\"method text is empty: {file_name}\")",
+      "why": "An emptied method file would be injected as nothing and the worker would lose the discipline without any signal."
+    },
+    {
+      "id": "security-methods-directory-unprotected",
+      "file": "scripts/factory_security.py",
+      "find": "        or path.startswith(\".factory/methods/\")\n",
+      "replace": "",
+      "why": "An autonomous PR could rewrite the method text its own workers are judged against."
     }
   ]
 }

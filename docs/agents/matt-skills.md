@@ -1,16 +1,13 @@
-# Pinned Matt Pocock engineering skills
+# Engineering methods for factory workers
 
-The builder uses the real `mattpocock-skills` Claude plugin, not copied prompt fragments.
+Autonomous factory workers do **not** load the `mattpocock-skills` plugin, or any plugin. The kernel launches every model worker with `--bare`, an empty strict MCP configuration and slash commands disabled (`factory_kernel/providers.py`), so no project settings, hooks, plugins or skills reach it. That isolation is deliberate and is part of the trust root.
 
-Pinned upstream revision: `mattpocock/skills@0ab1b63a410a03d3627979a109c8695de27af954`.
+The engineering disciplines those skills describe reach workers as **plain, pinned instruction text** instead:
 
-`.claude/settings.json` registers that exact marketplace revision and enables `mattpocock-skills@mattpocock`. Plugin skills are invoked by their namespaced IDs such as `mattpocock-skills:tdd`.
+- `.factory/methods/manifest.json` lists each method, its source (`mattpocock/skills` at the pinned upstream revision `0ab1b63a410a03d3627979a109c8695de27af954`, `ponytail`, or `dark-factory`), how it was adapted, and which roles receive it.
+- `.factory/methods/*.md` holds the adapted text. `factory_kernel/methods.py` validates the manifest fail-closed and the kernel injects the matching text into each role's prompt between the role prompt and the run context.
+- The directory is protected by the security guard: only the human maintenance lane changes method text, and a change to it is a reviewed trust-root change.
 
-For a new headless factory host, install the project plugin once before dispatching work:
+`.claude/settings.json` still registers the Matt Pocock marketplace and enables the plugin. That configuration is for **interactive human sessions** in this checkout only. The factory never reads it, and there is no preflight for the plugin because the factory does not depend on it.
 
-```bash
-claude plugin marketplace add mattpocock/skills@0ab1b63a410a03d3627979a109c8695de27af954 --scope project
-claude plugin install mattpocock-skills@mattpocock --scope project
-```
-
-The workflow preflight fails closed if the plugin is absent. Updating the pinned SHA is an explicit reviewed dependency change.
+An earlier version of this file said the builder used the real plugin and that a preflight failed closed without it. Neither was true of autonomous execution; see `.factory/decisions.md` D-013.

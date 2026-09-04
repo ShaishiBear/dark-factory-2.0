@@ -68,7 +68,7 @@ The build path is `KernelRuntime.build_issue` in `factory_kernel/runtime.py`. It
 
 ### What a model worker can and cannot do
 
-- Workers run as fresh Claude Code CLI processes with `--bare`, an empty strict MCP configuration, slash commands disabled, a filtered environment, and an explicit tool list (`factory_kernel/worker_policy.py`). **No worker ever has Bash or Git.**
+- Workers run as fresh Claude Code CLI processes with `--bare`, an empty strict MCP configuration, slash commands disabled, a filtered environment, and an explicit tool list (`factory_kernel/worker_policy.py`). **No worker ever has Bash or Git.** They load no plugins, hooks or skills; the engineering methods a role follows (minimal complexity, deep-module design, vertical-slice implementation, red-loop diagnosis, the two review axes) are pinned text in `.factory/methods/` that the kernel injects into that role's prompt (`factory_kernel/methods.py`, manifest validated fail-closed).
 - `plan`, `investigate`, `contract`, `context`, `architecture`, `test_author`, `implement`, `review`, `repair`, `conformance` get `Read`, `Glob`, `Grep`, `Write`, `Edit`. Only `test_author`, `implement` and `repair` are permitted to leave the worktree dirty; every other role's run is rejected if it changed anything.
 - `triage`, `holdout`, `architecture-holdout` and the three certifiers get **no tools**.
 - **Build-side subprocesses hold no GitHub credentials, except the kernel's own lease heartbeat.** `scripts/factory_protocol.py` and `scripts/factory_proof.py` run with `credential_scope="none"`; `factory_proof.py` executes checkpoint commands the model authored, and additionally scrubs `GH_TOKEN`/`GITHUB_TOKEN` from that child. Only `KernelRuntime._lease_heartbeat`, which runs `scripts/factory_lease.py` after contract, context, RED, GREEN, final GREEN and PR handoff, holds GitHub scope. The two `attach` programs keep GitHub scope to edit the PR body and run nothing model-authored. An AST test (`tests/factory/test_factory_lease_authority.py`) pins every call site.
@@ -170,7 +170,7 @@ There is no separate periodic regression job on `main` (section 13).
 
 - `factory_kernel/**` — dispatch, build, validate, merge authority
 - `.factory/kernel.json`, `.factory/evidence-spine.json`, `.factory/architecture.json`, `.factory/locks/floor.json`
-- `.factory/prompts/**`, `.factory/holdout/**`, `.factory/benchmark/**`
+- `.factory/prompts/**`, `.factory/methods/**`, `.factory/holdout/**`, `.factory/benchmark/**`
 - `harness/**` — canonical gate, E2E journey, mutation suites, immunity registry, merge verification
 - `scripts/factory_*`, `scripts/frontier_filter.py`
 - `tests/factory/**` — the factory's own detectors; weakening a detector is weakening the judge

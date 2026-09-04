@@ -53,6 +53,7 @@ class SecurityGuardTests(unittest.TestCase):
             ".factory/kernel.json",
             ".factory/evidence-spine.json",
             ".factory/prompts/implement.md",
+            ".factory/methods/manifest.json",
             ".factory/holdout/run.py",
             ".factory/benchmark/public.json",
             "harness/ci.py",
