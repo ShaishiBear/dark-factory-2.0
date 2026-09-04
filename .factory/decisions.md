@@ -417,3 +417,31 @@ Not chosen: the ruleset's require-branches-up-to-date setting. It would make eve
 PR rebase after each merge and re-run every gate on each advance of `main`; the factory merges
 many small PRs and that serialisation would cost more than the stall it prevents. A merge
 queue remains a future option if PR volume ever makes rebases the bottleneck.
+
+---
+
+## D-019 · A model-authored repro is bounded by shape, environment and an unchanged tree
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+D-015 made a bug go red under kernel execution before it is contracted. Review of that change
+found the boundary around the executed command was a program-name allowlist: `python`, `uv`,
+`bun`, `npx`, `pytest`. `python -c` is arbitrary code, so that was no boundary. The child
+environment was the parent's minus two GitHub tokens, so `OPENROUTER_API_KEY`,
+`SUPADATA_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and the validation credentials all reached the
+command. And the command ran in the builder worktree with nothing checking that the tree was
+unchanged before the contract worker read it.
+
+Three bounds replace the name list. The argv must start with one of the repository's test
+runners (`pytest`, `python -m pytest`, `uv run pytest`, `uv run python -m pytest`, `bun test`,
+`bun run test`, `bunx vitest run`) and every further argument is refused if it is an eval or
+exec flag, contains a shell metacharacter, is an absolute path or escapes the checkout. The
+environment is built from an allowlist of eleven benign names plus one synthetic variable, so
+the next secret added to the worker is withheld by construction. The kernel compares
+`git status --porcelain --untracked-files=all` before and after and escalates on any change.
+
+What this does not claim: a test file the command selects can still run arbitrary code. The
+bounds limit what that code can reach (the checkout, CPU for the timeout, stdout) and what it
+can leave behind (nothing). The command's output is evidence of what it printed and how it
+exited, not a trusted judgement. Six mutations attack the three bounds; IMM-013 records the
+class.

@@ -629,13 +629,6 @@
       "why": "Only the Spec reviewer would run; the Standards artifact would be stale or absent."
     },
     {
-      "id": "repro-allowlist-removed",
-      "file": "factory_kernel/repro.py",
-      "find": "    if program not in ALLOWED_PROGRAMS or program != argv[0]:",
-      "replace": "    if False:",
-      "why": "A model-authored repro could name any program, including a shell, and the kernel would execute it."
-    },
-    {
       "id": "repro-passing-command-accepted",
       "file": "factory_kernel/repro.py",
       "find": "    if proc.returncode == 0:\n        raise ReproRefused(\"repro passed; a bug that does not go red cannot be contracted\")",
@@ -683,6 +676,48 @@
       "find": "    if sorted(b[\"issue\"] for b in blockers) != named:\n",
       "replace": "    if False:\n",
       "why": "A snapshot omitting a named blocker would be accepted, so an open blocker could be hidden from the frontier decision."
+    },
+    {
+      "id": "repro-env-denylist-inherits-openrouter-secret",
+      "file": "factory_kernel/repro.py",
+      "find": "    child = {key: base[key] for key in REPRO_ENV_KEYS if key in base and base[key]}",
+      "replace": "    child = {key: value for key, value in base.items() if key not in (\"GH_TOKEN\", \"GITHUB_TOKEN\")}",
+      "why": "The child environment would be built by denylist again; OPENROUTER_API_KEY, SUPADATA_API_KEY and every provider credential the worker holds would reach a model-authored command."
+    },
+    {
+      "id": "repro-env-forwards-validation-credentials",
+      "file": "factory_kernel/repro.py",
+      "find": "    child.update(REPRO_ENV_SYNTHETIC)\n    return child",
+      "replace": "    child.update(REPRO_ENV_SYNTHETIC)\n    child.update({k: base[k] for k in (\"SUPADATA_API_KEY\", \"OPENROUTER_API_KEY\", \"DATABASE_URL\") if k in base})\n    return child",
+      "why": "A validation credential would be re-added to the allowlisted child environment under the guise of a synthetic variable."
+    },
+    {
+      "id": "repro-python-c-accepted",
+      "file": "factory_kernel/repro.py",
+      "find": "    shape = matched_shape(tuple(argv))\n    if shape is None:",
+      "replace": "    shape = matched_shape(tuple(argv)) or (argv[0],)\n    if False:",
+      "why": "Any program with any arguments, including python -c, would be executed as a repro."
+    },
+    {
+      "id": "repro-npx-accepted",
+      "file": "factory_kernel/repro.py",
+      "find": "    (\"bun\", \"x\", \"vitest\", \"run\"),\n)",
+      "replace": "    (\"bun\", \"x\", \"vitest\", \"run\"),\n    (\"npx\",),\n    (\"python\",),\n)",
+      "why": "npx and bare python would return to the shape list, turning the allowlist back into arbitrary process capability."
+    },
+    {
+      "id": "repro-eval-flags-unchecked",
+      "file": "factory_kernel/repro.py",
+      "find": "    if arg in EVAL_FLAGS or arg.split(\"=\", 1)[0] in EVAL_FLAGS:",
+      "replace": "    if False:",
+      "why": "python -m pytest -c <file> or bun run test -e <code> would evaluate model-supplied text."
+    },
+    {
+      "id": "repro-may-dirty-worktree",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if before != after:\n            raise NeedsHuman(\"bug repro refused: repro modified the worktree\")",
+      "replace": "        if False:\n            raise NeedsHuman(\"bug repro refused: repro modified the worktree\")",
+      "why": "A repro that edits a source file and then prints the symptom would contaminate what the contract worker reads next."
     }
   ]
 }

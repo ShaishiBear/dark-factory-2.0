@@ -23,7 +23,8 @@ PROMPT = ROOT / ".factory" / "prompts" / "investigate.md"
 
 
 def good(**over):
-    base = {"version": "1.0", "argv": ["python", "-c", "x"], "cwd": ".", "expect_failure_containing": "boom happened"}
+    base = {"version": "1.0", "argv": ["pytest", "tests/test_x.py"], "cwd": ".",
+            "expect_failure_containing": "boom happened"}
     base.update(over)
     return base
 
@@ -31,13 +32,14 @@ def good(**over):
 class ValidationTests(unittest.TestCase):
     def test_valid_repro_loads(self):
         rp = r.validate_repro(good())
-        self.assertEqual(rp.argv[0], "python")
+        self.assertEqual(rp.argv[0], "pytest")
         self.assertEqual(rp.expect_failure_containing, "boom happened")
 
-    def test_program_must_be_allowlisted_bare_name(self):
-        for prog in ("bash", "sh", "/usr/bin/python", "python3", "./run.sh", "curl"):
-            with self.subTest(prog=prog), self.assertRaisesRegex(r.ReproRefused, "allowlisted"):
-                r.validate_repro(good(argv=[prog, "x"]))
+    def test_command_must_match_an_allowlisted_shape(self):
+        for argv in (["bash", "x"], ["sh", "-c", "x"], ["/usr/bin/python", "-m", "pytest"],
+                     ["python3", "-m", "pytest"], ["./run.sh"], ["curl", "http://x"]):
+            with self.subTest(argv=argv), self.assertRaisesRegex(r.ReproRefused, "shape"):
+                r.validate_repro(good(argv=argv))
 
     def test_symptom_and_argv_shape_are_required(self):
         with self.assertRaisesRegex(r.ReproRefused, "symptom"):
@@ -45,7 +47,7 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(r.ReproRefused, "argv"):
             r.validate_repro(good(argv=[]))
         with self.assertRaisesRegex(r.ReproRefused, "control"):
-            r.validate_repro(good(argv=["python", "-c", "x\nimport os"]))
+            r.validate_repro(good(argv=["pytest", "tests/x.py\nimport os"]))
 
     def test_cwd_must_stay_inside_the_checkout(self):
         for cwd in ("/etc", "../other", "C:\\x", "app/../../x"):
@@ -61,19 +63,21 @@ class ValidationTests(unittest.TestCase):
                 r.load_repro(Path(tmp) / "repro.json")
 
 
+def fake_pytest_runner(exit_code: int, output: str):
+    """Stand in for the test runner the shape names: the kernel only sees rc and output."""
+
+    def run(argv, cwd, env, timeout):
+        return subprocess.CompletedProcess(list(argv), exit_code, output, "")
+
+    return run
+
+
 class ExecutionTests(unittest.TestCase):
-    """Real subprocesses: the allowlisted `python` is the interpreter running these tests only
-    when it is on PATH as `python`; the runner is injected so the assertions do not depend on that."""
-
-    def real_python_runner(self, argv, cwd, env, timeout):
-        return subprocess.run([sys.executable, *argv[1:]], cwd=cwd, env=env, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace", timeout=timeout)
-
     def test_failing_repro_with_symptom_is_observed(self):
         with tempfile.TemporaryDirectory() as tmp:
             wt = Path(tmp)
-            rp = r.validate_repro(good(argv=["python", "-c", "import sys; print('boom happened'); sys.exit(3)"]))
-            obs = r.execute(rp, worktree=wt, runner=self.real_python_runner)
+            rp = r.validate_repro(good())
+            obs = r.execute(rp, worktree=wt, runner=fake_pytest_runner(3, "FAILED boom happened"))
             self.assertEqual(obs.rc, 3)
             self.assertEqual(obs.matched_symptom, "boom happened")
             self.assertIn("boom happened", obs.output_tail)
@@ -84,21 +88,21 @@ class ExecutionTests(unittest.TestCase):
 
     def test_passing_repro_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
-            rp = r.validate_repro(good(argv=["python", "-c", "print('boom happened')"]))
+            rp = r.validate_repro(good())
             with self.assertRaisesRegex(r.ReproRefused, "does not go red"):
-                r.execute(rp, worktree=Path(tmp), runner=self.real_python_runner)
+                r.execute(rp, worktree=Path(tmp), runner=fake_pytest_runner(0, "boom happened"))
 
     def test_failing_repro_without_the_symptom_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
-            rp = r.validate_repro(good(argv=["python", "-c", "import sys; print('other'); sys.exit(1)"]))
+            rp = r.validate_repro(good())
             with self.assertRaisesRegex(r.ReproRefused, "named symptom"):
-                r.execute(rp, worktree=Path(tmp), runner=self.real_python_runner)
+                r.execute(rp, worktree=Path(tmp), runner=fake_pytest_runner(1, "other"))
 
     def test_cwd_outside_worktree_is_refused_at_execution(self):
         with tempfile.TemporaryDirectory() as tmp:
-            rp = r.Repro(argv=("python", "-c", "x"), expect_failure_containing="boom", cwd="missing-dir")
+            rp = r.Repro(argv=("pytest", "x"), expect_failure_containing="boom", cwd="missing-dir")
             with self.assertRaisesRegex(r.ReproRefused, "outside the worktree or missing"):
-                r.execute(rp, worktree=Path(tmp), runner=self.real_python_runner)
+                r.execute(rp, worktree=Path(tmp), runner=fake_pytest_runner(1, "boom"))
 
     def test_child_env_holds_no_github_credentials(self):
         seen = {}
@@ -163,6 +167,7 @@ class KernelWiringTests(unittest.TestCase):
 
         rt = KernelRuntime.__new__(KernelRuntime)
         rt._write_json = lambda path, value: Path(path).write_text(json.dumps(value), encoding="utf-8")
+        rt._git = lambda *args, cwd=None: ""  # a clean, unchanging worktree
         with tempfile.TemporaryDirectory() as tmp:
             artifacts = Path(tmp) / "a"; artifacts.mkdir()
             wt = Path(tmp) / "wt"; wt.mkdir()
@@ -170,18 +175,21 @@ class KernelWiringTests(unittest.TestCase):
                 rt._observe_repro(artifacts, wt, runner=lambda *a: None)
             (artifacts / "repro.json").write_text(json.dumps(good()), encoding="utf-8")
             with self.assertRaisesRegex(NeedsHuman, "does not go red"):
-                rt._observe_repro(artifacts, wt, runner=lambda argv, cwd, env, t: subprocess.CompletedProcess(argv, 0, "boom happened", ""))
-            ctx = rt._observe_repro(artifacts, wt, runner=lambda argv, cwd, env, t: subprocess.CompletedProcess(argv, 2, "boom happened", ""))
+                rt._observe_repro(artifacts, wt, runner=fake_pytest_runner(0, "boom happened"))
+            ctx = rt._observe_repro(artifacts, wt, runner=fake_pytest_runner(2, "boom happened"))
             self.assertIn("REPRO OBSERVED", ctx)
             rec = json.loads((artifacts / "repro-observed.json").read_text(encoding="utf-8"))
             self.assertEqual(rec["rc"], 2)
 
     @unittest.skipUnless(PROMPT.exists(), "repo-shaped copy without prompts (mutation runner)")
-    def test_prompt_requires_the_repro_block(self):
+    def test_prompt_names_the_allowed_shapes(self):
         text = PROMPT.read_text(encoding="utf-8")
         self.assertIn("repro.json", text)
         self.assertIn("expect_failure_containing", text)
-        self.assertIn("`python`, `uv`, `bun`, `npx`, `pytest`", text)
+        for shape in r.ALLOWED_SHAPES[:3]:
+            self.assertIn(" ".join(shape), text)
+        self.assertNotIn("`argv[0]` must be one of", text, "the old program-name allowlist wording")
+        self.assertIn("`python -c`, `npx`", text, "the prompt must say these are refused")
 
 
 if __name__ == "__main__":

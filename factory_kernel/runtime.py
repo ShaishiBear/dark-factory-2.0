@@ -505,12 +505,22 @@ class KernelRuntime:
         return result
 
     def _observe_repro(self, artifacts: Path, worktree: Path, *, runner=default_runner) -> str:
-        """Execute the investigate worker's repro; refuse unless it goes red for the named reason."""
+        """Execute the investigate worker's repro; refuse unless it goes red for the named reason.
+
+        The repro is model-authored and runs inside the builder's worktree, which the contract
+        worker reads next. The worktree must therefore be byte-identical before and after
+        (tracked and untracked files alike): a repro that edits a source file and then prints
+        the symptom would otherwise contaminate every later reasoning stage.
+        """
         try:
             repro = load_repro(artifacts / REPRO_ARTIFACT)
+            before = self._git("status", "--porcelain", "--untracked-files=all", cwd=worktree)
             observation = execute(repro, worktree=worktree, runner=runner)
+            after = self._git("status", "--porcelain", "--untracked-files=all", cwd=worktree)
         except ReproRefused as exc:
             raise NeedsHuman(f"bug repro refused: {exc}") from exc
+        if before != after:
+            raise NeedsHuman("bug repro refused: repro modified the worktree")
         record = observed_record(repro, observation)
         self._write_json(artifacts / OBSERVED_ARTIFACT, record)
         return "REPRO OBSERVED (kernel-executed, deterministic):\n" + json.dumps(

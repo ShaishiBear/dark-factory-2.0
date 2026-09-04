@@ -2,9 +2,29 @@
 
 A root cause proposed before the failure has been seen going red is a guess. The investigate
 worker cannot run commands, so it proposes the smallest repro and names the symptom; the kernel
-executes it here, deterministically, with no shell, no credentials and an allowlisted program,
-and refuses to continue unless the command fails and its output shows the named symptom. Only
-then does the contract stage see the investigation.
+executes it here, deterministically, and refuses to continue unless the command fails and its
+output shows the named symptom. Only then does the contract stage see the investigation.
+
+What bounds a model-authored command here, and what does not:
+
+* **Command shapes, not program names.** The argv must match one of `ALLOWED_SHAPES` -- the
+  repository's own test runners (`pytest`, `python -m pytest`, `uv run pytest`, `bun test`,
+  `bun run test`, `bunx vitest run`). "python is allowlisted" was not a boundary: `python -c`
+  is arbitrary code. Interpreter-eval flags, shell metacharacters, absolute paths and `..` are
+  refused in every argument. This is a shape allowlist, not a sandbox: a test file the command
+  selects can still execute arbitrary Python or TypeScript.
+* **An environment built from scratch.** `repro_env` forwards only the names in `REPRO_ENV_KEYS`
+  (PATH, HOME, temp dirs, locale, PYTHONPATH) and sets `PYTHONDONTWRITEBYTECODE`. Nothing else
+  from the parent reaches the child, so a new secret added to the worker's environment is
+  withheld by construction rather than by a denylist someone must remember to extend.
+* **A clean-tree guard around the run.** The kernel compares `git status` before and after the
+  repro (`KernelRuntime._observe_repro`) and escalates if anything in the worktree changed, so a
+  repro cannot rewrite what the contract worker reads next.
+* **No shell, confined cwd, bounded time and output.**
+
+Together these bound the damage of a hostile or careless repro to: reading the checkout, using
+the runner's CPU for `timeout` seconds, and printing. They do not make the command trusted; its
+output is evidence only of what it printed and its exit status.
 """
 from __future__ import annotations
 
@@ -13,16 +33,38 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 from typing import Callable, Mapping
 
-from .credential_env import GITHUB_CREDENTIALS
-
 REPRO_ARTIFACT = "repro.json"
 OBSERVED_ARTIFACT = "repro-observed.json"
-ALLOWED_PROGRAMS: frozenset[str] = frozenset({"python", "uv", "bun", "npx", "pytest"})
 MAX_ARGV = 40
 MAX_OUTPUT_CHARS = 200_000
+
+# Each shape is the exact argv prefix a repro must start with. The remainder is test-selection
+# arguments, checked word by word by `_refuse_dangerous_argument`.
+ALLOWED_SHAPES: tuple[tuple[str, ...], ...] = (
+    ("pytest",),
+    ("python", "-m", "pytest"),
+    ("uv", "run", "pytest"),
+    ("uv", "run", "python", "-m", "pytest"),
+    ("bun", "test"),
+    ("bun", "run", "test"),
+    ("bunx", "vitest", "run"),
+    ("bun", "x", "vitest", "run"),
+)
+
+# Flags that turn a test runner into an interpreter, or interpreter flags that evaluate text.
+EVAL_FLAGS: frozenset[str] = frozenset({"-c", "-e", "--eval", "-x", "--exec", "exec", "-p", "--print"})
+SHELL_METACHARACTERS = re.compile(r"[;|&<>`]|\$\(")
+
+# The only names a model-authored command may inherit from the kernel's environment.
+REPRO_ENV_KEYS: tuple[str, ...] = (
+    "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TERM", "CI", "NO_COLOR",
+    "PYTHONPATH",
+)
+REPRO_ENV_SYNTHETIC: dict[str, str] = {"PYTHONDONTWRITEBYTECODE": "1"}
 
 
 class ReproRefused(ValueError):
@@ -54,6 +96,26 @@ def load_repro(path: Path) -> Repro:
     return validate_repro(raw)
 
 
+def matched_shape(argv: tuple[str, ...]) -> tuple[str, ...] | None:
+    for shape in ALLOWED_SHAPES:
+        if tuple(argv[: len(shape)]) == shape:
+            return shape
+    return None
+
+
+def _refuse_dangerous_argument(arg: str) -> None:
+    if any(ch in arg for ch in ("\n", "\r", "\x00")):
+        raise ReproRefused("repro argv contains control characters")
+    if arg in EVAL_FLAGS or arg.split("=", 1)[0] in EVAL_FLAGS:
+        raise ReproRefused(f"repro argv contains an eval/exec flag: {arg!r}")
+    if SHELL_METACHARACTERS.search(arg):
+        raise ReproRefused(f"repro argv contains a shell metacharacter: {arg!r}")
+    if arg.startswith(("/", "\\", "~")) or (len(arg) > 1 and arg[1] == ":"):
+        raise ReproRefused(f"repro argv contains an absolute path: {arg!r}")
+    if ".." in Path(arg).parts:
+        raise ReproRefused(f"repro argv escapes the checkout: {arg!r}")
+
+
 def validate_repro(raw: object) -> Repro:
     if not isinstance(raw, Mapping) or raw.get("version") != "1.0":
         raise ReproRefused("repro.json must be a version 1.0 object")
@@ -62,12 +124,15 @@ def validate_repro(raw: object) -> Repro:
         raise ReproRefused("repro argv must be a non-empty list")
     if not all(isinstance(a, str) and a.strip() for a in argv):
         raise ReproRefused("repro argv entries must be non-empty strings")
-    program = os.path.basename(argv[0])
-    if program not in ALLOWED_PROGRAMS or program != argv[0]:
-        raise ReproRefused(f"repro program is not allowlisted: {argv[0]!r}")
-    for arg in argv[1:]:
-        if any(ch in arg for ch in ("\n", "\r", "\x00")):
-            raise ReproRefused("repro argv contains control characters")
+    shape = matched_shape(tuple(argv))
+    if shape is None:
+        raise ReproRefused(
+            "repro command shape is not allowlisted: "
+            + " ".join(argv[:4])
+            + " (allowed: " + "; ".join(" ".join(s) for s in ALLOWED_SHAPES) + ")"
+        )
+    for arg in argv[len(shape):]:
+        _refuse_dangerous_argument(arg)
     symptom = raw.get("expect_failure_containing")
     if not isinstance(symptom, str) or len(symptom.strip()) < 4:
         raise ReproRefused("repro must name a symptom of at least four characters")
@@ -79,10 +144,12 @@ def validate_repro(raw: object) -> Repro:
     return Repro(argv=tuple(argv), expect_failure_containing=symptom.strip(), cwd=cwd.strip())
 
 
-def scrubbed_env(source: Mapping[str, str] | None = None) -> dict[str, str]:
-    """No GitHub credentials reach a model-authored command, whatever the parent holds."""
+def repro_env(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Build the child environment from an allowlist; nothing else from the parent reaches it."""
     base = dict(os.environ if source is None else source)
-    return {k: v for k, v in base.items() if k not in GITHUB_CREDENTIALS}
+    child = {key: base[key] for key in REPRO_ENV_KEYS if key in base and base[key]}
+    child.update(REPRO_ENV_SYNTHETIC)
+    return child
 
 
 Runner = Callable[[tuple[str, ...], Path, dict[str, str], int], subprocess.CompletedProcess]
@@ -101,7 +168,7 @@ def execute(repro: Repro, *, worktree: Path, timeout: int = 600, runner: Runner 
     if worktree.resolve() not in (cwd, *cwd.parents) or not cwd.is_dir():
         raise ReproRefused(f"repro cwd is outside the worktree or missing: {repro.cwd}")
     try:
-        proc = runner(repro.argv, cwd, scrubbed_env(), timeout)
+        proc = runner(repro.argv, cwd, repro_env(), timeout)
     except subprocess.TimeoutExpired as exc:
         raise ReproRefused(f"repro timed out after {timeout}s") from exc
     except OSError as exc:

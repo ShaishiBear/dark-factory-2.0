@@ -362,6 +362,33 @@
           "value": "or path.startswith(\".factory/methods/\")"
         }
       ]
+    },
+    {
+      "id": "IMM-013",
+      "status": "active",
+      "source": {
+        "kind": "audit",
+        "ref": "2026-09-04-allowlisted-program-name-treated-as-a-sandbox"
+      },
+      "failure_class": "an allowlisted program name treated as a sandbox for model-authored commands",
+      "lesson": "The repro loop accepted any argv whose program was one of python/uv/bun/npx/pytest, built the child environment by removing two GitHub tokens from the parent's, and ran inside the builder worktree with no check that the tree was unchanged afterwards. python -c is arbitrary code; a denylist misses every secret added later; and a repro that edits a file then prints the symptom rewrites what the next stage reads. A model-authored command is bounded by command shapes (test runners only, no eval flags, no metacharacters, no absolute paths), an environment built from an allowlist, and a byte-identical worktree before and after. None of that makes the command trusted; it bounds the damage to reading and printing.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/repro.py",
+          "value": "ALLOWED_SHAPES: tuple[tuple[str, ...], ...] = ("
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/repro.py",
+          "value": "child = {key: base[key] for key in REPRO_ENV_KEYS if key in base and base[key]}"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "raise NeedsHuman(\"bug repro refused: repro modified the worktree\")"
+        }
+      ]
     }
   ]
 }
