@@ -90,7 +90,7 @@ The build path is `KernelRuntime.build_issue` in `factory_kernel/runtime.py`. It
 
 1. **Never modify acceptance tests to make them pass.** They are RED-hashed; the design envelope refuses the commit. If a test is wrong, the contract was wrong: the run escalates and a human fixes the issue text.
 2. **Never touch a protected file** (section 5). The security guard refuses the PR.
-3. **Never change dependencies without justification.** A manifest change requires its lockfile in the same PR, a registry source (no git/URL/path dependencies), and a PR-body heading titled exactly `## Dependency justification` naming each added or version-changed package. `scripts/factory_security.py` fails the PR otherwise. Since the kernel writes the PR body, a factory PR that needs a new dependency cannot currently pass this rule; treat "needs a new dependency" as a human-lane task.
+3. **Never change dependencies without justification.** A manifest change requires its lockfile in the same PR, a registry source (no git/URL/path dependencies), and a PR-body heading titled exactly `## Dependency justification` naming each added or version-changed package. `scripts/factory_security.py` fails the PR otherwise. Since the kernel writes the PR body, a factory PR that needs a new dependency cannot currently pass this rule; treat "needs a new dependency" as a human-lane task (tracked in issue #39).
 4. **Never declare success without the deterministic authorities.** The build cannot reach a PR without RED, GREEN, review, conformance, the final proof and the quick gate.
 5. **Never write outside the compiled design.** The design envelope refuses the commit. If the design was wrong, the run escalates; the worker does not widen it.
 6. **Never commit secrets, API keys, tokens, or `.env` files.** The security guard scans every added line for high-confidence secret patterns and refuses `.env*` paths.
@@ -111,7 +111,7 @@ The build path is `KernelRuntime.build_issue` in `factory_kernel/runtime.py`. It
 Validation is `KernelRuntime.validate_pr`. It starts from the exact PR head SHA in a fresh detached worktree with frozen dependencies, and it re-derives everything; it does not trust the builder's narrative, the PR description, or prior review discussion. A merge is authorized only when **every** step below is true, in this order:
 
 1. **Preconditions.** Emergency stop is clear (section 8). The PR is open and carries `factory:needs-review`. Head and base are exact commit IDs.
-2. **Deterministic security guard.** `scripts/factory_security.py --pr N` passes: no protected path (for autonomous PRs), no secret pattern in added lines, lockfile coupled to manifest, registry-only dependency sources, named dependency justification.
+2. **Deterministic security guard, base-anchored.** `scripts/factory_security.py --pr N --trusted-base --expect-head <head>` runs from the kernel's `main` checkout, never from the PR-head worktree, and passes: no protected path (for autonomous PRs), no secret pattern in added lines, lockfile coupled to manifest, registry-only dependency sources, named dependency justification.
 3. **Attached evidence parses.** The PR body carries valid `factory-contract` and `factory-proof` fenced blocks. Missing or malformed → escalate.
 4. **Blinded code holdout passes.** A model with no tools, running in an empty temporary directory outside the source checkout, is shown only the contract, changed-file list, diff and proof summary, and must return `pass`.
 5. **Provenance pack verifies.** `scripts/factory_provenance.py fetch` retrieves the builder's published contract, context, design, governor verdict, proofs, impact and conformance artifacts, and `verify_pack` binds them to the expected head, base and issue. This is the only step that reads builder-produced artifacts, and it reads them in order to verify them, not to believe them.
@@ -120,7 +120,7 @@ Validation is `KernelRuntime.validate_pr`. It starts from the exact PR head SHA 
 8. **Evidence spine closes.** `scripts/factory_evidence_spine.py` runs the core Evidence Bundle v5 (`scripts/factory_evidence.py`): trust-root touch/drift check, contract revalidation, security result, independent RED reconstruction and replay, GREEN replay, architecture policy/bindings recomputed, and the **full canonical harness** (`python harness/ci.py`: static, unit, real browser E2E, protected holdouts, application mutations) reaching `GATE_OK mode=full`. It then re-observes factory trust-root mutations and the immunity registry, re-verifies the provenance pack, loads the certificates, and closes all claims in `.factory/evidence-spine.json`. Ratchet floors in `.factory/locks/floor.json` must hold, and the head must not have moved.
 9. **Merge pre-authorization.** `harness/merge_verify.py pre` re-derives every claim's deterministic and independent hashes from protected policy, requires independent evidence to differ from deterministic evidence, binds to the exact head, and requires the base to be an ancestor of the head.
 10. **Second emergency-stop check**, immediately before the irreversible action.
-11. **Squash merge with expected head:** `gh pr merge --squash --match-head-commit <head>` after re-reading the head. Squash only.
+11. **Squash merge with expected head:** `gh pr merge --squash --match-head-commit <head>` after re-reading the head. Squash only. GitHub accepts this only because the ruleset's required checks (`trust-root-authority`, `quick-authority`) are green on that exact head; the kernel is not a bypass actor.
 12. **Post-merge exact-tree verification.** `harness/merge_verify.py post` confirms GitHub reports the expected merge commit, it is on `origin/main`, it has exactly one parent equal to the evidenced base, and its tree is byte-identical to the authorized head tree.
 13. **Post-merge validation on `main`.** `harness/post_merge.py` builds a fresh worktree at the merge commit with fresh locked dependencies, re-runs the full harness, and requires at least one observed E2E step.
 
@@ -158,7 +158,7 @@ There is no separate periodic regression job on `main` (section 13).
 
 ## 5. Protected Files (Auto-Reject on Any Modification)
 
-`scripts/factory_security.py` runs on every PR as the required `quick-authority` check and inside validation. For an **autonomous** PR, any of the following paths in the diff is a hard fail with no fix attempt. This list is the code's list; if they ever disagree, the code is wrong and this file must be corrected through section 12.
+`scripts/factory_security.py` judges every PR three times: as the required `trust-root-authority` check, running **from the base branch** (`.github/workflows/dark-factory-trust-root.yml`, a `pull_request_target` workflow that checks out `github.sha` and never the PR head); as a defence-in-depth step of the head-based `quick-authority` check; and inside kernel validation, from the kernel's `main` checkout. The first is the authority. For an **autonomous** PR, any of the following paths in the diff is a hard fail with no fix attempt. This list is the code's list; if they ever disagree, the code is wrong and this file must be corrected through section 12.
 
 ### Governance (the constitution)
 
@@ -211,7 +211,19 @@ The protected files are the factory's judge. Two authorities exist, and the secu
 
 The factory can never grant itself authority to change its judge. Humans can maintain the judge, and human maintenance remains observable and tested: the lane has regression tests in `tests/factory/test_factory_security.py` and trust-root mutations in `harness/factory_mutations/defects.json` that attempt to weaken the distinction.
 
-**Known limit.** `quick-authority` checks out the exact PR head and runs the guard from that head, so a PR that changes the guard is judged by its own copy. For autonomous PRs the primary barrier is therefore the kernel's commit envelope (section 2), which never lets a factory commit carry a trust-root file; the guard is the second barrier. Moving the guard to a base-anchored check is an open item (section 13).
+### The judge runs from `main`
+
+A PR that changes `scripts/factory_security.py`, or the workflow that invokes it, is judged by the copies already on `main`. `trust-root-authority` is a `pull_request_target` job: GitHub executes the workflow definition from the base branch, the job checks out the base tip (`github.sha`), asserts it is not the PR head and is on `origin/main`, fetches the PR head as an object, and runs the guard in `--trusted-base` mode bound to the event's base and head. The guard refuses to run from the PR head, refuses if base or head moved, and refuses if the fetched head is not the head GitHub reports. The kernel's own validator runs the same mode from its `main` checkout. The head-based `quick-authority` guard step remains as defence in depth and grants nothing.
+
+### Unattended merge
+
+No routine merge is a click. Merge permission is the `main-protection` ruleset: pull request, linear history, `trust-root-authority` and `quick-authority` green on the exact head, empty bypass list.
+
+- **Maintainer-lane PRs** are armed for GitHub auto-merge by the `unattended-merge` job of the trust-root workflow, which runs only when the trusted verdict is `pass`, the lane is `human-maintenance`, and `scripts/factory-stop.sh` reports no stop. It executes one GraphQL mutation with no checkout: `enablePullRequestAutoMerge(expectedHeadOid: <judged head>, mergeMethod: SQUASH)`. GitHub refuses if the head differs, and squash-merges only once every required check is green on that head. A later push re-runs the workflow against the new head.
+- **Autonomous PRs** are never armed. The guard computes `unattended_merge_eligible = lane == human-maintenance and verdict == pass` from `main`; the kernel merges autonomous PRs only after the evidence ladder (section 3), with `--match-head-commit`.
+- **Stop button.** With a stop active, maintainer PRs are still judged but not armed; a human may still merge manually if the checks are green.
+- **Failure.** A red required check blocks every merge of that head for everyone. An armed auto-merge on an earlier head cannot merge a later head whose checks are red.
+- **What lands.** The squash commit carries the judged head's tree when `main` has not moved; if `main` moved, GitHub produces the three-way result, exactly as a manual merge would (the ruleset does not require branches to be up to date). Post-merge full-harness validation runs only for autonomous merges (section 3 step 13); maintainer merges are verified by the head's required checks (section 13).
 
 ---
 
@@ -365,7 +377,7 @@ When you want to change factory behavior:
 
 1. Edit this file on a branch. If the change describes behavior, change the code in the same PR; this file must not promise what the kernel does not do.
 2. Open a pull request to `main` from your own GitHub account; every commit must be attributable to a GitHub user account.
-3. Wait for `quick-authority` to pass, then merge.
+3. Do nothing else. When `trust-root-authority` (from `main`) and `quick-authority` (from the head) are green, the PR merges itself (section 5, "Unattended merge").
 4. The next scheduled worker run reads the new rules (every stage re-reads the file at the start of each run).
 
 There is no need to restart anything. The rules are read at run start, not cached globally.
@@ -381,7 +393,8 @@ Rules earlier versions of this file stated that have **no implementation** today
 - **No validation-side fix loop.** `factory:needs-fix` is applied and never read by the kernel (only the lease reaper treats it as a handoff marker). A failed PR is superseded by a fresh build, not repaired.
 - **No periodic regression on `main`.** The full harness runs only inside the worker dispatch that performs a merge (validation and post-merge). There is no weekly comprehensive job and no auto-filed bug issue on a `main` regression.
 - **`max_repair_attempts`, `full_command`, `holdout_command`, `mutation_command` in `.factory/kernel.json` are validated but not consumed by the kernel.** The repair count is hardcoded to one; the full gate and holdout are invoked directly by the evidence and post-merge programs.
-- **The guard runs from the PR head** (section 5). A base-anchored trust-root check does not exist yet.
+- **Maintainer merges get no post-merge full harness.** Only autonomous merges run `harness/post_merge.py`. A maintainer PR is verified by its head's required checks (static + unit), not by the browser E2E, and if `main` moved under it the merged tree was never tested as a whole.
+- **`require_extra_approval_for_unattributed_changes` is on in the ruleset and unverified against kernel commits.** Kernel commits use an unmapped noreply identity. If GitHub treats them as unattributed and demands an approval, the autonomous merge path is blocked; the first canary will show it.
 - **`.factory/holdout/` is builder-readable** (section 9).
 - **No E2E floor in `.factory/locks/floor.json`.** The browser journey has not been observed end-to-end under the current kernel with a recorded step count (see `.factory/decisions.md` D-001).
 - **No worker is told to consult `.factory/decisions.md`.** The product/judgement distinction in section 7 is policy, not yet mechanism.

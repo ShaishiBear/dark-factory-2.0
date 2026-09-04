@@ -57,7 +57,8 @@ If the GitHub stop state cannot be read, the factory stops. An unreadable stop b
 | Deterministic engineering authorities | `scripts/factory_*.py`, `harness/` |
 | Canonical unattended scheduler | `.github/workflows/dark-factory-worker.yml` |
 | Optional self-hosted scheduler | `deploy/systemd/dark-factory.*` |
-| PR quick authority | `.github/workflows/dark-factory-ci.yml` |
+| PR quick authority (runs from the PR head) | `.github/workflows/dark-factory-ci.yml` |
+| Trust-root authority + unattended merge (runs from the base) | `.github/workflows/dark-factory-trust-root.yml` |
 
 The model provider is replaceable. The checked-in default is the Claude Code CLI. Provider output is untrusted reasoning; it never directly authorizes a merge.
 
@@ -104,7 +105,7 @@ Validation starts from the exact GitHub PR head in a separate worktree. The vali
 ```text
 exact PR head
  ↓
-deterministic security/dependency guard
+deterministic security/dependency guard (base-anchored: runs from the kernel's main checkout, reads the head as data)
  ↓
 blinded holdout outside the source checkout
  ↓
@@ -129,6 +130,30 @@ post-merge exact-tree verification on origin/main
 ```
 
 The model never executes the final logical decision “this evidence permits merge”. `scripts/factory_evidence.py` and `harness/merge_verify.py` do.
+
+## Trust-root authority and unattended merge
+
+Two questions are decided for every PR, and they are decided by different programs running from different commits.
+
+**What runs from the trusted base.** `.github/workflows/dark-factory-trust-root.yml` is a `pull_request_target` workflow: GitHub executes the workflow definition that is on `main`, not the PR's copy. Its `trust-root-authority` job checks out `github.sha` (the base tip), asserts that it is not the PR head and is on `origin/main`, fetches the PR head as a Git object without checking it out, and runs `scripts/factory_security.py --pr N --trusted-base --expect-base <base> --expect-head <head>`. In that mode the guard refuses to run from the PR head, refuses if the base or head differ from what the event promised, refuses if `refs/pull/N/head` is not the head GitHub reports, judges the diff, and emits a verdict bound to repository, PR, base SHA, head SHA, changed paths and lane. The kernel's own validator (`KernelRuntime.validate_pr`) runs the same mode from its `main` checkout before any model sees the PR. A PR that rewrites the guard, or the workflow that invokes it, is judged by the copies on `main`; its own copies are data in a diff.
+
+**What runs from the PR head.** `.github/workflows/dark-factory-ci.yml` (`quick-authority`) checks out the exact head and runs config validation, locked dependency installs, the guard again as defence in depth, and `harness/ci.py --quick`. That is where proposed code executes. Nothing it produces can grant trust-root permission.
+
+**What grants trust-root permission.** The base-run guard's lane: a PR opened by a GitHub user account holding a repository role (OWNER, MEMBER, COLLABORATOR) whose commits all resolve to user accounts is `human-maintenance` and may change protected paths. A PR opened by a Bot, by a user without a role, or with unresolved or Bot commits is `autonomous` and fails on any protected path. Identity is what GitHub reports about the PR, never commit text. A Claude Code session acting through a maintainer's GitHub credentials appears as that maintainer's delegated authority; the lane proves that the PR was opened under a maintainer's account, not that a human typed each commit.
+
+**What grants merge permission.** The `main-protection` ruleset, which requires a pull request, linear history, and both `trust-root-authority` and `quick-authority` green on the exact head being merged, with no bypass actor. Nothing in this repository can merge around it. For autonomous PRs the kernel adds the whole evidence ladder above and `harness/merge_verify.py pre` before it will even attempt a merge.
+
+**Who performs the merge.**
+- Maintainer-lane PR: the `unattended-merge` job (runs only when the trusted verdict is `pass`, the lane is `human-maintenance`, and the emergency stop is clear) executes one GraphQL mutation with the Actions token and no checkout: `enablePullRequestAutoMerge(expectedHeadOid: <judged head>, mergeMethod: SQUASH)`. GitHub then squash-merges the PR itself once every required check is green on that head. If the head moved, the mutation is refused; a new push re-runs the workflow, which re-arms against the new head or leaves it unarmed if the new head fails. The owner does not press Merge.
+- Autonomous PR: never armed. The kernel merges with `gh pr merge --squash --match-head-commit <evidenced head>` after re-reading the head and the stop button, then verifies the merged tree byte-for-byte.
+
+**What remains impossible for the autonomous factory.** Its workers have no Git and no Bash; the kernel commits only inside the acceptance-test and design envelopes, which exclude every protected path; its PRs are opened by a Bot and land on the autonomous lane, where the base-run guard refuses any protected path; and even a passing autonomous PR is never armed for auto-merge, because eligibility is computed as `lane == human-maintenance and verdict == pass` inside the guard that runs from `main`. The factory cannot rewrite its judge, cannot run its judge from its own copy, and cannot merge without the judge.
+
+**If any authority fails.** A failed `trust-root-authority` or `quick-authority` is a red required check: the ruleset refuses every merge of that head, by anyone. The unattended-merge job is skipped whenever the trusted verdict is not `pass`; if auto-merge was armed for an earlier head, the red check on the new head still blocks it. A failed autonomous validation records `factory:needs-fix` and the issue is rebuilt; a failed post-merge verification pulls the stop button.
+
+**Exact-head binding.** The verdict names the head it judged; the merge job refuses if the judged head differs from the event head; GitHub refuses to arm auto-merge if the PR head differs from `expectedHeadOid`; required checks are per commit, so a head pushed after the checks ran has no green checks and cannot merge until it is judged in turn; and the kernel's merge passes `--match-head-commit`. There is no window in which a head other than the one that was checked can be the one that merges.
+
+**Bootstrap.** A `pull_request_target` workflow runs only once it exists on `main`. The PR that introduced this file could not be judged by it, so it was merged through the maintainer lane by a delegated maintainer session with an expected-head squash, and `trust-root-authority` was added to the ruleset's required checks immediately afterwards. Every later PR, including the one that proved the mechanism, merges without a click.
 
 ## Canonical harness
 
@@ -187,7 +212,7 @@ The earlier experiment used Archon YAML workflows and command files. Active `.ar
 Before unattended Level-4 dispatch is enabled, repository configuration must satisfy the same fail-closed preflight enforced by `.github/workflows/dark-factory-worker.yml`:
 
 - GitHub Issues are enabled. Issues are the intake, state and remote emergency-stop surface.
-- `main` is protected by GitHub branch protection/rules so a direct push cannot bypass the in-repo evidence and exact-tree merge authority.
+- `main` is protected by GitHub branch protection/rules so a direct push cannot bypass the in-repo evidence and exact-tree merge authority. The `main-protection` ruleset requires a pull request, linear history, and the status checks `quick-authority` and `trust-root-authority`, with an empty bypass list. The repository setting **Allow auto-merge** is on; without it the unattended-merge job cannot arm a merge and maintainer PRs would wait for a click.
 - all eight factory control labels exist: `factory:accepted`, `factory:rejected`, `factory:rate-limited`, `factory:in-progress`, `factory:needs-review`, `factory:needs-fix`, `factory:needs-human`, `factory:stop`.
 - repository Actions secrets `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` are configured. Model
   calls are routed to OpenRouter's Anthropic-compatible Messages endpoint, so no separate

@@ -382,6 +382,62 @@
       "find": "        findings.extend(commit_provenance_problems(commits))",
       "replace": "        pass",
       "why": "A factory commit pushed onto a human's branch would inherit the human lane; the second fence behind PR identity would be gone."
+    },
+    {
+      "id": "security-trusted-base-runs-from-pr-head",
+      "file": "scripts/factory_security.py",
+      "find": "die(\"trusted-base mode refuses to run from the PR head: the change would be judging itself\")",
+      "replace": "pass",
+      "why": "Trusted-base mode would accept running from the PR head, so a PR could supply the guard that judges it."
+    },
+    {
+      "id": "security-trusted-base-expected-head-unbound",
+      "file": "scripts/factory_security.py",
+      "find": "if expect_head and head != expect_head:",
+      "replace": "if False:",
+      "why": "A verdict scheduled for one head could be issued for a later head that was never judged."
+    },
+    {
+      "id": "security-trusted-base-expected-base-unbound",
+      "file": "scripts/factory_security.py",
+      "find": "if expect_base and local != expect_base:",
+      "replace": "if False:",
+      "why": "The authority could run from a commit other than the base tip the workflow promised."
+    },
+    {
+      "id": "security-trusted-base-fetched-head-unbound",
+      "file": "scripts/factory_security.py",
+      "find": "if fetched != head:",
+      "replace": "if False:",
+      "why": "The diff judged could come from a ref other than the head GitHub reports and will merge."
+    },
+    {
+      "id": "security-trusted-base-off-main-accepted",
+      "file": "scripts/factory_security.py",
+      "find": "if run([\"git\", \"merge-base\", \"--is-ancestor\", local, f\"origin/{base_ref}\"], check=False).returncode != 0:",
+      "replace": "if False:",
+      "why": "A commit that never landed on the protected branch could act as the trusted base."
+    },
+    {
+      "id": "security-unattended-merge-armed-for-autonomous-lane",
+      "file": "scripts/factory_security.py",
+      "find": "\"unattended_merge_eligible\": lane == \"human-maintenance\" and verdict == \"pass\",",
+      "replace": "\"unattended_merge_eligible\": verdict == \"pass\",",
+      "why": "A factory product PR would be armed for GitHub auto-merge on the quick gate alone, bypassing the evidence ladder."
+    },
+    {
+      "id": "kernel-validator-guard-runs-from-pr-head",
+      "file": "factory_kernel/runtime.py",
+      "find": "                    \"--trusted-base\", \"--expect-head\", head,\n",
+      "replace": "",
+      "why": "The kernel validator would run the guard in head mode again, from code the PR supplied."
+    },
+    {
+      "id": "kernel-validator-guard-cwd-is-pr-worktree",
+      "file": "factory_kernel/runtime.py",
+      "find": "                cwd=self.repo_root,\n                env=env,\n                credential_scope=\"github\",\n                timeout=180,\n                transcript=paths.transcripts / \"security.log\",",
+      "replace": "                cwd=worktree.path,\n                env=env,\n                credential_scope=\"github\",\n                timeout=180,\n                transcript=paths.transcripts / \"security.log\",",
+      "why": "The guard would execute from the PR head worktree; the trusted-base flag alone does not choose the program."
     }
   ]
 }

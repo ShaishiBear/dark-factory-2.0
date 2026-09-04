@@ -1,0 +1,142 @@
+name: dark-factory-trust-root
+
+# Base-anchored trust-root authority.
+#
+# `pull_request_target` runs THIS workflow definition from the base branch, not from the PR, and
+# the job below checks out `github.sha` -- the protected base tip -- never the PR head. The guard
+# that decides whether a PR may alter the trust root therefore always executes from code that is
+# already on `main`. A PR that rewrites scripts/factory_security.py, or this file, is judged by
+# the copies on `main`; its own copies are data in a diff.
+#
+# The PR head is fetched as an object for diffing and is never checked out or executed here. The
+# head-based quick gate (dark-factory-ci.yml) is where proposed code runs.
+#
+# `trust-root-authority` is the required status check the main ruleset names. `unattended-merge`
+# is not required: it arms GitHub auto-merge, bound to the exact judged head, for maintainer-lane
+# PRs only. GitHub then performs the squash merge itself once every required check is green on
+# that head, and refuses if the head moved. Autonomous PRs are never armed; the kernel merges
+# them only after the full evidence ladder.
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: dark-factory-trust-root-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  trust-root-authority:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      unattended: ${{ steps.judge.outputs.unattended }}
+      head: ${{ steps.judge.outputs.head }}
+    steps:
+      - name: Checkout the trusted base (never the PR head)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert the checkout is the base tip and is on main
+        env:
+          TRUSTED_BASE: ${{ github.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$TRUSTED_BASE"
+          test "$(git rev-parse HEAD)" != "$PR_HEAD"
+          git merge-base --is-ancestor HEAD origin/main
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+
+      - name: Base-anchored security and trust-root guard
+        id: judge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TRUSTED_BASE: ${{ github.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -o pipefail
+          python scripts/factory_security.py --pr "$PR_NUMBER" --trusted-base \
+            --expect-base "$TRUSTED_BASE" --expect-head "$PR_HEAD" \
+            --output trust-root-authority.json
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          r = json.load(open("trust-root-authority.json"))
+          b = r["binding"]
+          assert b["mode"] == "trusted-base", b
+          print(f"unattended={'true' if r['authority']['unattended_merge_eligible'] else 'false'}")
+          print(f"head={b['head_sha']}")
+          PY
+          {
+            echo "## trust-root-authority"
+            echo '```json'
+            cat trust-root-authority.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Emergency stop gates unattended merge (not the verdict)
+        id: stop
+        if: steps.judge.outputs.unattended == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if bash scripts/factory-stop.sh; then
+            echo "stopped=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stopped=true" >> "$GITHUB_OUTPUT"
+            echo "FACTORY_STOPPED: the verdict stands but no unattended merge will be armed"
+          fi
+
+      - name: Publish the unattended decision
+        id: decide
+        run: |
+          if [ "${{ steps.judge.outputs.unattended }}" = "true" ] && [ "${{ steps.stop.outputs.stopped }}" = "false" ]; then
+            echo "unattended=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "unattended=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  unattended-merge:
+    needs: trust-root-authority
+    if: needs.trust-root-authority.outputs.unattended == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # No checkout, no third-party action, no code from anywhere: one GraphQL mutation that
+      # arms GitHub's own auto-merge for this PR, squash only, bound to the exact head the
+      # authority judged. GitHub refuses if the head differs; it merges only when every
+      # required check is green on that head; a new push re-runs this workflow, which re-arms
+      # against the new head or leaves it unarmed if the new head fails.
+      - name: Arm exact-head auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+          EXPECTED_HEAD: ${{ needs.trust-root-authority.outputs.head }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test -n "$EXPECTED_HEAD"
+          test "$EXPECTED_HEAD" = "$EVENT_HEAD"
+          gh api graphql \
+            -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
+            -f id="$PR_NODE_ID" >/dev/null 2>&1 || true
+          gh api graphql \
+            -f query='mutation($id: ID!, $head: GitObjectID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH}) { pullRequest { autoMergeRequest { enabledAt mergeMethod } } } }' \
+            -f id="$PR_NODE_ID" -f head="$EXPECTED_HEAD"
+          echo "UNATTENDED_MERGE_ARMED head=$EXPECTED_HEAD"

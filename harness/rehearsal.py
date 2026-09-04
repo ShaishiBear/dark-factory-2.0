@@ -74,6 +74,8 @@ class Step:
 
     kind: str  # control | github | agent | exec
     name: str
+    argv: tuple[str, ...] = ()
+    cwd: str = ""
 
 
 @dataclass
@@ -83,8 +85,8 @@ class Trace:
     error: str = ""
     incident_body: str = ""  # what the humans were actually told, verbatim
 
-    def record(self, kind: str, name: str) -> None:
-        self.steps.append(Step(kind, name))
+    def record(self, kind: str, name: str, *, argv: tuple[str, ...] = (), cwd: str = "") -> None:
+        self.steps.append(Step(kind, name, argv, cwd))
 
     def names(self, kind: str | None = None) -> list[str]:
         return [s.name for s in self.steps if kind is None or s.kind == kind]
@@ -260,7 +262,7 @@ def exec_recorder(trace: Trace, *, fail: str | None = None) -> Callable[..., str
         tool = Path(argv[1]).name if len(argv) > 1 else argv[0]
         phase = argv[2] if tool == "merge_verify.py" and len(argv) > 2 else ""
         name = f"{tool}:{phase}" if phase else tool
-        trace.record("exec", name)
+        trace.record("exec", name, argv=tuple(argv), cwd=str(cwd))
         if fail == name:
             raise RuntimeError(f"{name} failed rc=1: rehearsed failure")
         outputs = {argv[i + 1] for i, a in enumerate(argv) if a == "--output" and i + 1 < len(argv)}

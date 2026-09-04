@@ -477,12 +477,16 @@ class KernelRuntime:
         try:
             self._prepare_worktree(worktree.path, paths)
             env = self._run_env(paths, base_ref=base)
+            # The guard is base-anchored: it runs from the kernel's own main checkout and reads
+            # the PR head as data. The worktree at the PR head is where proposed code is tested,
+            # never where the program that judges the PR comes from.
             self._exec(
                 [
                     "python", "scripts/factory_security.py", "--pr", str(pr_number),
+                    "--trusted-base", "--expect-head", head,
                     "--output", str(paths.artifacts / "security.json"),
                 ],
-                cwd=worktree.path,
+                cwd=self.repo_root,
                 env=env,
                 credential_scope="github",
                 timeout=180,

@@ -507,7 +507,7 @@ These are existing bugs / quirks in the repo. They are fair game for the factory
 
 ## Protected paths (factory auto-rejects PRs touching these)
 
-The deterministic security guard `scripts/factory_security.py` runs on every PR as the required `quick-authority` check. It refuses any protected path in an **autonomous** PR (one opened by the factory's Bot identity, or by anyone without a repository role). A PR opened by a maintainer's GitHub user account may change these paths through the human maintenance lane described in FACTORY_RULES.md §5; every other check still runs.
+The deterministic security guard `scripts/factory_security.py` judges every PR as the required `trust-root-authority` check, which runs **from `main`** (a `pull_request_target` workflow that never checks out the PR head), and again inside the head-based `quick-authority` check as defence in depth. It refuses any protected path in an **autonomous** PR (one opened by the factory's Bot identity, or by anyone without a repository role). A PR opened by a maintainer's GitHub user account may change these paths through the human maintenance lane described in FACTORY_RULES.md §5; every other check still runs, and a green maintainer PR merges itself without a click.
 
 **Factory trust root** (the machinery that judges product PRs):
 
