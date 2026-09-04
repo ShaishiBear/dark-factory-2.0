@@ -43,26 +43,40 @@ def write(path: str, value: dict) -> str:
     return digest(value)
 
 
-def gh_issue(number: int) -> dict:
-    proc = subprocess.run(
-        ["gh", "issue", "view", str(number), "--json", "number,title,body,state,labels,url"],
-        cwd=ROOT, capture_output=True, text=True, timeout=30,
-    )
-    if proc.returncode:
-        die(f"cannot read issue #{number}: {(proc.stderr or proc.stdout)[-800:]}")
-    return json.loads(proc.stdout)
+def load_issue_frontier(path: str, issue_number: int) -> tuple[dict, list[dict]]:
+    """The kernel's snapshot of the issue and its `Blocked by` issues.
+
+    This program runs with no credentials, so it never asks GitHub anything. The kernel fetched
+    the issue and every blocker with its own authority before any model stage and wrote them
+    here; readiness is judged from that snapshot. A missing or mismatched snapshot fails closed.
+    """
+    snapshot = load(path)
+    if snapshot.get("version") != "1.0":
+        die(f"{path} is not a v1.0 issue-frontier snapshot")
+    issue = snapshot.get("issue")
+    if not isinstance(issue, dict) or issue.get("number") != issue_number:
+        die(f"{path} does not describe issue #{issue_number}")
+    raw_blockers = snapshot.get("blockers")
+    if not isinstance(raw_blockers, list):
+        die(f"{path} blockers must be a list")
+    body = str(issue.get("body") or "")
+    named = sorted({int(x) for x in BLOCKED.findall(body)})
+    blockers = []
+    for entry in raw_blockers:
+        if not isinstance(entry, dict) or not isinstance(entry.get("issue"), int):
+            die(f"{path} contains a malformed blocker entry")
+        blockers.append({"issue": int(entry["issue"]), "state": str(entry.get("state") or "OPEN").upper()})
+    if sorted(b["issue"] for b in blockers) != named:
+        die(f"{path} blockers do not match the `Blocked by` lines in the issue body")
+    return issue, blockers
 
 
 def compile_ticket(args: argparse.Namespace) -> None:
     contract = load(args.contract)
     contract_hash = validate_contract(contract, args.issue)
-    issue = gh_issue(args.issue)
+    issue, blockers = load_issue_frontier(args.issue_json, args.issue)
     body = issue.get("body") or ""
     labels = sorted(x.get("name", "") for x in issue.get("labels", []))
-    blockers = []
-    for number in sorted({int(x) for x in BLOCKED.findall(body)}):
-        state = str(gh_issue(number).get("state", "OPEN")).upper()
-        blockers.append({"issue": number, "state": state})
     parent_match = PART_OF.search(body)
     acceptance = [b["id"] for b in contract["behaviors"]]
     seams = {b["id"]: b["seam"] for b in contract["behaviors"]}
@@ -199,6 +213,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("ticket")
     p.add_argument("--issue", type=int, required=True); p.add_argument("--contract", required=True)
+    p.add_argument("--issue-json", required=True, help="kernel-written issue-frontier.json snapshot")
     p.add_argument("--ticket-output", required=True); p.add_argument("--frontier-output", required=True)
     p.set_defaults(fn=compile_ticket)
     p = sub.add_parser("design")

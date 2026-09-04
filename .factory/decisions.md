@@ -341,3 +341,27 @@ exit code, output digest, matched symptom) is passed to the contract worker as f
 investigation's hypotheses remain hypotheses. A repro that passes, misses the symptom, names a
 non-allowlisted program or escapes the checkout escalates the issue: a bug that cannot be made
 to go red cannot be contracted, and escalating early is cheaper than a confident wrong fix.
+
+---
+
+## D-016 · The credential-free programs read a kernel snapshot of the issue
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Fourth defect the canary (issue #49) revealed, attempt 2, run 33896546840. D-012 took GitHub
+credentials away from the contract, context and proof programs, correctly: they run
+model-influenced compilation and model-authored checkpoints. The ticket/frontier compiler
+inside the context stage then died, because it read the issue and each `Blocked by: #N`
+blocker through `gh issue view`.
+
+The fix keeps the privilege boundary and moves the fetch: `build_issue` resolves the issue
+and its blockers with the kernel's own authority and writes `issue-frontier.json` before any
+model stage; `factory_artifacts.py ticket` takes `--issue-json` and judges readiness from
+that snapshot, refusing a missing file, a snapshot for another issue, or a blocker list that
+does not match the `Blocked by` lines in the body. The only `gh` calls left in the build
+programs are the two attach paths, which edit the PR and run nothing model-authored; the
+kernel gives exactly those GitHub scope.
+
+Each canary defect so far was a program that worked when everything held one credential and
+broke the moment the boundary was drawn. That is the boundary doing its job; the canary is
+finding every place the old design leaned on it.

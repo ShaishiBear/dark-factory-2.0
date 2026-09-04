@@ -35,6 +35,19 @@ from .pr_body import render_pr_body
 from .worker_policy import BUILDER_BLIND_PATHS
 from .worktree import Worktree, create_detached, remove
 
+# `Blocked by: #N` lines in an issue body name the issues that must be CLOSED before this one
+# is on the ready frontier. The kernel resolves them with its own GitHub authority and writes
+# the snapshot for the credential-free ticket compiler; the same pattern lives in
+# scripts/factory_artifacts.py for the frontier filter.
+BLOCKED_BY = re.compile(r"(?im)^Blocked by:\s+#([1-9][0-9]*)\s*$")
+ISSUE_FRONTIER_ARTIFACT = "issue-frontier.json"
+
+
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
 
 class FactoryStopped(RuntimeError):
     pass
@@ -225,6 +238,12 @@ class KernelRuntime:
             self._git("checkout", "-b", branch, cwd=worktree.path)
             self._prepare_worktree(worktree.path, paths)
             self._write_json(paths.artifacts / "issue.json", issue)
+            # The ticket/frontier compiler runs with no credentials, so the kernel fetches the
+            # issue and every blocker it names here, before any model stage, and the script
+            # judges readiness from this snapshot rather than by calling GitHub itself.
+            self._write_json(
+                paths.artifacts / ISSUE_FRONTIER_ARTIFACT, self._issue_frontier(issue)
+            )
             env = self._run_env(paths, base_ref=f"origin/{self.config.default_branch}")
             issue_context = self._issue_context(issue)
 
@@ -1164,6 +1183,21 @@ class KernelRuntime:
     def _linked_issue_number(body: str) -> int | None:
         match = re.search(r"(?im)^\s*(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+#([1-9][0-9]*)\b", body)
         return int(match.group(1)) if match else None
+
+    def _issue_frontier(self, issue: Mapping[str, Any]) -> dict[str, Any]:
+        """The issue plus the state of every `Blocked by: #N` issue it names, as GitHub reports
+        them now. Written before any model stage; read by `factory_artifacts.py ticket`."""
+        body = str(issue.get("body") or "")
+        blockers = []
+        for number in sorted({int(x) for x in BLOCKED_BY.findall(body)}):
+            state = str(self.github.issue(number).get("state") or "OPEN").upper()
+            blockers.append({"issue": number, "state": state})
+        return {
+            "version": "1.0",
+            "issue": dict(issue),
+            "blockers": blockers,
+            "fetched_at": _utc_now(),
+        }
 
     @staticmethod
     def _issue_context(issue: Mapping[str, Any]) -> str:

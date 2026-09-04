@@ -110,6 +110,7 @@ def run_context(args: argparse.Namespace) -> None:
     subprocess.check_call([
         sys.executable, str(ROOT / "scripts" / "factory_artifacts.py"), "ticket",
         "--issue", str(c["issue"]["number"]), "--contract", args.contract,
+        "--issue-json", str(artifacts / "issue-frontier.json"),
         "--ticket-output", str(artifacts / "ticket.json"),
         "--frontier-output", str(artifacts / "frontier.json"),
     ], cwd=ROOT)
