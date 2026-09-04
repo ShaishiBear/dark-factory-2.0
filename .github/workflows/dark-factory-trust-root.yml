@@ -89,6 +89,36 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # A PR that conflicts with main gets no `pull_request` workflow run at all, so the
+      # head-based quick gate never reports while this base-run check stays green, and the PR
+      # sits with one green check until someone notices (observed on #46). The verdict on the
+      # diff above stands; mergeability is a separate fact, asked of GitHub here, and a
+      # conflicting PR makes this required check red with a reason instead of silently stale.
+      # GitHub computes mergeable_state asynchronously, so `unknown` is retried and then
+      # tolerated: an unknown state is not evidence of a conflict.
+      - name: Refuse a PR that conflicts with its base
+        id: mergeable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          state="unknown"
+          for attempt in 1 2 3 4 5 6; do
+            state="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.mergeable_state // "unknown"')"
+            [ "$state" != "unknown" ] && break
+            sleep 5
+          done
+          echo "mergeable_state=$state" >> "$GITHUB_OUTPUT"
+          if [ "$state" = "dirty" ]; then
+            echo "TRUST_ROOT_REFUSED pr is not mergeable (conflicting with base); rebase"
+            exit 1
+          fi
+          if [ "$state" = "unknown" ]; then
+            echo "TRUST_ROOT_MERGEABILITY_UNKNOWN GitHub has not computed mergeability yet; the verdict stands"
+          else
+            echo "TRUST_ROOT_MERGEABLE state=$state"
+          fi
+
       - name: Emergency stop gates unattended merge (not the verdict)
         id: stop
         if: steps.judge.outputs.unattended == 'true'

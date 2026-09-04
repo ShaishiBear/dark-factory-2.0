@@ -395,3 +395,25 @@ and were deleted by hand. The setting evidently does not fire when GitHub's auto
 completes a merge on behalf of the Actions app. The trust-root workflow now deletes the
 head ref on the `closed` event, only if the PR merged and only if the head is in this
 repository.
+
+---
+
+## D-018 · A conflicting PR is refused loudly by the base-run authority
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+PR #46 became CONFLICTING after three other PRs landed. GitHub runs no `pull_request`
+workflow on an unmergeable PR, so `quick-authority` never reported, while
+`trust-root-authority`, a `pull_request_target` job that runs on the base, stayed green. The
+PR sat with one green check and nobody was told anything.
+
+The fix is in the job that does run: after the verdict, `trust-root-authority` asks GitHub for
+`mergeable_state` and fails the required check on `dirty` with a reason. The verdict on the
+diff is untouched; mergeability is a second fact and is reported as such. `unknown` is retried
+six times five seconds apart and then tolerated, since GitHub computes it asynchronously and
+an unknown state is not evidence of a conflict.
+
+Not chosen: the ruleset's require-branches-up-to-date setting. It would make every unrelated
+PR rebase after each merge and re-run every gate on each advance of `main`; the factory merges
+many small PRs and that serialisation would cost more than the stall it prevents. A merge
+queue remains a future option if PR volume ever makes rebases the bottleneck.
