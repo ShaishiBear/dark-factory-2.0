@@ -6,7 +6,6 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "factory_artifacts.py"
@@ -101,24 +100,6 @@ class ArtifactTests(unittest.TestCase):
             {"files": []},
         )
         self.assertEqual(result["allowed_new_files"], [new_path])
-
-    def test_ticket_fails_closed_when_blocker_open(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            c = root / "contract.json"; c.write_text(json.dumps(contract()))
-            issue = {
-                "number": 7,
-                "title": "Example",
-                "body": "Blocked by: #8",
-                "state": "OPEN",
-                "labels": [{"name": "factory:accepted"}],
-                "url": "https://example/7",
-            }
-            blocker = {"number": 8, "state": "OPEN", "labels": [], "body": "", "title": "Blocker"}
-            args = argparse.Namespace(issue=7, contract=str(c), ticket_output=str(root / "ticket.json"), frontier_output=str(root / "frontier.json"))
-            with mock.patch.object(artifacts, "gh_issue", side_effect=lambda n: issue if n == 7 else blocker):
-                with self.assertRaises(SystemExit):
-                    artifacts.compile_ticket(args)
 
 
 if __name__ == "__main__":

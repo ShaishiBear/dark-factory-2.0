@@ -655,6 +655,34 @@
       "find": "            if role == \"investigate\":\n                # The red loop",
       "replace": "            if False:\n                # The red loop",
       "why": "Bug builds would proceed to the contract without the red loop the rules describe."
+    },
+    {
+      "id": "ticket-blocker-state-ignored",
+      "file": "scripts/factory_artifacts.py",
+      "find": "        and all(x[\"state\"] == \"CLOSED\" for x in blockers)\n",
+      "replace": "        and True\n",
+      "why": "An issue whose named blockers are still open would be compiled onto the ready frontier."
+    },
+    {
+      "id": "ticket-accepted-label-not-required",
+      "file": "scripts/factory_artifacts.py",
+      "find": "        and \"factory:accepted\" in labels\n        and all(",
+      "replace": "        and True\n        and all(",
+      "why": "An issue triage never accepted would be compiled as ready."
+    },
+    {
+      "id": "kernel-issue-frontier-snapshot-not-written",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._write_json(\n                paths.artifacts / ISSUE_FRONTIER_ARTIFACT, self._issue_frontier(issue)\n            )\n",
+      "replace": "",
+      "why": "The ticket compiler would find no snapshot; the build could only proceed if it went back to calling GitHub itself, from a credential-free process."
+    },
+    {
+      "id": "ticket-snapshot-blockers-unchecked-against-body",
+      "file": "scripts/factory_artifacts.py",
+      "find": "    if sorted(b[\"issue\"] for b in blockers) != named:\n",
+      "replace": "    if False:\n",
+      "why": "A snapshot omitting a named blocker would be accepted, so an open blocker could be hidden from the frontier decision."
     }
   ]
 }
