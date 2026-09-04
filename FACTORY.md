@@ -86,7 +86,7 @@ independent acceptance-test author
  ↓ deterministic RED replay/proof
 implementation worker
  ↓ deterministic GREEN replay/proof
-fresh code review
+fresh two-axis code review (Spec and Standards, separate processes, deterministic aggregator)
  ↓ optional one fresh-context repair + GREEN replay
 architecture conformance
  ↓ deterministic conformance compiler

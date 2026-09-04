@@ -308,3 +308,19 @@ review axes. Two follow-ups make the last two executable: separate spec and stan
 (D-014) and a kernel-executed repro loop for bugs (D-015).
 
 `.claude/settings.json` keeps the plugin registration for interactive human sessions only.
+
+---
+
+## D-014 · Spec and Standards are reviewed by separate processes
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+The single `review` worker was told to judge two axes "independently" inside one context. One
+model weighing "does it do what the contract says" and "is it built well" together lets one
+impression colour the other; a change that passes its tests reads as well built, and a
+well-built change reads as correct. The two axes now run as `review-spec` and
+`review-standards`, fresh processes with disjoint prompts, disjoint method text and disjoint
+artifacts. `factory_kernel/review.py` aggregates deterministically and fails closed: a missing,
+malformed or mislabelled artifact, or a verdict that contradicts its own findings, escalates;
+either axis failing fails the review. The rest of the ladder (one repair, second review, GREEN
+replay, conformance, holdouts, certifiers) is unchanged.

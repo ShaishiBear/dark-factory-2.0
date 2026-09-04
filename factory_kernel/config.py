@@ -121,7 +121,8 @@ def load_config(path: str | Path) -> KernelConfig:
 
     required_prompts = {
         "triage", "plan", "investigate", "contract", "context", "architecture",
-        "test_author", "implement", "review", "repair", "conformance", "holdout",
+        "test_author", "implement", "review-spec", "review-standards", "repair", "conformance",
+        "holdout",
     }
     if set(prompts) != required_prompts:
         missing = sorted(required_prompts - set(prompts))

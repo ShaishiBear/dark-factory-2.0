@@ -41,7 +41,8 @@ class ManifestTests(unittest.TestCase):
         ids = {x.id for x in loaded}
         self.assertEqual(ids, {"minimal-complexity", "deep-module-design", "tdd",
                                "diagnosing-bugs", "code-review-spec", "code-review-standards"})
-        for role in ("context", "implement", "repair", "review", "investigate", "architecture"):
+        for role in ("context", "implement", "repair", "review-spec", "review-standards",
+                     "investigate", "architecture"):
             self.assertTrue(m.methods_for_role(ROOT, role), role)
         for role in ("triage", "holdout", "contract-certifier"):
             self.assertEqual(m.methods_for_role(ROOT, role), ())

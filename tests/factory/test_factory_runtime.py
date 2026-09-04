@@ -91,7 +91,7 @@ class ProviderTests(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(RuntimeError, "agent worker failed"):
-            provider.run(AgentRequest(role="review", prompt="review", cwd="/tmp"))
+            provider.run(AgentRequest(role="review-spec", prompt="review", cwd="/tmp"))
 
 
 class FakeGitHub:
