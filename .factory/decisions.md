@@ -484,3 +484,20 @@ now a small hourly workflow (`dark-factory-branch-cleanup.yml`) that lists this 
 PR from this repository, and deletes them; `main` is never a candidate and a branch with commits
 past its merged PR is left alone. Chosen over a PAT because no new credential is needed, and over
 a step in the daily regression because that workflow deliberately holds `contents: read`.
+## D-021 · The ratchet only goes up, and a program says so
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+`.factory/locks/floor.json` once claimed "a second check asserts floor(head) >= floor(base)".
+PR #44 found no such program and said so honestly; section 13 then carried the gap: a
+maintainer PR lowering a floor would pass every check, and the human lane was the only
+control. A ratchet that the maintenance lane can lower is a dial.
+
+The check now lives in the base-anchored trust-root guard, because that is the one program
+that runs from `main` on every PR, both lanes, with the base and head SHAs in hand. When the
+floor file is in the diff, every numeric key at the base must exist at the head and be at
+least as high; notes are free; new keys are how a floor is first measured. The human lane
+waives the protected-path veto and nothing else, so this refusal binds maintainers too. The
+check is a protected path with its own mutation; removing it fails the factory suite.
+
+`harness/harness.config.json` carries no floors (only `e2e_timeout_s`), so it is not compared.

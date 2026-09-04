@@ -274,6 +274,73 @@ class SecurityGuardTests(unittest.TestCase):
         self.assertEqual(m.github_actor({"login": "x", "type": "User", "email": "x@y"}),
                          {"login": "x", "type": "User"})
 
+    # ---- ratchet monotonicity ---------------------------------------------------------------
+    # floor(head) >= floor(base) for every numeric key. Both lanes; the human lane waives only
+    # the protected-path veto.
+
+    @staticmethod
+    def floor(**values):
+        base = {"_what_this_is": "note", "unit_tests": 1033, "static_checks": 5, "holdout_assertions": 9}
+        base.update(values)
+        return json.dumps(base)
+
+    def ratchet(self, head_floor, base_floor=None, **overrides):
+        values = {
+            "changed_files": [m.FLOOR_FILE],
+            "base_floor": self.floor() if base_floor is None else base_floor,
+            "head_floor": head_floor,
+            "author": self.human(), "commits": [self.commit()],
+        }
+        values.update(overrides)
+        return self.evaluate(**values)
+
+    def test_lowered_floor_fails_on_the_human_lane(self):
+        result = self.ratchet(self.floor(unit_tests=900))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertEqual(result["authority"]["lane"], "human-maintenance")
+        regressions = [x for x in result["findings"] if x["kind"] == "ratchet_regression"]
+        self.assertEqual(len(regressions), 1)
+        self.assertIn("unit_tests lowered from 1033 to 900", regressions[0]["detail"])
+        self.assertFalse(result["authority"]["unattended_merge_eligible"])
+
+    def test_lowered_floor_fails_on_the_autonomous_lane_too(self):
+        result = self.ratchet(self.floor(unit_tests=900), author=self.bot())
+        self.assertTrue(any(x["kind"] == "ratchet_regression" for x in result["findings"]))
+
+    def test_raised_floor_passes(self):
+        self.assertEqual(self.ratchet(self.floor(unit_tests=1100))["verdict"], "pass")
+
+    def test_new_floor_key_passes(self):
+        self.assertEqual(self.ratchet(self.floor(e2e_steps=8))["verdict"], "pass")
+
+    def test_removed_floor_key_fails(self):
+        head = json.loads(self.floor())
+        del head["holdout_assertions"]
+        result = self.ratchet(json.dumps(head))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any("holdout_assertions removed" in x["detail"] for x in result["findings"]))
+
+    def test_invalid_head_json_fails(self):
+        result = self.ratchet("{not json")
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any("not valid JSON" in x["detail"] for x in result["findings"]))
+
+    def test_note_only_change_passes(self):
+        head = json.loads(self.floor())
+        head["_measured_today"] = "a new note"
+        head["_what_this_is"] = "reworded"
+        self.assertEqual(self.ratchet(json.dumps(head))["verdict"], "pass")
+
+    def test_floor_file_untouched_is_not_compared(self):
+        """A garbage head floor is irrelevant when the file is not in the diff."""
+        result = self.evaluate(changed_files=["app/backend/routes/chat.py"], base_floor=self.floor(), head_floor="{not json")
+        self.assertEqual(result["verdict"], "pass")
+
+    def test_ratchet_regressions_ignores_booleans_and_strings(self):
+        base = json.dumps({"unit_tests": 10, "flag": True, "name": "x"})
+        head = json.dumps({"unit_tests": 10, "flag": False, "name": "y"})
+        self.assertEqual(m.ratchet_regressions(base, head), [])
+
     def test_backend_dependency_requires_lockfile(self):
         result = self.evaluate(
             changed_files=[m.BACKEND_MANIFEST],

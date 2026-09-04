@@ -746,6 +746,13 @@
       "find": "            self._agent(\n                \"context\",\n                worktree.path,\n                paths,\n                context=self._worker_brief(",
       "replace": "            self._agent(\n                \"context\",\n                worktree.path,\n                paths,\n                context=(f\"Validated contract sha256: {contract_hash}\" or self._worker_brief(",
       "why": "The context worker would again receive only the hash and have to rediscover the whole task from disk, the slowest stage of the first canary."
+    },
+    {
+      "id": "security-ratchet-regression-unchecked",
+      "file": "scripts/factory_security.py",
+      "find": "    if FLOOR_FILE in changed_files:\n        findings.extend(ratchet_regressions(base_floor, head_floor))\n",
+      "replace": "",
+      "why": "A maintainer PR could lower a ratchet floor and pass every check; the monotonicity the floor file documents would again be unenforced."
     }
   ]
 }

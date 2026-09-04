@@ -242,6 +242,25 @@ class TrustedBaseGuardTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.m.verify_pr_trusted_base(PR, expect_base=None, expect_head=None)
 
+    def test_maintainer_lowering_a_floor_is_refused_from_the_base(self):
+        """The base guard reads floor.json at base and head from the object store and refuses
+        the regression even though the author holds the human lane."""
+        self.repo.write(".factory/locks/floor.json", json.dumps({"unit_tests": 1033, "static_checks": 5}) + "\n")
+        self.repo.base = self.repo.commit("floors")
+        git(self.repo.work, "push", "-q", "origin", "main")
+        result = self.judge({".factory/locks/floor.json": json.dumps({"unit_tests": 500, "static_checks": 5}) + "\n"})
+        self.assertEqual(result["verdict"], "fail")
+        self.assertEqual(result["authority"]["lane"], "human-maintenance")
+        self.assertTrue(any(x["kind"] == "ratchet_regression" and "unit_tests lowered from 1033 to 500" in x["detail"]
+                            for x in result["findings"]))
+
+    def test_maintainer_raising_a_floor_passes_from_the_base(self):
+        self.repo.write(".factory/locks/floor.json", json.dumps({"unit_tests": 1033}) + "\n")
+        self.repo.base = self.repo.commit("floors")
+        git(self.repo.work, "push", "-q", "origin", "main")
+        result = self.judge({".factory/locks/floor.json": json.dumps({"unit_tests": 1100, "e2e_steps": 8}) + "\n"})
+        self.assertEqual(result["verdict"], "pass")
+
     # -- attack 8: the maintainer lane waives nothing else ------------------------------------------
     def test_secret_in_maintainer_trust_root_pr_still_fails(self):
         marker = "-----BEGIN " + "PRIVATE KEY-----"
