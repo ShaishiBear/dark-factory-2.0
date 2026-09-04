@@ -127,7 +127,7 @@ Validation is `KernelRuntime.validate_pr`. It starts from the exact PR head SHA 
 12. **Post-merge exact-tree verification.** `harness/merge_verify.py post` confirms GitHub reports the expected merge commit, it is on `origin/main`, it has exactly one parent equal to the evidenced base, and its tree is byte-identical to the authorized head tree.
 13. **Post-merge validation on `main`.** `harness/post_merge.py` builds a fresh worktree at the merge commit with fresh locked dependencies, re-runs the full harness, and requires at least one observed E2E step.
 
-Any failure at steps 1–9 fails closed with no merge (section 7). A failure at step 12 is an incident (section 7). A failure at step 13 opens a never-auto-merged revert PR for a human.
+Any failure at steps 1–9 fails closed with no merge and is recorded as a typed refusal (section 7): the validator knows which step it was in, `factory_kernel/refusal.py` turns that and the refusing program's output into one stable `reason_code` (`security_guard`, `attached_evidence`, `code_holdout`, `provenance`, `architecture_holdout`, `certifier:contract|design|governor`, `evidence_spine`, `merge_preauth`, `stale_base`, or `unknown`), and a scrubbed `validation-refusal.json` goes into the run's uploaded artifacts. A failure at step 12 is an incident (section 7). A failure at step 13 opens a never-auto-merged revert PR for a human.
 
 ---
 
@@ -255,7 +255,23 @@ These failures are fundamental. The PR is not sent back for fixes; the validator
 
 ### Validation failure (steps 1–9 of section 3)
 
-The validator removes `factory:needs-review`, adds **`factory:needs-fix`** to the PR, comments on the PR ("Dark Factory validation failed closed. No merge was authorized. Failure class: …"), and comments on the linked issue with a hidden `<!-- dark-factory-validation-failed -->` marker. **Nothing reads `factory:needs-fix` to fix the PR.** It is a terminal marker: the PR stays open for a human to inspect, and the issue — still `factory:accepted`, no longer `factory:in-progress` — is re-dispatched for a **fresh build from current `main`** at attempt N+1. The old PR is superseded, not repaired.
+The validator removes `factory:needs-review`, adds **`factory:needs-fix`** to the PR, and comments on the PR with a hidden `<!-- dark-factory-refusal: {…} -->` marker carrying the `reason_code`, the refusing authority, the judged head and base, followed by one human-readable line. The scrubbed refusal record (`validation-refusal.json`: program, subcommand, exit code, the tail of its output with every secret shape the guard knows redacted) is in the run's uploaded artifacts; nothing is left "on the host".
+
+For every reason code except `stale_base`, the validator also comments on the linked issue with the hidden `<!-- dark-factory-validation-failed -->` marker that `_next_build_attempt` counts. The PR stays open for a human to inspect, and the issue — still `factory:accepted`, no longer `factory:in-progress` — is re-dispatched for a **fresh build from current `main`** at attempt N+1. The old PR is superseded, not repaired. **There is no model repair loop** (section 13).
+
+### Stale base: re-headed without a model, not repaired
+
+`stale_base` is the one refusal that is not the build's fault: `main` moved under the PR, reported by `factory_kernel/provenance.py` ("built from a different base"), `harness/merge_verify.py pre` ("main moved after evidence") or `scripts/factory_evidence.py` ("trust root is not current with origin/main"). It does **not** write the validation-failed marker, so it does not consume the issue's attempt budget. Instead, `KernelRuntime.rehead_pr` runs on the next dispatch (section 8):
+
+1. Precondition: the PR is open, carries `factory:needs-fix`, its latest refusal marker is `stale_base`, and it carries no re-head marker. Anything else is refused.
+2. The builder's provenance pack is fetched and re-verified at the judged head (`_builder_pack`); the certified contract, context, design, governor verdict and RED proof are written back under their builder file names.
+3. A **blinded** worktree at the judged head (`BUILDER_BLIND_PATHS`, the same blind a build gets) is rebased onto current `origin/main` with the kernel's identity. A conflict aborts the rebase and escalates to `factory:needs-human`.
+4. Every RED-hashed acceptance test must be byte-identical at the new tip, or the re-head refuses.
+5. What a new head invalidates is recomputed, in order: GREEN replay, the `conformance` worker and its compiler, the final GREEN, the quick gate, a clean-tree check.
+6. The branch is pushed with `--force-with-lease=refs/heads/<branch>:<judged head>`, the one legitimate non-fast-forward push in the kernel: the rebase rewrote history by construction, and the lease makes the remote refuse if anything but the judged head is there.
+7. The contract and final proof are re-attached, the provenance note is republished at the new head (`GitHubClient.push_branch`, `scripts/factory_protocol.py attach`, `scripts/factory_proof.py attach`, `scripts/factory_provenance.py publish`), a `<!-- dark-factory-rehead: {…} -->` marker is posted, and the PR goes back to `factory:needs-review`.
+
+Validation then runs **in full** from the new head and reuses nothing validator-side; the head-bound certificates and provenance bindings would refuse reuse anyway. One re-head per PR: a second `stale_base` refusal adds `factory:needs-human`.
 
 ### Attempt budget exhausted, or any build-time failure
 
@@ -294,10 +310,11 @@ Every run first proves its prerequisites and refuses otherwise: Issues enabled, 
 1. **Emergency stop** (below) — if stopped, do nothing.
 2. **Stale-lease reaper** — `scripts/factory_lease.py reap` releases claims whose lease expired (active TTL 6 h, legacy grace 24 h). A linked PR carrying a handoff label wins over redispatching the issue.
 3. **Validate** the oldest PR labeled `factory:needs-review`.
-4. **Build** the highest-priority `factory:accepted` issue that is not `factory:in-progress` (ties: oldest update, then lowest number).
-5. **Triage** a bounded batch, only if none of the above applied.
+4. **Re-head** the oldest PR labeled `factory:needs-fix` whose latest refusal is `stale_base` and which has not been re-headed (section 7): a model-free rebase of certified work onto current `main`.
+5. **Build** the highest-priority `factory:accepted` issue that is not `factory:in-progress` (ties: oldest update, then lowest number).
+6. **Triage** a bounded batch, only if none of the above applied.
 
-Validation outranks building so PRs do not rot. Triage is last because it creates work rather than finishing it.
+Validation outranks building so PRs do not rot; finishing certified work outranks starting more. Triage is last because it creates work rather than finishing it.
 
 ### Hard limits
 
@@ -403,7 +420,7 @@ Rules earlier versions of this file stated that have **no implementation** today
 
 - **No PR size cap.** Nothing counts additions or deletions. Scope is bounded by the design envelope, not by line count.
 - **No triage-time `factory:needs-human`.** Triage returns only accept or reject.
-- **No validation-side fix loop.** `factory:needs-fix` is applied and never read by the kernel (only the lease reaper treats it as a handoff marker). A failed PR is superseded by a fresh build, not repaired.
+- **No model repair loop on the validation side.** Refusals are now classified (section 7) and the one model-free class, `stale_base`, is re-headed; every other `factory:needs-fix` PR is superseded by a fresh build. A model `repair` pass against a validation refusal is deferred until the recorded reason codes show which class deserves one, and the holdout suite is excluded from any such loop by design (D-023): feeding a blinded judge's verdict back to a builder-path worker turns it into an oracle.
 - **Maintainer merges get no post-merge full harness.** Only autonomous merges run `harness/post_merge.py`. A maintainer PR is verified by its head's required checks (static + unit), not by the browser E2E, and if `main` moved under it the merged tree was never tested as a whole.
 - **`require_extra_approval_for_unattributed_changes` is on in the ruleset and unobserved against kernel commits.** Kernel commits now attribute to `github-actions[bot]` (D-008) rather than to no account, but whether GitHub counts a Bot-attributed commit as attributed for this rule has not been observed; the first canary will show it.
 - **No E2E floor in `.factory/locks/floor.json`.** The browser journey has not been observed end-to-end under the current kernel with a recorded step count (see `.factory/decisions.md` D-001).

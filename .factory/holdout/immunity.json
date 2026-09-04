@@ -446,6 +446,43 @@
           "value": "repro-deferred.json"
         }
       ]
+    },
+    {
+      "id": "IMM-016",
+      "status": "active",
+      "source": {
+        "kind": "decision",
+        "ref": "D-023"
+      },
+      "failure_class": "a refusal whose cause was never recorded",
+      "lesson": "Every validation refusal reached the failure handler as a bare exception, the PR comment recorded only the exception's class name, and the two logs that carried the reason stayed on an ephemeral runner. A security-guard veto and a base that moved under the PR looked identical, so the factory rebuilt certified work from scratch for a problem no model needed to touch, and nobody could size a repair loop because there was no failure data. A refusal now carries a stable reason code and its authority, a scrubbed record travels in the uploaded artifacts, a moved base does not charge the issue's rebuild budget, and the only consumer of a reason code is a model-free re-head that reuses nothing validator-side. A model repair loop stays unbuilt until the recorded codes say which class deserves one.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/refusal.py",
+          "value": "def classify(stage: str, exc: BaseException) -> str:"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/refusal.py",
+          "value": "STALE_BASE_PATTERNS"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "validation-refusal.json"
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "reason_code != \"stale_base\""
+        },
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/runtime.py",
+          "value": "push_branch(branch, force_with_lease=head)"
+        }
+      ]
     }
   ]
 }

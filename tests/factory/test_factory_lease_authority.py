@@ -125,6 +125,11 @@ class BuilderCallSiteTests(unittest.TestCase):
         cls.tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
         cls.build = _function(cls.tree, "KernelRuntime", "build_issue")
         cls.repair = _function(cls.tree, "KernelRuntime", "_review_and_repair")
+        # The handoff (attach, attach, publish) is shared by the build and the stale-base
+        # re-head, and the re-head's GREEN replays live in their own helper (D-023).
+        cls.handoff = _function(cls.tree, "KernelRuntime", "_attach_and_publish")
+        cls.rehead = _function(cls.tree, "KernelRuntime", "rehead_pr")
+        cls.rehead_green = _function(cls.tree, "KernelRuntime", "_rehead_green")
 
     def _protocol_and_proof_execs(self, func):
         found = []
@@ -138,18 +143,29 @@ class BuilderCallSiteTests(unittest.TestCase):
         return found
 
     def test_protocol_and_proof_run_without_github_credentials(self):
-        calls = self._protocol_and_proof_execs(self.build) + self._protocol_and_proof_execs(self.repair)
+        calls = (
+            self._protocol_and_proof_execs(self.build)
+            + self._protocol_and_proof_execs(self.repair)
+            + self._protocol_and_proof_execs(self.handoff)
+            + self._protocol_and_proof_execs(self.rehead)
+            + self._protocol_and_proof_execs(self.rehead_green)
+        )
         commands = sorted((p, c) for p, c, _ in calls)
         self.assertEqual(commands, sorted([
             ("scripts/factory_protocol.py", "contract"),
             ("scripts/factory_protocol.py", "context"),
             ("scripts/factory_protocol.py", "attach"),
             ("scripts/factory_proof.py", "red"),
-            ("scripts/factory_proof.py", "green"),
-            ("scripts/factory_proof.py", "green"),
-            ("scripts/factory_proof.py", "green"),
+            ("scripts/factory_proof.py", "green"),   # build, after implement
+            ("scripts/factory_proof.py", "green"),   # build, final
+            ("scripts/factory_proof.py", "green"),   # repair
+            ("scripts/factory_proof.py", "green"),   # re-head (called twice through one helper)
             ("scripts/factory_proof.py", "attach"),
         ]))
+        # Both handoff callers go through the one helper, so the attach calls are counted once.
+        for func, name in ((self.build, "build_issue"), (self.rehead, "rehead_pr")):
+            self.assertEqual(len(_method_calls(func, "_attach_and_publish")), 1, name)
+        self.assertEqual(len(_method_calls(self.rehead, "_rehead_green")), 2)
         for program, command, scope in calls:
             with self.subTest(program=program, command=command):
                 if command == "attach":

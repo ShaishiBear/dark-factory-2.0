@@ -621,3 +621,46 @@ The prompts keep `$ARTIFACTS_DIR` as their placeholder by contract; a test pins 
 placeholders in the checked-in prompts is a subset of what the kernel renders, and that the
 renderable set equals the provider's request environment. Three trust-root mutations attack the
 substitution, the unknown-placeholder refusal and the named failure.
+## D-023 · Refusals are facts; a moved base is re-headed without a model; no repair loop yet
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+A read-only design scout for the validation-side fix loop (FACTORY_RULES §13) found that
+nothing could be built on: `_exec` raised a bare `RuntimeError`, `_record_validation_failure`
+kept only `type(exc).__name__`, the PR comment promised a transcript "on the host" that an
+ephemeral runner discards, and the worker's artifact upload excludes the two logs that carry
+the reason. A security-guard veto and a base that moved under the PR were indistinguishable.
+The scout also found that a rebuild after any refusal re-spends about seventy percent of a
+build's turn budget on stages that were independently certified and did not fail.
+
+Two things are done here, and one is deliberately not.
+
+**Refusals are typed and durable.** `_exec` raises `ToolRefused` (a `RuntimeError`, so every
+handler keeps working) carrying the program, subcommand, rc and tail. `validate_pr` tracks the
+stage it is in; `factory_kernel/refusal.py` turns stage and refusal into one of a fixed set of
+reason codes and the authority that speaks for it. The PR comment carries the code and authority
+behind an HTML marker; a scrubbed `validation-refusal.json` (every secret shape the guard knows
+is redacted) goes into the run's uploaded artifacts. The false "remains on the host" sentence is
+gone.
+
+**A stale base is re-headed, model-free.** The three programs that say main moved under the PR
+(`provenance.py`, `merge_verify.py pre`, `factory_evidence.py`) produce `stale_base`. That code
+does not write the validation-failed marker on the issue: main's motion is not the build's
+defect and must not spend its rebuild budget. On the next dispatch, after review PRs and before
+any new build, the kernel fetches and re-verifies the builder's provenance pack at the judged
+head, creates a blinded worktree, rebases onto current main, checks that every RED-hashed
+acceptance test is byte-identical, replays GREEN, runs the conformance worker and compiler,
+replays the final GREEN and the quick gate, pushes with `--force-with-lease` naming the judged
+head (the one legitimate non-fast-forward push in the kernel), re-attaches contract and proof,
+republishes the provenance note at the new head, and hands the PR back to `factory:needs-review`.
+Validation then runs in full and reuses nothing; the bindings in `independence.py` and
+`provenance.py` would refuse reuse anyway. One re-head per PR; a second stale refusal is a
+human's problem. A rebase conflict is too.
+
+**No model repair loop.** The scout's ranking was explicit: build the model-free case first,
+then measure. The most repairable failure class is the holdout suite, and it is exactly the one
+that must never be fed back to a builder-path worker: the builder is blinded to those scenarios
+by construction, and repairing against them would turn a one-shot blinded judge into an oracle
+the builder can iterate against. Whether any other class deserves a loop is a question the
+recorded reason codes will answer; until they do, the honest §13 line is that refusals are
+classified and a repair loop is deferred, not that none is wanted.

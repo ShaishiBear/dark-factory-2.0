@@ -60,12 +60,19 @@ def _evidence_rules():
     return module
 from factory_kernel.canonical import sha256_value  # noqa: E402
 from factory_kernel.provenance import BUILDER_CLAIMS, NOTE_REF  # noqa: E402
+from factory_kernel.refusal import ToolRefused  # noqa: E402
 
 CHANGED_FILES: tuple[str, ...] = ("app/backend/main.py",)
 HEAD = "1" * 40
 BASE = "2" * 40
+NEW_HEAD = "4" * 40   # the tip after a rehearsed rebase
+NEW_BASE = "5" * 40   # where origin/main is when a stale PR is re-headed
 PR_NUMBER = 77
 ISSUE_NUMBER = 42
+AUTHORITY_ROLES: frozenset[str] = frozenset({
+    "holdout", "architecture-holdout", "contract-certifier", "design-certifier",
+    "governor-certifier",
+})
 
 
 @dataclass(frozen=True)
@@ -84,6 +91,9 @@ class Trace:
     outcome: str = "incomplete"
     error: str = ""
     incident_body: str = ""  # what the humans were actually told, verbatim
+    pr_comments: list[str] = field(default_factory=list)     # PR comments the kernel posted
+    issue_comments: list[str] = field(default_factory=list)  # issue comments the kernel posted
+    refusal_record: dict | None = None  # validation-refusal.json, if the run wrote one
 
     def record(self, kind: str, name: str, *, argv: tuple[str, ...] = (), cwd: str = "") -> None:
         self.steps.append(Step(kind, name, argv, cwd))
@@ -103,8 +113,19 @@ class Trace:
     def before(self, first: str, second: str) -> bool:
         return self.index(first) < self.index(second)
 
+    def execs(self, tool: str, phase: str | None = None) -> list[Step]:
+        """Recorded subprocess steps for one tool, optionally narrowed to its subcommand."""
+        return [
+            s for s in self.steps
+            if s.kind == "exec" and s.name == tool
+            and (phase is None or (len(s.argv) > 2 and s.argv[2] == phase))
+        ]
 
-def builder_pack(issue: int = ISSUE_NUMBER, head: str = HEAD, base: str = BASE) -> dict:
+
+def builder_pack(
+    issue: int = ISSUE_NUMBER, head: str = HEAD, base: str = BASE,
+    red_files: Mapping[str, str] | None = None,
+) -> dict:
     """A provenance pack that satisfies the real verify_pack, bindings included.
 
     The cross-artifact bindings are computed rather than typed, so this stays correct if the
@@ -125,6 +146,8 @@ def builder_pack(issue: int = ISSUE_NUMBER, head: str = HEAD, base: str = BASE) 
     artifacts = {
         "contract": contract, "tickets": tickets, "frontier": frontier,
         "context": context, "design": design,
+        "red-proof": rec({"version": "2.0", "claim": "red-proof", "test_commit": "3" * 40,
+                          "files": dict(red_files or {})}),
     }
     for claim in BUILDER_CLAIMS:
         artifacts.setdefault(claim, rec({"version": "1.0", "claim": claim}))
@@ -139,7 +162,8 @@ class FakeGitHub:
 
     def __init__(self, trace: Trace, *, state: str = "OPEN", labels: tuple[str, ...] = (),
                  head: str = HEAD, base: str = BASE, body: str | None = None,
-                 refuse_issue_creation: bool = False) -> None:
+                 refuse_issue_creation: bool = False, comments: tuple[str, ...] = (),
+                 prs: tuple[Mapping[str, Any], ...] = ()) -> None:
         self.trace = trace
         self.cwd = "."
         self._state = state
@@ -149,6 +173,10 @@ class FakeGitHub:
         self._body = body if body is not None else _pr_body()
         self.refuse_issue_creation = refuse_issue_creation
         self.body = ""
+        self._comments = list(comments)
+        self._prs = list(prs)
+        self.posted: list[str] = []          # every PR comment the kernel wrote, verbatim
+        self.issue_comments: list[str] = []  # every issue comment the kernel wrote, verbatim
 
     def pr(self, number: int, *, holdout_safe: bool = False) -> Mapping[str, Any]:
         self.trace.record("github", f"pr(holdout_safe={holdout_safe})")
@@ -164,6 +192,21 @@ class FakeGitHub:
     def issue(self, number: int) -> Mapping[str, Any]:
         self.trace.record("github", "issue")
         return {"number": number, "title": "rehearsal issue", "body": "please do the thing"}
+
+    def pr_comments(self, number: int) -> list[str]:
+        self.trace.record("github", "pr_comments")
+        return list(self._comments) + list(self.posted)
+
+    def list_prs(self, label: str, *, limit: int = 100) -> list[Mapping[str, Any]]:
+        self.trace.record("github", f"list_prs:{label}")
+        return [dict(pr) for pr in self._prs if label in {str(x) for x in pr.get("labels", ())}]
+
+    def list_issues(self, label: str, *, limit: int = 100) -> list[Mapping[str, Any]]:
+        self.trace.record("github", f"list_issues:{label}")
+        return []
+
+    def push_branch(self, branch: str, *, force_with_lease: str | None = None) -> None:
+        self.trace.record("github", f"push_branch(lease={force_with_lease})")
 
     @staticmethod
     def labels(value: Mapping[str, Any]) -> set[str]:
@@ -198,9 +241,11 @@ class FakeGitHub:
 
     def comment_pr(self, number: int, body: str) -> None:
         self.trace.record("github", "comment_pr")
+        self.posted.append(body)
 
     def comment_issue(self, number: int, body: str) -> None:
         self.trace.record("github", "comment_issue")
+        self.issue_comments.append(body)
 
 
 class FakeProvider:
@@ -213,6 +258,12 @@ class FakeProvider:
     def run(self, request: Any) -> AgentResult:
         role = request.role
         self.trace.record("agent", role)
+        if role not in AUTHORITY_ROLES:
+            # A build-side worker (the re-head runs `conformance`): it writes nothing here, the
+            # deterministic compiler that follows it is recorded like every other gate.
+            value: dict[str, Any] = {"version": "1.0", "role": role}
+            return AgentResult(provider_id="rehearsal", model="rehearsal",
+                               content=json.dumps(value), structured_output=value)
         # An authority that can see the repository is not blinded, whatever it concludes.
         if Path(request.cwd).resolve() == ROOT:
             raise AssertionError(f"authority {role!r} was run inside the repository checkout")
@@ -253,8 +304,14 @@ def _pr_body() -> str:
     return f"Fixes #{ISSUE_NUMBER}\n\n" + block("contract", contract) + block("proof", proof)
 
 
-def exec_recorder(trace: Trace, *, fail: str | None = None) -> Callable[..., str]:
-    """Stand in for the deterministic tools, materializing what each is contracted to write."""
+def exec_recorder(trace: Trace, *, fail: str | None = None,
+                  fail_detail: str = "rehearsed failure",
+                  red_files: Mapping[str, str] | None = None) -> Callable[..., str]:
+    """Stand in for the deterministic tools, materializing what each is contracted to write.
+
+    A rehearsed failure raises the same typed refusal the real `_exec` raises, carrying
+    `fail_detail` as the tool's tail, so the refusal classifier is exercised on real text.
+    """
 
     def _exec(argv: list[str], *, cwd: Path, env: Mapping[str, str] | None = None,
               credential_scope: str = "none", timeout: int = 300,
@@ -264,7 +321,7 @@ def exec_recorder(trace: Trace, *, fail: str | None = None) -> Callable[..., str
         name = f"{tool}:{phase}" if phase else tool
         trace.record("exec", name, argv=tuple(argv), cwd=str(cwd))
         if fail == name:
-            raise RuntimeError(f"{name} failed rc=1: rehearsed failure")
+            raise ToolRefused(argv, rc=1, output=fail_detail)
         outputs = {argv[i + 1] for i, a in enumerate(argv) if a == "--output" and i + 1 < len(argv)}
         for out in outputs:
             target = Path(out)
@@ -282,13 +339,13 @@ def exec_recorder(trace: Trace, *, fail: str | None = None) -> Callable[..., str
             try:
                 rules.verify_architecture_holdout(value, list(CHANGED_FILES), policy)
             except SystemExit as exc:
-                raise RuntimeError(f"{name} failed rc=1: architecture holdout refused") from exc
-        if tool == "factory_provenance.py":
+                raise ToolRefused(argv, rc=1, output="architecture holdout refused") from exc
+        if tool == "factory_provenance.py" and "--output-dir" in argv:
             idx = argv.index("--output-dir")
             pack_dir = Path(argv[idx + 1])
             pack_dir.mkdir(parents=True, exist_ok=True)
             (pack_dir / "builder-provenance.json").write_text(
-                json.dumps(builder_pack()), encoding="utf-8")
+                json.dumps(builder_pack(red_files=red_files)), encoding="utf-8")
         return ""
 
     return _exec
@@ -307,6 +364,13 @@ class Scenario:
     head: str = HEAD
     body: str | None = None
     refuse_issue_creation: bool = False
+    command: str = "validate"            # validate | rehead | dispatch
+    fail_detail: str = "rehearsed failure"
+    comments: tuple[str, ...] = ()       # PR comments that already exist (markers live here)
+    prs: tuple[Mapping[str, Any], ...] = ()  # what list_prs returns, for dispatch
+    red_files: Mapping[str, str] | None = None   # RED-hashed files the pack declares
+    worktree_files: Mapping[str, str] | None = None  # files present in the rehearsed worktree
+    rebase_conflict: bool = False
 
 
 def rehearse(scenario: Scenario) -> Trace:
@@ -318,6 +382,8 @@ def rehearse(scenario: Scenario) -> Trace:
     from factory_kernel.config import load_config
     from factory_kernel.runtime import KernelRuntime
 
+    import shutil
+
     trace = Trace()
     with tempfile.TemporaryDirectory(prefix="dark-factory-rehearsal-") as tmp:
         home = Path(tmp)
@@ -327,6 +393,13 @@ def rehearse(scenario: Scenario) -> Trace:
         (worktree_dir / ".factory").mkdir(parents=True)
         (worktree_dir / ".factory" / "architecture.json").write_text(
             (ROOT / ".factory" / "architecture.json").read_text(encoding="utf-8"), encoding="utf-8")
+        # Build-side roles resolve their prompt under the worktree, so the re-head's
+        # conformance worker needs the prompt files there.
+        shutil.copytree(ROOT / ".factory" / "prompts", worktree_dir / ".factory" / "prompts")
+        for rel, text in (scenario.worktree_files or {}).items():
+            target = worktree_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8", newline="")  # exact bytes, any OS
 
         config = load_config(ROOT / ".factory" / "kernel.json")
         config = dataclasses.replace(
@@ -336,26 +409,63 @@ def rehearse(scenario: Scenario) -> Trace:
         runtime.github = FakeGitHub(
             trace, state=scenario.state, labels=scenario.labels,
             head=scenario.head, body=scenario.body,
-            refuse_issue_creation=scenario.refuse_issue_creation)
+            refuse_issue_creation=scenario.refuse_issue_creation,
+            comments=scenario.comments, prs=scenario.prs)
         runtime.provider = FakeProvider(trace, reject=scenario.reject)
-        runtime._exec = exec_recorder(trace, fail=scenario.fail)  # type: ignore[method-assign]
+        runtime._exec = exec_recorder(  # type: ignore[method-assign]
+            trace, fail=scenario.fail, fail_detail=scenario.fail_detail,
+            red_files=scenario.red_files)
         runtime._prepare_worktree = lambda cwd, paths: trace.record("control", "prepare_worktree")  # type: ignore[method-assign]
         runtime.check_stop = lambda: trace.record("control", "check_stop")  # type: ignore[method-assign]
 
+        git_state = {"head": scenario.head}
+
         def fake_git(*args: str, cwd: Path | None = None) -> str:
+            verb = next((a for a in args if not a.startswith("-") and a != "-c"
+                         and "=" not in a), args[0])
             if args[:1] == ("diff",) and "--name-only" in args:
                 return "".join(f"{path}\n" for path in CHANGED_FILES)
             if args[:1] == ("diff",):
                 return "diff --git a/app/backend/main.py b/app/backend/main.py\n"
+            if "rebase" in args:
+                trace.record("control", "git:rebase")
+                if "--abort" in args:
+                    return ""
+                if scenario.rebase_conflict:
+                    raise ToolRefused(["git", *args], rc=1, output="CONFLICT (content): rehearsed")
+                git_state["head"] = NEW_HEAD
+                return ""
+            if args[:1] == ("merge-base",):
+                return BASE
+            if args[:2] == ("rev-parse", "HEAD"):
+                return git_state["head"]
+            if args[:1] == ("rev-parse",):
+                return NEW_BASE
+            if verb in {"fetch", "checkout", "status"}:
+                trace.record("control", f"git:{verb}")
             return ""
 
         runtime._git = fake_git  # type: ignore[method-assign]
 
         worktree = mock.Mock(path=worktree_dir)
-        with mock.patch("factory_kernel.runtime.create_detached", return_value=worktree), \
+
+        def fake_create_detached(*args: Any, **kwargs: Any) -> Any:
+            blind = tuple(kwargs.get("blind") or ())
+            trace.record("control", f"worktree_blind={'yes' if blind else 'no'}")
+            return worktree
+
+        with mock.patch("factory_kernel.runtime.create_detached", side_effect=fake_create_detached), \
              mock.patch("factory_kernel.runtime.remove") as removed:
             try:
-                runtime.validate_pr(PR_NUMBER, merge=scenario.merge)
+                if scenario.command == "validate":
+                    runtime.validate_pr(PR_NUMBER, merge=scenario.merge)
+                elif scenario.command == "rehead":
+                    runtime.rehead_pr(PR_NUMBER)
+                elif scenario.command == "dispatch":
+                    decision = runtime.dispatch_once(merge=scenario.merge)
+                    trace.record("control", f"dispatch:{decision.kind}")
+                else:
+                    raise ValueError(f"unknown rehearsal command {scenario.command!r}")
                 trace.outcome = "returned"
             except Exception as exc:  # the control plane's own refusal is the result
                 trace.outcome = type(exc).__name__
@@ -363,6 +473,10 @@ def rehearse(scenario: Scenario) -> Trace:
             if removed.called:
                 trace.record("control", "worktree_removed")
         trace.incident_body = runtime.github.body
+        trace.pr_comments = list(runtime.github.posted)
+        trace.issue_comments = list(runtime.github.issue_comments)
+        for record in work_root.rglob("validation-refusal.json"):
+            trace.refusal_record = json.loads(record.read_text(encoding="utf-8"))
     return trace
 
 
