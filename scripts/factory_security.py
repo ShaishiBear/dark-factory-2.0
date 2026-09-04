@@ -307,14 +307,19 @@ def evaluate(*, changed_files: list[str], base_backend: str, head_backend: str,
         findings.append({"kind": "secret", "path": secret["path"],
                          "detail": f"high-confidence {secret['kind']} pattern in added line"})
 
+    verdict = "pass" if not findings else "fail"
     return {
         "version": "1.0",
-        "verdict": "pass" if not findings else "fail",
+        "verdict": verdict,
         "protected_paths": protected,
         "authority": {
             "lane": lane,
             "author": str((author or {}).get("login") or ""),
             "protected_paths_permitted": lane == "human-maintenance",
+            # Unattended merge is a maintainer-lane property. An autonomous PR is merged only
+            # by the kernel after the full evidence ladder; the guard passing is nowhere near
+            # enough for it, so the eligibility bit is never set on the autonomous lane.
+            "unattended_merge_eligible": lane == "human-maintenance" and verdict == "pass",
         },
         "dependency_changes": public_dependency_changes(dep_changes),
         "secret_findings": secrets,
@@ -369,7 +374,21 @@ def pr_identity(pr: str) -> tuple[dict, list[dict]]:
     return author, commits
 
 
+def repository_name() -> str:
+    return str(json.loads(run(["gh", "repo", "view", "--json", "nameWithOwner"]).stdout).get("nameWithOwner") or "")
+
+
+def bound(result: dict, *, mode: str, pr: str, base: str, head: str, changed: list[str]) -> dict:
+    """Bind the verdict to exactly what was judged, so a consumer can refuse a stale result."""
+    result["binding"] = {
+        "mode": mode, "repository": repository_name(), "pr": int(pr),
+        "base_sha": base, "head_sha": head, "changed_files": list(changed),
+    }
+    return result
+
+
 def verify_pr(pr: str) -> dict:
+    """Head mode: the validator worktree IS the PR head. Used by the head-based quick gate."""
     meta = json.loads(run(["gh", "pr", "view", pr, "--json", "body,baseRefOid,headRefOid"]).stdout)
     author, commits = pr_identity(pr)
     base, head = meta["baseRefOid"], meta["headRefOid"]
@@ -378,13 +397,54 @@ def verify_pr(pr: str) -> dict:
         die(f"validator worktree is stale: HEAD={local} PR={head}")
     changed = sorted(x for x in run(["git", "diff", "--name-only", f"{base}...{head}"]).stdout.splitlines() if x)
     diff = run(["git", "diff", "--unified=0", "--no-ext-diff", "--no-color", f"{base}...{head}"]).stdout
-    return evaluate(
+    result = evaluate(
         changed_files=changed,
         base_backend=git_show(base, BACKEND_MANIFEST), head_backend=git_show(head, BACKEND_MANIFEST),
         base_frontend=git_show(base, FRONTEND_MANIFEST), head_frontend=git_show(head, FRONTEND_MANIFEST),
         diff=diff, body=meta.get("body") or "",
         author=author, commits=commits,
     )
+    return bound(result, mode="head", pr=pr, base=base, head=head, changed=changed)
+
+
+def verify_pr_trusted_base(pr: str, *, expect_base: str | None, expect_head: str | None) -> dict:
+    """Trusted-base mode: this program runs from a commit already on the protected branch and
+    judges the PR head as data. The PR cannot supply the guard that judges it.
+
+    The trust comes from the caller: the trust-root workflow runs from the base of the pull
+    request (a `pull_request_target` event executes the workflow definition from `main`) and
+    checks out `github.sha`, the base tip; the kernel validator runs from its `main` checkout.
+    This function verifies the shape of that promise -- HEAD is not the PR head, HEAD is reachable
+    from the base branch, the fetched head is exactly the head GitHub reports, and any expected
+    identities the caller passed match -- and refuses to run from the PR head.
+    """
+    meta = json.loads(run(["gh", "pr", "view", pr, "--json", "body,baseRefName,baseRefOid,headRefOid"]).stdout)
+    author, commits = pr_identity(pr)
+    head = str(meta["headRefOid"])
+    base_ref = str(meta.get("baseRefName") or "main")
+    local = run(["git", "rev-parse", "HEAD"]).stdout.strip()
+    if local == head:
+        die("trusted-base mode refuses to run from the PR head: the change would be judging itself")
+    if expect_base and local != expect_base:
+        die(f"trusted base moved: HEAD={local} expected={expect_base}")
+    if expect_head and head != expect_head:
+        die(f"PR head moved after the check was scheduled: PR={head} expected={expect_head}")
+    if run(["git", "merge-base", "--is-ancestor", local, f"origin/{base_ref}"], check=False).returncode != 0:
+        die(f"trusted base {local} is not on origin/{base_ref}")
+    run(["git", "fetch", "--quiet", "origin", f"refs/pull/{int(pr)}/head"])
+    fetched = run(["git", "rev-parse", "FETCH_HEAD"]).stdout.strip()
+    if fetched != head:
+        die(f"fetched PR head {fetched} is not the head GitHub reports {head}")
+    changed = sorted(x for x in run(["git", "diff", "--name-only", f"{local}...{head}"]).stdout.splitlines() if x)
+    diff = run(["git", "diff", "--unified=0", "--no-ext-diff", "--no-color", f"{local}...{head}"]).stdout
+    result = evaluate(
+        changed_files=changed,
+        base_backend=git_show(local, BACKEND_MANIFEST), head_backend=git_show(head, BACKEND_MANIFEST),
+        base_frontend=git_show(local, FRONTEND_MANIFEST), head_frontend=git_show(head, FRONTEND_MANIFEST),
+        diff=diff, body=meta.get("body") or "",
+        author=author, commits=commits,
+    )
+    return bound(result, mode="trusted-base", pr=pr, base=local, head=head, changed=changed)
 
 
 def verify_worktree() -> dict:
@@ -404,8 +464,21 @@ def main() -> None:
     target.add_argument("--pr")
     target.add_argument("--worktree", action="store_true")
     parser.add_argument("--output")
+    parser.add_argument("--trusted-base", action="store_true",
+                        help="judge the PR head from a base commit already on the protected branch")
+    parser.add_argument("--expect-base", help="refuse unless HEAD is exactly this commit (trusted-base mode)")
+    parser.add_argument("--expect-head", help="refuse unless the PR head is exactly this commit (trusted-base mode)")
     args = parser.parse_args()
-    result = verify_worktree() if args.worktree else verify_pr(str(args.pr))
+    if (args.expect_base or args.expect_head) and not args.trusted_base:
+        parser.error("--expect-base/--expect-head require --trusted-base")
+    if args.trusted_base and not args.pr:
+        parser.error("--trusted-base requires --pr")
+    if args.worktree:
+        result = verify_worktree()
+    elif args.trusted_base:
+        result = verify_pr_trusted_base(str(args.pr), expect_base=args.expect_base, expect_head=args.expect_head)
+    else:
+        result = verify_pr(str(args.pr))
     payload = json.dumps(result, sort_keys=True, separators=(",", ":"))
     if args.output:
         Path(args.output).write_text(payload + "\n", encoding="utf-8")

@@ -59,6 +59,55 @@
       "find": "          bun-version: '1.4.0'",
       "replace": "          bun-version: 'latest'",
       "why": "The native authority could silently move to a different Bun runtime."
+    },
+    {
+      "id": "trust-root-workflow-runs-the-pr-copy",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "on:\n  pull_request_target:\n    branches: [main]",
+      "replace": "on:\n  pull_request:\n    branches: [main]",
+      "why": "A pull_request trigger executes the PR's copy of this workflow; the PR could edit its judge."
+    },
+    {
+      "id": "trust-root-checkout-is-the-pr-head",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "          ref: ${{ github.sha }}",
+      "replace": "          ref: ${{ github.event.pull_request.head.sha }}",
+      "why": "The guard would be loaded from the PR head instead of the protected base tip."
+    },
+    {
+      "id": "trust-root-mode-dropped-from-workflow",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "--pr \"$PR_NUMBER\" --trusted-base \\",
+      "replace": "--pr \"$PR_NUMBER\" \\",
+      "why": "The guard would run in head mode and the workflow would stop asserting base anchoring."
+    },
+    {
+      "id": "trust-root-authority-token-can-write",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "    permissions:\n      contents: read\n      pull-requests: read\n      issues: read",
+      "replace": "    permissions:\n      contents: write\n      pull-requests: write\n      issues: read",
+      "why": "The judging job would hold write authority it does not need."
+    },
+    {
+      "id": "unattended-merge-not-bound-to-judged-head",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH",
+      "replace": "pullRequestId: $id, mergeMethod: SQUASH",
+      "why": "Auto-merge would be armed without the expected head, so a head the authority never judged could merge."
+    },
+    {
+      "id": "unattended-merge-ungated",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "    if: needs.trust-root-authority.outputs.unattended == 'true'",
+      "replace": "    if: always()",
+      "why": "Auto-merge would be armed for autonomous PRs and for PRs the authority refused."
+    },
+    {
+      "id": "unattended-merge-event-head-check-dropped",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "          test \"$EXPECTED_HEAD\" = \"$EVENT_HEAD\"\n",
+      "replace": "",
+      "why": "The merge job would no longer refuse when the judged head and the event head disagree."
     }
   ]
 }
