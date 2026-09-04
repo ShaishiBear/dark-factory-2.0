@@ -256,3 +256,29 @@ The fix makes the label vocabulary a kernel fact (`label_vocabulary`, derived fr
 sets the decision validator enforces) and has the preflight read it from the kernel rather than
 from a second hand-typed list, so a label added in code cannot outrun the check. Same class as
 D-010: a prerequisite check that verifies something other than what the run will do.
+
+---
+
+## D-012 · The kernel alone heartbeats the lease; contract and proof hold no credentials
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Third canary dispatch (run 33880438107): triage and labels were fixed, the build started, and
+`scripts/factory_protocol.py contract` died at `LEASE_ERROR gh repo view ... set the GH_TOKEN`.
+The contract compiler started the issue lease itself, which needs `gh`, while the kernel ran it
+with no credentials. That scope was right: `factory_proof.py` executes checkpoint commands the
+model authored, and a program that runs model-authored commands must never hold a repository
+token. The lease heartbeat and the model-authored command were sharing a process.
+
+Adopted the architecture of PR #53: `KernelRuntime._lease_heartbeat` is the only build-side
+subprocess with GitHub scope, called by the kernel after contract, context, RED, GREEN, final
+GREEN and PR handoff; the script-owned `lease()`/`heartbeat()` helpers are deleted rather than
+short-circuited, so a missing lease cannot be silently ignored; and `factory_proof.run` scrubs
+GH_TOKEN and GITHUB_TOKEN from the checkpoint child as defence in depth. The two `attach`
+programs keep GitHub scope because they edit the PR through `gh` and run nothing model-authored.
+
+PR #53's commits were authored by `google-labs-jules[bot]` and the trust-root guard's second
+fence refused them, which is the fence working: the change was re-authored under the
+maintainer's identity with the reviewer's cleanups. An AST test now pins the scope of every
+protocol/proof call in `build_issue` and the exact heartbeat sequence, so a future edit cannot
+quietly hand the token back.

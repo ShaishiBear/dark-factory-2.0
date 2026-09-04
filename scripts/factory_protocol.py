@@ -30,20 +30,6 @@ def canonical(value: dict) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
 
 
-def lease(action: str, issue: int, stage: str, pr: str | None = None) -> None:
-    artifacts = os.environ.get("ARTIFACTS_DIR", "").strip()
-    if not artifacts:
-        return
-    lease_file = Path(artifacts) / "factory-lease.json"
-    argv = [
-        sys.executable, str(ROOT / "scripts" / "factory_lease.py"), action,
-        "--issue", str(issue), "--stage", stage, "--lease-file", str(lease_file),
-    ]
-    if pr is not None and action != "start":
-        argv.extend(["--pr", str(pr)])
-    subprocess.check_call(argv, cwd=ROOT)
-
-
 def validate_dependencies(deps: object) -> list[dict]:
     """A contract may declare the packages the change needs. Each declaration carries the three
     justifications the security guard requires under `## Dependency justification`; the kernel
@@ -108,7 +94,6 @@ def validate_context(m: dict, contract_hash: str) -> dict:
 def run_contract(args: argparse.Namespace) -> None:
     c = load(args.input); h = validate_contract(c, args.issue)
     Path(args.output).write_bytes(canonical(c)); Path(args.hash_output).write_text(h + "\n", encoding="utf-8")
-    lease("start", c["issue"]["number"], "contract")
     print(f"CONTRACT_OK sha256={h} criteria={len(c['behaviors'])}")
 
 
@@ -133,7 +118,6 @@ def run_context(args: argparse.Namespace) -> None:
         "--input", str(artifacts / "design.raw.json"), "--contract", args.contract,
         "--context", args.output, "--output", str(artifacts / "design.json"),
     ], cwd=ROOT)
-    lease("touch", c["issue"]["number"], "design-context")
     print(f"CONTEXT_OK files={len(m['files'])} sha256={hashlib.sha256(canonical(m)).hexdigest()}")
 
 
@@ -149,7 +133,6 @@ def run_attach(args: argparse.Namespace) -> None:
         sys.executable, str(ROOT / "scripts" / "factory_provenance.py"), "publish",
         "--pr", str(args.pr), "--artifacts", artifacts,
     ], cwd=ROOT)
-    lease("touch", c["issue"]["number"], "pr-handoff", str(args.pr))
     print(f"CONTRACT_ATTACHED pr={args.pr} sha256={h}")
 
 

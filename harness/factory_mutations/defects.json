@@ -543,6 +543,34 @@
       "find": "                type_label(str(decision[\"classification\"])),\n",
       "replace": "                \"kind:\" + str(decision[\"classification\"]),\n",
       "why": "Triage would apply a label the preflight never required to exist, so an accepted issue would crash the run half-labelled."
+    },
+    {
+      "id": "kernel-red-proof-holds-github-credentials",
+      "file": "factory_kernel/runtime.py",
+      "find": "                cwd=worktree.path,\n                env=env,\n                credential_scope=\"none\",\n                timeout=600,\n                transcript=paths.transcripts / \"red-gate.log\",",
+      "replace": "                cwd=worktree.path,\n                env=env,\n                credential_scope=\"github\",\n                timeout=600,\n                transcript=paths.transcripts / \"red-gate.log\",",
+      "why": "The RED proof runs model-authored checkpoint commands; giving it GitHub scope hands a repository token to code the model wrote."
+    },
+    {
+      "id": "kernel-lease-heartbeat-without-credentials",
+      "file": "factory_kernel/runtime.py",
+      "find": "            credential_scope=\"github\",\n            timeout=120,\n            transcript=paths.transcripts / f\"lease-{stage}.log\",",
+      "replace": "            credential_scope=\"none\",\n            timeout=120,\n            transcript=paths.transcripts / f\"lease-{stage}.log\",",
+      "why": "The kernel's own heartbeat would fail the same way the script-owned one did, and every build would die at the contract stage."
+    },
+    {
+      "id": "proof-checkpoint-env-unscrubbed",
+      "file": "scripts/factory_proof.py",
+      "find": "    p=subprocess.run(argv,cwd=ROOT/cwd,env=checkpoint_env(),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)",
+      "replace": "    p=subprocess.run(argv,cwd=ROOT/cwd,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)",
+      "why": "The defence-in-depth scrub is gone; a caller that forgets the credential scope would leak GH_TOKEN into a model-authored command."
+    },
+    {
+      "id": "kernel-design-context-heartbeat-dropped",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._lease_heartbeat(\"touch\", issue_number, \"design-context\", paths, cwd=worktree.path)\n",
+      "replace": "",
+      "why": "A stage would run with no heartbeat, so a long context/design phase could be reaped as stale mid-build."
     }
   ]
 }
