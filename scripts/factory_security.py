@@ -160,7 +160,7 @@ def commit_provenance_problems(commits: list[dict] | None) -> list[dict[str, str
     """Second fence behind the PR-identity rule, not the proof of human control.
 
     Every commit a human PR carries into the trust root must itself resolve, on GitHub's side, to a
-    user account for both author and committer. The kernel commits under an unmapped noreply
+    user account for both author and committer. The kernel commits as github-actions[bot]
     identity and the Actions token commits as a Bot, so a factory commit pushed onto a human's
     branch shows up here as unresolved or Bot even though the PR author is human. Unknown
     provenance fails closed for the same reason.

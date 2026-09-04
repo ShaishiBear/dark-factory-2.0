@@ -242,7 +242,7 @@ class SecurityGuardTests(unittest.TestCase):
                 self.assertEqual(problems[0]["commit"], "2" * 12)
 
     def test_human_pr_carrying_an_unresolved_commit_into_trust_root_fails(self):
-        """The kernel commits under an unmapped noreply identity, which GitHub resolves to null."""
+        """A commit whose author GitHub cannot map to any account resolves to null."""
         commits = [self.commit("1" * 40), self.commit("2" * 40)]
         commits[0]["author"] = None
         result = self.evaluate(changed_files=["scripts/factory_security.py"],

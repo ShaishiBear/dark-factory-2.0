@@ -33,6 +33,19 @@ ROLE_TOOLS: dict[str, tuple[str, ...]] = {
 
 REPO_MUTATION_ROLES = frozenset({"test_author", "implement", "repair"})
 
+# The identity every kernel-made commit carries. It is the GitHub Actions bot's own noreply
+# address, which GitHub attributes to the `github-actions[bot]` account (type Bot). An earlier
+# invented noreply address mapped to no account at all, so kernel commits resolved to null:
+# unattributable to anyone, and a possible trigger for the ruleset's extra-approval rule
+# that the autonomous path can never satisfy. Attributing to the Bot is also what the trust-root
+# guard's second fence expects of factory commits.
+KERNEL_COMMIT_NAME = "github-actions[bot]"
+KERNEL_COMMIT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
+KERNEL_COMMIT_ARGS: tuple[str, ...] = (
+    "-c", f"user.name={KERNEL_COMMIT_NAME}",
+    "-c", f"user.email={KERNEL_COMMIT_EMAIL}",
+)
+
 # Paths that do not exist in a build worktree. Workers get Read/Glob/Grep over the checkout, and
 # a protected file is only tamper-resistant, not secret: the holdout scenarios under
 # .factory/holdout/ were readable by the very worker whose output they judge. The kernel creates
