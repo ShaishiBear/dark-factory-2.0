@@ -217,3 +217,24 @@ anything else.
 What this does not do: decide whether a package is wise. The contract certifier, the
 architecture governor and the blinded holdout still judge that; this only makes an honest
 declaration mergeable and a silent one impossible.
+
+---
+
+## D-010 · The model route had never worked; the preflight now proves the real request
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+The first canary dispatch (issue #49, worker run 33876017910) failed at triage with "There's
+an issue with the selected model (z-ai/glm-5.3-flash)". Diagnostic PR #50 (runs 33876770089,
+33876959027) showed the cause was not the model: the Anthropic SDK inside Claude Code appends
+`/v1/messages` to `ANTHROPIC_BASE_URL`, the worker set that base to `https://openrouter.ai/api/v1`,
+and every model call requested `/api/v1/v1/messages` and received OpenRouter's HTML 404 page.
+The preflight's curl probe hard-coded the correct path and passed for weeks while proving a
+request the worker never made. With `https://openrouter.ai/api` the pinned CLI returns `OK`
+for GLM-5.3 Flash, DeepSeek V4 Pro and Claude Haiku 4.5, including a tool-using turn.
+
+What the fix proves: at preflight, the pinned CLI, launched as the kernel launches a worker,
+reaches each configured model and returns a non-error result. What it does not prove: that
+any model is good enough to build, review or judge; that is what the canary measures.
+
+This is a **judgement** mechanism in a protected workflow and moved through the maintainer lane.

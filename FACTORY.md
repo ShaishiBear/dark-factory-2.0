@@ -220,8 +220,11 @@ Before unattended Level-4 dispatch is enabled, repository configuration must sat
 - all eight factory control labels exist: `factory:accepted`, `factory:rejected`, `factory:rate-limited`, `factory:in-progress`, `factory:needs-review`, `factory:needs-fix`, `factory:needs-human`, `factory:stop`.
 - repository Actions secrets `OPENROUTER_API_KEY` and `SUPADATA_API_KEY` are configured. Model
   calls are routed to OpenRouter's Anthropic-compatible Messages endpoint, so no separate
-  Anthropic credential is required; the preflight proves that route with the configured model
-  before dispatching.
+  Anthropic credential is required. `ANTHROPIC_BASE_URL` is `https://openrouter.ai/api` (the SDK
+  appends `/v1/messages`; a versioned base doubles the segment, D-010). Before dispatching, the
+  preflight runs the pinned Claude Code CLI exactly as the kernel launches a worker against
+  every configured model and refuses the run unless the CLI itself returns a non-error result;
+  the raw curl probe is only an earlier, cheaper signal.
 
 The worker checks out current `main` without persisting checkout credentials, runs one global dispatch at a time, and refuses to start if any prerequisite above is missing.
 

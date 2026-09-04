@@ -108,6 +108,27 @@
       "find": "          test \"$EXPECTED_HEAD\" = \"$EVENT_HEAD\"\n",
       "replace": "",
       "why": "The merge job would no longer refuse when the judged head and the event head disagree."
+    },
+    {
+      "id": "worker-model-route-versioned-base",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api\n",
+      "replace": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api/v1\n",
+      "why": "The SDK would request /api/v1/v1/messages again and every model call would fail as it did on the first canary dispatch."
+    },
+    {
+      "id": "worker-cli-route-probe-advisory",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "              echo \"FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model $model\"\n              head -c 600 /tmp/route-probe.json; echo; head -c 400 /tmp/route-probe.err; echo\n              exit 1\n",
+      "replace": "              echo \"FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model $model\"\n              head -c 600 /tmp/route-probe.json; echo; head -c 400 /tmp/route-probe.err; echo\n              true\n",
+      "why": "A dead model route would be logged and the dispatch would proceed to burn a validation ladder discovering it."
+    },
+    {
+      "id": "worker-curl-probe-hardcoded-url",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "-X POST \"${ANTHROPIC_BASE_URL}/v1/messages\"",
+      "replace": "-X POST \"https://openrouter.ai/api/v1/messages\"",
+      "why": "The raw probe would again prove a different request than the one the worker makes."
     }
   ]
 }

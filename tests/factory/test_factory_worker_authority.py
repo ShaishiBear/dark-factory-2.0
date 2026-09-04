@@ -262,14 +262,17 @@ class GitHubWorkerWorkflowTests(unittest.TestCase):
             "DARK_FACTORY_E2E_PASSWORD",
         ):
             self.assertIn(name, self.workflow)
-        # Model calls leave the runner for OpenRouter's Anthropic-compatible endpoint. A silently
-        # misrouted or unauthorised endpoint would degrade every model judgement in the run
-        # instead of stopping it, so the preflight proves that exact route with the configured
-        # model before any ladder is spent.
-        self.assertIn("https://openrouter.ai/api/v1", self.workflow)
+        # Model calls leave the runner for OpenRouter's Anthropic-compatible endpoint. The SDK
+        # appends /v1/messages to the base, so the base is the API root; a versioned base sent
+        # every call to /api/v1/v1/messages (D-010). A silently misrouted or unauthorised
+        # endpoint would degrade every model judgement in the run instead of stopping it, so the
+        # preflight proves that exact route, with the pinned CLI, before any ladder is spent.
+        self.assertIn("ANTHROPIC_BASE_URL: https://openrouter.ai/api\n", self.workflow)
+        self.assertNotIn("openrouter.ai/api/v1", self.workflow)
         self.assertIn(
             "FACTORY_PREFLIGHT_REFUSED OpenRouter messages endpoint returned", self.workflow
         )
+        self.assertIn("FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model", self.workflow)
         self.assertNotIn("api.anthropic.com", self.workflow)
         self.assertIn("run: python -m factory_kernel dispatch --once", self.workflow)
         self.assertNotIn("dispatch --once --no-merge", self.workflow)
