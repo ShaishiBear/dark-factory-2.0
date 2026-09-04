@@ -473,6 +473,13 @@
       "find": "    sub.add_parser(\"config-check\")\n",
       "replace": "    sub.add_parser(\"state-next\")\n    sub.add_parser(\"config-check\")\n",
       "why": "A lifecycle command the runtime does not consume would return to the control surface, reopening a second representation of the lifecycle."
+    },
+    {
+      "id": "kernel-commit-identity-unattributed",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "KERNEL_COMMIT_EMAIL = \"41898282+github-actions[bot]@users.noreply.github.com\"",
+      "replace": "KERNEL_COMMIT_EMAIL = \"dark-factory@users.noreply.github.com\"",
+      "why": "Kernel commits would again resolve to no GitHub account: attributable to nobody and outside what the second fence expects of a factory commit."
     }
   ]
 }

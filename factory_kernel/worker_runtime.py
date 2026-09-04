@@ -9,7 +9,7 @@ from .agents import AgentRequest
 from .git_authority import commit_acceptance_tests, commit_planned_changes
 from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
-from .worker_policy import allowed_tools, may_change_repo
+from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, may_change_repo
 from .worktree import create_detached, remove
 
 
@@ -117,16 +117,7 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         try:
             self._git("checkout", "-b", branch, cwd=worktree.path)
             self._exec(
-                [
-                    "git",
-                    "-c",
-                    "user.name=Dark Factory",
-                    "-c",
-                    "user.email=dark-factory@users.noreply.github.com",
-                    "revert",
-                    "--no-edit",
-                    merge_sha,
-                ],
+                ["git", *KERNEL_COMMIT_ARGS, "revert", "--no-edit", merge_sha],
                 cwd=worktree.path,
                 timeout=180,
             )

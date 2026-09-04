@@ -10,6 +10,8 @@ from pathlib import Path, PurePosixPath
 import subprocess
 from typing import Iterable, Mapping
 
+from .worker_policy import KERNEL_COMMIT_ARGS
+
 
 class GitAuthorityError(RuntimeError):
     pass
@@ -78,12 +80,7 @@ def _commit(cwd: Path, paths: list[str], subject: str, body: str | None = None) 
     if not paths:
         raise GitAuthorityError("refusing to create an empty worker commit")
     _run(cwd, ["git", "add", "-A", "--", *paths])
-    argv = [
-        "git",
-        "-c", "user.name=Dark Factory",
-        "-c", "user.email=dark-factory@users.noreply.github.com",
-        "commit", "-m", subject,
-    ]
+    argv = ["git", *KERNEL_COMMIT_ARGS, "commit", "-m", subject]
     if body:
         argv.extend(["-m", body])
     _run(cwd, argv)

@@ -172,3 +172,24 @@ While reading the enforcers, the claim in the floor file that a second program a
 floor(head) >= floor(base) turned out to be false. The note now says what is enforced and
 by which program, and FACTORY_RULES section 13 records the gap. This is a **judgement**
 value and moved through the maintainer lane.
+
+---
+
+## D-008 · Kernel commits are attributed to the Actions bot
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+Every kernel-made commit carried `Dark Factory <dark-factory@users.noreply.github.com>`. That
+address maps to no GitHub account, so on GitHub the author of every factory commit resolved
+to null: attributable to nobody, and a candidate for the `main-protection` ruleset's
+`require_extra_approval_for_unattributed_changes` rule, which would demand an approval the
+autonomous path can never give.
+
+Kernel commits now carry `github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`,
+the address GitHub attributes to the Actions Bot account. That is exactly what the trust-root
+guard's second fence already expects of a factory commit (a Bot, never a User), so the change
+strengthens the fence rather than weakening it. The identity lives in one place,
+`KERNEL_COMMIT_ARGS` in `factory_kernel/worker_policy.py`, used by both commit sites.
+
+Whether the ruleset rule accepts a Bot-attributed commit is still unobserved; the canary
+decides it. This is a **judgement** value and moved through the maintainer lane.
