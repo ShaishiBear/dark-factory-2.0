@@ -282,3 +282,29 @@ fence refused them, which is the fence working: the change was re-authored under
 maintainer's identity with the reviewer's cleanups. An AST test now pins the scope of every
 protocol/proof call in `build_issue` and the exact heartbeat sequence, so a future edit cannot
 quietly hand the token back.
+
+---
+
+## D-013 · Methods are pinned text, not a plugin
+
+**Status:** recorded · **Raised:** 2026-09-04
+
+`docs/agents/matt-skills.md` said the builder used the real `mattpocock-skills` plugin and that
+a workflow preflight failed closed without it. In autonomous execution neither was true: the
+kernel launches every worker with `--bare`, an empty strict MCP configuration and slash commands
+disabled, the worker workflow installs no plugin, and no preflight checked for one. The context
+worker was told to read that document, so a worker was being told it had a capability its
+launcher deliberately removes.
+
+The isolation stays; it is part of the trust root. The disciplines those skills describe now
+reach workers as plain text: `.factory/methods/manifest.json` records each method's source and
+adaptation and which roles receive it, `factory_kernel/methods.py` validates it fail-closed, and
+the kernel injects the role's text between the role prompt and the run context. The directory is
+protected by the security guard. Several of Matt Pocock's ideas were already reimplemented
+independently (contract compiler, deterministic triage, architecture governor); what this adds
+is the explicit text for minimal complexity (Ponytail's ladder), deep-module design, vertical
+slice implementation inside the frozen acceptance contract, red-loop diagnosis, and the two
+review axes. Two follow-ups make the last two executable: separate spec and standards reviewers
+(D-014) and a kernel-executed repro loop for bugs (D-015).
+
+`.claude/settings.json` keeps the plugin registration for interactive human sessions only.

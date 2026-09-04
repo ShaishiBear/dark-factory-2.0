@@ -335,6 +335,33 @@
           "value": "transcript=paths.transcripts / f\"lease-{stage}.log\""
         }
       ]
+    },
+    {
+      "id": "IMM-012",
+      "status": "active",
+      "source": {
+        "kind": "decision",
+        "ref": "D-013"
+      },
+      "failure_class": "a capability the documentation claims the worker has but the launcher disables",
+      "lesson": "docs/agents/matt-skills.md told every context worker that the builder used the real mattpocock-skills plugin and that a preflight failed closed without it. Workers launch with --bare and load no plugins; no such preflight existed. The isolation is right and stays. The disciplines now arrive as pinned text from .factory/methods/, validated fail-closed and injected by the kernel per role, and the documentation says exactly that.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "factory_kernel/worker_runtime.py",
+          "value": "methods=method_block(cwd, role),"
+        },
+        {
+          "kind": "text_contains",
+          "path": "docs/agents/matt-skills.md",
+          "value": "do **not** load the `mattpocock-skills` plugin"
+        },
+        {
+          "kind": "text_contains",
+          "path": "scripts/factory_security.py",
+          "value": "or path.startswith(\".factory/methods/\")"
+        }
+      ]
     }
   ]
 }

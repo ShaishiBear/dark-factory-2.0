@@ -160,7 +160,9 @@ def _extract_json(text: str) -> Any | None:
     return None
 
 
-def prompt_text(path: Path, *, preamble: str = "", context: str = "") -> str:
+def prompt_text(path: Path, *, preamble: str = "", methods: str = "", context: str = "") -> str:
+    """Preamble, role prompt, pinned method text, then run context. Methods sit between the
+    role prompt and the context so the discipline is stated before the specifics it applies to."""
     body = path.read_text(encoding="utf-8")
-    parts = [part.strip() for part in (preamble, body, context) if part.strip()]
+    parts = [part.strip() for part in (preamble, body, methods, context) if part.strip()]
     return "\n\n".join(parts) + "\n"

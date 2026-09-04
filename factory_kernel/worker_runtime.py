@@ -7,6 +7,7 @@ import uuid
 
 from .agents import AgentRequest
 from .git_authority import commit_acceptance_tests, commit_planned_changes
+from .methods import method_block
 from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
 from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, may_change_repo
@@ -167,6 +168,8 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         env: Mapping[str, str],
     ) -> None:
         self.check_stop()
+        # Workers load no plugins or skills (--bare). Whatever engineering discipline the role is
+        # expected to follow arrives here as pinned, protected text from .factory/methods/.
         prompt = prompt_text(
             self.config.prompt_path(role, cwd),
             preamble=(
@@ -174,6 +177,7 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 "Git, test-execution or external-system authority. Obey repository and artifact "
                 "constraints exactly. The kernel owns Git commits and all command execution."
             ),
+            methods=method_block(cwd, role),
             context=context,
         )
         result = self.provider.run(
