@@ -1,0 +1,104 @@
+{
+  "version": "1.0",
+  "modules": [
+    {
+      "name": "app/frontend/src/lib/exportMarkdown.ts#formatCitation",
+      "why": "The deep module this fix tightens. Given one Citation it returns one complete markdown list entry: '- ' marker, title/link (or the '(timestamp link unavailable)' label), '—' separator, 'M:SS–M:SS' range, and the '  > \"<snippet>\"' continuation line. It owns URL parsing, the fallback warning, and fallback selection internally, so callers never orchestrate. Today three fallback returns violate that contract; the fix makes every non-empty-snippet citation emit a marker-prefixed, snippet-carrying entry and collapses the two duplicated YouTube fallback exits (catch and !videoId, already byte-identical in both warn and return) into one 'if (!videoId)' branch — deletion, not growth. Signature and the empty-snippet guard are unchanged."
+    }
+  ],
+  "seams": [
+    {
+      "name": "app/frontend/src/lib/exportMarkdown.ts#formatCitation",
+      "why": "Unit seam for all four ACs: observable purely through its returned string (leading '- ', '(timestamp link unavailable)', '0:10–0:20', '> \"<snippet>\"' on its own line) with no DOM and no mocks beyond console.warn. Existing tests already exercise it this way; the new AC cases add only the assertions the buggy output lacks."
+    },
+    {
+      "name": "app/frontend/src/lib/exportMarkdown.ts#formatSources",
+      "why": "Composition seam that distributes the symptom: it joins formatCitation entries with '\\n' under '**Sources:**', so a marker-less entry merges into the previous list item when rendered. It stays unchanged — the contract forbids fixing the marker at the caller — and its existing tests pinning '- [Test Video]' entries keep passing."
+    }
+  ],
+  "public_interfaces": [
+    {
+      "name": "formatCitation(citation: Citation): string",
+      "why": "Signature unchanged. Output contract after the fix: every citation with a non-empty snippet returns exactly one '- '-prefixed entry whose snippet blockquote '  > \"<snippet>\"' sits on its own continuation line, matching the valid paths' shape; absent/empty/whitespace snippet still returns ''."
+    },
+    {
+      "name": "formatSources(sources: Citation[]): string",
+      "why": "Unchanged. Every entry it receives is now a '- '-prefixed list item, so nothing merges when joined with '\\n'."
+    },
+    {
+      "name": "formatTimestamp(seconds: number): string",
+      "why": "Unchanged; out of scope, pinned by seven tests."
+    },
+    {
+      "name": "exportConversationAsMarkdown(conversation: Conversation, messages: Message[]): void",
+      "why": "Unchanged; header, slug, filename, Blob and saveAs are all out of scope, pinned by eight tests."
+    },
+    {
+      "name": "Citation (imported from ./api)",
+      "why": "Input type, unchanged: snippet: string; video_url: string; start_seconds/end_seconds: number; source_type?: 'youtube' | 'dynamous' | string; lesson_url?: string."
+    }
+  ],
+  "invariants": [
+    {
+      "name": "Envelope",
+      "why": "app/frontend/src/lib/exportMarkdown.ts is the only production file edited; test edits stay in app/frontend/src/lib/exportMarkdown.test.ts; no new files."
+    },
+    {
+      "name": "Warn payload stays byte-identical",
+      "why": "The merged single fallback branch warns exactly '[exportMarkdown] Skipping timestamp link — invalid video_url: \"<video_url>\"' (em dash U+2014) for both triggers — unparseable video_url and missing v param — so the existing assertions keep passing."
+    },
+    {
+      "name": "Unicode separators preserved",
+      "why": "Em dash '—' (U+2014) between title/link and range; en dash '–' (U+2013) inside '0:10–0:20'. Template-literal whitespace is significant output, not style."
+    },
+    {
+      "name": "Empty-snippet guard untouched",
+      "why": "The opening 'if (!citation.snippet?.trim()) return '';'' is unchanged, so absent/empty/whitespace snippets still yield ''."
+    },
+    {
+      "name": "Valid paths untouched",
+      "why": "YouTube-with-v and Dynamous-with-lesson_url returns keep their exact current shape; only the three fallback returns change."
+    },
+    {
+      "name": "Marker and blockquote emitted inside formatCitation",
+      "why": "Never patched at formatSources or exportConversationAsMarkdown; direct formatCitation consumers and the '\\n' join both depend on entries being complete list items."
+    },
+    {
+      "name": "Dedup is deletion only",
+      "why": "Merging the duplicated YouTube warn+return exits must remove code, not add branches; both triggers already produce byte-identical warnings and returns today, so behaviour is preserved and one warning site remains."
+    },
+    {
+      "name": "Red-first tests",
+      "why": "New AC cases must fail on the unchanged tree by asserting the missing '- ' marker and/or the '> \"<snippet>\"' blockquote; every existing case keeps passing."
+    }
+  ],
+  "data_flows": [
+    {
+      "name": "Export render flow",
+      "why": "Message.sources (Citation[] delivered by the backend SSE 'sources' event and persisted on the message) → ChatArea export action → exportConversationAsMarkdown → formatSources → formatCitation per citation → entries joined with '\\n' under '**Sources:**' → Blob → saveAs download. Only formatCitation's fallback outputs change."
+    },
+    {
+      "name": "YouTube fallback flow (AC-1, AC-2, AC-4)",
+      "why": "new URL(video_url) throws, or searchParams.get('v') is empty → the single merged fallback branch → console.warn with the byte-identical payload, then return '- ${title} (timestamp link unavailable) — ${range}' + '\\n  > \"${snippet}\"'."
+    },
+    {
+      "name": "Dynamous fallback flow (AC-3)",
+      "why": "lesson_url missing or whitespace-only after the existing trim → return '- ${title} — ${range}' + '\\n  > \"${snippet}\"' (marker added; no '](' since there is no URL)."
+    },
+    {
+      "name": "Valid flows (frozen)",
+      "why": "YouTube with v: '- [${title}](https://www.youtube.com/watch?v=${v}&t=${floor(start)}s) — ${range}' + '\\n  > \"${snippet}\"'. Dynamous with lesson_url: '- [${title}](${lesson_url}) — ${range}' + '\\n  > \"${snippet}\"'."
+    }
+  ],
+  "ac_mapping": {
+    "AC-1": ["app/frontend/src/lib/exportMarkdown.ts#formatCitation"],
+    "AC-2": ["app/frontend/src/lib/exportMarkdown.ts#formatCitation"],
+    "AC-3": ["app/frontend/src/lib/exportMarkdown.ts#formatCitation"],
+    "AC-4": ["app/frontend/src/lib/exportMarkdown.ts#formatCitation"]
+  },
+  "planned_files": [
+    "app/frontend/src/lib/exportMarkdown.ts",
+    "app/frontend/src/lib/exportMarkdown.test.ts"
+  ],
+  "allowed_new_files": []
+}

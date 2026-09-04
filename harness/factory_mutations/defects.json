@@ -921,6 +921,41 @@
       "find": "    return 'test' in low or '/tests/' in slashed or '/__tests__/' in slashed or '.spec.' in low or low.endswith('conftest.py')\n",
       "replace": "    return 'test' in low or '/tests/' in slashed or low.endswith('conftest.py')\n",
       "why": "A .spec. acceptance file committed by git_authority would be refused by RED, leaving a stray commit on the branch."
+    },
+    {
+      "id": "context-object-entries-refused-again",
+      "file": "scripts/factory_impact.py",
+      "find": "    raw = normalise_lists(load(args.input), CONTEXT_LISTS, \"context\", die)\n",
+      "replace": "    raw = load(args.input)\n",
+      "why": "A context whose file entries are objects would again be refused as 'no seed files' although its content is correct (canary attempt 8)."
+    },
+    {
+      "id": "design-object-entries-refused-again",
+      "file": "scripts/factory_artifacts.py",
+      "find": "    raw = normalise_lists(load(args.input), DESIGN_LISTS, \"design\", die)\n",
+      "replace": "    raw = load(args.input)\n",
+      "why": "A design whose module/seam entries are objects would be refused although its content is correct."
+    },
+    {
+      "id": "governor-id-objects-refused-again",
+      "file": "scripts/factory_architecture.py",
+      "find": "    raw = normalise_lists(raw, GOVERNOR_LISTS, \"governor\", die)\n",
+      "replace": "    pass\n",
+      "why": "A governor that spells policy ids as {id: ...} objects would be refused although its judgement is correct (canary attempt 7)."
+    },
+    {
+      "id": "shape-duplicate-after-normalisation-accepted",
+      "file": "scripts/factory_shapes.py",
+      "find": "    if len(out) != len(set(out)):\n        die(f\"{where} contains duplicate entries after normalisation\")\n",
+      "replace": "",
+      "why": "Two objects naming the same file would pass as distinct entries, weakening the duplicate check the string form always had."
+    },
+    {
+      "id": "shape-inapplicable-flag-ignored",
+      "file": "scripts/factory_shapes.py",
+      "find": "        if entry.get(APPLICABLE_FIELD) is False:\n            return None\n",
+      "replace": "",
+      "why": "A governor that lists every policy with applicable:false would be refused again for the ids it explicitly excluded (canary attempt 7)."
     }
   ]
 }

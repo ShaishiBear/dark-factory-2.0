@@ -9,6 +9,9 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from factory_shapes import normalise_list, normalise_lists  # noqa: E402
+
 from factory_protocol import canonical, validate_contract
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,8 +125,21 @@ def repo_files(value: object, name: str, *, allow_empty: bool = False) -> list[s
     return files
 
 
+DESIGN_LISTS = (
+    "modules", "seams", "public_interfaces", "invariants", "data_flows", "planned_files", "allowed_new_files",
+)
+
+
 def compile_design(args: argparse.Namespace) -> None:
-    raw = load(args.input)
+    # Entries may be plain strings or objects carrying the canonical key; the compiled design
+    # and its hash are always plain strings (scripts/factory_shapes.py).
+    raw = normalise_lists(load(args.input), DESIGN_LISTS, "design", die)
+    if isinstance(raw.get("ac_mapping"), dict):
+        raw["ac_mapping"] = {
+            ac: (normalise_list(seams, "seams", f"design ac_mapping {ac}", die) if isinstance(seams, list)
+                 else [seams] if isinstance(seams, str) else seams)
+            for ac, seams in raw["ac_mapping"].items()
+        }
     contract = load(args.contract)
     context = load(args.context)
     contract_hash = validate_contract(contract)

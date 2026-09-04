@@ -1,0 +1,146 @@
+{
+  "version": "1.0",
+  "contract_sha256": "d7b779e034668585cd5b91ef7b7090e67abfaa3dc2641fbe97a46d2d00534d54",
+  "files": [
+    {
+      "path": "app/frontend/src/lib/exportMarkdown.ts",
+      "why": "The only production file in scope. formatCitation has three wrong fallback returns (as of today: line 32 Dynamous-empty-lesson_url, line 46 unparseable video_url, line 53 video_url without a v param). Lines 46 and 53 drop both the '- ' list marker and the snippet blockquote; line 32 keeps the snippet but lacks the '- ' marker. The two valid returns (lines 35 and 58) show the target shape: '- [Title](url) — <range>' followed by the continuation line '  > \"<snippet>\"'. Lines 43-45 and 50-52 are byte-identical duplicated console.warn+return exits."
+    },
+    {
+      "path": "app/frontend/src/lib/exportMarkdown.test.ts",
+      "why": "The suite that must keep passing and gains the red-first acceptance tests. Its current fallback cases assert only substrings the buggy output already contains, which is why the suite is green today; it also pins the console.warn payload byte-identically and pins the two valid-path shapes."
+    },
+    {
+      "path": "app/frontend/src/lib/api.ts",
+      "why": "Defines the Citation interface (lines 46-79) the seam consumes: snippet: string; video_url: string; start_seconds/end_seconds: number; source_type?: 'youtube' | 'dynamous' | string; lesson_url?: string. Unchanged by this fix."
+    },
+    {
+      "path": "app/frontend/src/components/ChatArea.tsx",
+      "why": "Sole production caller: imports exportConversationAsMarkdown (line 9) behind the export-conversation action. Confirms no component changes are needed; Message.tsx imports a different formatTimestamp from CitationModal and does not touch this module."
+    },
+    {
+      "path": "MISSION.md",
+      "why": "Line 42 ('Every cited chunk shows: video title, link to the video, exact-timestamp deep-link, and the quoted transcript snippet') is the product requirement the export currently violates; line 50 makes markdown export an in-scope capability; 'Citation UX' is an allowed evolution."
+    }
+  ],
+  "symbols": [
+    {
+      "name": "exportMarkdown.ts#formatCitation",
+      "why": "The seam under repair. Converts one Citation into one markdown entry; owns URL parsing (new URL(...).searchParams.get('v')), the fallback warning, range composition via formatTimestamp, and snippet blockquote emission. Early-returns '' for absent/empty/whitespace snippet. Its three fallback returns are the defect."
+    },
+    {
+      "name": "exportMarkdown.ts#formatSources",
+      "why": "Composition seam that distributes the symptom: joins formatCitation entries with '\\n' under '\\n\\n**Sources:**\\n', so a marker-less entry merges into the previous list item when rendered. Unchanged by the fix; the marker must not be patched in here."
+    },
+    {
+      "name": "exportMarkdown.ts#formatTimestamp",
+      "why": "Builds the 'M:SS' halves of the '0:10–0:20' range (en dash U+2013 comes from formatCitation line 24). Out of scope; its seven unit tests must keep passing."
+    },
+    {
+      "name": "exportMarkdown.ts#exportConversationAsMarkdown",
+      "why": "Top-level entry the ChatArea button calls; owns header, slug, filename, Blob and saveAs. All out of scope; its eight tests must keep passing."
+    },
+    {
+      "name": "api.ts#Citation",
+      "why": "Input type of the seam. Optional source_type/lesson_url (backward-compatible with pre-issue-#147 messages) are exactly why the Dynamous and YouTube fallback paths exist. Unchanged."
+    }
+  ],
+  "callers": [
+    {
+      "name": "app/frontend/src/components/ChatArea.tsx → exportConversationAsMarkdown",
+      "why": "The only production import of the module; triggers the export download. No signature or call-site change."
+    },
+    {
+      "name": "exportMarkdown.ts#formatSources → formatCitation",
+      "why": "Internal caller: sources.map(formatCitation).join('\\n'). This join is why a fallback entry missing '- ' merges into the previous list item when rendered."
+    },
+    {
+      "name": "app/frontend/src/lib/exportMarkdown.test.ts → formatCitation / formatSources / formatTimestamp / exportConversationAsMarkdown",
+      "why": "The test consumer; pins every output shape involved, including the byte-identical warn payload. The only file besides the module the implementer may edit."
+    }
+  ],
+  "tests": [
+    {
+      "name": "exportMarkdown.test.ts › formatCitation › 'should fall back to title-only with unavailable text when URL is invalid'",
+      "why": "video_url 'not-a-url' (AC-1/AC-2 base). Asserts 'Test Video Title', absence of '[Test Video Title](', '(timestamp link unavailable)', '0:10–0:20', and the exact warn payload '[exportMarkdown] Skipping timestamp link — invalid video_url: \"not-a-url\"'. Passes on the buggy output because it asserts neither the '- ' marker nor the blockquote — that is the red-first gap the new AC-1/AC-2 cases close. Must keep passing after the fix."
+    },
+    {
+      "name": "exportMarkdown.test.ts › formatCitation › 'should fall back when video_url has no v param'",
+      "why": "video_url 'https://www.youtube.com/' (AC-4 base). Asserts no youtube watch link, title, and '(timestamp link unavailable)'; same red-first gap (no marker/snippet assertions). Must keep passing."
+    },
+    {
+      "name": "exportMarkdown.test.ts › formatCitation › 'falls back gracefully when Dynamous citation has no lesson_url'",
+      "why": "AC-3 base. Already asserts no '](', the title, the range, and '> \"Test snippet text\"' — but not the '- ' marker, which the AC-3 case adds. Must keep passing."
+    },
+    {
+      "name": "exportMarkdown.test.ts › formatCitation › 'should format citation with full video URL' and 'links Dynamous citations to lesson_url instead of YouTube ?t= deep-link'",
+      "why": "Pin the two valid-path outputs including the blockquote continuation line; these paths are out of scope and their shape is frozen."
+    },
+    {
+      "name": "exportMarkdown.test.ts › formatSources › 'should format single citation with header' and 'should join multiple citations with newline'",
+      "why": "Pin the '- [Test Video]' markers produced by the valid path and the '\\n' join; prove the list-marker contract formatSources relies on. Must keep passing."
+    },
+    {
+      "name": "exportMarkdown.test.ts › formatCitation › 'should return empty string for empty snippet'",
+      "why": "Pins the guard: '' returned for '', '   ', and undefined snippet. The fix must not disturb it (contract invariant 4)."
+    }
+  ],
+  "invariants": [
+    {
+      "name": "File envelope",
+      "why": "Only app/frontend/src/lib/exportMarkdown.ts changes among production files; test changes are confined to app/frontend/src/lib/exportMarkdown.test.ts. Backend, components (CitationModal/Message/ChatArea/Sidebar), and hooks are out of scope."
+    },
+    {
+      "name": "Byte-identical console.warn payload",
+      "why": "Both YouTube fallback triggers must still warn exactly '[exportMarkdown] Skipping timestamp link — invalid video_url: \"<video_url>\"' (em dash U+2014 inside the message); existing tests assert it verbatim."
+    },
+    {
+      "name": "Unicode separators preserved",
+      "why": "Em dash '—' (U+2014) between title/link and the range; en dash '–' (U+2013) inside ranges such as '0:10–0:20'. Both are asserted by existing tests."
+    },
+    {
+      "name": "Empty-snippet guard unchanged",
+      "why": "formatCitation still returns '' when snippet is absent, empty, or whitespace-only — pinned by an existing test."
+    },
+    {
+      "name": "Valid-path shapes frozen",
+      "why": "YouTube with a v param and Dynamous with a lesson_url keep returning '- [Title](url) — <range>' plus the continuation line '  > \"<snippet>\"'; formatTimestamp, the export header, and the filename slug are untouched."
+    },
+    {
+      "name": "Fix lives inside formatCitation, not its callers",
+      "why": "formatSources joins entries with '\\n' only, so the '- ' marker and the blockquote must be emitted by formatCitation itself; patching at the caller is explicitly forbidden and would leave direct formatCitation callers broken."
+    },
+    {
+      "name": "No dependency or manifest changes",
+      "why": "No new or version-changed packages; the fix is pure string shaping in one lib module (frontend-lib has allowed_imports: [])."
+    },
+    {
+      "name": "Red-first acceptance tests",
+      "why": "The new AC cases must fail on the unchanged tree by asserting exactly what the buggy fallback lacks — the '> \"<snippet>\"' blockquote and/or the leading '- ' marker — since the current suite is green."
+    }
+  ],
+  "adrs": [
+    {
+      "name": ".factory/architecture.json — ARCH-FRONTEND-BOUNDARIES and the frontend-lib layer",
+      "why": "Lib owns pure helpers and may import nothing from frontend layers (allowed_imports: []). The fix stays inside the existing exportMarkdown seam with no new import edges and no parallel helper module."
+    },
+    {
+      "name": ".factory/decisions.md — D-003 (mutation coverage on the citation path)",
+      "why": "Indirectly relevant: it asks for more behavioural defect coverage aimed at the citation path, which is the direction these red-first fallback tests take. No ADR governs markdown export itself."
+    }
+  ],
+  "history": [
+    {
+      "name": "Issue #147 — Dynamous lesson_url split",
+      "why": "Code comment in exportMarkdown.ts (lines 26-28) records that Dynamous citations link to the Circle lesson_url without timestamp deep-links; it introduced the Dynamous branch and its empty-lesson_url fallback — the path that keeps the snippet but lacks the '- ' marker."
+    },
+    {
+      "name": "Issue #208 — segment_count on Citation",
+      "why": "api.ts comment records the citation-collapse field; shows the Citation type evolves without formatCitation's entry shape changing — no type change is needed here either."
+    },
+    {
+      "name": "Issue #49 (this issue)",
+      "why": "The bug report naming the exact buggy string 'Test Video (timestamp link unavailable) — 0:10–0:20' and both defects (dropped snippet, missing marker); exportMarkdown.test.ts is the only known consumer of the fallback strings."
+    }
+  ]
+}

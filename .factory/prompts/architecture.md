@@ -11,11 +11,12 @@ Write `$ARTIFACTS_DIR/architecture-governor.raw.json` with exactly this shape:
   "migrations": ["MIG-..."],
   "debts": ["DEBT-..."],
   "rationale": ["one point per entry", "..."],
-  "required_changes": []
+  "required_changes": [],
+  "notes": "free text; the compiler ignores it"
 }
 ```
 
-`rationale` is an array of strings, one point per entry, never a paragraph. `required_changes` is an array of strings: required and non-empty for `prefactor` or `decompose`, and exactly `[]` for `proceed` (a `proceed` that carries structural demands is refused; put advice in `rationale`).
+`rationale` is an array of strings, one point per entry, never a paragraph. Every array holds plain strings; put explanations in `notes` (a free-text string field the compiler ignores), never as objects inside the arrays. `required_changes` is an array of strings: required and non-empty for `prefactor` or `decompose`, and exactly `[]` for `proceed` (a `proceed` that carries structural demands is refused; put advice in `rationale`).
 
 `principles`, `migrations`, `debts` are arrays of policy ID strings from `.factory/architecture.json`. The invocation context supplies the exact sets the deterministic compiler will require, computed as it computes them: every policy whose `scope`/`paths` prefix-overlaps any file in `context.json`'s `files` or `design.json`'s `planned_files` (migrations only where `active` is true; debts from the policy's `debt` list), and no others. Copy those sets verbatim; judgement about relevance is not a reason to omit or add one.
 

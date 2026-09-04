@@ -9,6 +9,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from factory_shapes import normalise_lists  # noqa: E402
+
 from factory_architecture_guard import layer_table
 from factory_protocol import canonical, validate_contract
 
@@ -140,7 +143,16 @@ def governed_files(context: dict, design: dict) -> list[str]:
     return sorted(set(strings(context.get("files"), "context files")) | set(strings(design.get("planned_files"), "design planned_files")))
 
 
+GOVERNOR_LISTS = ("principles", "migrations", "debts", "rationale", "required_changes")
+CONFORMANCE_LISTS = ("principles", "migrations", "debts", "rationale", "findings")
+
+
 def compile_value(policy: dict, raw: dict, contract: dict, context: dict, design: dict) -> dict:
+    # A governor may spell ids as {"id": ...} objects and prose lists as {"text": ...}; the
+    # compiled verdict is always plain strings (scripts/factory_shapes.py).
+    raw = normalise_lists(raw, GOVERNOR_LISTS, "governor", die)
+    if isinstance(raw.get("rationale"), str) and raw["rationale"].strip():
+        raw["rationale"] = [raw["rationale"]]
     policy_hash = validate_policy(policy)
     contract_hash, context_hash, design_hash = validate_bindings(contract, context, design)
     files = governed_files(context, design)
@@ -221,6 +233,9 @@ def compile_conformance_value(
     changed_files: list[str],
     diff_sha256: str,
 ) -> dict:
+    raw = normalise_lists(raw, CONFORMANCE_LISTS, "conformance", die)
+    if isinstance(raw.get("rationale"), str) and raw["rationale"].strip():
+        raw["rationale"] = [raw["rationale"]]
     policy_hash = validate_policy(policy)
     contract_hash, context_hash, design_hash = validate_bindings(contract, context, design)
     governor_hash = validate_governor_binding(
