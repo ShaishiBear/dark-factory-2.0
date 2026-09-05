@@ -139,8 +139,8 @@ class ClaudeCliProvider:
                 if before_retry is not None:
                     before_retry(attempt)
                 _sleep(TRANSIENT_BACKOFF_SECONDS[min(attempt - 2, len(TRANSIENT_BACKOFF_SECONDS) - 1)])
-            stdout = self._launch(argv, request)
             try:
+                stdout = self._launch(argv, request)
                 envelope = unwrap_result_envelope(stdout, role=request.role)
             except TransientProviderError as exc:
                 spent.add(exc.envelope)
@@ -209,6 +209,15 @@ class ClaudeCliProvider:
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
         if proc.returncode:
+            # The CLI exits non-zero when the session ended in error, and it still prints its
+            # result envelope on stdout. The eighteenth canary defect (D-040) was this branch
+            # raising the generic failure before that envelope was classified, so a dropped
+            # stream that the retry loop is built for never reached it. Classify first; only
+            # an envelope the classifier calls transient is handed to the retry loop, anything
+            # else (a terminal envelope, or stdout that is not an envelope) is refused as before.
+            transient = _transient_from_stdout(stdout, role=request.role)
+            if transient is not None:
+                raise transient
             detail = (stdout + "\n" + stderr)[-4000:]
             raise RuntimeError(
                 f"agent worker failed role={request.role!r} rc={proc.returncode}: {detail}"
@@ -244,6 +253,27 @@ def is_transient_error(detail: str, subtype: str) -> bool:
         return False
     lowered = detail.lower()
     return any(pattern.lower() in lowered for pattern in TRANSIENT_ERROR_PATTERNS)
+
+
+def _transient_from_stdout(stdout: str, *, role: str) -> "TransientProviderError | None":
+    """The transient error a non-zero-exit CLI process printed, if that is what it printed."""
+    try:
+        raw = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(raw, Mapping) or "is_error" not in raw or "result" not in raw:
+        return None
+    subtype = str(raw.get("subtype") or "")
+    detail = str(raw.get("result") or "")[-1500:]
+    if raw.get("is_error") is not True and not subtype.startswith("error"):
+        return None
+    if not is_transient_error(detail, subtype):
+        return None
+    return TransientProviderError(
+        f"agent worker role={role!r} ended in error "
+        f"(subtype={subtype or 'unknown'} num_turns={raw.get('num_turns')}): {detail}",
+        ResultEnvelope(raw),
+    )
 
 
 class TransientProviderError(RuntimeError):
