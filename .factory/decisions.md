@@ -1276,3 +1276,64 @@ environmental and the overseer resets it. PR #91's head predates this fix and th
 harness runs at the PR head's tree, so #91 needs a re-head (its one re-head is unspent)
 or a rebuild for the fix to reach it. The E2E is still unproven end to end; the next
 validation is the first that can reach the citation steps.
+
+## D-047 · The synthetic E2E account is `dark-factory-e2e@example.com`, because the login route refuses reserved names
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33950794336 (validation of PR #93)
+
+D-046 moved the browser origin to `localhost`. The next production validation stalled on
+the login form exactly as before, so the Secure-cookie theory was at most one of two
+causes, and the harness had produced no evidence that could tell them apart: the
+interactive snapshot (`snapshot -i`) lists interactive elements only, so the alert the
+login page renders on failure never appeared in it, and nothing captured the page,
+console, network log or cookies before the session closed.
+
+**Evidence chain.**
+
+1. `harness/bootstrap_e2e.py` pinned the account as `dark-factory-e2e@localhost.invalid`
+   and both workflows exported the same literal. The bootstrap writes the user row with
+   `users_repo.create_user` directly, below any route validation, so the row is created.
+2. `POST /api/auth/login` validates the body with `LoginRequest(email: EmailStr)`
+   (`app/backend/routes/auth.py`). Reproduced against the application test client with
+   the repository mocked and the same env shape as the worker: the route answers
+   `422 {"detail":[{"type":"value_error","loc":["body","email"],"msg":"value is not a
+   valid email address: The part after the @-sign is a special-use or reserved name that
+   cannot be used with email." ...}]}`; `/api/auth/me` afterwards answers 401.
+3. `email-validator`, which `EmailStr` delegates to, rejects `.invalid`, `.localhost`,
+   `.test` and the bare `localhost` domain; it accepts `example.com`
+   (reserved for documentation by RFC 2606 but not on the special-use list). Verified by
+   instantiating the model with each spelling in the backend's locked environment.
+4. On the frontend, `authApi.login` throws `AuthError(422, "value is not a valid email
+   address: …")`, `Login.tsx` sets `formError` and renders it in a `role="alert"` div,
+   the form stays. That is the recorded snapshot. The Vite proxy target and agent-browser
+   `fill` semantics (clear then type, drives React state) were checked and are not causes.
+
+**Fix.** Three parts, all in the harness lane; the application and its validation are
+untouched.
+
+- The account is now `dark-factory-e2e@example.com` in the bootstrap and both workflows,
+  and the bootstrap instantiates the route's own `LoginRequest` before writing the row,
+  so it can no longer provision an account the route would refuse.
+- `harness/e2e.py` asks the route first: a harness-side `POST /api/auth/login` with the
+  validation credentials, printed as `E2E_LOGIN_PROBE status=… session_cookie=… body=…`
+  (password scrubbed). The journey requires 200 plus a session cookie before any browser
+  starts, so a route refusal names its reason in the log instead of surfacing as a
+  predicate timeout.
+- Any `E2EFailure` inside the browser journey now dumps `url.txt`, the full
+  (non-interactive) `snapshot.txt`, `page.html`, `console.txt`, `errors.txt`,
+  `network.txt`, `cookies.txt` (values scrubbed), `failure.png` and `failure.txt` into
+  the artifact directory the kernel already uploads, and prints `E2E_EVIDENCE_DUMP`.
+
+Pinned by `tests/factory/test_e2e_contract.py` (probe refusal before the browser, cookie
+required not just 200, scrubbed dump on failure, literal agreement across bootstrap and
+workflows, no reserved name) and by `app/backend/tests/test_e2e_account_email.py` (the
+pinned address passes `LoginRequest`; the old one is 422 at the route with no repository
+call). Mutations `e2e-validation-account-under-reserved-name`,
+`e2e-login-probe-assumed-green` and `e2e-failure-dump-skipped` prove each part is
+detected.
+
+**Consequences.** The attempt marker this refusal wrote on #49 is environmental and is
+reset. PR #93's refusal class is `evidence_spine`, not `stale_base`, so it is not
+re-head eligible, and its head carries the old bootstrap literal; #93 is closed and #49
+rebuilt on a main that contains this fix. The next validation is the first in which the
+browser is asked to log in with an account the route accepts.

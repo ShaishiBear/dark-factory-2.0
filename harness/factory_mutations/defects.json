@@ -1222,6 +1222,27 @@
       "find": "BROWSER_ORIGIN_HOST = \"localhost\"",
       "replace": "BROWSER_ORIGIN_HOST = \"127.0.0.1\"",
       "why": "The browser would open the frontend at the loopback literal, the Secure session cookie would be discarded, and every login in the E2E would bounce back to the form (D-046)."
+    },
+    {
+      "id": "e2e-validation-account-under-reserved-name",
+      "file": "harness/bootstrap_e2e.py",
+      "find": "VALIDATION_EMAIL = \"dark-factory-e2e@example.com\"",
+      "replace": "VALIDATION_EMAIL = \"dark-factory-e2e@localhost.invalid\"",
+      "why": "The bootstrap would provision an account under a special-use name that the login route's EmailStr validation refuses with 422; the account exists but can never sign in, and the browser E2E stalls on the form (D-047)."
+    },
+    {
+      "id": "e2e-login-probe-assumed-green",
+      "file": "harness/e2e.py",
+      "find": "        probe_status, probe_cookie, probe_body = _probe_login(app, email, password)\n",
+      "replace": "        probe_status, probe_cookie, probe_body = 200, True, \"\"\n",
+      "why": "The harness would launch the browser without asking the route whether it accepts the validation account, so a route refusal would surface only as a silent predicate timeout with no reason in the log (D-047)."
+    },
+    {
+      "id": "e2e-failure-dump-skipped",
+      "file": "harness/e2e.py",
+      "find": "    except E2EFailure as exc:\n        _dump_failure(session, artifacts, str(exc), (password,))\n        raise\n",
+      "replace": "    except E2EFailure as exc:\n        raise\n",
+      "why": "A broken browser journey would leave no page, console, network or cookie evidence in the uploaded artifact, which is exactly what made D-047 a two-run diagnosis."
     }
   ]
 }

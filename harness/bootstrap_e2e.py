@@ -23,7 +23,14 @@ CONFIG = json.loads((ROOT / "harness" / "harness.config.json").read_text(encodin
 FIXTURE_VIDEO_ID = str(CONFIG["browser"]["fixture_video_id"])
 FIXTURE_URL = f"https://www.youtube.com/watch?v={FIXTURE_VIDEO_ID}"
 VALIDATION_DB_NAME = "dark_factory_validation"
-VALIDATION_EMAIL = "dark-factory-e2e@localhost.invalid"
+# The synthetic account must be one the login route accepts. `POST /api/auth/login`
+# validates the address with pydantic's EmailStr, which refuses special-use and reserved
+# names (`.invalid`, `.localhost`, `.test`) with 422. This bootstrap writes the user row
+# directly, so a reserved name would provision an account that can exist but never log in;
+# that was the second production E2E failure (D-047). `example.com` is reserved for
+# documentation by RFC 2606 yet is not on the validator's special-use list, so it is
+# accepted, and it is guaranteed never to route to a real mailbox.
+VALIDATION_EMAIL = "dark-factory-e2e@example.com"
 
 
 def safe_local_validation_database(dsn: str) -> bool:
@@ -92,11 +99,23 @@ async def _bootstrap() -> int:
     if str(APP) not in sys.path:
         sys.path.insert(0, str(APP))
 
+    from pydantic import ValidationError
+
     from backend.auth.password import hash_password
     from backend.db import users_repo
     from backend.db.postgres import close_pg_pool, get_pg_pool, init_pg_pool
+    from backend.routes.auth import LoginRequest
     from backend.routes.ingest import IngestRequest, ingest_video
     from backend.services.video_ingest import fetch_video_for_ingest
+
+    # Provision only what the login route itself would accept. The row is written below
+    # the route's validation, so this is the only place the mismatch can be refused.
+    try:
+        LoginRequest(email=email, password=password)
+    except ValidationError as exc:
+        reasons = "; ".join(str(err.get("msg", "")) for err in exc.errors())
+        print(f"E2E_BOOTSTRAP_REFUSED login route would reject the validation account: {reasons}")
+        return 1
 
     await init_pg_pool()
     try:
