@@ -192,6 +192,10 @@ for step in steps:
     if "stderr" in step:
         sys.stderr.write(step["stderr"] + "\\n")
         sys.stderr.flush()
+    if "stdin" in step:
+        seen = {"type": "system", "subtype": "stdin", "text": sys.stdin.read()}
+        sys.stdout.write(json.dumps(seen) + "\\n")
+        sys.stdout.flush()
     if "exit" in step:
         sys.exit(step["exit"])
 sys.exit(0)
@@ -215,8 +219,10 @@ def fake_cli(tmp: Path) -> str:
 
 
 def provider_for(
-    binary: str, *, retries: int = 2, timeout: int = 60, idle: int = 1
+    binary: str, *, retries: int = 2, timeout: int = 60, idle: float = 1
 ) -> ClaudeCliProvider:
+    # The loader requires an integer idle timeout; the dataclass does not check, and a
+    # fraction of a second keeps the end-to-end cases short.
     return ClaudeCliProvider(
         ProviderConfig(
             provider_id="claude-cli",
@@ -311,7 +317,7 @@ def healthy_steps(pace: float = 0.05) -> list[dict]:
     ]
 
 
-def hanging_steps(silence: float = 6.0) -> list[dict]:
+def hanging_steps(silence: float = 3.0) -> list[dict]:
     return [
         {"emit": init_event()},
         {"sleep": 0.05, "emit": assistant_event("msg_1", "thinking", input_tokens=300)},
@@ -396,92 +402,126 @@ class NormalCompletionTests(_FakeCliCase):
         self.assertEqual(len(self.launches()), 2)
 
 
+class ReaderTests(_FakeCliCase):
+    """`_stream_cli` against the fake CLI: the two clocks, on a real process."""
+
+    def read(self, steps: list[dict], *, wall: float, idle: float) -> CliRun:
+        self.scenario(steps)
+        return providers_module._stream_cli(
+            [self.binary, "--bare", "-p", "p"],
+            cwd=tempfile.gettempdir(),
+            env=ClaudeCliProvider._worker_env({}),
+            wall_seconds=wall,
+            idle_seconds=idle,
+        )
+
+    def test_silence_longer_than_the_idle_timeout_is_a_hang(self):
+        run = self.read(hanging_steps(silence=3.0), wall=10, idle=0.3)
+        self.assertTrue(run.hung)
+        self.assertFalse(run.timed_out)
+        self.assertIsNone(run.returncode, "killed by the kernel, not exited")
+        self.assertEqual(run.events_seen, 2)
+        self.assertGreaterEqual(run.last_event_age, 0.3)
+        self.assertLess(run.elapsed, 2.0, "killed at the idle timeout, not after the 3 s silence")
+        self.assertIsNone(run.result_event)
+
+    def test_events_within_the_idle_timeout_are_progress_not_a_hang(self):
+        """The idle clock measures silence between events, not total time."""
+        run = self.read(slow_steps(count=5, pace=0.12), wall=10, idle=0.4)
+        self.assertEqual(run.returncode, 0)
+        self.assertFalse(run.hung)
+        self.assertFalse(run.timed_out)
+        self.assertEqual(run.events_seen, 7)
+        self.assertEqual(run.result_event["num_turns"], 5)
+
+    def test_the_wall_kills_a_process_that_is_still_printing(self):
+        run = self.read(slow_steps(count=40, pace=0.05), wall=0.6, idle=5)
+        self.assertTrue(run.timed_out)
+        self.assertFalse(run.hung)
+        self.assertIsNone(run.returncode)
+        self.assertGreaterEqual(run.events_seen, 5)
+        self.assertGreaterEqual(run.elapsed, 0.6)
+        self.assertLess(run.elapsed, 2.0)
+        self.assertIsNone(run.result_event)
+
+    def test_stderr_is_collected_and_is_not_progress(self):
+        steps = [{"emit": init_event()}, {"stderr": "warning: something"}, {"sleep": 2.0}]
+        run = self.read(steps, wall=10, idle=0.25)
+        self.assertTrue(run.hung)
+        self.assertIn("warning: something", run.stderr)
+        self.assertEqual(run.events_seen, 1)
+
+    def test_stdin_is_closed_so_a_worker_that_reads_it_gets_nothing_at_once(self):
+        run = self.read([{"stdin": True}, {"emit": result_event()}], wall=10, idle=2)
+        self.assertEqual(run.returncode, 0)
+        (stdin_event, _result) = run.events
+        self.assertEqual((stdin_event["subtype"], stdin_event["text"]), ("stdin", ""))
+
+
 class HangTests(_FakeCliCase):
-    def test_a_hung_process_is_killed_recorded_retried_once_then_terminal(self):
+    def test_a_hung_process_is_killed_recorded_and_terminal_without_a_retry_budget(self):
         self.scenario(hanging_steps())
-        restores: list[int] = []
         started = time.monotonic()
         with self.assertRaises(ProviderStageError) as ctx:
-            provider_for(self.binary, retries=2, idle=1).run(
-                request(), before_retry=restores.append
-            )
+            provider_for(self.binary, retries=0, idle=0.5).run(request())
         elapsed = time.monotonic() - started
         exc = ctx.exception
-        self.assertLess(elapsed, 5.0, "two idle timeouts of 1 s, not the 6 s silences")
-        self.assertEqual(len(self.launches()), 1 + HANG_RETRIES, "retried once, then terminal")
-        self.assertEqual(restores, [2], "the worktree restore hook ran before the relaunch")
-        self.assertEqual(exc.attempts, 2)
+        self.assertLess(elapsed, 2.5, "one idle timeout of 0.5 s, not the 3 s silence")
+        self.assertEqual(len(self.launches()), 1)
+        self.assertEqual(exc.attempts, 1)
         self.assertFalse(exc.timed_out)
         self.assertIs(exc.telemetry["hang"], True)
-        self.assertGreaterEqual(exc.telemetry["last_event_age_s"], 1.0)
-        self.assertEqual(exc.telemetry["events_seen"], 2 * 2, "summed across both hung attempts")
-        self.assertEqual(exc.telemetry["num_turns"], 1 * 2, "one assistant message per attempt")
-        self.assertEqual(exc.telemetry["input_tokens"], 300 * 2)
+        self.assertGreaterEqual(exc.telemetry["last_event_age_s"], 0.5)
+        self.assertEqual(exc.telemetry["events_seen"], 2)
+        self.assertEqual(exc.telemetry["num_turns"], 1, "one assistant message seen")
+        self.assertEqual(exc.telemetry["input_tokens"], 300)
+        self.assertIsNone(exc.telemetry["total_cost_usd"], "no result event: cost unknown")
         self.assertIn("msg_1", exc.telemetry["partial_output"])
-        self.assertEqual(len(exc.transient_errors), 2)
+        self.assertEqual(len(exc.transient_errors), 1)
         self.assertIn("hung", exc.transient_errors[0])
-        self.assertIn("hung 2 time(s)", str(exc))
-        self.assertIn("idle_timeout_seconds=1", str(exc))
+        self.assertIn("hung 1 time(s)", str(exc))
+        self.assertIn("idle_timeout_seconds=0.5", str(exc))
 
-    def test_a_hang_followed_by_a_healthy_process_is_one_retry(self):
+    def test_a_hang_followed_by_a_healthy_process_is_one_retry_with_the_restore_hook(self):
         self.scenario(attempts=[hanging_steps(), healthy_steps()])
-        result = provider_for(self.binary, retries=2, idle=1).run(request())
+        restores: list[int] = []
+        result = provider_for(self.binary, retries=2, idle=0.5).run(
+            request(), before_retry=restores.append
+        )
         self.assertEqual(result.content, "done")
         self.assertEqual(result.attempts, 2)
+        self.assertEqual(restores, [2], "the worktree restore hook ran before the relaunch")
         self.assertEqual(len(result.transient_errors), 1)
         self.assertIn("hung", result.transient_errors[0])
         self.assertEqual(result.num_turns, 1 + 3, "the hung attempt's turn is counted")
         self.assertEqual(result.events_seen, 2 + 5)
-        self.assertEqual(len(self.launches()), 2)
-
-    def test_a_hang_with_no_retry_budget_is_terminal_at_once(self):
-        self.scenario(hanging_steps())
-        with self.assertRaises(ProviderStageError) as ctx:
-            provider_for(self.binary, retries=0, idle=1).run(request())
-        self.assertEqual(len(self.launches()), 1)
-        self.assertIs(ctx.exception.telemetry["hang"], True)
-        self.assertIn("hung 1 time(s)", str(ctx.exception))
-
-    def test_a_working_process_slower_than_the_idle_timeout_between_events_is_hung(self):
-        """The idle clock measures silence, not total time: events 0.3 s apart under a 1 s idle
-        timeout are progress, and the same process is not killed however long it runs."""
-        self.scenario(slow_steps(count=8, pace=0.3))
-        result = provider_for(self.binary, idle=1).run(request(timeout_seconds=30))
-        self.assertEqual(result.num_turns, 8)
-        self.assertEqual(result.events_seen, 10)
+        self.assertEqual(len(self.launches()), 1 + HANG_RETRIES)
 
 
 class WallTimeoutTests(_FakeCliCase):
-    def test_a_stage_killed_at_its_wall_records_partial_turns_and_events(self):
-        self.scenario(slow_steps(count=25, pace=0.2))
+    def test_a_stage_killed_at_its_own_wall_records_partial_turns_and_events(self):
+        """The request said 1 s; the configured 60 s maximum and the 5 s idle clock are not
+        what stops it, and what it showed by then is in the refusal."""
+        self.scenario(slow_steps(count=30, pace=0.1))
         started = time.monotonic()
         with self.assertRaises(ProviderStageError) as ctx:
-            provider_for(self.binary, retries=2, idle=5).run(request(timeout_seconds=2))
+            provider_for(self.binary, retries=2, timeout=60, idle=5).run(request(timeout_seconds=1))
         elapsed = time.monotonic() - started
         exc = ctx.exception
-        self.assertLess(elapsed, 4.5, "killed at the 2 s wall, not the 5 s idle or the run's end")
+        self.assertLess(elapsed, 3.0, "killed at the 1 s wall, not the 5 s idle or the run's end")
         self.assertEqual(len(self.launches()), 1, "a wall timeout is terminal, never retried")
         self.assertTrue(exc.timed_out)
         self.assertNotIn("hang", exc.telemetry)
         self.assertGreaterEqual(exc.telemetry["events_seen"], 4)
         self.assertGreaterEqual(exc.telemetry["num_turns"], 3, "one per assistant message seen")
         self.assertGreaterEqual(exc.telemetry["input_tokens"], 300)
-        self.assertGreaterEqual(exc.telemetry["wall_seconds_last_attempt"], 2.0)
+        self.assertGreaterEqual(exc.telemetry["wall_seconds_last_attempt"], 1.0)
         self.assertLessEqual(exc.telemetry["last_event_age_s"], 1.0)
         self.assertIn("msg_", exc.telemetry["partial_output"])
         self.assertLessEqual(len(exc.telemetry["partial_output"]), PARTIAL_OUTPUT_CHARS)
         self.assertIn("timed out role='test_author'", str(exc))
-        self.assertIn("timeout_seconds=2", str(exc))
+        self.assertIn("timeout_seconds=1", str(exc))
         self.assertIn("events_seen=", str(exc))
-
-    def test_the_wall_is_the_requests_own_not_the_global_maximum(self):
-        """The request said 2 s; the provider's configured 60 s is the ceiling, not the wall."""
-        self.scenario(slow_steps(count=25, pace=0.2))
-        started = time.monotonic()
-        with self.assertRaises(ProviderStageError) as ctx:
-            provider_for(self.binary, timeout=60, idle=5).run(request(timeout_seconds=2))
-        self.assertLess(time.monotonic() - started, 4.5)
-        self.assertTrue(ctx.exception.timed_out)
 
     def test_a_request_wall_above_the_maximum_is_clamped_to_it(self):
         prov = provider_for(self.binary, timeout=60)
