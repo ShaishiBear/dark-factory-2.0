@@ -149,7 +149,7 @@ The canonical end-to-end journey is `harness/e2e.py`, driven by the pinned `agen
 
 ### Environment
 
-The journey needs a database, a signed-in account and one real ingested video. The worker provisions all of it per run: a disposable `postgres:16` database `dark_factory_validation`, a random JWT secret, the synthetic account `dark-factory-e2e@localhost.invalid`, and `harness/bootstrap_e2e.py` ingesting the fixture video through the real Supadata/OpenRouter path. `bootstrap_e2e.py` refuses to run against anything but that loopback database and that account. Missing credentials or browser infrastructure are a failed prerequisite, never a silent skip.
+The journey needs a database, a signed-in account and one real ingested video. The worker provisions all of it per run: a disposable `postgres:16` database `dark_factory_validation`, a random JWT secret, the synthetic account `dark-factory-e2e@example.com` (a name the login route's `EmailStr` validation accepts; reserved TLDs such as `.invalid` are refused with 422, D-047), and `harness/bootstrap_e2e.py` ingesting the fixture video through the real Supadata/OpenRouter path. `bootstrap_e2e.py` refuses to run against anything but that loopback database and that account. Missing credentials or browser infrastructure are a failed prerequisite, never a silent skip.
 
 ### When it runs
 

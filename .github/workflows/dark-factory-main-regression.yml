@@ -107,7 +107,7 @@ jobs:
           {
             echo "DATABASE_URL=$database_url"
             echo "JWT_SECRET=$jwt_secret"
-            echo "DARK_FACTORY_E2E_EMAIL=dark-factory-e2e@localhost.invalid"
+            echo "DARK_FACTORY_E2E_EMAIL=dark-factory-e2e@example.com"
             echo "DARK_FACTORY_E2E_PASSWORD=$e2e_password"
             echo "DARK_FACTORY_E2E_BOOTSTRAP=1"
             echo "SEED_ENABLE=false"

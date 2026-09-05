@@ -179,6 +179,79 @@ def _snapshot_until(session: str, predicate, timeout: int) -> str:
     raise E2EFailure(f"browser state did not appear in {timeout}s; last snapshot: {last[-1200:]}")
 
 
+def _scrub(text: str, secrets: tuple[str, ...]) -> str:
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "***")
+    return text
+
+
+def _scrub_cookie_values(text: str) -> str:
+    text = re.sub(r'("value"\s*:\s*)"[^"]*"', r'\1"***"', text)
+    return re.sub(r"^(\s*[\w.-]+)=\S+", r"\1=***", text, flags=re.MULTILINE)
+
+
+def _probe_login(app, email: str, password: str) -> tuple[int, bool, str]:
+    """POST the validation credentials from the harness side before the browser does.
+
+    A browser that stays on the login form cannot say why: the interactive snapshot never
+    shows the alert text, and the refusal only surfaces as a predicate timeout. The route's
+    own answer can. This prints the status, whether a session cookie was issued, and the
+    scrubbed body, so a refusal names its cause in the log (D-047: the synthetic account's
+    email failed the route's EmailStr validation with 422, and nothing said so).
+    """
+    body = json.dumps({"email": email, "password": password})
+    status, text, headers = app.post("/api/auth/login", body)
+    cookie = any(
+        key.lower() == "set-cookie" and "session=" in str(value)
+        for key, value in headers.items()
+    )
+    summary = _scrub(" ".join(text.split())[:400], (password,))
+    print(
+        f"E2E_LOGIN_PROBE status={status} session_cookie={str(cookie).lower()} body={summary}",
+        flush=True,
+    )
+    return status, cookie, summary
+
+
+FAILURE_CAPTURES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("url.txt", ("get", "url")),
+    ("snapshot.txt", ("snapshot",)),
+    ("page.html", ("get", "html")),
+    ("console.txt", ("console",)),
+    ("errors.txt", ("errors",)),
+    ("network.txt", ("network", "requests")),
+    ("cookies.txt", ("cookies", "get")),
+)
+
+
+def _dump_failure(session: str, artifacts: Path, reason: str, secrets: tuple[str, ...]) -> None:
+    """Capture what the browser saw when the journey broke (D-047).
+
+    The full (non-interactive) snapshot is the one that shows alert text. Every capture is
+    best effort and scrubbed of the validation password; the dump never masks the original
+    failure, it only makes the next diagnosis a read instead of a guess.
+    """
+    written: list[str] = []
+    for name, args in FAILURE_CAPTURES:
+        try:
+            output = _browser(session, *args, timeout=20, check=False)
+        except E2EFailure as exc:
+            output = f"capture failed: {exc}"
+        if name == "cookies.txt":
+            output = _scrub_cookie_values(output)
+        (artifacts / name).write_text(_scrub(output, secrets), encoding="utf-8")
+        written.append(name)
+    try:
+        _browser(session, "screenshot", str(artifacts / "failure.png"), timeout=20, check=False)
+        written.append("failure.png")
+    except E2EFailure:
+        pass
+    (artifacts / "failure.txt").write_text(_scrub(reason, secrets) + "\n", encoding="utf-8")
+    written.append("failure.txt")
+    print(f"E2E_EVIDENCE_DUMP dir={artifacts} files={','.join(written)}", flush=True)
+
+
 def _load_validation_env() -> tuple[str, str]:
     from serve import load_env_file
 
@@ -240,63 +313,18 @@ def run_e2e(app, frontend_url: str | None = None) -> int | None:
 
         email, password = _load_validation_env()
 
+        # The route must accept the account before a browser is asked to. A refusal here
+        # is the same refusal the browser would swallow, with its reason still attached.
+        probe_status, probe_cookie, probe_body = _probe_login(app, email, password)
+        require("backend accepts the validation account",
+                probe_status == 200 and probe_cookie,
+                f"status={probe_status} session_cookie={probe_cookie} body={probe_body}")
+
         session = f"df-{os.getpid()}-{app.port}"
         artifacts = _artifact_dir(session)
         try:
-            _browser(session, "open", frontend_url, timeout=30)
-            snap = _snapshot_until(session, lambda s: "Email" in s and "Password" in s, 15)
-            email_ref = _ref(snap, "Email")
-            password_ref = _ref(snap, "Password")
-            login_ref = _ref(snap, 'button "Log in"')
-            _browser(session, "fill", f"@{email_ref}", email)
-            _browser(session, "fill", f"@{password_ref}", password)
-            _browser(session, "click", f"@{login_ref}")
-
-            snap = _snapshot_until(
-                session, lambda s: "Ask anything about the video library" in s, 20)
-            url = _scalar(_browser(session, "get", "url"))
-            require("login reaches new-conversation surface", urlparse(url).path == "/", url)
-            _browser(session, "screenshot", str(artifacts / "authenticated.png"))
-
-            input_ref = _ref(snap, "Ask anything about the video library")
-            send_ref = _ref(snap, "Send message")
-            _browser(session, "fill", f"@{input_ref}", question)
-            _browser(session, "click", f"@{send_ref}")
-
-            _snapshot_until(session, lambda s: "Stop response" in s, 10)
-            require("streaming UI state observed", True)
-
-            snap = _snapshot_until(
-                session,
-                lambda s: "Send message" in s and bool(CITATION.search(s)),
-                response_timeout,
-            )
-            url = _scalar(_browser(session, "get", "url"))
-            require("message created a real conversation", urlparse(url).path.startswith("/c/"), url)
-
-            citation_ref, citation_label = _citation(snap)
-            seconds = _timestamp_seconds(citation_label)
-            title_attr = _scalar(_browser(session, "get", "attr", f"@{citation_ref}", "title"))
-            title_lines = title_attr.splitlines()
-            require("citation includes title/timestamp metadata", len(title_lines) >= 2, title_attr)
-            require("citation includes quoted transcript evidence",
-                    len(" ".join(title_lines[1:]).strip()) >= 8, title_attr)
-            _browser(session, "screenshot", str(artifacts / "citation.png"))
-
-            _browser(session, "click", f"@{citation_ref}")
-            modal = _snapshot_until(
-                session, lambda s: "Video citation" in s and "Open on YouTube" in s, 15)
-            youtube_ref = _ref(modal, "Open on YouTube")
-            external = _scalar(_browser(session, "get", "attr", f"@{youtube_ref}", "href"))
-            embed = _scalar(_browser(
-                session, "eval",
-                "document.querySelector('iframe[title=\"YouTube video player\"]')?.getAttribute('src') || ''",
-            ))
-            require("citation modal points to locked video at exact timestamp",
-                    _youtube_matches(external, embed, video_id, seconds),
-                    f"external={external!r} embed={embed!r} expected={video_id}@{seconds}")
-            _browser(session, "screenshot", str(artifacts / "citation-modal.png"))
-            print(f"E2E_EVIDENCE dir={artifacts} video_id={video_id} timestamp={seconds}", flush=True)
+            _run_browser_journey(session, artifacts, frontend_url, email, password,
+                                 question, video_id, response_timeout, require)
         finally:
             try:
                 _browser(session, "close", timeout=15, check=False)
@@ -307,6 +335,76 @@ def run_e2e(app, frontend_url: str | None = None) -> int | None:
     except (E2EFailure, OSError, ValueError) as exc:
         print(f"  E2E_FAIL  {exc}", flush=True)
         return None
+
+
+def _run_browser_journey(session: str, artifacts: Path, frontend_url: str, email: str,
+                         password: str, question: str, video_id: str,
+                         response_timeout: int, require) -> None:
+    try:
+        _browser_journey(session, artifacts, frontend_url, email, password,
+                         question, video_id, response_timeout, require)
+    except E2EFailure as exc:
+        _dump_failure(session, artifacts, str(exc), (password,))
+        raise
+
+
+def _browser_journey(session: str, artifacts: Path, frontend_url: str, email: str,
+                     password: str, question: str, video_id: str,
+                     response_timeout: int, require) -> None:
+    _browser(session, "open", frontend_url, timeout=30)
+    snap = _snapshot_until(session, lambda s: "Email" in s and "Password" in s, 15)
+    email_ref = _ref(snap, "Email")
+    password_ref = _ref(snap, "Password")
+    login_ref = _ref(snap, 'button "Log in"')
+    _browser(session, "fill", f"@{email_ref}", email)
+    _browser(session, "fill", f"@{password_ref}", password)
+    _browser(session, "click", f"@{login_ref}")
+
+    snap = _snapshot_until(
+        session, lambda s: "Ask anything about the video library" in s, 20)
+    url = _scalar(_browser(session, "get", "url"))
+    require("login reaches new-conversation surface", urlparse(url).path == "/", url)
+    _browser(session, "screenshot", str(artifacts / "authenticated.png"))
+
+    input_ref = _ref(snap, "Ask anything about the video library")
+    send_ref = _ref(snap, "Send message")
+    _browser(session, "fill", f"@{input_ref}", question)
+    _browser(session, "click", f"@{send_ref}")
+
+    _snapshot_until(session, lambda s: "Stop response" in s, 10)
+    require("streaming UI state observed", True)
+
+    snap = _snapshot_until(
+        session,
+        lambda s: "Send message" in s and bool(CITATION.search(s)),
+        response_timeout,
+    )
+    url = _scalar(_browser(session, "get", "url"))
+    require("message created a real conversation", urlparse(url).path.startswith("/c/"), url)
+
+    citation_ref, citation_label = _citation(snap)
+    seconds = _timestamp_seconds(citation_label)
+    title_attr = _scalar(_browser(session, "get", "attr", f"@{citation_ref}", "title"))
+    title_lines = title_attr.splitlines()
+    require("citation includes title/timestamp metadata", len(title_lines) >= 2, title_attr)
+    require("citation includes quoted transcript evidence",
+            len(" ".join(title_lines[1:]).strip()) >= 8, title_attr)
+    _browser(session, "screenshot", str(artifacts / "citation.png"))
+
+    _browser(session, "click", f"@{citation_ref}")
+    modal = _snapshot_until(
+        session, lambda s: "Video citation" in s and "Open on YouTube" in s, 15)
+    youtube_ref = _ref(modal, "Open on YouTube")
+    external = _scalar(_browser(session, "get", "attr", f"@{youtube_ref}", "href"))
+    embed = _scalar(_browser(
+        session, "eval",
+        "document.querySelector('iframe[title=\"YouTube video player\"]')?.getAttribute('src') || ''",
+    ))
+    require("citation modal points to locked video at exact timestamp",
+            _youtube_matches(external, embed, video_id, seconds),
+            f"external={external!r} embed={embed!r} expected={video_id}@{seconds}")
+    _browser(session, "screenshot", str(artifacts / "citation-modal.png"))
+    print(f"E2E_EVIDENCE dir={artifacts} video_id={video_id} timestamp={seconds}", flush=True)
 
 
 def main() -> int:
