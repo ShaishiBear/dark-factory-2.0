@@ -218,9 +218,10 @@ class FailedStageRecordTests(unittest.TestCase):
             rt = _runtime(Path(tmp), _Ok())
             _run_stage(rt, paths, role="conformance")
             record = _record(paths, "conformance")
-            self.assertNotIn("outcome", record)
+            # A returned stage says so, the same way a failed one does (D-050).
+            self.assertEqual(record["outcome"], "ok")
             self.assertEqual(record["num_turns"], 4)
-            self.assertEqual(_rows(paths)[0].get("outcome"), None)
+            self.assertEqual(_rows(paths)[0]["outcome"], "ok")
 
 
 if __name__ == "__main__":

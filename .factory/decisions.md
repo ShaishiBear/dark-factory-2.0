@@ -1476,3 +1476,92 @@ head predates this and D-048, its refusal class is `code_holdout` (not re-head e
 and the validator's browser journey runs from the trusted base, so once this merges a fresh
 validation of #96 would use the fixed harness but its own pack still binds the old kernel;
 the overseer closes #96 as superseded and rebuilds #49.
+
+## D-050 · Every model stage of validation leaves a timing record, because 25 minutes of run 33960088633 left none
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33960088633 (validation of PR #99, the first validation after D-048/D-049)
+
+The run's uploaded `stage-timings.jsonl` held six `exec` rows: `backend-sync`,
+`frontend-sync`, `security`, `provenance-peek` and `provenance-fetch`, all finished by
+10:15:44Z, and `evidence`, started 10:40:37Z and refused after 211 s at the browser journey
+(`E2E_FAIL browser state did not appear in 10s`, a separate defect). Nothing was recorded for
+the 24 minutes 53 seconds in between, no `agent-*.log` or `agent-*.json` was in the bundle
+although the worker workflow's upload globs name them, and the Actions log for the dispatch
+step is empty between the step's environment banner at 10:15:37Z and the traceback at
+10:44:13Z. Yet `holdout.json`, `architecture-holdout.json`, the three certifications and
+`validator-verdict.json` exist, so the five validation authorities ran.
+
+**What the 25 minutes were.** The artifact zip preserves each file's modification time on the
+runner, which is the only per-stage evidence the run left:
+
+| stage | wrote its artifact at | wall clock | turn cap | budget at 35 s/turn |
+|---|---|---|---|---|
+| `holdout` (blinded code holdout) | 10:31:18Z | 934 s | 10 | 350 s |
+| `architecture-holdout` | 10:31:40Z | 22 s | 10 | 350 s |
+| `contract-certifier` | 10:34:04Z | 144 s | 10 | 350 s |
+| `design-certifier` | 10:37:22Z | 198 s | 10 | 350 s |
+| `governor-certifier` | 10:40:36Z | 194 s | 10 | 350 s |
+
+1492 s in total, of which the code holdout alone took 934 s: 2.7 times its budget, and by far
+the longest single stage of the day (the build run 33956891774, fully recorded, peaked at
+`test_author` 797 s / 14 turns). Whether that was one slow process (93 s per turn at ten
+turns, against a 35 s ceiling) or two transient retries stacked behind a success (three
+attempts of up to 350 s fit the number) cannot be told: the fields that would say so
+(`attempts`, `num_turns`, `transient_errors`) were never written. That is the whole finding.
+
+**Why the records were missing.** Not a different `RunPaths`, not a different transcripts
+directory, not the upload globs. `_run_blinded_holdout`, `_run_architecture_holdout` and
+`_run_precode_certifier` called `self.provider.run(...)` directly and returned the result;
+only the build-side `_agent` (and its `worker_runtime` override, D-041) called
+`_record_agent`/`_record_failed_agent`. Validation never had a recording path. The log was
+silent for a second, independent reason: the kernel's stdout is a pipe under Actions, so an
+unflushed `print` reaches the job log when the process exits, and the kernel printed nothing
+per stage anyway.
+
+**Decision.** Data first; no behaviour changes.
+
+- `KernelRuntime._agent_stage(paths, request)` is the one place a model is run. It times
+  the call, writes `agent-<role>.log`, `agent-<role>.json` and the `kind=agent` timing row on
+  return, writes the failed record and re-raises on any exception (D-041), and hands the
+  result back unchanged. Both `_agent` paths and the three validation authorities go through
+  it; `tests/factory/test_factory_validation_stage_telemetry.py` pins by AST that
+  `runtime.py` calls `provider.run` from nowhere else and that `worker_runtime.py` never
+  calls it directly. A stage with no record is now a stage that never ran.
+- Every record and row carries `outcome` (`ok`, `failed`; `refused` for a gate that exited
+  non-zero), `model`, `cost_usd` (the row; the JSON keeps `total_cost_usd`), `num_turns`,
+  `seconds`. A returned stage says `ok` where it used to say nothing; the one test that pinned
+  the absence is updated.
+- `record_stage_timing` prints one flushed line per stage as it ends, deterministic gates
+  included: `FACTORY_STAGE kind=agent|exec name=<role or gate> seconds=<n> [turns=<n>]
+  [cost_usd=<x>] outcome=ok|failed|refused [over_budget=true]`. The Actions log reads as a
+  live progress line rather than a post-mortem.
+- `over_budget` is set on the record, the row and the line when a model stage's wall clock
+  exceeded `max_turns(role) * OBSERVED_SECONDS_PER_TURN_CEILING`
+  (`worker_policy.stage_budget_seconds`). Telemetry only: the result is returned, nothing
+  refuses, the caps are unchanged. The 934 s holdout above would have carried it; the agreed
+  policy is to tune the caps from real telemetry (D-025), and this is the field the tuning
+  reads.
+- Observed on the way and deliberately left alone, because this change is data only: the
+  direct calls passed neither `allowed_tools` nor `max_budget_usd` to the authorities, unlike
+  the build workers. The first recorded validation run says what that costs before anything
+  is changed.
+
+Pinned by `tests/factory/test_factory_validation_stage_telemetry.py`: the real `validate_pr`
+through the rehearsal harness records all five authorities (record, row, log text, stage
+line); a holdout or certifier that raises is recorded under its role with the carried
+telemetry and re-raised; a certifier that returned a rejection is an `ok` stage whose refusal
+is the kernel's; the exec line omits turns and cost and says `refused` on a non-zero exit;
+the print is flushed; the budget is the cap at the ceiling, 934 s against `holdout` is
+flagged and 350 s is not; a slow returned and a slow failed stage are flagged in record,
+row and line, a stage within budget nowhere; a flagged holdout still returns its verdict.
+Mutations verified by direct injection on the maintainer's host (the Windows mutation harness
+is unreliable there, and `harness/` was under concurrent change, so they are not yet in
+`harness/factory_mutations/defects.json`; that registration is a follow-up):
+`validation-stage-records-nothing` (the holdout calls `provider.run` directly again),
+`stage-line-dropped`, `stage-line-unflushed` and `over-budget-never-set` are each caught.
+
+**Consequences.** The next validation run uploads five `agent-*.json` records and prints its
+progress live; cap tuning for the authorities happens after that run, from its numbers, not
+from this one's reconstruction. The refusal that ended run 33960088633 (`evidence_spine`, the
+browser journey timing out on the chat page after a successful login) is a separate defect
+and is not addressed here.
