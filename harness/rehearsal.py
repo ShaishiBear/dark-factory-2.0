@@ -67,6 +67,8 @@ CHANGED_FILES: tuple[str, ...] = ("app/backend/main.py",)
 HEAD = "1" * 40
 BASE = "2" * 40
 NEW_HEAD = "4" * 40   # the tip after a rehearsed rebase
+NEW_TEST_COMMIT = "6" * 40   # the rebased test-author commit (an ancestor of NEW_HEAD)
+RED_SUBJECT = "test(factory): prove acceptance contract red"
 NEW_BASE = "5" * 40   # where origin/main is when a stale PR is re-headed
 PR_NUMBER = 77
 ISSUE_NUMBER = 42
@@ -95,6 +97,8 @@ class Trace:
     pr_comments: list[str] = field(default_factory=list)     # PR comments the kernel posted
     issue_comments: list[str] = field(default_factory=list)  # issue comments the kernel posted
     refusal_record: dict | None = None  # validation-refusal.json, if the run wrote one
+    rehead_red_proof: dict | None = None  # red-proof.json a re-head re-issued, if any
+    rehead_red_spec: dict | None = None   # rehead-test-spec.json a re-head reconstructed, if any
 
     def record(self, kind: str, name: str, *, argv: tuple[str, ...] = (), cwd: str = "") -> None:
         self.steps.append(Step(kind, name, argv, cwd))
@@ -148,7 +152,11 @@ def builder_pack(
         "contract": contract, "tickets": tickets, "frontier": frontier,
         "context": context, "design": design,
         "red-proof": rec({"version": "2.0", "claim": "red-proof", "test_commit": "3" * 40,
-                          "files": dict(red_files or {})}),
+                          "files": dict(red_files or {}),
+                          "checkpoints": [{"acceptance_id": "AC-1", "cwd": ".",
+                                           "argv": ["pytest", "tests/red_test.py"],
+                                           "files": sorted(red_files or {}),
+                                           "expected_failure": "AssertionError"}]}),
     }
     for claim in BUILDER_CLAIMS:
         artifacts.setdefault(claim, rec({"version": "1.0", "claim": claim}))
@@ -323,7 +331,9 @@ def _pr_body() -> str:
 def exec_recorder(trace: Trace, *, fail: str | None = None,
                   fail_detail: str = "rehearsed failure",
                   red_files: Mapping[str, str] | None = None,
-                  pack_base: str = BASE) -> Callable[..., str]:
+                  pack_base: str = BASE,
+                  git_state: dict[str, str] | None = None,
+                  red_passes_after_rebase: bool = False) -> Callable[..., str]:
     """Stand in for the deterministic tools, materializing what each is contracted to write.
 
     A rehearsed failure raises the same typed refusal the real `_exec` raises, carrying
@@ -347,6 +357,17 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
             target = Path(out)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps({"version": "1.0", "tool": name}), encoding="utf-8")
+        if tool == "factory_proof.py" and "red" in argv[:3]:
+            # RED binds `test_commit` to the commit the worktree is at; a checkpoint that passes
+            # after a rebase is the real program's refusal, reproduced here.
+            if red_passes_after_rebase:
+                raise ToolRefused(argv, rc=1, output="AC-1 RED command unexpectedly passed")
+            at = (git_state or {}).get("head", HEAD)
+            for out in outputs:
+                Path(out).write_text(json.dumps({
+                    "version": "2.0", "test_commit": at, "files": dict(red_files or {}),
+                    "checkpoints": [{"acceptance_id": "AC-1"}],
+                }), encoding="utf-8")
         if tool == "factory_evidence.py":
             # Stand in for the evidence authority by running its real architecture-holdout rule.
             # Everything else that tool does is out of scope here, but this gate must not be
@@ -407,6 +428,8 @@ class Scenario:
     author_type: str = "Bot"             # REST user.type; the factory is a Bot
     issue_labels: tuple[str, ...] = ("factory:needs-human",)  # linked issue's labels, for resume
     artifacts: Mapping[str, dict] | None = None  # resume: builder artifacts by relative name
+    rebased_log: tuple[tuple[str, str], ...] | None = None  # (sha, subject) after a rebase
+    red_passes_after_rebase: bool = False  # a RED checkpoint no longer fails after the rebase
 
 
 def rehearse(scenario: Scenario) -> Trace:
@@ -457,17 +480,31 @@ def rehearse(scenario: Scenario) -> Trace:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(json.dumps(value), encoding="utf-8")
         runtime.provider = FakeProvider(trace, reject=scenario.reject)
+        git_state = {"head": scenario.head}
         runtime._exec = exec_recorder(  # type: ignore[method-assign]
             trace, fail=scenario.fail, fail_detail=scenario.fail_detail,
-            red_files=scenario.red_files, pack_base=scenario.pack_base)
+            red_files=scenario.red_files, pack_base=scenario.pack_base,
+            git_state=git_state, red_passes_after_rebase=scenario.red_passes_after_rebase)
         runtime._prepare_worktree = lambda cwd, paths: trace.record("control", "prepare_worktree")  # type: ignore[method-assign]
         runtime.check_stop = lambda: trace.record("control", "check_stop")  # type: ignore[method-assign]
 
-        git_state = {"head": scenario.head}
+        rebased_log = scenario.rebased_log
+        if rebased_log is None:
+            rebased_log = ((NEW_TEST_COMMIT, RED_SUBJECT), (NEW_HEAD, "fix(factory): satisfy issue #42"))
 
         def fake_git(*args: str, cwd: Path | None = None) -> str:
             verb = next((a for a in args if not a.startswith("-") and a != "-c"
                          and "=" not in a), args[0])
+            if args[:1] == ("log",):
+                trace.record("control", "git:log")
+                return "".join(f"{sha}\x1f{subject}\n" for sha, subject in rebased_log)
+            if args[:1] == ("diff",) and "--name-only" in args and any(a.endswith("^") for a in args):
+                # The parent diff of a single commit: the test-author commit changes exactly the
+                # RED-hashed files; any other commit changes production files.
+                commit = args[-1]
+                if commit == NEW_TEST_COMMIT:
+                    return "".join(f"{path}\n" for path in sorted(scenario.red_files or {}))
+                return "".join(f"{path}\n" for path in CHANGED_FILES)
             if args[:1] == ("diff",) and "--name-only" in args:
                 return "".join(f"{path}\n" for path in CHANGED_FILES)
             if args[:1] == ("diff",):
@@ -479,12 +516,16 @@ def rehearse(scenario: Scenario) -> Trace:
                 if scenario.rebase_conflict:
                     raise ToolRefused(["git", *args], rc=1, output="CONFLICT (content): rehearsed")
                 git_state["head"] = NEW_HEAD
+                git_state["tip"] = NEW_HEAD
                 return ""
             if args[:2] == ("merge-base", "--is-ancestor"):
-                # The kernel verifies the pack's declared base against the head here.
+                # The kernel verifies the pack's declared base against the head here, and the
+                # re-issued RED test commit against the new head.
                 trace.record("control", "git:is-ancestor")
                 if args[2] == scenario.pack_base and not scenario.pack_base_is_ancestor:
                     raise ToolRefused(["git", *args], rc=1, output="not an ancestor")
+                if args[2] == NEW_TEST_COMMIT:
+                    trace.record("control", "git:red-commit-is-ancestor")
                 return ""
             if args[:1] == ("merge-base",):
                 # What a guess would return: deliberately NOT the pack's base, so any code path
@@ -493,6 +534,16 @@ def rehearse(scenario: Scenario) -> Trace:
                 return BASE
             if args[:2] == ("rev-parse", "HEAD"):
                 return git_state["head"]
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return git_state.get("branch", "factory/rehearsed")
+            if args[:2] == ("checkout", "--detach"):
+                trace.record("control", f"git:checkout-detach:{args[2]}")
+                git_state["head"] = args[2]
+                return ""
+            if args[:1] == ("checkout",) and len(args) == 2 and args[1] == git_state.get("branch", "factory/rehearsed"):
+                trace.record("control", "git:checkout-branch")
+                git_state["head"] = git_state.get("tip", NEW_HEAD)
+                return ""
             if args[:1] == ("rev-parse",):
                 return NEW_BASE
             if verb in {"fetch", "checkout", "status"}:
@@ -533,6 +584,11 @@ def rehearse(scenario: Scenario) -> Trace:
         trace.issue_comments = list(runtime.github.issue_comments)
         for record in work_root.rglob("validation-refusal.json"):
             trace.refusal_record = json.loads(record.read_text(encoding="utf-8"))
+        for spec_file in work_root.rglob("rehead-test-spec.json"):
+            trace.rehead_red_spec = json.loads(spec_file.read_text(encoding="utf-8"))
+            proof_file = spec_file.with_name("red-proof.json")
+            if proof_file.is_file():
+                trace.rehead_red_proof = json.loads(proof_file.read_text(encoding="utf-8"))
     return trace
 
 
