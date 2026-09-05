@@ -22,6 +22,7 @@ at least `MARGIN_RATIO` times the lower level's count and at least `MARGIN_TOKEN
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from collections.abc import Callable
@@ -30,18 +31,34 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
+# The tree under test is the working directory (D-036): its `.factory/kernel.json` names the
+# worker model when `--model` is not given. The code is loaded from beside this file.
+ROOT = Path.cwd().resolve()
 sys.path.insert(0, str(HERE.parent))
 
 from factory_kernel.providers import parse_events, thinking_tokens  # noqa: E402
 from factory_kernel.worker_policy import EFFORT_LEVELS, ROLE_EFFORT, effort_rank  # noqa: E402
 
 LINE_PREFIX = "FACTORY_PREFLIGHT_EFFORT_PROBE"
+KERNEL_JSON = ROOT / ".factory" / "kernel.json"
 # A short task with a real plan in it, so a model that is allowed to think has something to
 # think about, and a one-turn answer is still cheap.
 PROMPT = "Plan, in numbered steps, how you would add a column to a Postgres table without downtime."
 MARGIN_RATIO = 1.5
 MARGIN_TOKENS = 100
 PROBE_TIMEOUT_SECONDS = 180
+
+
+def configured_model(policy: Path = KERNEL_JSON) -> str:
+    """`provider.model` of the tree under test's kernel policy: the worker model."""
+    try:
+        raw = json.loads(policy.read_text(encoding="utf-8"))
+        model = raw["provider"]["model"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ValueError(f"cannot read provider.model from {policy}: {exc}") from exc
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError(f"provider.model in {policy} must be a non-empty string")
+    return model.strip()
 
 
 def policy_extremes() -> tuple[str, str]:
@@ -191,7 +208,11 @@ def run_probe(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--model", required=True, help="the worker model slug (provider.model)")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="the worker model slug; default: provider.model of ./.factory/kernel.json",
+    )
     parser.add_argument("--binary", default="claude")
     parser.add_argument("--low", default=None, help="lower level; default: the policy's lowest")
     parser.add_argument("--high", default=None, help="higher level; default: the policy's highest")
@@ -199,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     print(
         run_probe(
-            args.model,
+            args.model or configured_model(),
             binary=args.binary,
             low_level=args.low,
             high_level=args.high,

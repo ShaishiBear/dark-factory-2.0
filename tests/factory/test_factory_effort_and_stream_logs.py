@@ -673,6 +673,24 @@ class _FakeRunner:
 
 
 class ProbeScriptTests(unittest.TestCase):
+    def test_the_default_model_is_the_trees_worker_model(self):
+        """ROOT is the working directory (D-036); the checked-in policy names the model."""
+        self.assertEqual(
+            probe.configured_model(KERNEL_JSON),
+            json.loads(KERNEL_JSON.read_text(encoding="utf-8"))["provider"]["model"],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "cannot read provider.model"):
+                probe.configured_model(Path(tmp) / "kernel.json")
+            bad = Path(tmp) / "bad.json"
+            bad.write_text(json.dumps({"provider": {"model": ""}}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "non-empty"):
+                probe.configured_model(bad)
+        self.assertRegex(
+            (ROOT / "scripts" / "factory_effort_probe.py").read_text(encoding="utf-8"),
+            r"(?m)^ROOT = Path\.cwd\(\)\.resolve\(\)$",
+        )
+
     def test_the_default_levels_are_the_policys_lowest_and_highest(self):
         self.assertEqual(probe.policy_extremes(), (WORKER_EFFORT, JUDGE_EFFORT))
         self.assertEqual(probe.policy_extremes(), ("medium", "high"))
