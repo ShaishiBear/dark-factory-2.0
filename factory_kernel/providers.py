@@ -147,11 +147,21 @@ class ClaudeCliProvider:
                 transient_errors.append(exc.detail)
                 if attempt < attempts_allowed:
                     continue
-                raise RuntimeError(
+                raise ProviderStageError(
                     f"agent worker role={request.role!r} failed on a transient provider error "
                     f"{attempt} time(s) (transient_retries={self.config.transient_retries}): "
-                    f"{exc.detail}"
+                    f"{exc.detail}",
+                    telemetry=spent.telemetry(),
+                    attempts=attempt,
+                    transient_errors=tuple(transient_errors),
                 ) from exc
+            except ProviderStageError as exc:
+                # A terminal refusal from `_launch` (timeout, non-transient exit) knows nothing
+                # of earlier attempts; attach what this stage already spent across them.
+                exc.telemetry = {**spent.telemetry(), **exc.telemetry}
+                exc.attempts = attempt
+                exc.transient_errors = tuple(transient_errors)
+                raise
             spent.add(envelope)
             break
         output = envelope.content
@@ -201,10 +211,12 @@ class ClaudeCliProvider:
             # and what the worker had printed so far; the turn cap is meant to fire before this.
             elapsed = round(time.monotonic() - started, 1)
             partial = exc.stdout if isinstance(exc.stdout, str) else (exc.stdout or b"").decode("utf-8", "replace")
-            raise RuntimeError(
+            raise ProviderStageError(
                 f"agent worker timed out role={request.role!r} after {elapsed}s "
                 f"(timeout_seconds={self.config.timeout_seconds}, max_turns={request.max_turns}); "
-                f"partial output: {(partial or '').strip()[-1500:]}"
+                f"partial output: {(partial or '').strip()[-1500:]}",
+                telemetry={"wall_seconds_last_attempt": elapsed},
+                timed_out=True,
             ) from exc
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
@@ -219,8 +231,9 @@ class ClaudeCliProvider:
             if transient is not None:
                 raise transient
             detail = (stdout + "\n" + stderr)[-4000:]
-            raise RuntimeError(
-                f"agent worker failed role={request.role!r} rc={proc.returncode}: {detail}"
+            raise ProviderStageError(
+                f"agent worker failed role={request.role!r} rc={proc.returncode}: {detail}",
+                telemetry=_terminal_envelope_telemetry(stdout),
             )
         return stdout
 
@@ -255,6 +268,19 @@ def is_transient_error(detail: str, subtype: str) -> bool:
     return any(pattern.lower() in lowered for pattern in TRANSIENT_ERROR_PATTERNS)
 
 
+def _terminal_envelope_telemetry(stdout: str) -> dict[str, Any]:
+    """The counts a terminal error envelope reports, if stdout is one; else nothing."""
+    try:
+        raw = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(raw, Mapping) or "is_error" not in raw:
+        return {}
+    spent = _Spent()
+    spent.add(ResultEnvelope(raw))
+    return {**spent.telemetry(), "subtype": str(raw.get("subtype") or "")}
+
+
 def _transient_from_stdout(stdout: str, *, role: str) -> "TransientProviderError | None":
     """The transient error a non-zero-exit CLI process printed, if that is what it printed."""
     try:
@@ -285,6 +311,33 @@ class TransientProviderError(RuntimeError):
         self.envelope = envelope
 
 
+class ProviderStageError(RuntimeError):
+    """A stage the provider refused, carrying what the stage cost before it failed.
+
+    Two `test_author` stream drops (runs 33918953996 and 33933101233) left only the exception
+    text as evidence, because the kernel recorded telemetry only for a stage that returned
+    (D-040). Every terminal refusal now carries `telemetry` (the summed envelope counts, if any
+    envelope was ever parsed), `attempts`, `transient_errors` and `timed_out`, so the kernel
+    can write the same `agent-<role>.json` record it writes for a success. The message and the
+    classification are exactly what they were; only the attributes are new.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        telemetry: Mapping[str, Any] | None = None,
+        attempts: int = 1,
+        transient_errors: tuple[str, ...] = (),
+        timed_out: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.telemetry = dict(telemetry or {})
+        self.attempts = attempts
+        self.transient_errors = tuple(transient_errors)
+        self.timed_out = timed_out
+
+
 class _Spent:
     """Telemetry summed across every attempt of one stage, so a retried stage reports what
     it actually cost rather than only its final successful process."""
@@ -306,6 +359,17 @@ class _Spent:
         self.output_tokens += envelope.output_tokens or 0
         self.cache_creation_input_tokens += envelope.cache_creation_input_tokens or 0
         self.cache_read_input_tokens += envelope.cache_read_input_tokens or 0
+
+    def telemetry(self) -> dict[str, Any]:
+        return {
+            "num_turns": self.num_turns,
+            "duration_ms": self.duration_ms,
+            "total_cost_usd": self.cost_usd,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cache_creation_input_tokens": self.cache_creation_input_tokens,
+            "cache_read_input_tokens": self.cache_read_input_tokens,
+        }
 
 
 class ResultEnvelope:

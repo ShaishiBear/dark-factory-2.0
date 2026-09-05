@@ -250,6 +250,8 @@ Every worker is launched with a per-role turn cap (`ROLE_MAX_TURNS`, `factory_ke
 
 GitHub's `delete_branch_on_merge` setting does not delete branches merged by GitHub's own auto-merge on behalf of the Actions app, and a `closed`-event job cannot see that close either: events caused by `GITHUB_TOKEN` start no workflows (D-020). `.github/workflows/dark-factory-branch-cleanup.yml` therefore runs hourly (and on dispatch) with `contents: write` and no checkout: it lists this repository's `human/*` and `factory/*` branches and deletes a branch only when a merged PR from this repository has it as head and the branch tip is exactly that PR's head commit. `main` is never a candidate; a branch with commits past its merged PR is kept and reported. Drafts are judged by the trust-root workflow but never armed for auto-merge.
 
+The uploaded transcripts artifact records every model stage, including one that failed: a failed stage's `agent-<role>.json` carries `outcome: failed`, the scrubbed error, the attempt count and whatever the provider had already spent (D-041).
+
 ### Optional self-hosted scheduler
 
 The systemd files remain available when an operator deliberately chooses a self-hosted scheduler. Expected layout for those checked-in units is:

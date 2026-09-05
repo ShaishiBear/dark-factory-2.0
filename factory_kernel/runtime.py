@@ -41,6 +41,7 @@ from .refusal import (
     render_rehead_marker,
     render_resume_marker,
     resume_count,
+    scrub,
 )
 from .repro import (
     RED_TAIL_CHARS,
@@ -1570,6 +1571,40 @@ class KernelRuntime:
         record_stage_timing(
             paths.transcripts, kind="agent", name=role, started=started, ended=ended,
             num_turns=telemetry["num_turns"], duration_ms=telemetry["duration_ms"],
+        )
+
+    def _record_failed_agent(
+        self, paths: RunPaths, role: str, exc: BaseException, *, started: float
+    ) -> None:
+        """Write the same stage record for a worker that failed as for one that returned.
+
+        A stage that ended in an error envelope, an exhausted retry budget, a timeout or a
+        refused unwrap used to leave no `agent-<role>.json` and no timing row, so the two
+        `test_author` stream drops had only the exception text as evidence (D-040, D-041).
+        The error text is scrubbed of every secret shape the guard knows before it is written,
+        because a provider error can echo the prompt and the prompt can echo an issue body.
+        """
+        ended = time.time()
+        paths.transcripts.mkdir(parents=True, exist_ok=True)
+        carried = getattr(exc, "telemetry", None)
+        telemetry = {
+            "role": role,
+            "outcome": "failed",
+            "error_class": type(exc).__name__,
+            "error": scrub(str(exc))[-4000:],
+            "attempts": getattr(exc, "attempts", 1),
+            "transient_errors": [scrub(str(e)) for e in (getattr(exc, "transient_errors", ()) or ())],
+            "timed_out": bool(getattr(exc, "timed_out", False)),
+            "wall_seconds": round(ended - started, 3),
+            **({k: v for k, v in carried.items()} if isinstance(carried, Mapping) else {}),
+        }
+        (paths.transcripts / f"agent-{role}.json").write_text(
+            json.dumps(telemetry, sort_keys=True, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+        record_stage_timing(
+            paths.transcripts, kind="agent", name=role, started=started, ended=ended,
+            outcome="failed", error_class=type(exc).__name__,
+            num_turns=telemetry.get("num_turns"), timed_out=telemetry["timed_out"] or None,
         )
 
     # A merge-base diff handed to reviewers and the conformance authority. Bounded so a large

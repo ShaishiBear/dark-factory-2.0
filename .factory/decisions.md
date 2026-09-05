@@ -1069,3 +1069,27 @@ files and writes new ones, and the stage records no telemetry when it fails beca
 `_record_agent` runs only on success; the failing envelope itself is the only evidence. With the
 retry now reachable, the next drop is measured instead of fatal. A failed stage should also
 leave a telemetry record; that is a separate change to `_record_agent`'s call site.
+
+---
+
+## D-041 · A failed stage is recorded like a successful one
+
+**Status:** implemented · **Raised:** 2026-09-05
+
+`_record_agent` wrote `agent-<role>.json` and the stage-timings row only after
+`provider.run` returned. The two `test_author` stream drops (runs 33918953996 and
+33933101233) therefore left one line of exception text and nothing else: no turn count,
+no token count, no cost, no attempt count, although the CLI had printed all of it in the
+error envelope the provider refused.
+
+`worker_runtime._agent` now records the failure before re-raising it, unchanged. Every
+terminal refusal the provider raises (`ProviderStageError`: exhausted transient retries,
+a non-transient exit, a timeout) carries the telemetry summed across the attempts it made,
+the attempt count, the transient errors seen and whether it timed out; the record is written
+with `outcome: failed`, and the error text passes through the guard's secret scrub first,
+because a provider error can echo the prompt and the prompt can echo an issue body. The
+timing row gains `outcome`, `error_class` and `timed_out`.
+
+This is observability only. Nothing reads the record to decide anything; the failure
+propagates exactly as before, with the same class and message, and the retry
+classification is untouched.
