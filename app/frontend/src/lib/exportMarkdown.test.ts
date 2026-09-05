@@ -308,3 +308,64 @@ describe('formatSources', () => {
     expect(result.split('- [Test Video]').length).toBe(3);
   });
 });
+
+describe('formatCitation fallback acceptance (issue #49)', () => {
+  const citationBase = {
+    chunk_id: 'chunk-49',
+    video_id: 'vid-49',
+    video_title: 'Test Video Title',
+    video_url: 'not-a-url',
+    start_seconds: 10,
+    end_seconds: 20,
+    snippet: 'Relevant text',
+  };
+
+  it('AC-1: keeps the snippet blockquote when video_url is unparseable', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...citationBase, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toContain('> "Relevant text"');
+    expect(result).toContain('\n  > "Relevant text"');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-2: prefixes the unparseable-video_url fallback entry with the list marker', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...citationBase, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-3: prefixes the Dynamous empty-lesson_url fallback entry with the list marker', () => {
+    const citation = {
+      ...citationBase,
+      source_type: 'dynamous' as const,
+      video_url: '',
+      lesson_url: '',
+      snippet: 'Relevant text',
+    };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Relevant text"');
+  });
+
+  it('AC-4: keeps the snippet blockquote when video_url has no v parameter', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = {
+      ...citationBase,
+      video_url: 'https://www.youtube.com/',
+      snippet: 'Relevant text',
+    };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    expect(result).not.toContain('[Test Video Title](https://www.youtube.com/watch?v=');
+    expect(result).toContain('\n  > "Relevant text"');
+    warnSpy.mockRestore();
+  });
+});
