@@ -1393,3 +1393,86 @@ judged-questions sections. Mutations `holdout-shown-only-green` and
 reset by the overseer. PR #96's head is untouched and its refusal class is `code_holdout`,
 which is validator-side, so it can be validated again on a main that contains this fix
 without a re-head or a rebuild.
+
+## D-049 · The browser journey targets nodes by role and accessible name, because the React root is listed first with the whole page as its name
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33953697016 (main regression on 08067a0, after D-047)
+
+The first main regression after D-047 printed `E2E_LOGIN_PROBE status=200 session_cookie=true`
+and then `E2E_FAIL browser state did not appear in 20s` with the login form still showing.
+The route accepted the account; the browser never asked it. The evidence dump D-047 added was
+written to `/tmp` on the hosted runner and uploaded by nothing, so the cause was re-derived
+locally with the real Vite frontend, agent-browser 0.35.0 and a stub backend that answers the
+login exactly as the route does.
+
+**What the browser saw.** `agent-browser snapshot -i` lists the React root first:
+
+```
+- generic "DynaChatAsk Cole Medin's YouTube videos ... Log inEmailPasswordLog inNeed a" [ref=e1] clickable [onclick]
+  - heading "Log in" [level=1, ref=e2]
+  - textbox "Email" [required, ref=e4]
+  - textbox "Password" [required, ref=e5]
+  - button "Log in" [ref=e3]
+```
+
+React delegates every event listener to its root element, so the root is "clickable", and
+the snapshot names it by the page's whole text. The harness resolved a target as the first
+line containing the query text: "Email" and "Password" both resolved to `e1`. `fill @e1`
+on that div returned `Done` (rc 0), both inputs stayed empty, and the click submitted a form
+whose `required` fields were empty: the browser blocked the submit silently, no request left
+the page, no alert rendered. Every earlier hypothesis (the `127.0.0.1` origin of D-046, the
+reserved-name email of D-047, a Vite proxy pointed at the wrong port, the `Secure` cookie on
+plain HTTP) was either real and insufficient or refuted: `serve.py` already exported
+`VITE_API_TARGET`, the proxy returned the Secure cookie, and Chromium honoured it on
+`http://localhost` (the post-login `/me` carried the cookie once the fills landed).
+
+The same defect waits after login: the chat page lists `heading "Ask anything about the
+video library"` before `textbox "Ask anything about the video library…"`, so the message
+input would have resolved to the heading next.
+
+**Decision.**
+
+- `harness/e2e.py` parses each snapshot line into role, accessible name and ref and resolves
+  a target by `_ref(snapshot, role, name)` on those fields only, never on raw line text. A
+  container role (`generic`, `group`, `form`, `dialog`, ...) is never a target, even when
+  asked for; a query whose text lives only in a container fails naming that container. The
+  ref is matched as a word inside its bracket (`[required, ref=e4]`).
+- After the two fills the harness reads both fields back (`agent-browser get value`) and
+  refuses before the click unless each equals what was typed, printing
+  `E2E_FIELD_CHECK email=<bool> password=<bool>`; the failure detail names lengths, never
+  values.
+- A second probe posts the credentials through the frontend origin the browser will use
+  (`E2E_PROXY_PROBE url=... status=... session_cookie=...`), after the backend probe and
+  before any browser; it must answer 200 with a session cookie. `harness/serve.py` exposes
+  the Vite child's argv and environment as `frontend_launch(backend_port, frontend_port)`
+  so the exported `VITE_API_TARGET` is a tested value, not a line in `main`.
+- The evidence dump is written under `$ARTIFACTS_DIR/e2e-evidence/`. The validator already
+  passes the run's artifacts directory to the evidence program, and the worker now uploads
+  that subdirectory; the main-regression workflow sets `ARTIFACTS_DIR` on the gate step and
+  uploads the dump and `/tmp/main-regression.log` on every outcome (pinned action, 7 days).
+- Two host quirks met on the way are fixed because a maintainer's local run is the only
+  place this journey can be re-derived: the CLI is launched by its resolved path (a Windows
+  `.cmd` shim is not found by bare name) and the per-command log is left in place when the
+  daemon that `open` spawned still holds it.
+
+Pinned by `tests/factory/test_e2e_contract.py` (the recorded real snapshots resolve `e4`,
+`e5`, `e3`; a container is refused; the heading is not confused with the input; every
+journey `_ref` call is role-qualified; the field check refuses before the click with lengths
+only; the proxy probe refuses on 502, on a missing cookie and on an unreachable frontend
+before any browser; probe order; the `e2e-evidence` subdirectory; `frontend_launch` names
+the chosen backend port) and by `tests/factory/test_factory_workflow_hygiene.py` (the upload
+step, its pin, `if: always()`, the paths, and the worker's matching path). Mutations
+`e2e-ref-matches-line-text-not-role`, `e2e-field-check-assumed-filled`,
+`e2e-proxy-probe-assumed-green`, `e2e-server-vite-api-target-not-exported`,
+`e2e-evidence-dump-outside-run-artifacts` and `regression-evidence-upload-only-on-success`
+are caught.
+
+**Consequences.** Local proof with the real frontend: `E2E_FIELD_CHECK email=true
+password=true`, the click posted the login through the proxy, `/me` carried the cookie, the
+page landed on `/` and the message input and send button resolved by role. The remaining
+steps (streaming answer, citation, modal) need the real model and are proved only by the
+next validation or regression run. PR #96 (issue #49) cannot simply be re-validated: its
+head predates this and D-048, its refusal class is `code_holdout` (not re-head eligible),
+and the validator's browser journey runs from the trusted base, so once this merges a fresh
+validation of #96 would use the fixed harness but its own pack still binds the old kernel;
+the overseer closes #96 as superseded and rebuilds #49.

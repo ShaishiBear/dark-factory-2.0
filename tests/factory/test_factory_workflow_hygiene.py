@@ -86,6 +86,28 @@ class MainRegressionWorkflowTests(unittest.TestCase):
         self.assertEqual(worker_env["DATABASE_URL"].split("//", 1)[1].split("@", 1)[1], "127.0.0.1:5432/dark_factory_validation")
         self.assertNotRegex(self.text, r"://[^\s/@]+:[^@\s/]+@", "no credential-bearing URL literal in this file")
 
+    def test_uploads_the_harness_log_and_browser_evidence_on_every_outcome(self) -> None:
+        """D-049: the first regression run with a browser failure wrote its evidence dump to
+        /tmp on the runner and nothing uploaded it; the diagnosis had to be re-derived
+        locally. The gate now names an artifacts dir and the run keeps the dump and the log."""
+        gate = self.text.split("- name: Full canonical harness on main", 1)[1].split("- name:", 1)[0]
+        self.assertIn("ARTIFACTS_DIR: ${{ runner.temp }}/dark-factory/main-regression/artifacts", gate)
+        step = self.text.split("- name: Upload harness log and browser evidence (observability)", 1)
+        self.assertEqual(len(step), 2, "upload step missing")
+        step = step[1].split("- name:", 1)[0]
+        self.assertTrue(step.lstrip().startswith("if: always()"), "must upload on failure too")
+        worker_upload = self.worker.split("- name: Upload run transcripts and artifacts (observability)", 1)[1]
+        pin = re.search(r"uses: actions/upload-artifact@[0-9a-f]{40}", worker_upload).group(0)
+        self.assertIn(pin, step, "the upload action is pinned exactly as the worker pins it")
+        self.assertIn("retention-days: 7", step)
+        self.assertIn("if-no-files-found: ignore", step)
+        self.assertIn("/tmp/main-regression.log", step)
+        self.assertIn("${{ runner.temp }}/dark-factory/main-regression/artifacts/e2e-evidence/**", step)
+        self.assertLess(self.text.index("Full canonical harness on main"), self.text.index("Upload harness log"))
+        self.assertLess(self.text.index("Upload harness log"), self.text.index("File or update the regression issue"))
+        # The worker keeps the same dump from validation runs.
+        self.assertIn("${{ runner.temp }}/dark-factory/runs/*/artifacts/e2e-evidence/**", worker_upload)
+
     def test_holds_no_write_authority_over_code(self) -> None:
         head = self.text.split("jobs:", 1)[0]
         self.assertIn("permissions:\n  contents: read\n  issues: write\n", head)

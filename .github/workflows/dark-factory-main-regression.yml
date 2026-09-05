@@ -127,6 +127,10 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
+          # The browser journey writes its failure dump (snapshot, page, console, network,
+          # scrubbed cookies, screenshot) under $ARTIFACTS_DIR/e2e-evidence; the step below
+          # uploads it. Without this the dump lands in /tmp and dies with the runner (D-049).
+          ARTIFACTS_DIR: ${{ runner.temp }}/dark-factory/main-regression/artifacts
         run: |
           set +e
           python harness/ci.py 2>&1 | tee /tmp/main-regression.log
@@ -139,6 +143,17 @@ jobs:
             echo "MAIN_REGRESSION_FAILED head=$(git rev-parse HEAD) rc=$rc"
             echo "failed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Upload harness log and browser evidence (observability)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-main-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            /tmp/main-regression.log
+            ${{ runner.temp }}/dark-factory/main-regression/artifacts/e2e-evidence/**
 
       - name: File or update the regression issue
         if: steps.gate.outputs.failed == 'true'

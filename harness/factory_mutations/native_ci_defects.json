@@ -220,6 +220,13 @@
       "find": "          routed = (d.get(\"is_error\") is False\n",
       "replace": "          routed = (d.get(\"is_error\") is False and bool(d.get(\"result\"))\n",
       "why": "The probe would again refuse a healthy route whose model answered with an empty final message, escalating every issue before a stage ran (defect 17, run 33931843218)."
+    },
+    {
+      "id": "regression-evidence-upload-only-on-success",
+      "file": ".github/workflows/dark-factory-main-regression.yml",
+      "find": "      - name: Upload harness log and browser evidence (observability)\n        if: always()\n",
+      "replace": "      - name: Upload harness log and browser evidence (observability)\n        if: success()\n",
+      "why": "The harness log and the browser evidence dump would be uploaded only when the gate passed, which is exactly when nobody needs them (D-049)."
     }
   ]
 }

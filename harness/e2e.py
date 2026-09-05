@@ -43,7 +43,24 @@ ROOT = HERE.parent
 BROWSER_ORIGIN_HOST = "localhost"
 CONFIG = json.loads((HERE / "harness.config.json").read_text(encoding="utf-8"))
 REF = re.compile(r"\[ref=(e\d+)\]")
-CITATION = re.compile(r'button\s+"(?P<label>\d+:\d{2}\s+—\s+[^\"]+)".*\[ref=(?P<ref>e\d+)\]')
+CITATION = re.compile(r'button\s+"(?P<label>\d+:\d{2}\s+—\s+[^\"]+)".*\bref=(?P<ref>e\d+)\]')
+# One line of an interactive snapshot: `- <role> "<accessible name>" [attr, ref=eN]`. The
+# ref shares its bracket with other attributes (`[required, ref=e4]`), so it is matched as
+# a word, not as `[ref=`.
+NODE = re.compile(
+    r'^\s*-\s*(?P<role>[a-z]+)\s+"(?P<name>(?:[^"\\]|\\.)*)"(?P<attrs>.*?)\bref=(?P<ref>e\d+)\]'
+)
+# Roles that only group other nodes. React delegates every event listener to its root
+# element, so agent-browser lists that root first as `generic "<every visible string on the
+# page>" clickable [onclick]`. Its name contains every label on the page; a substring match
+# over raw snapshot lines therefore resolves any query to the root, and `fill` on that div
+# reports success while the real inputs stay empty (D-049). Targets are resolved by parsed
+# role and accessible name only, and a container role is never a target.
+CONTAINER_ROLES = frozenset({
+    "article", "banner", "complementary", "contentinfo", "dialog", "document", "form",
+    "generic", "group", "list", "listitem", "main", "navigation", "none", "paragraph",
+    "presentation", "region", "section",
+})
 
 
 class E2EFailure(RuntimeError):
@@ -85,13 +102,34 @@ class ExistingApp:
         return self._request("POST", path, body)
 
 
-def _ref(snapshot: str, contains: str) -> str:
+def _nodes(snapshot: str) -> list[tuple[str, str, str]]:
+    """(role, accessible name, ref) for every node line of an interactive snapshot."""
+    found: list[tuple[str, str, str]] = []
     for line in snapshot.splitlines():
-        if contains in line:
-            match = REF.search(line)
-            if match:
-                return match.group(1)
-    raise E2EFailure(f"interactive element not found: {contains!r}")
+        match = NODE.match(line)
+        if match:
+            found.append((match.group("role"), match.group("name"), match.group("ref")))
+    return found
+
+
+def _ref(snapshot: str, role: str, name: str) -> str:
+    """Resolve the ref of the node whose role is `role` and whose accessible name starts
+    with `name`.
+
+    The match is on the parsed role and name, never on the raw line: the root container's
+    name carries every visible string, so a line-substring match would hand back the root
+    for any query (D-049). A container role is refused as a target even when asked for.
+    """
+    if role in CONTAINER_ROLES:
+        raise E2EFailure(f"refusing to target a container role: {role} {name!r}")
+    containers: list[str] = []
+    for node_role, node_name, ref in _nodes(snapshot):
+        if node_role == role and node_name.startswith(name):
+            return ref
+        if node_role in CONTAINER_ROLES and name in node_name:
+            containers.append(f"{node_role} [ref={ref}]")
+    detail = f"; only containers carry that text: {', '.join(containers)}" if containers else ""
+    raise E2EFailure(f"interactive element not found: {role} {name!r}{detail}")
 
 
 def _citation(snapshot: str) -> tuple[str, str]:
@@ -133,9 +171,15 @@ def _youtube_matches(external: str, embed: str, video_id: str, seconds: int) -> 
 
 
 def _artifact_dir(session: str) -> Path:
+    """Where screenshots and the failure dump go.
+
+    Under the run's `ARTIFACTS_DIR` this is the `e2e-evidence/` subdirectory, which both the
+    worker and the main-regression workflow upload; without one it is a temp directory that
+    survives only on the host (D-049: a dump written to /tmp on a hosted runner is lost).
+    """
     configured = os.environ.get("ARTIFACTS_DIR", "").strip()
     if configured:
-        candidate = Path(configured).expanduser().resolve()
+        candidate = Path(configured).expanduser().resolve() / "e2e-evidence"
         if ROOT not in (candidate, *candidate.parents):
             candidate.mkdir(parents=True, exist_ok=True)
             return candidate
@@ -145,15 +189,19 @@ def _artifact_dir(session: str) -> Path:
 
 
 def _browser(session: str, *args: str, timeout: int = 30, check: bool = True) -> str:
-    if shutil.which("agent-browser") is None:
+    executable = shutil.which("agent-browser")
+    if executable is None:
         raise E2EFailure("agent-browser is not on PATH")
     fd, name = tempfile.mkstemp(prefix="df-agent-browser-", suffix=".log")
     os.close(fd)
     log = Path(name)
     try:
         with log.open("w", encoding="utf-8") as handle:
+            # The resolved path, not the bare name: on Windows the CLI is a `.cmd` shim that
+            # CreateProcess cannot find by name, so a maintainer's local run dies before the
+            # first browser command (appproc.py resolves its commands the same way).
             proc = subprocess.run(
-                ["agent-browser", "--session", session, *args],
+                [executable, "--session", session, *args],
                 cwd=ROOT, stdout=handle, stderr=subprocess.STDOUT,
                 text=True, timeout=timeout,
             )
@@ -165,7 +213,12 @@ def _browser(session: str, *args: str, timeout: int = 30, check: bool = True) ->
     except subprocess.TimeoutExpired as exc:
         raise E2EFailure(f"agent-browser {' '.join(args)} timed out after {timeout}s") from exc
     finally:
-        log.unlink(missing_ok=True)
+        try:
+            log.unlink(missing_ok=True)
+        except OSError:
+            # The daemon that `open` launches inherits the handle; Windows refuses to unlink
+            # an open file. One small log per session is left for the OS to reclaim.
+            pass
 
 
 def _snapshot_until(session: str, predicate, timeout: int) -> str:
@@ -191,6 +244,29 @@ def _scrub_cookie_values(text: str) -> str:
     return re.sub(r"^(\s*[\w.-]+)=\S+", r"\1=***", text, flags=re.MULTILINE)
 
 
+def _session_cookie_issued(headers: dict[str, str]) -> bool:
+    return any(
+        key.lower() == "set-cookie" and "session=" in str(value)
+        for key, value in headers.items()
+    )
+
+
+def _post_json(url: str, body: str) -> tuple[int, str, dict[str, str]]:
+    """POST a JSON body to an absolute URL; HTTP errors are answers, not exceptions."""
+    req = urllib.request.Request(
+        url, data=body.encode("utf-8"), method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            text = response.read().decode("utf-8", errors="replace")
+            return response.status, text, dict(response.headers.items())
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", errors="replace"), dict(exc.headers.items())
+    except (urllib.error.URLError, OSError) as exc:
+        raise E2EFailure(f"POST {url} could not reach the frontend: {exc}") from exc
+
+
 def _probe_login(app, email: str, password: str) -> tuple[int, bool, str]:
     """POST the validation credentials from the harness side before the browser does.
 
@@ -202,16 +278,57 @@ def _probe_login(app, email: str, password: str) -> tuple[int, bool, str]:
     """
     body = json.dumps({"email": email, "password": password})
     status, text, headers = app.post("/api/auth/login", body)
-    cookie = any(
-        key.lower() == "set-cookie" and "session=" in str(value)
-        for key, value in headers.items()
-    )
+    cookie = _session_cookie_issued(headers)
     summary = _scrub(" ".join(text.split())[:400], (password,))
     print(
         f"E2E_LOGIN_PROBE status={status} session_cookie={str(cookie).lower()} body={summary}",
         flush=True,
     )
     return status, cookie, summary
+
+
+def _probe_proxy_login(frontend_url: str, email: str, password: str) -> tuple[int, bool, str]:
+    """POST the same credentials through the frontend origin the browser will use.
+
+    The page posts a relative `/api/auth/login`, which the Vite dev server proxies to
+    `VITE_API_TARGET`. That is a second boundary the backend probe never crosses: a proxy
+    pointed at the wrong port, or a cookie stripped on the way back, would leave the browser
+    on the form with the backend probe green (D-049). Unreachable is reported as status 0.
+    """
+    url = f"{frontend_url}/api/auth/login"
+    body = json.dumps({"email": email, "password": password})
+    try:
+        status, text, headers = _post_json(url, body)
+        cookie = _session_cookie_issued(headers)
+    except E2EFailure as exc:
+        status, text, cookie = 0, str(exc), False
+    summary = _scrub(" ".join(text.split())[:400], (password,))
+    print(
+        f"E2E_PROXY_PROBE url={url} status={status} session_cookie={str(cookie).lower()} "
+        f"body={summary}",
+        flush=True,
+    )
+    return status, cookie, summary
+
+
+def _check_fields(session: str, fields: dict[str, tuple[str, str]]) -> tuple[bool, str]:
+    """Read every filled control back and compare it with what was typed.
+
+    `fill` on a non-input reports success (D-049: the root container took both fills and the
+    form was submitted empty, which the browser's `required` validation blocked silently).
+    Prints `E2E_FIELD_CHECK <label>=<bool> ...`; the detail names lengths, never values.
+    """
+    verdicts: dict[str, bool] = {}
+    details: list[str] = []
+    for ref, (label, expected) in fields.items():
+        value = _scalar(_browser(session, "get", "value", f"@{ref}"))
+        verdicts[label] = value == expected
+        details.append(f"{label}@{ref} holds {len(value)} chars, expected {len(expected)}")
+    print(
+        "E2E_FIELD_CHECK " + " ".join(f"{k}={str(v).lower()}" for k, v in verdicts.items()),
+        flush=True,
+    )
+    return all(verdicts.values()), "; ".join(details)
 
 
 FAILURE_CAPTURES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -320,6 +437,13 @@ def run_e2e(app, frontend_url: str | None = None) -> int | None:
                 probe_status == 200 and probe_cookie,
                 f"status={probe_status} session_cookie={probe_cookie} body={probe_body}")
 
+        # The page will post through the frontend origin, not to the backend port. That
+        # path has its own ways to fail (proxy target, cookie pass-through); ask it too.
+        proxy_status, proxy_cookie, proxy_body = _probe_proxy_login(frontend_url, email, password)
+        require("frontend proxies the login to the backend",
+                proxy_status == 200 and proxy_cookie,
+                f"status={proxy_status} session_cookie={proxy_cookie} body={proxy_body}")
+
         session = f"df-{os.getpid()}-{app.port}"
         artifacts = _artifact_dir(session)
         try:
@@ -353,11 +477,14 @@ def _browser_journey(session: str, artifacts: Path, frontend_url: str, email: st
                      response_timeout: int, require) -> None:
     _browser(session, "open", frontend_url, timeout=30)
     snap = _snapshot_until(session, lambda s: "Email" in s and "Password" in s, 15)
-    email_ref = _ref(snap, "Email")
-    password_ref = _ref(snap, "Password")
-    login_ref = _ref(snap, 'button "Log in"')
+    email_ref = _ref(snap, "textbox", "Email")
+    password_ref = _ref(snap, "textbox", "Password")
+    login_ref = _ref(snap, "button", "Log in")
     _browser(session, "fill", f"@{email_ref}", email)
     _browser(session, "fill", f"@{password_ref}", password)
+    filled, detail = _check_fields(
+        session, {email_ref: ("email", email), password_ref: ("password", password)})
+    require("form fields hold the credentials before submit", filled, detail)
     _browser(session, "click", f"@{login_ref}")
 
     snap = _snapshot_until(
@@ -366,8 +493,8 @@ def _browser_journey(session: str, artifacts: Path, frontend_url: str, email: st
     require("login reaches new-conversation surface", urlparse(url).path == "/", url)
     _browser(session, "screenshot", str(artifacts / "authenticated.png"))
 
-    input_ref = _ref(snap, "Ask anything about the video library")
-    send_ref = _ref(snap, "Send message")
+    input_ref = _ref(snap, "textbox", "Ask anything about the video library")
+    send_ref = _ref(snap, "button", "Send message")
     _browser(session, "fill", f"@{input_ref}", question)
     _browser(session, "click", f"@{send_ref}")
 
@@ -394,7 +521,7 @@ def _browser_journey(session: str, artifacts: Path, frontend_url: str, email: st
     _browser(session, "click", f"@{citation_ref}")
     modal = _snapshot_until(
         session, lambda s: "Video citation" in s and "Open on YouTube" in s, 15)
-    youtube_ref = _ref(modal, "Open on YouTube")
+    youtube_ref = _ref(modal, "link", "Open on YouTube")
     external = _scalar(_browser(session, "get", "attr", f"@{youtube_ref}", "href"))
     embed = _scalar(_browser(
         session, "eval",

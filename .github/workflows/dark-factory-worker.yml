@@ -330,6 +330,7 @@ jobs:
             ${{ runner.temp }}/dark-factory/runs/*/transcripts/stage-timings.jsonl
             ${{ runner.temp }}/dark-factory/runs/*/transcripts/*-gate.log
             ${{ runner.temp }}/dark-factory/runs/*/artifacts/*.json
+            ${{ runner.temp }}/dark-factory/runs/*/artifacts/e2e-evidence/**
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/evidence.log
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/merge-*.log
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/post-merge.log
