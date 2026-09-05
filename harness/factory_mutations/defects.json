@@ -1243,6 +1243,20 @@
       "find": "    except E2EFailure as exc:\n        _dump_failure(session, artifacts, str(exc), (password,))\n        raise\n",
       "replace": "    except E2EFailure as exc:\n        raise\n",
       "why": "A broken browser journey would leave no page, console, network or cookie evidence in the uploaded artifact, which is exactly what made D-047 a two-run diagnosis."
+    },
+    {
+      "id": "holdout-shown-only-green",
+      "file": "factory_kernel/runtime.py",
+      "find": "                \"proof_summary\": proof_summary,\n            }\n            stage = \"code_holdout\"\n",
+      "replace": "                \"proof_summary\": {k: v for k, v in proof_summary.items() if k != \"red_results\"},\n            }\n            stage = \"code_holdout\"\n",
+      "why": "The code holdout would again see GREEN results and no RED evidence, which is exactly the gap a careful judge refused on in run 33955178802 (D-048)."
+    },
+    {
+      "id": "pack-verified-after-holdout",
+      "file": "factory_kernel/runtime.py",
+      "find": "            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)\n\n            stage = \"attached_evidence\"\n            changed_files = sorted(x for x in changed if x)\n            proof_summary = self._holdout_proof_summary(\n                proof, pack, changed_files=changed_files,\n                worktree=worktree.path, base=base, head=head,\n            )\n            holdout_context = {\n                \"contract\": contract,\n                \"changed_files\": changed_files,\n                \"diff_sha256\": hashlib.sha256(patch.encode()).hexdigest(),\n                \"diff\": patch,\n                \"proof_summary\": proof_summary,\n            }\n            stage = \"code_holdout\"\n            verdict = self._run_blinded_holdout(paths, holdout_context)\n            if verdict.get(\"verdict\") != \"pass\":\n                raise NeedsHuman(\"blinded holdout rejected PR\")\n\n            stage = \"architecture_holdout\"\n",
+      "replace": "            pack_dir = paths.artifacts / \"spine\"\n            self._exec(\n                [\n                    \"python\", \"scripts/factory_provenance.py\", \"fetch\",\n                    \"--head\", head, \"--base\", base, \"--issue\", str(linked_issue),\n                    \"--output-dir\", str(pack_dir),\n                ],\n                cwd=self.repo_root,\n                env={\"FACTORY_REPO\": self.config.repository},\n                credential_scope=\"github\",\n                timeout=240,\n                transcript=paths.transcripts / \"provenance-fetch.log\",\n            )\n            pack = self._read_json(pack_dir / \"builder-provenance.json\")\n\n            stage = \"attached_evidence\"\n            changed_files = sorted(x for x in changed if x)\n            proof_summary = self._holdout_proof_summary(\n                proof, pack, changed_files=changed_files,\n                worktree=worktree.path, base=base, head=head,\n            )\n            holdout_context = {\n                \"contract\": contract,\n                \"changed_files\": changed_files,\n                \"diff_sha256\": hashlib.sha256(patch.encode()).hexdigest(),\n                \"diff\": patch,\n                \"proof_summary\": proof_summary,\n            }\n            stage = \"code_holdout\"\n            verdict = self._run_blinded_holdout(paths, holdout_context)\n            if verdict.get(\"verdict\") != \"pass\":\n                raise NeedsHuman(\"blinded holdout rejected PR\")\n\n            stage = \"provenance\"\n            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)\n            stage = \"architecture_holdout\"\n",
+      "why": "The RED evidence handed to the holdout would be cross-checked against a pack nobody had verified yet; verify_pack must precede the judge that relies on it (D-048)."
     }
   ]
 }
