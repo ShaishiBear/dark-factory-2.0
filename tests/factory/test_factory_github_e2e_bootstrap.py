@@ -276,7 +276,7 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "dark-factory-worker.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("postgres:16", workflow)
+        self.assertIn("image: pgvector/pgvector:pg16", workflow)  # D-053
         self.assertIn("dark_factory_validation", workflow)
         self.assertIn("DARK_FACTORY_E2E_BOOTSTRAP=1", workflow)
         self.assertIn("secrets.OPENROUTER_API_KEY", workflow)

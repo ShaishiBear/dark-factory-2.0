@@ -1754,8 +1754,10 @@ Pinned by `app/backend/tests/test_migration_pgvector_extension.py` (0006 follows
 the sole head; `upgrade()` issues exactly that statement through a fake `op`; `downgrade()`
 issues nothing; no database) and by `ValidationDatabaseTests` in
 `tests/factory/test_factory_workflow_hygiene.py` (both workflows' postgres image starts with
-`pgvector/pgvector:` and pins `pg16`). Mutation `validation-db-without-pgvector` (the
-worker's image reverted to `postgres:16`) is caught.
+`pgvector/pgvector:` and pins `pg16`); `test_worker_provisions_disposable_validation_state`
+in `tests/factory/test_factory_github_e2e_bootstrap.py`, which pinned the literal
+`postgres:16`, now pins `image: pgvector/pgvector:pg16`. Mutation
+`validation-db-without-pgvector` (the worker's image reverted to `postgres:16`) is caught.
 
 **Consequences.** The next validation or main-regression run reaches the citation step with
 retrieval working; whatever fails there next is a new cause. The validation database is
