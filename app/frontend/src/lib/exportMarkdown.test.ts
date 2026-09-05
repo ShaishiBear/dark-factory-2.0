@@ -270,6 +270,59 @@ describe('formatCitation', () => {
     expect(result).toContain('0:10–0:20');
     expect(result).toContain('> "Test snippet text"');
   });
+
+  // Issue #49 acceptance: every fallback path of formatCitation must keep the
+  // '- ' list marker and the quoted transcript snippet blockquote, so exported
+  // fallback entries stay their own list item and never drop the snippet.
+  it('AC-1 fallback keeps quoted snippet on its own line', () => {
+    const citation = {
+      ...baseCitation,
+      video_url: 'not-a-url',
+      snippet: 'Relevant text',
+    };
+    const result = formatCitation(citation);
+    expect(result).toContain('> "Relevant text"');
+    expect(result).toContain('\n  > "Relevant text"');
+  });
+
+  it('AC-2 fallback keeps list marker and unavailable range', () => {
+    const citation = {
+      ...baseCitation,
+      video_url: 'not-a-url',
+      snippet: 'Relevant text',
+    };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+  });
+
+  it('AC-3 dynamous fallback keeps list marker and snippet', () => {
+    const citation = {
+      ...baseCitation,
+      source_type: 'dynamous' as const,
+      video_url: '',
+      lesson_url: '',
+      snippet: 'Relevant text',
+    };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Relevant text"');
+  });
+
+  it('AC-4 no-v-param fallback keeps marker and snippet', () => {
+    const citation = {
+      ...baseCitation,
+      video_url: 'https://www.youtube.com/',
+      snippet: 'Relevant text',
+    };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    expect(result).toContain('> "Relevant text"');
+  });
 });
 
 describe('formatSources', () => {
