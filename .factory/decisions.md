@@ -1093,3 +1093,38 @@ timing row gains `outcome`, `error_class` and `timed_out`.
 This is observability only. Nothing reads the record to decide anything; the failure
 propagates exactly as before, with the same class and message, and the retry
 classification is untouched.
+
+---
+
+## D-042 · A consumer reads the binding it verifies; the pack records the base the branch was cut from
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Evidence:** worker run 33938048704 (the first
+production re-head, PR #85), run 33934857300 (the build that published the pack)
+
+Validation refused #85 with a correctly classified `stale_base`: main had moved from 0c17566 to
+14701b8 while the build ran. The next dispatch chose the model-free re-head, which died at
+`factory_provenance.py fetch --base 0c17566` with "built from a different base". The note on
+aa38448 declared `base_sha = 14701b8`: `publish` had read GitHub's `baseRefOid`, which is the
+current tip of main, not the commit the branch was cut from, and 14701b8 is not even an
+ancestor of aa38448. The re-head's `merge-base` guess (0c17566) was right; the pack was the one
+lying. Two programs computed the same binding two ways and neither read what the other wrote.
+
+Three changes, none weakening a check:
+
+- **The pack records the cut point.** `build_issue` resolves `base_sha` once at its start and
+  hands it to `_run_env` as `FACTORY_BASE_SHA`; `_attach_and_publish` passes it as
+  `publish --base` and refuses to publish without it. `publish` no longer reads `baseRefOid`.
+  The re-head republishes with the rebased base; `resume` uses the merge-base of the uploaded
+  head, which the head's own history holds.
+- **A base that is not an ancestor of its head is refused everywhere.** `verify_pack` takes an
+  `is_ancestor` callback; `publish` and `fetch` pass a real `merge-base --is-ancestor`, the
+  kernel passes its own. The first production pack would have been refused at publish.
+- **Consumers read, then verify.** `factory_provenance.py peek --head H` prints the identity a
+  note declares without trusting its contents. `_pack_base` reads it, checks head and issue,
+  checks ancestry, and only then does `fetch` hold the pack to that base. `rehead_pr` no longer
+  guesses. `validate_pr` compares the declared base with GitHub's current base before fetching
+  and refuses `stale_base` at the provenance stage, the earliest point the class can be known;
+  `refusal.py` pins the new producer string.
+
+#85's note is false and cannot be repaired by re-heading; the overseer closes it and rebuilds
+#49 on this kernel. The nineteenth canary defect.

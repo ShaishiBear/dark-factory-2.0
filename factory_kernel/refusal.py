@@ -58,6 +58,9 @@ AUTHORITY: Mapping[str, str] = {
 # each string against its producer so a reworded message cannot silently drop the class.
 STALE_BASE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("factory_kernel/provenance.py", "builder provenance was built from a different base"),
+    # validate_pr compares the pack's declared base with GitHub's current base before it fetches
+    # the pack, so the earliest producer of the class is the kernel itself (D-042).
+    ("factory_kernel/runtime.py", "main moved under the PR"),
     ("harness/merge_verify.py", "main moved after evidence"),
     ("scripts/factory_evidence.py", "PR trust root is not current with origin/main"),
 )

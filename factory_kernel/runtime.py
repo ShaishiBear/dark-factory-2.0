@@ -306,7 +306,12 @@ class KernelRuntime:
             self._write_json(
                 paths.artifacts / ISSUE_FRONTIER_ARTIFACT, self._issue_frontier(issue)
             )
-            env = self._run_env(paths, base_ref=f"origin/{self.config.default_branch}")
+            # The branch was cut from base_sha, resolved once at the start of this build. It is
+            # what the provenance pack records; it is never re-read from origin/main, which can
+            # advance while the build runs (D-042).
+            env = self._run_env(
+                paths, base_ref=f"origin/{self.config.default_branch}", base_sha=base_sha
+            )
             issue_context = self._issue_context(issue)
 
             role = "investigate" if self._is_bug(labels) else "plan"
@@ -580,11 +585,18 @@ class KernelRuntime:
             credential_scope="github",
             timeout=180,
         )
+        base_sha = str(env.get("FACTORY_BASE_SHA") or "")
+        if not re.fullmatch(r"[0-9a-f]{40,64}", base_sha):
+            raise RuntimeError(
+                "provenance publish needs the exact base the branch was cut from "
+                "(FACTORY_BASE_SHA); it never reads the base branch tip"
+            )
         self._exec(
             [
                 "python", "scripts/factory_provenance.py", "publish",
                 "--pr", str(pr_number),
                 "--artifacts", str(paths.artifacts),
+                "--base", base_sha,
             ],
             cwd=cwd,
             env=env,
@@ -802,6 +814,21 @@ class KernelRuntime:
                 raise NeedsHuman("blinded holdout rejected PR")
 
             stage = "provenance"
+            # GitHub's baseRefOid is the current tip of main. The pack declares the base the
+            # branch was actually cut from; when the two differ, main moved under the PR, and
+            # that is a stale_base refusal here, at the earliest point it can be known, rather
+            # than one gate later in the evidence spine (D-042).
+            if isinstance(linked_issue, int):
+                pack_base = self._pack_base(paths, head=head, issue=linked_issue)
+                if pack_base != base:
+                    raise ToolRefused(
+                        ["scripts/factory_provenance.py", "fetch"],
+                        rc=1,
+                        output=(
+                            f"builder provenance was built from a different base: pack "
+                            f"{pack_base}, current {base}; main moved under the PR"
+                        ),
+                    )
             pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)
             stage = "architecture_holdout"
             architecture_holdout = self._run_architecture_holdout(
@@ -930,11 +957,14 @@ class KernelRuntime:
         default = self.config.default_branch
 
         self._git("fetch", "origin", branch, default)
-        # main is linear (required_linear_history) and the builder branched from its exact tip,
-        # so the merge-base is the base the provenance pack was built from.
-        old_base = self._git("merge-base", f"origin/{default}", head)
         run_id = f"rehead-{pr_number}-{uuid.uuid4().hex[:12]}"
         paths = RunPaths.create(self.config.runtime.work_root, run_id)
+        if not isinstance(linked_issue, int):
+            raise NeedsHuman(f"PR #{pr_number} does not link an issue")
+        # The base the pack was built from is read from the pack, not recomputed: the pack
+        # declares it, the kernel verifies it is an ancestor of the head, and fetch then holds
+        # the pack to exactly that binding (D-042).
+        old_base = self._pack_base(paths, head=head, issue=linked_issue)
         # Blinded like a build worktree: the conformance worker runs here and must not see the
         # holdout. Validation, which does need it, starts its own unblinded worktree later.
         worktree = create_detached(
@@ -961,7 +991,9 @@ class KernelRuntime:
             new_head = self._git("rev-parse", "HEAD", cwd=worktree.path)
             self._verify_red_unchanged(pack, worktree.path)
 
-            env = self._run_env(paths, base_ref=f"origin/{default}")
+            # The rebased branch is now cut from new_base; that, and only that, is what the
+            # republished pack records (D-042).
+            env = self._run_env(paths, base_ref=f"origin/{default}", base_sha=new_base)
             self._rehead_green(paths, worktree.path, env, output="green-proof.json", log=self.REHEAD_GREEN_LOG)
             self._agent(
                 "conformance", worktree.path, paths,
@@ -1117,7 +1149,15 @@ class KernelRuntime:
             if local != head:
                 raise NeedsHuman(f"resume worktree HEAD {local} is not the PR head {head}")
 
-            env = self._run_env(paths, base_ref=f"origin/{self.config.default_branch}")
+            # A resumed build never re-reads the base branch tip either: its base is the one
+            # the uploaded final proof was cut from, the merge-base of the head and the base
+            # branch as they were when the build ran, which the PR head's history still holds.
+            cut_base = self._git("merge-base", f"origin/{self.config.default_branch}", head)
+            if not self._is_ancestor(cut_base, head):
+                raise NeedsHuman(f"resume cannot establish the base {head} was cut from")
+            env = self._run_env(
+                paths, base_ref=f"origin/{self.config.default_branch}", base_sha=cut_base
+            )
             self.github.cwd = str(worktree.path)
             self._attach_and_publish(paths, worktree.path, env, pr_number)
             self._lease_heartbeat(
@@ -1298,10 +1338,55 @@ class KernelRuntime:
         ),
     }
 
+    def _pack_base(self, paths: RunPaths, *, head: str, issue: int) -> str:
+        """The base the pack itself declares for `head`, verified as an ancestor of it.
+
+        Consumers read the binding they are about to verify; none recomputes the base from the
+        current branch tip. The first production re-head guessed it with merge-base and could
+        not match a pack that had recorded the wrong base; a pack whose base is not an ancestor
+        of its head is refused here as well as at publish (D-042).
+        """
+        peek_log = paths.transcripts / "provenance-peek.log"
+        output = self._exec(
+            [
+                "python", "scripts/factory_provenance.py", "peek", "--head", head,
+            ],
+            cwd=self.repo_root,
+            env={"FACTORY_REPO": self.config.repository},
+            credential_scope="github",
+            timeout=120,
+            transcript=peek_log,
+        )
+        line = next((ln for ln in output.splitlines() if ln.startswith("{")), "")
+        try:
+            identity = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise NeedsHuman("builder provenance note identity is unreadable") from exc
+        base = str(identity.get("base_sha") or "")
+        if identity.get("head_sha") != head or identity.get("issue") != issue:
+            raise NeedsHuman("builder provenance note is bound to a different head or issue")
+        if not re.fullmatch(r"[0-9a-f]{40,64}", base):
+            raise NeedsHuman("builder provenance note declares no exact base")
+        if not self._is_ancestor(base, head):
+            raise NeedsHuman(
+                f"builder provenance base {base} is not an ancestor of its head {head}"
+            )
+        return base
+
+    def _is_ancestor(self, base: str, head: str) -> bool:
+        try:
+            self._git("merge-base", "--is-ancestor", base, head)
+        except RuntimeError:
+            return False
+        return True
+
     def _builder_pack(
         self, paths: RunPaths, *, head: str, base: str, issue: int | None
     ) -> Mapping[str, Any]:
-        """Fetch and re-verify the exact-head builder provenance the authorities are judged on."""
+        """Fetch and re-verify the exact-head builder provenance the authorities are judged on.
+
+        `base` is what the caller expects; a pack recording a different base is refused with
+        the producer string `refusal.py` classifies as `stale_base`."""
         if not isinstance(issue, int) or isinstance(issue, bool) or issue <= 0:
             raise NeedsHuman("cannot certify claims without a linked issue number")
         pack_dir = paths.artifacts / "spine"
@@ -1323,6 +1408,7 @@ class KernelRuntime:
                 expected_head_sha=head,
                 expected_base_sha=base,
                 expected_issue=issue,
+                is_ancestor=self._is_ancestor,
             )
         except ValueError as exc:
             raise NeedsHuman(f"builder provenance is unusable for certification: {exc}") from exc
@@ -1735,13 +1821,20 @@ class KernelRuntime:
             )
         return "\n\n".join(parts)
 
-    def _run_env(self, paths: RunPaths, *, base_ref: str) -> dict[str, str]:
-        return {
+    def _run_env(
+        self, paths: RunPaths, *, base_ref: str, base_sha: str | None = None
+    ) -> dict[str, str]:
+        env = {
             "ARTIFACTS_DIR": str(paths.artifacts),
             "FACTORY_BASE_REF": base_ref,
             "FACTORY_REPO": self.config.repository,
             "FACTORY_WORKDIR": str(self.config.runtime.work_root),
         }
+        if base_sha:
+            # The exact commit the branch was cut from; the provenance pack records this and
+            # nothing else as its base.
+            env["FACTORY_BASE_SHA"] = base_sha
+        return env
 
     def _fetch_main(self) -> None:
         self._git("fetch", "origin", self.config.default_branch)

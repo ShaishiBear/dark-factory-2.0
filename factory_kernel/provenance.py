@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .canonical import canonical_bytes, sha256_value
 
@@ -110,13 +110,15 @@ def build_pack(
     }
 
 
-def verify_pack(
-    value: object,
-    *,
-    expected_head_sha: str | None = None,
-    expected_base_sha: str | None = None,
-    expected_issue: int | None = None,
-) -> dict:
+def pack_identity(value: object) -> dict:
+    """The binding a pack declares, before its contents are trusted: head, base and issue.
+
+    A consumer that needs the base a build was cut from reads it from here and then verifies
+    it (`is_ancestor` at the head, `expected_base_sha` in `verify_pack`); it never recomputes
+    the base from the current branch tip. The first production re-head guessed the base with
+    `merge-base origin/main <head>` and could not match a pack whose recorded base was wrong;
+    the fix is that packs record the true base and consumers read what they verify (D-042).
+    """
     if not isinstance(value, dict) or value.get("version") != "1.0":
         raise ValueError("builder provenance pack must be version 1.0")
     if value.get("note_ref") != NOTE_REF:
@@ -124,14 +126,34 @@ def verify_pack(
     issue = value.get("issue")
     if not isinstance(issue, int) or isinstance(issue, bool) or issue <= 0:
         raise ValueError("builder provenance issue is invalid")
-    base = _oid(str(value.get("base_sha") or ""), "base_sha")
-    head = _oid(str(value.get("head_sha") or ""), "head_sha")
+    return {
+        "head_sha": _oid(str(value.get("head_sha") or ""), "head_sha"),
+        "base_sha": _oid(str(value.get("base_sha") or ""), "base_sha"),
+        "issue": issue,
+    }
+
+
+def verify_pack(
+    value: object,
+    *,
+    expected_head_sha: str | None = None,
+    expected_base_sha: str | None = None,
+    expected_issue: int | None = None,
+    is_ancestor: Callable[[str, str], bool] | None = None,
+) -> dict:
+    identity = pack_identity(value)
+    issue, base, head = identity["issue"], identity["base_sha"], identity["head_sha"]
     if expected_head_sha is not None and head != expected_head_sha:
         raise ValueError("builder provenance is attached to a different PR head")
     if expected_base_sha is not None and base != expected_base_sha:
         raise ValueError("builder provenance was built from a different base")
     if expected_issue is not None and issue != expected_issue:
         raise ValueError("builder provenance belongs to a different issue")
+    # A base that is not an ancestor of the head is a binding nothing can satisfy: the PR was
+    # never cut from it. The first production pack recorded origin/main at publish time, which
+    # had moved past the branch point; this refuses that pack at publish and at every read.
+    if is_ancestor is not None and not is_ancestor(base, head):
+        raise ValueError("builder provenance base is not an ancestor of its head")
 
     artifacts = value.get("artifacts")
     if not isinstance(artifacts, dict) or set(artifacts) != set(BUILDER_CLAIMS):

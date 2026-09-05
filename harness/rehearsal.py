@@ -322,7 +322,8 @@ def _pr_body() -> str:
 
 def exec_recorder(trace: Trace, *, fail: str | None = None,
                   fail_detail: str = "rehearsed failure",
-                  red_files: Mapping[str, str] | None = None) -> Callable[..., str]:
+                  red_files: Mapping[str, str] | None = None,
+                  pack_base: str = BASE) -> Callable[..., str]:
     """Stand in for the deterministic tools, materializing what each is contracted to write.
 
     A rehearsed failure raises the same typed refusal the real `_exec` raises, carrying
@@ -359,12 +360,22 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
                 rules.verify_architecture_holdout(value, list(CHANGED_FILES), policy)
             except SystemExit as exc:
                 raise ToolRefused(argv, rc=1, output="architecture holdout refused") from exc
+        if tool == "factory_provenance.py" and "peek" in argv:
+            # The note declares its own base; the kernel reads it here and verifies it.
+            return json.dumps({"head_sha": HEAD, "base_sha": pack_base, "issue": ISSUE_NUMBER}) + "\n"
         if tool == "factory_provenance.py" and "--output-dir" in argv:
+            # fetch holds the pack to the base the caller expects, exactly as the real program.
+            expected = argv[argv.index("--base") + 1] if "--base" in argv else pack_base
+            if expected != pack_base:
+                raise ToolRefused(
+                    argv, rc=1,
+                    output="PROVENANCE_FAIL: builder provenance was built from a different base",
+                )
             idx = argv.index("--output-dir")
             pack_dir = Path(argv[idx + 1])
             pack_dir.mkdir(parents=True, exist_ok=True)
             (pack_dir / "builder-provenance.json").write_text(
-                json.dumps(builder_pack(red_files=red_files)), encoding="utf-8")
+                json.dumps(builder_pack(base=pack_base, red_files=red_files)), encoding="utf-8")
         return ""
 
     return _exec
@@ -390,6 +401,8 @@ class Scenario:
     red_files: Mapping[str, str] | None = None   # RED-hashed files the pack declares
     worktree_files: Mapping[str, str] | None = None  # files present in the rehearsed worktree
     rebase_conflict: bool = False
+    pack_base: str = BASE                # the base the provenance note declares for HEAD
+    pack_base_is_ancestor: bool = True   # whether that base is an ancestor of HEAD
     author: str = "github-actions[bot]"  # who opened the PR (REST login), for resume
     author_type: str = "Bot"             # REST user.type; the factory is a Bot
     issue_labels: tuple[str, ...] = ("factory:needs-human",)  # linked issue's labels, for resume
@@ -446,7 +459,7 @@ def rehearse(scenario: Scenario) -> Trace:
         runtime.provider = FakeProvider(trace, reject=scenario.reject)
         runtime._exec = exec_recorder(  # type: ignore[method-assign]
             trace, fail=scenario.fail, fail_detail=scenario.fail_detail,
-            red_files=scenario.red_files)
+            red_files=scenario.red_files, pack_base=scenario.pack_base)
         runtime._prepare_worktree = lambda cwd, paths: trace.record("control", "prepare_worktree")  # type: ignore[method-assign]
         runtime.check_stop = lambda: trace.record("control", "check_stop")  # type: ignore[method-assign]
 
@@ -467,7 +480,16 @@ def rehearse(scenario: Scenario) -> Trace:
                     raise ToolRefused(["git", *args], rc=1, output="CONFLICT (content): rehearsed")
                 git_state["head"] = NEW_HEAD
                 return ""
+            if args[:2] == ("merge-base", "--is-ancestor"):
+                # The kernel verifies the pack's declared base against the head here.
+                trace.record("control", "git:is-ancestor")
+                if args[2] == scenario.pack_base and not scenario.pack_base_is_ancestor:
+                    raise ToolRefused(["git", *args], rc=1, output="not an ancestor")
+                return ""
             if args[:1] == ("merge-base",):
+                # What a guess would return: deliberately NOT the pack's base, so any code path
+                # that recomputes the base instead of reading it is caught by the rehearsal.
+                trace.record("control", "git:merge-base-guess")
                 return BASE
             if args[:2] == ("rev-parse", "HEAD"):
                 return git_state["head"]
