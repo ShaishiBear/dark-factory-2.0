@@ -10,6 +10,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = Path.cwd().resolve()
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))
+from factory_kernel.attached import round_trip_ok  # noqa: E402
 from factory_shapes import normalise_lists  # noqa: E402
 
 AC = re.compile(r"^AC-[1-9][0-9]*$")
@@ -168,6 +170,9 @@ def run_attach(args: argparse.Namespace) -> None:
     block = "\n\n<!-- factory-contract:start -->\n```factory-contract\n" + canonical(c).decode().rstrip() + "\n```\ncontract-sha256: " + h + "\n<!-- factory-contract:end -->\n"
     tmp = Path(args.contract).with_suffix(".pr-body.md"); tmp.write_text(body + block, encoding="utf-8")
     subprocess.check_call(["gh", "pr", "edit", str(args.pr), "--body-file", str(tmp)])
+    back = subprocess.check_output(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"], text=True)
+    if not round_trip_ok(back, "contract", c):
+        die("ATTACH_FAIL: contract block did not survive the PR body round trip")
     artifacts = os.environ.get("ARTIFACTS_DIR", "").strip() or str(Path(args.contract).resolve().parent)
     subprocess.check_call([
         sys.executable, str(HERE / "factory_provenance.py"), "publish",

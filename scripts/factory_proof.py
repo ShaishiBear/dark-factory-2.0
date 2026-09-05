@@ -8,6 +8,8 @@ from pathlib import Path
 # PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
 HERE = Path(__file__).resolve().parent
 ROOT = Path.cwd().resolve()
+sys.path.insert(0, str(HERE.parent))
+from factory_kernel.attached import extract_block, round_trip_ok, sanitise_output  # noqa: E402
 PROOF_BLOCK = re.compile(r"\n?<!-- factory-proof:start -->.*?<!-- factory-proof:end -->\n?", re.S)
 DESIGN_BLOCK = re.compile(r"\n?<!-- factory-design:start -->.*?<!-- factory-design:end -->\n?", re.S)
 
@@ -21,7 +23,9 @@ def checkpoint_env():
     return {k:v for k,v in os.environ.items() if k not in CHECKPOINT_SCRUBBED_ENV}
 def run(argv, cwd):
     p=subprocess.run(argv,cwd=ROOT/cwd,env=checkpoint_env(),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)
-    return p.returncode,(p.stdout or '')+(p.stderr or '')
+    # Terminal control sequences are not evidence. Sanitising here means the symptom match,
+    # the stored tail and the output hash all see the same text (D-038).
+    return p.returncode,sanitise_output((p.stdout or '')+(p.stderr or ''))
 def sha(p): return hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
 def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False)+'\n'
 def digest(v): return hashlib.sha256(canonical(v).encode()).hexdigest()
@@ -237,8 +241,14 @@ def attach(a):
     proof_block=(f"\n<!-- factory-proof:start -->\n```factory-proof\n{canonical(p).strip()}\n```\n"
                  f"proof-sha256: {digest(p)}\n<!-- factory-proof:end -->\n")
     body=DESIGN_BLOCK.sub('\n',PROOF_BLOCK.sub('\n',info.get('body') or '')).rstrip()+design_block+proof_block
-    q=subprocess.run(['gh','pr','edit',str(a.pr),'--body',body],cwd=ROOT,text=True,capture_output=True)
+    body_file=Path(root)/'pr-body.proof.md'; body_file.write_text(body,encoding='utf-8')
+    q=subprocess.run(['gh','pr','edit',str(a.pr),'--body-file',str(body_file)],cwd=ROOT,text=True,capture_output=True)
     if q.returncode: die('could not attach proof/design: '+q.stderr[-1000:])
+    # The attach is complete only when the body GitHub hands back parses to the same bytes the
+    # validator will need; a block that did not survive the channel fails the build here.
+    back=json.loads(subprocess.check_output(['gh','pr','view',str(a.pr),'--json','body'],cwd=ROOT,text=True)).get('body') or ''
+    for kind,value in (('design',design),('proof',p)):
+        if not round_trip_ok(back,kind,value): die(f'ATTACH_FAIL: {kind} block did not survive the PR body round trip')
     print(f"PROOF_ATTACHED pr={a.pr} head={head} sha256={digest(p)} design_sha256={digest(design)}")
 def main():
     p=argparse.ArgumentParser(); sub=p.add_subparsers(dest='cmd',required=True)

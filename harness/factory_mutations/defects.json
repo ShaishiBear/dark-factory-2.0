@@ -1096,6 +1096,27 @@
       "find": "[\"git\", *KERNEL_COMMIT_ARGS, \"notes\", f\"--ref={NOTE_REF}\", \"add\", \"-f\", \"-F\", str(note_file), head],",
       "replace": "[\"git\", \"notes\", f\"--ref={NOTE_REF}\", \"add\", \"-f\", \"-F\", str(note_file), head],",
       "why": "The provenance note would be written without the kernel identity and fail on a runner that configures none, so no exact-head provenance could ever be published."
+    },
+    {
+      "id": "proof-runner-output-unsanitised",
+      "file": "scripts/factory_proof.py",
+      "find": "    return p.returncode,sanitise_output((p.stdout or '')+(p.stderr or ''))",
+      "replace": "    return p.returncode,(p.stdout or '')+(p.stderr or '')",
+      "why": "Terminal control sequences would re-enter the stored RED tail; the attached proof can then stop being JSON after the PR-body round trip."
+    },
+    {
+      "id": "proof-attach-round-trip-unchecked",
+      "file": "scripts/factory_proof.py",
+      "find": "        if not round_trip_ok(back,kind,value): die(f'ATTACH_FAIL: {kind} block did not survive the PR body round trip')",
+      "replace": "        pass",
+      "why": "A block that did not survive the PR body would be reported attached; the validator would refuse it hours later instead of the build failing closed."
+    },
+    {
+      "id": "attached-sanitiser-strips-nothing",
+      "file": "factory_kernel/attached.py",
+      "find": "    without_escapes = _ANSI.sub(\"\", text)\n    return _CONTROL.sub(REPLACEMENT, without_escapes)",
+      "replace": "    return text",
+      "why": "The symptom check and the stored evidence would silently disagree with what a validator can parse."
     }
   ]
 }

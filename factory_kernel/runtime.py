@@ -50,6 +50,7 @@ from .repro import (
 from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
 from .trusted_programs import resolve_trusted_program
+from .attached import extract_block
 from .worker_policy import BUILDER_BLIND_PATHS, KERNEL_COMMIT_NAME, KERNEL_COMMIT_ARGS, max_turns
 from .worktree import Worktree, create_detached, remove
 
@@ -1999,20 +2000,12 @@ class KernelRuntime:
 
     @staticmethod
     def _extract_attached(body: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+        # One parser for attach and extract (factory_kernel.attached), so the block a script
+        # verified on the way in is the block the validator reads on the way out (D-038).
         def one(kind: str) -> Mapping[str, Any]:
-            pattern = re.compile(
-                rf"<!-- factory-{kind}:start -->\s*```factory-{kind}\s*(\{{.*?\}})\s*```",
-                re.S,
-            )
-            match = pattern.search(body)
-            if not match:
-                raise NeedsHuman(f"PR is missing attached factory-{kind} evidence")
             try:
-                value = json.loads(match.group(1))
-            except json.JSONDecodeError as exc:
-                raise NeedsHuman(f"attached factory-{kind} is invalid JSON") from exc
-            if not isinstance(value, Mapping):
-                raise NeedsHuman(f"attached factory-{kind} must be an object")
-            return value
+                return extract_block(body, kind)
+            except ValueError as exc:
+                raise NeedsHuman(str(exc)) from exc
 
         return one("contract"), one("proof")
