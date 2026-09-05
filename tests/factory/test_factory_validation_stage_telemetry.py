@@ -59,6 +59,7 @@ VALIDATION_ROLES = (
 STAGE_LINE = re.compile(
     r"^FACTORY_STAGE kind=(?P<kind>agent|exec) name=(?P<name>\S+) seconds=(?P<seconds>\d+(\.\d+)?)"
     r"(?: turns=(?P<turns>\d+))?(?: cost_usd=(?P<cost>\S+))? outcome=(?P<outcome>ok|failed|refused)"
+    r"(?: events=(?P<events>\d+))?(?P<timed_out> timed_out=true)?(?P<hang> hang=true)?"
     r"(?P<over> over_budget=true)?$"
 )
 
@@ -375,7 +376,7 @@ class OverBudgetTests(unittest.TestCase):
 
     def test_run_33960088633s_holdout_would_have_been_flagged(self):
         """934 s against a 10-turn cap: the number the caps must be tuned from."""
-        self.assertEqual(stage_budget_seconds("holdout"), 350)
+        self.assertEqual(stage_budget_seconds("holdout"), 450)
         self.assertTrue(over_budget("holdout", 934))
         self.assertFalse(over_budget("holdout", 349))
         self.assertFalse(over_budget("holdout", 350))
@@ -392,7 +393,7 @@ class OverBudgetTests(unittest.TestCase):
                 )
             record = _record(paths, "holdout")
             self.assertTrue(record["over_budget"])
-            self.assertEqual(record["budget_seconds"], 350)
+            self.assertEqual(record["budget_seconds"], 450)
             row = _rows(paths)[0]
             self.assertIs(row["over_budget"], True)
             self.assertEqual(row["outcome"], "ok")

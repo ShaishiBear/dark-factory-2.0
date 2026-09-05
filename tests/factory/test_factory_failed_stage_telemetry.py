@@ -8,7 +8,6 @@ secret shape the guard knows before it reaches an uploaded artifact.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,7 +21,7 @@ if str(ROOT) not in sys.path:
 from factory_kernel import providers as providers_module  # noqa: E402
 from factory_kernel.agents import AgentRequest, AgentResult  # noqa: E402
 from factory_kernel.config import ProviderConfig  # noqa: E402
-from factory_kernel.providers import ClaudeCliProvider, ProviderStageError  # noqa: E402
+from factory_kernel.providers import ClaudeCliProvider, CliRun, ProviderStageError  # noqa: E402
 from factory_kernel.runtime import RunPaths, STAGE_TIMINGS  # noqa: E402
 
 # Assembled at run time so no added line in this file matches the guard's secret patterns;
@@ -54,8 +53,10 @@ class _Runs:
         item = self.stdouts.pop(0)
         if isinstance(item, BaseException):
             raise item
+        if isinstance(item, CliRun):
+            return item
         rc, out = item if isinstance(item, tuple) else (0, item)
-        return mock.Mock(returncode=rc, stdout=out, stderr="")
+        return CliRun(returncode=rc, stdout=out, stderr="")
 
 
 def _provider(retries: int = 2) -> ClaudeCliProvider:
@@ -113,7 +114,7 @@ class ProviderErrorTelemetryTests(unittest.TestCase):
     def test_exhausted_transient_retries_carry_summed_telemetry(self):
         prov = _provider(retries=2)
         runs = _Runs((1, transient()), (1, transient()), (1, transient()))
-        with mock.patch.object(providers_module.subprocess, "run", runs), \
+        with mock.patch.object(providers_module, "_stream_cli", runs), \
                 mock.patch.object(providers_module, "_sleep", lambda s: None):
             with self.assertRaises(ProviderStageError) as ctx:
                 prov.run(AgentRequest(role="test_author", prompt="p", cwd="/tmp", max_turns=30))
@@ -129,7 +130,7 @@ class ProviderErrorTelemetryTests(unittest.TestCase):
     def test_terminal_nonzero_exit_carries_its_envelope_counts(self):
         prov = _provider(retries=2)
         terminal = envelope(is_error=True, subtype="error_max_turns", result="max turns", num_turns=30)
-        with mock.patch.object(providers_module.subprocess, "run", _Runs((1, terminal))):
+        with mock.patch.object(providers_module, "_stream_cli", _Runs((1, terminal))):
             with self.assertRaises(ProviderStageError) as ctx:
                 prov.run(AgentRequest(role="implement", prompt="p", cwd="/tmp", max_turns=30))
         self.assertEqual(ctx.exception.telemetry["num_turns"], 30)
@@ -138,8 +139,8 @@ class ProviderErrorTelemetryTests(unittest.TestCase):
 
     def test_timeout_is_marked(self):
         prov = _provider(retries=0)
-        boom = subprocess.TimeoutExpired(cmd=["claude"], timeout=60, output="partial")
-        with mock.patch.object(providers_module.subprocess, "run", _Runs(boom)):
+        killed = CliRun(returncode=None, stdout="", stderr="", timed_out=True, elapsed=60.0)
+        with mock.patch.object(providers_module, "_stream_cli", _Runs(killed)):
             with self.assertRaises(ProviderStageError) as ctx:
                 prov.run(AgentRequest(role="context", prompt="p", cwd="/tmp", max_turns=24))
         self.assertTrue(ctx.exception.timed_out)
@@ -147,7 +148,7 @@ class ProviderErrorTelemetryTests(unittest.TestCase):
 
     def test_generic_failure_message_is_unchanged(self):
         prov = _provider(retries=0)
-        with mock.patch.object(providers_module.subprocess, "run", _Runs((1, "not json"))):
+        with mock.patch.object(providers_module, "_stream_cli", _Runs((1, "not json"))):
             with self.assertRaises(RuntimeError) as ctx:
                 prov.run(AgentRequest(role="plan", prompt="p", cwd="/tmp", max_turns=30))
         self.assertIsInstance(ctx.exception, ProviderStageError)

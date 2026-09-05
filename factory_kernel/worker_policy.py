@@ -6,6 +6,8 @@ repo-owned kernel.
 """
 from __future__ import annotations
 
+import math
+
 READ_TOOLS = ("Read", "Glob", "Grep")
 WRITE_TOOLS = (*READ_TOOLS, "Write", "Edit")
 
@@ -71,7 +73,20 @@ REPO_MUTATION_ROLES = frozenset({"test_author", "implement", "repair"})
 # kernel records as a clean, measured, retryable failed stage. The invariant below keeps every
 # cap under the timeout using a ceiling on seconds per turn; a cap that would outlive the timeout
 # is a configuration error, not a generous budget (D-025).
-OBSERVED_SECONDS_PER_TURN_CEILING = 35
+#
+# The ceiling is stated from data, not tuned. Build run 33987381035 (issue #103) measured four
+# stages on z-ai/glm-5.3-flash: investigate 888.6 s / 22 turns = 40.4 s per turn, contract
+# 280.3 s / 12 = 23.4, context 697.0 s / 30 = 23.2, architecture 262.4 s / 12 = 21.9. The
+# earlier ceiling of 35 was already below the first of those, and a 30-turn worker at 40.4 s
+# per turn needs 1212 s, which put the single 1200 s wall exactly on the turn budget. 45 is the
+# highest observed rate with a margin (D-054). Raise it again only from a measured run.
+OBSERVED_SECONDS_PER_TURN_CEILING = 45
+
+# A role's wall clock is its turn budget with headroom for the work between turns that is not
+# a model call (tool calls over a large tree) and for the spread the four observations above
+# already show (21.9 to 40.4 s per turn). Beyond the wall the process is killed and the stage
+# is a recorded, timed-out failure.
+STAGE_WALL_HEADROOM = 1.5
 
 ROLE_MAX_TURNS: dict[str, int] = {
     "triage": 20,
@@ -186,13 +201,28 @@ def stage_budget_seconds(role: str) -> int | None:
     return max_turns(role) * OBSERVED_SECONDS_PER_TURN_CEILING
 
 
+def stage_timeout_seconds(role: str) -> int:
+    """The wall clock one CLI process for `role` may run: the turn budget with headroom.
+
+    `ceil(max_turns(role) * OBSERVED_SECONDS_PER_TURN_CEILING * STAGE_WALL_HEADROOM)`. The
+    provider kills the process at this wall and the stage is recorded as timed out with the
+    turns, cost and events it had shown by then. The single global `provider.timeout_seconds`
+    used to be every role's wall; it is now the maximum every role's wall must fit under
+    (`assert_caps_fit_timeout`), because a ten-turn judge and a thirty-turn builder do not
+    share one budget (D-054).
+    """
+    return math.ceil(max_turns(role) * OBSERVED_SECONDS_PER_TURN_CEILING * STAGE_WALL_HEADROOM)
+
+
 def assert_caps_fit_timeout(timeout_seconds: int) -> None:
-    """Refuse any turn cap the subprocess timeout would cut off first."""
+    """Refuse any role whose wall the configured maximum would cut off first."""
     for role, cap in ROLE_MAX_TURNS.items():
-        if cap * OBSERVED_SECONDS_PER_TURN_CEILING > timeout_seconds:
+        wall = stage_timeout_seconds(role)
+        if wall > timeout_seconds:
             raise ValueError(
-                f"turn cap for role {role!r} ({cap}) exceeds what timeout_seconds={timeout_seconds} "
-                f"allows at {OBSERVED_SECONDS_PER_TURN_CEILING} s/turn"
+                f"turn cap for role {role!r} ({cap}) needs a wall of {wall} s at "
+                f"{OBSERVED_SECONDS_PER_TURN_CEILING} s/turn x{STAGE_WALL_HEADROOM}, which exceeds "
+                f"the provider maximum timeout_seconds={timeout_seconds}"
             )
 
 

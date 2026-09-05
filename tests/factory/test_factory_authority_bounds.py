@@ -37,7 +37,7 @@ if str(ROOT) not in sys.path:
 
 from factory_kernel.agents import AgentRequest, AgentResult  # noqa: E402
 from factory_kernel.config import ProviderConfig  # noqa: E402
-from factory_kernel.providers import ClaudeCliProvider  # noqa: E402
+from factory_kernel.providers import ClaudeCliProvider, CliRun  # noqa: E402
 from factory_kernel.runtime import STAGE_TIMINGS, KernelRuntime, RunPaths  # noqa: E402
 from factory_kernel.triage import TriageEngine  # noqa: E402
 from factory_kernel.worker_policy import (  # noqa: E402
@@ -50,12 +50,21 @@ from factory_kernel.worker_policy import (  # noqa: E402
     allowed_tools,
     max_budget_usd,
     max_turns,
+    stage_timeout_seconds,
 )
 from harness import rehearsal  # noqa: E402
 from harness.rehearsal import Scenario, rehearse  # noqa: E402
 
 KERNEL = ROOT / "factory_kernel"
-BOUNDS = ("allowed_tools", "max_turns", "max_budget_usd")
+# Every bound a request must carry, and the policy function each is taken from. The fourth,
+# the role's own wall clock, arrived with D-054; its source is `stage_timeout_seconds`.
+BOUND_SOURCES = {
+    "allowed_tools": "allowed_tools",
+    "max_turns": "max_turns",
+    "max_budget_usd": "max_budget_usd",
+    "timeout_seconds": "stage_timeout_seconds",
+}
+BOUNDS = tuple(BOUND_SOURCES)
 # Every place the kernel constructs a request, with the number of sites each file holds. A
 # refactor that adds a site must add it here; a file that is not listed may construct none.
 REQUEST_SITES = {"runtime.py": 4, "worker_runtime.py": 1, "triage.py": 1}
@@ -152,9 +161,9 @@ class EveryRequestIsBoundedAtConstructionTests(unittest.TestCase):
                         )
                         self.assertIsInstance(value.func, ast.Name, f"{where} {bound}")
                         self.assertEqual(
-                            value.func.id, bound,
+                            value.func.id, BOUND_SOURCES[bound],
                             f"{where} sets {bound} from {ast.unparse(value)} rather than "
-                            f"worker_policy.{bound}(role)",
+                            f"worker_policy.{BOUND_SOURCES[bound]}(role)",
                         )
                         self.assertEqual(
                             (len(value.args), value.keywords), (1, []),
@@ -173,9 +182,11 @@ class EveryRequestIsBoundedAtConstructionTests(unittest.TestCase):
                 if isinstance(node, ast.ImportFrom) and node.module == "worker_policy":
                     imported.update(alias.asname or alias.name for alias in node.names)
             with self.subTest(filename):
+                needed = set(BOUND_SOURCES.values())
                 self.assertTrue(
-                    set(BOUNDS) <= imported,
-                    f"{filename} imports {sorted(imported)} from worker_policy; needs {BOUNDS}",
+                    needed <= imported,
+                    f"{filename} imports {sorted(imported)} from worker_policy; "
+                    f"needs {sorted(needed)}",
                 )
 
     def test_no_other_kernel_module_constructs_a_request(self):
@@ -248,6 +259,7 @@ class AuthoritiesReachTheProviderBoundedTests(unittest.TestCase):
                 self.assertEqual(request.allowed_tools, allowed_tools(role))
                 self.assertEqual(request.max_turns, max_turns(role))
                 self.assertEqual(request.max_budget_usd, max_budget_usd(role))
+                self.assertEqual(request.timeout_seconds, stage_timeout_seconds(role))
                 self.assertIsNotNone(request.max_budget_usd)
 
     def test_no_authority_can_write_or_run_anything(self):
@@ -272,11 +284,11 @@ class TheProviderRendersTheBoundsTests(unittest.TestCase):
             paths = RunPaths.create(Path(tmp), "run")
             rt = _runtime(Path(tmp), provider)
             with (
-                mock.patch("factory_kernel.providers.subprocess.run") as run,
+                mock.patch("factory_kernel.providers._stream_cli") as run,
                 mock.patch.dict(os.environ, {"PATH": os.environ.get("PATH", "")}, clear=True),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
-                run.return_value = mock.Mock(returncode=0, stdout=_envelope(verdict), stderr="")
+                run.return_value = CliRun(returncode=0, stdout=_envelope(verdict), stderr="")
                 run_stage(rt, paths)
             return list(run.call_args.args[0])
 
@@ -345,6 +357,15 @@ class TheFunnelRefusesAnUnboundedRequestTests(unittest.TestCase):
             "max_turns",
         )
 
+    def test_a_request_without_a_wall_never_reaches_the_provider(self):
+        """Without its own wall a request would run under the global maximum, which is not
+        a role's bound but the ceiling every role's bound fits under (D-054)."""
+        self._refuse(
+            AgentRequest(role="implement", prompt="p", cwd="/tmp", allowed_tools=("Read",),
+                         max_turns=30, max_budget_usd=12.0),
+            "timeout_seconds",
+        )
+
     def test_the_refusal_names_every_missing_bound(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RunPaths.create(Path(tmp), "run")
@@ -363,6 +384,7 @@ class TheFunnelRefusesAnUnboundedRequestTests(unittest.TestCase):
                 role="holdout", prompt="p", cwd="/tmp",
                 allowed_tools=allowed_tools("holdout"), max_turns=max_turns("holdout"),
                 max_budget_usd=max_budget_usd("holdout"),
+                timeout_seconds=stage_timeout_seconds("holdout"),
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 rt._agent_stage(paths, request)
@@ -385,6 +407,7 @@ class BuildSideRequestsAreBoundedTests(unittest.TestCase):
             self.assertEqual(request.allowed_tools, allowed_tools("conformance"))
             self.assertEqual(request.max_turns, max_turns("conformance"))
             self.assertEqual(request.max_budget_usd, max_budget_usd("conformance"))
+            self.assertEqual(request.timeout_seconds, stage_timeout_seconds("conformance"))
 
     def test_the_worker_agent_path_is_bounded(self):
         from factory_kernel.worker_runtime import WorkerControlledRuntime
@@ -406,6 +429,7 @@ class BuildSideRequestsAreBoundedTests(unittest.TestCase):
             self.assertEqual(request.allowed_tools, allowed_tools("conformance"))
             self.assertEqual(request.max_turns, max_turns("conformance"))
             self.assertEqual(request.max_budget_usd, max_budget_usd("conformance"))
+            self.assertEqual(request.timeout_seconds, stage_timeout_seconds("conformance"))
 
 
 class _TriageGitHub:

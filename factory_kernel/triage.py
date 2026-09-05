@@ -10,7 +10,7 @@ from typing import Any, Mapping
 from .agents import AgentRequest
 from .providers import prompt_text
 from .runtime import KernelRuntime
-from .worker_policy import allowed_tools, max_budget_usd, max_turns
+from .worker_policy import allowed_tools, max_budget_usd, max_turns, stage_timeout_seconds
 
 
 PRIORITIES = {"critical", "high", "medium", "low"}
@@ -115,6 +115,7 @@ class TriageEngine:
                 allowed_tools=allowed_tools("triage"),
                 max_turns=max_turns("triage"),
                 max_budget_usd=max_budget_usd("triage"),
+                timeout_seconds=stage_timeout_seconds("triage"),
             )
         )
         decisions = self._validate_decisions(result.structured_output, candidates)

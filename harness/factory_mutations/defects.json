@@ -1390,6 +1390,41 @@
       "find": "        image: pgvector/pgvector:pg16\n",
       "replace": "        image: postgres:16\n",
       "why": "The validation database would lack the vector extension, so every retrieval query would fail with `type \"vector\" does not exist` while ingestion succeeded, and the browser journey could never see a citation (D-053)."
+    },
+    {
+      "id": "idle-detection-never-fires",
+      "file": "factory_kernel/providers.py",
+      "find": "        if idle_left <= 0:\n            hung = True\n            break\n",
+      "replace": "        if False:\n            hung = True\n            break\n",
+      "why": "A CLI process that stopped printing events would run to its wall instead of being killed at the idle timeout, so a hung worker could not be told from a slow one and would never be retried; caught by tests/factory/test_factory_stream_timeouts.py (HangTests against the fake CLI) (D-054)."
+    },
+    {
+      "id": "hang-not-retried",
+      "file": "factory_kernel/providers.py",
+      "find": "                if hangs <= HANG_RETRIES and attempt < attempts_allowed:\n                    continue\n",
+      "replace": "                if False:\n                    continue\n",
+      "why": "A first hang would be terminal instead of relaunched once with the worktree restored, so one silent process would cost the whole build; caught by tests/factory/test_factory_stream_timeouts.py (a hang followed by a healthy process is one retry; the hang budget beside the transient budget) (D-054)."
+    },
+    {
+      "id": "timed-out-telemetry-dropped",
+      "file": "factory_kernel/providers.py",
+      "find": "                telemetry=observed,\n                timed_out=True,\n                envelope=partial,\n",
+      "replace": "                telemetry={},\n                timed_out=True,\n",
+      "why": "A stage killed at its wall would again record no turns, tokens, events or partial output, which is exactly the empty agent-test_author.json of run 33987381035; caught by tests/factory/test_factory_stream_timeouts.py (WallTimeoutTests, TimedOutStageLeavesTelemetryTests) and tests/factory/test_factory_worker_throughput.py (the timeout carries events_seen) (D-054)."
+    },
+    {
+      "id": "per-role-wall-ignored",
+      "file": "factory_kernel/providers.py",
+      "find": "            wall_seconds=wall,\n",
+      "replace": "            wall_seconds=self.config.timeout_seconds,\n",
+      "why": "Every process would run under the global 2700 s maximum instead of its role's own wall, so a ten-turn judge could run four times its turn budget before anything stopped it; caught by tests/factory/test_factory_stream_timeouts.py (the reader is given the request's wall; the fake CLI is killed at the request's 2 s, not the configured 60 s) (D-054)."
+    },
+    {
+      "id": "ceiling-reverted-to-35",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "OBSERVED_SECONDS_PER_TURN_CEILING = 45\n",
+      "replace": "OBSERVED_SECONDS_PER_TURN_CEILING = 35\n",
+      "why": "The per-turn ceiling would sit below the 40.4 s/turn build run 33987381035 measured, so every wall and every over_budget flag would be computed from a rate the data already refutes, while assert_caps_fit_timeout still passes; caught by tests/factory/test_factory_stream_timeouts.py (the ceiling is stated from the run's four observations) and tests/factory/test_factory_worker_throughput.py (the ceiling is at least the measured rate) (D-054)."
     }
   ]
 }
