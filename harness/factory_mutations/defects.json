@@ -1138,6 +1138,27 @@
       "find": "            \"error\": scrub(str(exc))[-4000:],",
       "replace": "            \"error\": str(exc)[-4000:],",
       "why": "A provider error can echo the prompt and the prompt can echo an issue body; an unscrubbed failure record would write a secret shape into an uploaded artifact."
+    },
+    {
+      "id": "rehead-guesses-base-with-merge-base",
+      "file": "factory_kernel/runtime.py",
+      "find": "        old_base = self._pack_base(paths, head=head, issue=linked_issue)",
+      "replace": "        old_base = self._git(\"merge-base\", f\"origin/{default}\", head)",
+      "why": "The re-head would recompute the base from the current branch tip instead of reading the binding the pack declares; a pack cut from any other commit could never be fetched (the first production re-head, run 33938048704)."
+    },
+    {
+      "id": "pack-base-ancestor-check-dropped",
+      "file": "factory_kernel/provenance.py",
+      "find": "    if is_ancestor is not None and not is_ancestor(base, head):\n        raise ValueError(\"builder provenance base is not an ancestor of its head\")",
+      "replace": "    pass",
+      "why": "A pack recording a base the head was never cut from (origin/main at publish time after it moved) would be accepted at every read."
+    },
+    {
+      "id": "publish-base-read-from-branch-tip",
+      "file": "factory_kernel/runtime.py",
+      "find": "                \"--base\", base_sha,\n",
+      "replace": "                \"--base\", self._git(\"rev-parse\", f\"origin/{self.config.default_branch}\"),\n",
+      "why": "publish would record the base branch tip at publish time instead of the commit the branch was cut from, which is exactly the false binding the first production pack carried."
     }
   ]
 }

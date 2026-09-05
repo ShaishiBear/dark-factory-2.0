@@ -21,7 +21,9 @@ sys.path.insert(0, str(HERE.parent))
 ROOT = Path.cwd().resolve()
 
 from factory_kernel.canonical import canonical_bytes
-from factory_kernel.provenance import NOTE_REF, build_pack, materialize, pack_sha256, verify_pack
+from factory_kernel.provenance import (
+    GIT_OID, NOTE_REF, build_pack, materialize, pack_identity, pack_sha256, verify_pack,
+)
 from factory_kernel.worker_policy import KERNEL_COMMIT_ARGS
 
 
@@ -116,13 +118,21 @@ def _fetch_note_ref() -> None:
     fail("could not fetch provenance notes: " + detail[-1600:])
 
 
+def _is_ancestor(base: str, head: str) -> bool:
+    proc = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", base, head],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    return proc.returncode == 0
+
+
 def publish(args: argparse.Namespace) -> None:
     artifacts = Path(args.artifacts).resolve()
     if not artifacts.is_dir():
         fail("ARTIFACTS_DIR does not exist")
     raw = subprocess.run(
         [
-            "gh", "pr", "view", str(args.pr), "--json", "headRefOid,baseRefOid,body",
+            "gh", "pr", "view", str(args.pr), "--json", "headRefOid,body",
         ],
         cwd=ROOT,
         capture_output=True,
@@ -133,10 +143,18 @@ def publish(args: argparse.Namespace) -> None:
         fail("cannot resolve PR for provenance handoff")
     info = json.loads(raw.stdout)
     head = str(info.get("headRefOid") or "")
-    base = str(info.get("baseRefOid") or "")
+    # The base is the commit the branch was cut from, supplied by the kernel that cut it. It is
+    # never read from GitHub's baseRefOid: that is the current tip of the base branch, which
+    # moves whenever main advances mid-build, and the first production pack recorded exactly
+    # that (a base that was not an ancestor of its own head; D-042).
+    base = str(args.base or "")
+    if not GIT_OID.fullmatch(base):
+        fail("publish requires --base, the exact commit the branch was cut from")
     local = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     if local != head:
         fail("builder provenance can only be attached from the exact PR head")
+    if not _is_ancestor(base, head):
+        fail("builder provenance base is not an ancestor of its head")
     contract_path = artifacts / "task-contract.json"
     try:
         contract = json.loads(contract_path.read_text(encoding="utf-8"))
@@ -188,10 +206,11 @@ def publish(args: argparse.Namespace) -> None:
     )
 
 
-def fetch(args: argparse.Namespace) -> None:
-    _fetch_note_ref()
+def _note(head: str, *, fetch_remote: bool = True) -> dict:
+    if fetch_remote:
+        _fetch_note_ref()
     proc = subprocess.run(
-        ["git", "notes", f"--ref={NOTE_REF}", "show", args.head],
+        ["git", "notes", f"--ref={NOTE_REF}", "show", head],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -203,13 +222,38 @@ def fetch(args: argparse.Namespace) -> None:
         fail("exact PR head has no builder provenance note")
     try:
         value = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        fail(f"builder provenance note is not JSON: {exc}")
+    if not isinstance(value, dict):
+        fail("builder provenance note is not an object")
+    return value
+
+
+def peek(args: argparse.Namespace) -> None:
+    """Print the binding a note declares without trusting its contents.
+
+    A consumer reads the base from here and then verifies it; it never recomputes the base from
+    the current branch tip (D-042)."""
+    try:
+        identity = pack_identity(_note(args.head, fetch_remote=not args.local_notes))
+    except ValueError as exc:
+        fail(str(exc))
+    if identity["head_sha"] != args.head:
+        fail("builder provenance is attached to a different PR head")
+    print(json.dumps(identity, sort_keys=True, separators=(",", ":")))
+
+
+def fetch(args: argparse.Namespace) -> None:
+    value = _note(args.head, fetch_remote=not args.local_notes)
+    try:
         pack = verify_pack(
             value,
             expected_head_sha=args.head,
             expected_base_sha=args.base,
             expected_issue=args.issue,
+            is_ancestor=_is_ancestor,
         )
-    except (json.JSONDecodeError, ValueError) as exc:
+    except ValueError as exc:
         fail(str(exc))
     output = Path(args.output_dir).resolve()
     try:
@@ -229,12 +273,21 @@ def main() -> None:
     p = sub.add_parser("publish")
     p.add_argument("--pr", type=int, required=True)
     p.add_argument("--artifacts", required=True)
+    p.add_argument("--base", required=True, help="the exact commit the branch was cut from")
     p.set_defaults(fn=publish)
+    p = sub.add_parser("peek")
+    p.add_argument("--head", required=True)
+    # Read the notes ref already present locally instead of fetching it first. The kernel never
+    # passes this; it exists so the script's judgement can be tested against a local repository
+    # without a token or a remote. The judgement itself is identical either way.
+    p.add_argument("--local-notes", action="store_true")
+    p.set_defaults(fn=peek)
     p = sub.add_parser("fetch")
     p.add_argument("--head", required=True)
     p.add_argument("--base", required=True)
     p.add_argument("--issue", type=int, required=True)
     p.add_argument("--output-dir", required=True)
+    p.add_argument("--local-notes", action="store_true")
     p.set_defaults(fn=fetch)
     args = parser.parse_args()
     args.fn(args)

@@ -274,8 +274,10 @@ class RehearsalTraceTests(unittest.TestCase):
 
     def test_pr_tree_operations_run_in_the_worktree(self):
         # Programs that read or edit the PR's tree take it from their working directory. The
-        # base-anchored guard and the provenance fetch run in the kernel checkout by design.
+        # base-anchored guard and the provenance peek/fetch run in the kernel checkout by
+        # design: the notes ref is fetched into the kernel's own repository, never the subject's.
         kernel_side = {"factory_security.py", "factory_lease.py"}
+        kernel_side_phases = {("factory_provenance.py", "fetch"), ("factory_provenance.py", "peek")}
         for command, trace in self.traces.items():
             worktrees = {step.cwd for step in trace.steps if step.kind == "exec" and step.cwd
                          and Path(step.cwd).name == "worktree"}
@@ -284,7 +286,7 @@ class RehearsalTraceTests(unittest.TestCase):
             for step in self._authority_steps(trace):
                 name = Path(step.argv[1]).name
                 phase = step.argv[2] if len(step.argv) > 2 else ""
-                if name in kernel_side or (name == "factory_provenance.py" and phase == "fetch"):
+                if name in kernel_side or (name, phase) in kernel_side_phases:
                     continue
                 with self.subTest(command=command, tool=step.name):
                     self.assertEqual(step.cwd, worktree, f"{step.name} must operate on the PR worktree")

@@ -97,6 +97,7 @@ COPY_FILES = (
     "tests/factory/test_factory_failed_stage_telemetry.py",
     "tests/factory/fixtures/provider/run-33933101233-test-author-stream-closed.json",
     "tests/factory/test_factory_resume.py",
+    "tests/factory/test_factory_pack_base.py",
     "tests/factory/test_factory_trusted_programs.py",
     "tests/factory/test_factory_methods.py",
     "tests/factory/test_factory_review_axes.py",
