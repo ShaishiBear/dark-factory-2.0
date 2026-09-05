@@ -7,13 +7,20 @@ from typing import Mapping
 import uuid
 
 from .agents import AgentRequest
-from .git_authority import commit_acceptance_tests, commit_planned_changes
+from .git_authority import commit_acceptance_tests, commit_planned_changes, dirty_paths
 from .methods import method_block
 from .prompt_render import literal_artifacts_dir_entries, render_prompt
 from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
+from .static_gate import check_files
 from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, max_budget_usd, max_turns, may_change_repo
 from .worktree import create_detached, remove
+
+
+# One static retry per mutation stage. A lint failure in a file the worker just wrote is
+# repairable exactly once, by that worker, before the kernel commits the file; after RED the
+# acceptance tests are immutable and no later stage can touch them (D-043).
+STATIC_RETRIES = 1
 
 
 class WorkerControlledRuntime(BaseKernelRuntime):
@@ -168,6 +175,7 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         *,
         context: str = "",
         env: Mapping[str, str],
+        static_retry: int = 0,
     ) -> None:
         self.check_stop()
         # Workers load no plugins or skills (--bare). Whatever engineering discipline the role is
@@ -221,6 +229,13 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         self._record_agent(paths, role, result, started=started)
 
         if role == "test_author":
+            # The files are still uncommitted, so the author that wrote them is the one that can
+            # still fix them. The gate runs BEFORE commit_acceptance_tests, because after the RED
+            # commit those files are hashed and immutable for every later stage (D-043).
+            if self._static_gate_or_retry(
+                "test_author", cwd, paths, env, static_retry=static_retry, context=context,
+            ):
+                return
             commit_acceptance_tests(cwd, paths.artifacts / "test-spec.json")
             return
         if role in {"implement", "repair"}:
@@ -229,6 +244,13 @@ class WorkerControlledRuntime(BaseKernelRuntime):
             issue_number = issue.get("number") if isinstance(issue, Mapping) else None
             if not isinstance(issue_number, int) or isinstance(issue_number, bool):
                 raise RuntimeError("compiled contract lacks issue number for kernel Git authority")
+            # Same gate on the production files before the design-envelope commit. A failure
+            # here is repaired by ONE fresh `repair` worker briefed with the lint output; the
+            # final quick gate over the whole tree remains the authority.
+            if self._static_gate_or_retry(
+                role, cwd, paths, env, static_retry=static_retry, context=context,
+            ):
+                return
             subject = (
                 f"fix(factory): satisfy issue #{issue_number}"
                 if role == "implement"
@@ -247,6 +269,55 @@ class WorkerControlledRuntime(BaseKernelRuntime):
             raise RuntimeError(f"unhandled repository-mutation role: {role}")
         self._refuse_literal_artifacts_dir(cwd)
         self._assert_clean(cwd)
+
+    def _static_gate_or_retry(
+        self,
+        role: str,
+        cwd: Path,
+        paths: RunPaths,
+        env: Mapping[str, str],
+        *,
+        static_retry: int,
+        context: str,
+    ) -> bool:
+        """Run the scoped static checks on the worker's uncommitted files.
+
+        Returns True when a retry was dispatched and has already completed the commit (so the
+        caller must not commit again), False when the files are clean and the caller commits.
+        Raises NeedsHuman when the bounded retry is exhausted. The failed attempt's files stay in
+        the checkout, uncommitted: the retried worker edits them in place rather than starting
+        from a restored tree, because the defect is in those very files and nothing has been
+        committed yet (contrast the transient-retry restore, D-031, where the tree is
+        half-written by a dropped stream).
+        """
+        files = dirty_paths(cwd)
+        result = self._scoped_static(cwd, files)
+        record = {
+            "role": role, "attempt": static_retry + 1, "files": files,
+            "checks": list(result.checks), "ok": result.ok, "skipped": list(result.skipped),
+            "output": result.output,
+        }
+        self._write_json(paths.artifacts / f"static-gate-{role}-{static_retry + 1}.json", record)
+        if result.ok:
+            return False
+        if static_retry >= STATIC_RETRIES:
+            raise NeedsHuman(
+                f"{role} files do not pass the repository's static checks after "
+                f"{STATIC_RETRIES + 1} attempts:\n{result.output[-2000:]}"
+            )
+        retry_role = "repair" if role in {"implement", "repair"} else role
+        brief = (
+            "STATIC CHECK FAILURE (kernel-run, deterministic). The files you wrote are still "
+            "uncommitted; they must pass the repository's static checks before the kernel will "
+            "commit them. Fix only lint/format problems in these files and change nothing else:\n"
+            + "\n".join(files) + "\n\n" + result.output[-3000:]
+        )
+        merged = (context.strip() + "\n\n" + brief) if context.strip() else brief
+        self._agent(retry_role, cwd, paths, context=merged, env=env, static_retry=static_retry + 1)
+        return True
+
+    def _scoped_static(self, cwd: Path, files: list[str]):
+        return check_files(cwd, files)
 
     def _restore_worktree_before_retry(self, role: str, cwd: Path, attempt: int) -> None:
         """Put the checkout back to the pre-attempt state before a transient retry.

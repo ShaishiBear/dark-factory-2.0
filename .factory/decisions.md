@@ -1128,3 +1128,37 @@ Three changes, none weakening a check:
 
 #85's note is false and cannot be repaired by re-heading; the overseer closes it and rebuilds
 #49 on this kernel. The nineteenth canary defect.
+
+---
+
+## D-043 · Static checks run on a worker's files before the kernel commits them
+
+**Status:** implemented · **Raised:** 2026-09-05
+
+Worker run 33938917038 (kernel eb40907) passed every model stage, RED, GREEN, both review
+axes and conformance, then failed the quick gate's biome rung on two
+`noMultipleSpacesInRegularExpressionLiterals` errors in the acceptance-test file the
+independent test author had written. Those files are RED-hashed the moment
+`factory_proof.py red` succeeds and immutable for every later stage, so no repair could ever
+have fixed them: the build was structurally lost forty minutes before it was reported lost.
+The twentieth canary defect, and the first that was a design gap rather than a plumbing one:
+the repository's static checks ran only after RED had frozen the files.
+
+The kernel now runs the same tools, scoped to the files a worker just wrote, BEFORE it commits
+them (`factory_kernel/static_gate.py`, `WorkerControlledRuntime._static_gate_or_retry`):
+ruff check and ruff format for `app/backend/**/*.py`, biome check for
+`app/frontend/**/*.{ts,tsx,js,jsx}`. On a failure the files stay uncommitted and the worker
+that wrote them is run once more with the checker's output (the test author for acceptance
+tests; a fresh `repair` worker for production files); a second failure escalates with the
+output in the refusal record. The retry edits the files in place rather than starting from a
+restored tree, because the defect is in those very files and nothing has been committed
+(contrast D-031's transient restore, where a dropped stream left the tree half-written). mypy
+and tsc are whole-program checks with no honest file scope and stay in the quick gate, which
+still runs every check over the whole tree afterwards and remains the authority. Nothing is
+weakened; a subset of the gate moved earlier, to where it is repairable.
+
+Telemetry from the run: test_author 1149 s / 13 turns, the slowest stage by far; investigate
+544 s / 7; contract 321 s; context 155 s; architecture 202 s; implement 132 s; review-spec
+130 s; review-standards 176 s; conformance 217 s; quick gate 69 s. Whole build about fifty
+minutes. The test author's cost is the next throughput question; it reads test files and
+writes new ones and has the smallest prompt of the post-contract stages.
