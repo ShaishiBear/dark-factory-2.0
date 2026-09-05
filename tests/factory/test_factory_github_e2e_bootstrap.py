@@ -249,14 +249,24 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             'p["model"]',
             'p.get("architecture_model")',
             'd.get("is_error") is False',
+            'stop in {"end_turn", "stop_sequence", "max_tokens"}',
+            "turns >= 1",
+            'bool(d.get("modelUsage")) or bool(usage)',
             "FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=$model",
         ):
             self.assertIn(needle, step, needle)
+        # Defect 17 (run 33931843218): the rule once required non-empty `result` text and
+        # refused a healthy DeepSeek envelope that answered with an empty final message.
+        # Reachability is the error state; the text of `result` is never consulted.
+        self.assertNotIn('d.get("result")', step, "route probe must not judge on result text")
+        self.assertNotIn('d["result"]', step, "route probe must not judge on result text")
         self.assertRegex(
             step,
-            r'echo "FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model \$model"\n(?:.*\n)?\s+exit 1',
+            r'echo "FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model \$model[^"]*"\n(?:.*\n)?\s+exit 1',
             "a failed CLI probe must refuse the run, not warn",
         )
+        self.assertIn("stop_reason=", step, "the OK line reports the stop reason for diagnosis")
+        self.assertIn("output_tokens=", step, "the OK line reports output tokens for diagnosis")
         install = workflow.index("Install pinned worker and browser CLIs")
         dispatch = workflow.index("Dispatch exactly one factory action")
         self.assertLess(install, workflow.index("Prove the worker's model route"))

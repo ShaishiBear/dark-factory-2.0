@@ -1012,3 +1012,32 @@ writes the body through `--body-file`, reads it back from GitHub, and refuses wi
 one shared parser (`factory_kernel/attached.py`) used by both the scripts and the kernel's
 `_extract_attached`, so attach and validate cannot drift. An already-attached corrupt block is
 repaired by re-running `resume`: attach replaces its blocks.
+
+---
+
+## D-039 · The route probe tests the route, not the model's chattiness
+
+**Status:** recorded · **Raised:** 2026-09-05
+
+Worker run 33931843218 refused `deepseek/deepseek-v4-pro-0813` at preflight
+(`FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model`) and escalated issue #49 to
+`factory:needs-human` before any model stage ran. The CLI envelope was healthy:
+`is_error: false`, `stop_reason: end_turn`, `num_turns: 2`, four output tokens, the model
+present in `modelUsage`. Its `result` was the empty string: asked to "reply with exactly the
+word OK", DeepSeek spent its tokens thinking and emitted no final message. The probe's rule
+was `is_error is False and result`, so an empty string read as unreachable. Seventeenth
+canary defect.
+
+The probe now judges reachability on the error state alone: `is_error` false, a normal
+`stop_reason` (`end_turn`, `stop_sequence`, `max_tokens`), at least one turn, and usage or
+`modelUsage` present. The text of `result` is not consulted. The OK and REFUSED lines carry
+`stop_reason` and `output_tokens` so a future refusal is diagnosable from the log.
+
+Why this is safe: no factory stage relies on a bare final message. Every worker writes its
+artifact to `ARTIFACTS_DIR` and the kernel reads the file; a worker that writes nothing is
+refused by the stage-note existence check (#70) or the artifact validators, never by the
+probe. The empty-result behaviour is a DeepSeek trait under a tiny prompt, not a routing
+fault, and the probe must not encode one model's habits as the definition of "reachable".
+
+A mutation (`worker-route-probe-requires-result-text`) restores the text requirement and is
+caught by the structure test. Issue #49's escalation from this run is un-escalated by hand.

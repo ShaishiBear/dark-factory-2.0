@@ -213,6 +213,13 @@
       "find": "      - name: Dispatch exactly one factory action\n        if: inputs.resume_pr == '' && inputs.resume_run_id == ''\n",
       "replace": "      - name: Dispatch exactly one factory action\n",
       "why": "The ordinary dispatch would lose its inverse guard and run after a resume too, so one worker run could finish one PR and start another build; the run must take exactly one action."
+    },
+    {
+      "id": "worker-route-probe-requires-result-text",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "          routed = (d.get(\"is_error\") is False\n",
+      "replace": "          routed = (d.get(\"is_error\") is False and bool(d.get(\"result\"))\n",
+      "why": "The probe would again refuse a healthy route whose model answered with an empty final message, escalating every issue before a stage ran (defect 17, run 33931843218)."
     }
   ]
 }
