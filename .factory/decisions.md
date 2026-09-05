@@ -990,3 +990,25 @@ revert, `factory_provenance.publish` notes add. Reads (`notes show`, `rev-parse`
 no identity. The test runs the real script in a repository whose global and system config are
 empty, proves the note's author and committer are the kernel identity, and proves the same
 write without the args fails with the runner's exact error.
+
+---
+
+## D-038 · Evidence stores no terminal control sequences; an attach is not done until it round-trips
+
+**Status:** recorded · **Raised:** 2026-09-05
+
+The first production `validate_pr` (worker run 33931048575, PR #74) refused at its third step:
+`attached factory-proof is invalid JSON`. The proof's `red_output_tail` (D-024) carried vitest
+colour escapes; `canonical()` wrote them as `\u001b`, and the body GitHub handed back held a
+backslash followed by caret-notation `^[`, which is not a JSON escape. The uploaded artifact parsed;
+the PR-body channel corrupted it. Sixteenth canary defect.
+
+Two rules follow. Runner output that enters evidence is sanitised at the source
+(`factory_kernel.attached.sanitise_output`: ANSI/CSI/OSC stripped, other C0 controls to
+U+FFFD, newline and tab kept), and the RED symptom match, the stored tail and the output hash
+all see the sanitised text so stored evidence and the check agree. And every attach program
+writes the body through `--body-file`, reads it back from GitHub, and refuses with
+`ATTACH_FAIL` unless the block parses to the same canonical bytes it sent; the extraction is
+one shared parser (`factory_kernel/attached.py`) used by both the scripts and the kernel's
+`_extract_attached`, so attach and validate cannot drift. An already-attached corrupt block is
+repaired by re-running `resume`: attach replaces its blocks.

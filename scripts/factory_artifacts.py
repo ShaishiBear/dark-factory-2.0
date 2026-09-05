@@ -16,6 +16,8 @@ HERE = Path(__file__).resolve().parent
 ROOT = Path.cwd().resolve()
 sys.path.insert(0, str(HERE))
 from factory_shapes import normalise_list, normalise_lists  # noqa: E402
+sys.path.insert(0, str(HERE.parent))
+from factory_kernel.attached import round_trip_ok  # noqa: E402
 
 from factory_protocol import canonical, validate_contract  # noqa: E402
 
@@ -219,12 +221,20 @@ def attach_design(args: argparse.Namespace) -> None:
         + "\n<!-- factory-design:end -->\n"
     )
     body = DESIGN_BLOCK.sub("\n", info.get("body") or "").rstrip() + block
+    body_file = Path(args.design).with_suffix(".pr-body.md")
+    body_file.write_text(body, encoding="utf-8")
     edit = subprocess.run(
-        ["gh", "pr", "edit", str(args.pr), "--body", body],
+        ["gh", "pr", "edit", str(args.pr), "--body-file", str(body_file)],
         cwd=ROOT, capture_output=True, text=True, timeout=60,
     )
     if edit.returncode:
         die("could not attach design: " + (edit.stderr or edit.stdout)[-1000:])
+    back = subprocess.run(
+        ["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    if back.returncode or not round_trip_ok(back.stdout, "design", design):
+        die("ATTACH_FAIL: design block did not survive the PR body round trip")
     print(f"DESIGN_ATTACHED pr={args.pr} sha256={digest(design)}")
 
 
