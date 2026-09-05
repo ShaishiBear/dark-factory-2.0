@@ -48,6 +48,7 @@ from factory_kernel.worker_policy import (  # noqa: E402
     ROLE_MAX_TURNS,
     ROLE_TOOLS,
     allowed_tools,
+    effort,
     max_budget_usd,
     max_turns,
     stage_timeout_seconds,
@@ -63,6 +64,8 @@ BOUND_SOURCES = {
     "max_turns": "max_turns",
     "max_budget_usd": "max_budget_usd",
     "timeout_seconds": "stage_timeout_seconds",
+    # The fifth, how hard each turn may think, arrived with D-055; its source is `effort`.
+    "effort": "effort",
 }
 BOUNDS = tuple(BOUND_SOURCES)
 # Every place the kernel constructs a request, with the number of sites each file holds. A
@@ -385,6 +388,7 @@ class TheFunnelRefusesAnUnboundedRequestTests(unittest.TestCase):
                 allowed_tools=allowed_tools("holdout"), max_turns=max_turns("holdout"),
                 max_budget_usd=max_budget_usd("holdout"),
                 timeout_seconds=stage_timeout_seconds("holdout"),
+                effort=effort("holdout"),
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 rt._agent_stage(paths, request)

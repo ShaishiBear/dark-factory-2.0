@@ -1900,3 +1900,151 @@ D-025 intended; a stage that is killed says what it had done. A 30-turn stage ma
 2025 s rather than 1200 s before its wall, so a build's worst case is longer, but bounded
 per role and measured per turn. The next build's stage lines carry `events=N`, and the
 next timed-out stage, if there is one, is a record to read rather than a gap to reconstruct.
+
+---
+
+## D-055 · Every worker runs at a stated effort, and every stage keeps its whole transcript, because the 2025-second `test_author` of run 33992451400 thought at the CLI's default and left 1500 characters
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33992451400 (build of issue #103, the first stream-read build after D-054)
+
+The run's stage lines, with D-054's `events=N`:
+
+```
+FACTORY_STAGE kind=agent name=investigate seconds=782.704 turns=17 cost_usd=1.388 outcome=ok events=30432
+FACTORY_STAGE kind=agent name=contract seconds=366.228 turns=20 cost_usd=0.940 outcome=ok events=11614
+FACTORY_STAGE kind=agent name=context seconds=461.222 turns=29 cost_usd=1.208 outcome=ok events=13790
+FACTORY_STAGE kind=agent name=architecture seconds=203.013 turns=10 cost_usd=0.679 outcome=ok events=5414
+FACTORY_STAGE kind=agent name=test_author seconds=2025.084 turns=14 outcome=failed events=76248 timed_out=true over_budget=true
+```
+
+D-054 worked: the killed stage has a record. `agent-test_author.json` says `num_turns=14`,
+`events_seen=76248`, `last_event_age_s=0.0` (alive to the last second, not hung), and its
+`partial_output` is five consecutive `{"type":"system","subtype":"thinking_tokens",
+"estimated_tokens":13247,"estimated_tokens_delta":1,...}` lines. Per turn: `test_author`
+5,446 events and 145 s, against 476-1,790 events and 16-46 s for the four stages before it.
+The design was small (three acceptance criteria, one new file,
+`app/frontend/src/components/ChatArea.test.tsx`). Two facts follow.
+
+**(a) Nothing bounded how long a turn thinks.** The turn cap bounds iterations and the
+dollar cap bounds the resent conversation; a turn that streams thinking for minutes is one
+turn and a few cents of output tokens, and it sits inside both. The kernel named no effort
+level, so every request ran at the CLI's default, which the CLI's documentation says is
+`high` ("balances token usage and intelligence") on every model; the route is OpenRouter's
+Anthropic-compatible endpoint to `z-ai/glm-5.3-flash`, and what that model does with the
+default is what the stream shows: it thinks without bound. The installed CLI (2.1.259) and
+the workflow's pin (2.1.245) both accept `--effort <level>` with levels `low`, `medium`,
+`high`, `xhigh`, `max` (`claude --help`); the documentation calls effort the control on
+adaptive reasoning, "whether and how much to think on each step", with `low` reserved for
+"short, scoped, latency-sensitive tasks that are not intelligence-sensitive", `medium` as
+"reduces token usage for cost-sensitive work that can trade off some intelligence", and
+`max` "prone to overthinking".
+
+**(b) A killed stage leaves a tail, not a transcript.** `_record_agent` wrote
+`agent-<role>.log` (the worker's final text) only for a stage that returned; a stage that
+was killed had only `partial_output`, the last five event lines capped at 1500 characters.
+Fourteen turns and 76,248 events of what the worker read, wrote and thought are gone, and
+whether it was writing the test file, re-reading the tree, or looping on one thought cannot
+be told from what was kept.
+
+**Decision.** Every request names an effort level, every stage streams its transcript to
+disk as it runs, and the thinking each stage showed is recorded beside its turns.
+
+- **Per-role effort.** `worker_policy.EFFORT_LEVELS = ("low", "medium", "high", "xhigh",
+  "max")`, the pinned CLI's scale lowest first, and `ROLE_EFFORT`, a table beside
+  `ROLE_MAX_TURNS` with a row for every role. Workers (every role that edits or drafts
+  against a checkout: `plan`, `investigate`, `contract`, `context`, `architecture`,
+  `test_author`, `implement`, `repair`, `conformance`, `review-spec`, `review-standards`)
+  run at `medium`: one notch below the default, so thinking is bounded but not disabled.
+  `low` was considered for the three mutation roles, whose per-turn work is file edits, and
+  not chosen: the documentation reserves it for work "not intelligence-sensitive" and
+  effort is adaptive, so at `low` a step may not think at all; choosing what a test should
+  assert, or how a fix should land, is intelligence-sensitive, and the defect being
+  corrected is unbounded thinking, not thinking. Judges (the five validation authorities
+  and triage) run at `high`, the default: tool-less single-prompt calls where reasoning is
+  the whole job, already bounded to ten turns; `max` is documented as prone to overthinking
+  and `xhigh` is not offered on every model and would fall back silently. `effort(role)`
+  is the fifth bound every `AgentRequest` carries (all six construction sites; the
+  `_agent_stage` funnel refuses a request without it, beside tools, turns, dollars and the
+  wall, D-052, D-054), and `ClaudeCliProvider.run` renders it as `--effort <level>` on
+  every launch after applying `provider.effort_overrides` from `kernel.json`, a
+  `{role: level}` table validated at load against the policy's roles and the CLI's levels
+  (a typo is a refused configuration, not a silent default); the provider refuses a level
+  the CLI does not accept before any process starts. The checked-in table is empty.
+- **The route is measured, not assumed.** The scale is calibrated per model and the route
+  is not Anthropic's, so the worker workflow's preflight, after the route probe (which now
+  makes a judge's request, `--effort high`), runs `scripts/factory_effort_probe.py`: the
+  worker model twice on one fixed reasoning prompt ("Plan, in numbered steps, how you
+  would add a column to a Postgres table without downtime."), one turn and one dollar
+  each, at the lowest and the highest level the policy uses (`medium` and `high`, the
+  spread the policy relies on; `--low`/`--high` widen it), counting the thinking each
+  stream showed with the same estimator the stage records use. It prints
+  `FACTORY_PREFLIGHT_EFFORT_PROBE model=<slug> low_thinking=<n> high_thinking=<m>
+  honoured=true|false low_level=<l> high_level=<h> low_events=<n> high_events=<n>
+  [error=<what>]` and exits 0 whatever it found; `honoured` means the higher level thought
+  at least 1.5× and at least 100 tokens more. A `honoured=false` is data for tuning the
+  levels, never a refusal: the run continues, and the next build's `thinking=` fields say
+  what the levels bought.
+- **Full stream logs for every stage.** `_agent_stage` hands the provider
+  `transcripts/agent-<role>.log`; `_launch` opens it for append before the process starts,
+  writes `--- attempt N role=<role> started=<utc> ---`, and `_stream_cli` writes every
+  stdout line to it, flushed, as the reader sees it and before it is parsed, then an end
+  marker (`--- attempt N ended rc=... timed_out=... hung=... elapsed=...s events=...
+  thinking=... ---`). Every attempt of a retried stage appends under its own header. A
+  process killed at its wall or its idle clock therefore leaves exactly what it had printed.
+  `_record_agent` no longer overwrites that file: it writes the worker's text there only
+  when the file does not exist (a provider that does not stream, such as the rehearsal
+  fakes), and `partial_output` stays in the JSON record as the capped tail for quick
+  reading.
+- **Thinking telemetry.** `providers.thinking_tokens(events)` sums the CLI's
+  `thinking_tokens` events. Whether `estimated_tokens` counts from the session's start or
+  restarts with each turn is not documented, so the sum is taken in the way that is right
+  either way: the counter is walked in order, a value below the one before it is a reset,
+  and the high-water mark of every monotone run is summed (one run whose mark is the final
+  value if the counter never resets; one run per turn if it does). The per-event
+  `estimated_tokens_delta` is not used: summing it would be exact only if no line were ever
+  dropped and the first event after a reset carried its own value as its delta, and
+  neither is promised, whereas a high-water mark survives a missed line. The figure rides
+  on every envelope (`ResultEnvelope.thinking_tokens`, from the events of a returned and
+  of a killed process alike), is summed across attempts, and lands in `agent-<role>.json`
+  as `thinking_tokens`, in the timing row, and on the stage line as `thinking=<n>`, beside
+  `effort=<level>`, the level the CLI was actually asked for. The `result` event's
+  `usage.output_tokens_details.thinking_tokens`, where the route reports it, is kept as
+  `thinking_tokens_reported` for reconciling the estimate against the bill.
+
+Pinned by `tests/factory/test_factory_effort_and_stream_logs.py`, which reuses the fake CLI
+of D-054's detector: every role with a turn cap has a level from the CLI's scale, judges at
+`high` and workers at `medium`, and the workflow pins a CLI at or above 2.1.245; a worker's
+argv carries `--effort medium` and a judge's `--effort high`, a configured override wins and
+is what the result and the record say, an unknown level is refused before any launch, and a
+failed stage carries the level it ran at; the funnel refuses a request without `effort`,
+names it, calls no provider and writes no record, hands the provider the stage's log path,
+and writes the worker's text to that path only when nothing was streamed there; the
+override table is parsed, defaults to empty, and refuses an unknown role, a level the CLI
+does not accept, and a value that is not an object; the log of a completed, a wall-killed,
+a hung-then-retried, a terminally hung, and a never-printed stage holds every stream line
+under its attempt headers, and through the funnel the log holds more than the capped tail
+the record keeps; the estimator sums high-water marks across resets and ignores deltas,
+survives a missed line, ignores other events, and reaches both envelopes; the record, row
+and line of a returned, a killed and a retried stage carry `thinking=` and `effort=`; and
+the probe's argv, margin rule, default levels, line format (honoured, not honoured, an
+errored call, explicit levels), exit code and place in the workflow. Updated:
+`test_factory_authority_bounds.py` (the fifth bound at every site, from `effort`),
+`test_factory_stream_timeouts.py` and `test_factory_validation_stage_telemetry.py` (the
+fifth bound, the stage-line shape). Mutations `effort-flag-dropped`,
+`judge-effort-lowered-to-worker-level`, `stream-tee-dropped`,
+`thinking-telemetry-always-zero` and `effort-override-not-validated` are registered in
+`harness/factory_mutations/defects.json`, the detector file and the probe script are in the
+runner's copy list, and each was verified by direct injection on the maintainer's Windows
+host (the copy built by `run.py`, one defect injected, the detector file run).
+
+**Observed and left alone.** The levels are stated from the CLI's documentation, not from
+a measured run; the first build at `medium` is the evidence for tuning them, and the probe
+line says whether the route honours them at all. The caps, the dollar backstops, the walls
+and the idle timeout are unchanged. The `result` event's reported thinking count and the
+stream's estimate are both recorded and not yet reconciled.
+
+**Consequences.** A worker's turn is bounded on a third axis, and the next `test_author` at
+`medium` either finishes inside its wall or leaves a full transcript that says why it did
+not. Every stage line now ends `thinking=<n> effort=<level>`, so over-reasoning is visible
+per stage as it happens rather than reconstructed from an event count. The preflight costs
+two one-turn calls more per run.

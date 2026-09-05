@@ -58,6 +58,7 @@ from .worker_policy import (
     KERNEL_COMMIT_ARGS,
     ROLE_MAX_TURNS,
     allowed_tools,
+    effort,
     max_budget_usd,
     max_turns,
     stage_budget_seconds,
@@ -100,9 +101,11 @@ def record_stage_timing(
 
 def stage_line(row: Mapping[str, Any]) -> str:
     """`FACTORY_STAGE kind=... name=... seconds=... [turns=...] [cost_usd=...] outcome=...
-    [events=...] [timed_out=true] [hang=true] [over_budget=true]`: the row as one log line,
-    with the fields that do not apply left out. `events` is how many stream events the
-    provider read; a timed-out or hung stage still says what it had shown by then (D-054)."""
+    [events=...] [timed_out=true] [hang=true] [over_budget=true] [thinking=...] [effort=...]`:
+    the row as one log line, with the fields that do not apply left out. `events` is how many
+    stream events the provider read; a timed-out or hung stage still says what it had shown by
+    then (D-054). `thinking` is the thinking those events showed, in the CLI's estimate, and
+    `effort` the level the CLI was asked for (D-055)."""
     fields = [f"kind={row['kind']}", f"name={row['name']}", f"seconds={row['seconds']}"]
     if row.get("num_turns") is not None:
         fields.append(f"turns={row['num_turns']}")
@@ -117,6 +120,10 @@ def stage_line(row: Mapping[str, Any]) -> str:
         fields.append("hang=true")
     if row.get("over_budget"):
         fields.append("over_budget=true")
+    if row.get("thinking_tokens") is not None:
+        fields.append(f"thinking={row['thinking_tokens']}")
+    if row.get("effort"):
+        fields.append(f"effort={row['effort']}")
     return STAGE_LINE_PREFIX + " " + " ".join(fields)
 
 
@@ -1582,6 +1589,7 @@ class KernelRuntime:
                     max_turns=max_turns("holdout"),
                     max_budget_usd=max_budget_usd("holdout"),
                     timeout_seconds=stage_timeout_seconds("holdout"),
+                    effort=effort("holdout"),
                 ),
             )
             value = result.structured_output
@@ -1800,6 +1808,7 @@ class KernelRuntime:
                     max_turns=max_turns(role),
                     max_budget_usd=max_budget_usd(role),
                     timeout_seconds=stage_timeout_seconds(role),
+                    effort=effort(role),
                 ),
             )
             value = result.structured_output
@@ -1868,6 +1877,7 @@ class KernelRuntime:
                     max_turns=max_turns("architecture-holdout"),
                     max_budget_usd=max_budget_usd("architecture-holdout"),
                     timeout_seconds=stage_timeout_seconds("architecture-holdout"),
+                    effort=effort("architecture-holdout"),
                 ),
             )
             value = result.structured_output
@@ -1924,16 +1934,19 @@ class KernelRuntime:
                 max_turns=max_turns(role),
                 max_budget_usd=max_budget_usd(role),
                 timeout_seconds=stage_timeout_seconds(role),
+                effort=effort(role),
             ),
         )
 
-    # The four bounds every request must carry before a model is run. `allowed_tools` is what
+    # The five bounds every request must carry before a model is run. `allowed_tools` is what
     # the role may touch, `max_turns` how many iterations it gets, `max_budget_usd` what it may
-    # spend, `timeout_seconds` how long its process may run; the provider only renders a flag
-    # for a value that is present (and falls back to the global maximum wall for a missing
-    # timeout), so a request that arrives without one runs unbounded on that axis, silently.
+    # spend, `timeout_seconds` how long its process may run, `effort` how hard each turn may
+    # think; the provider only renders a flag for a value that is present (and falls back to
+    # the global maximum wall for a missing timeout, and to the CLI's default effort for a
+    # missing level), so a request that arrives without one runs unbounded on that axis,
+    # silently (D-052, D-054, D-055).
     REQUEST_BOUNDS: tuple[str, ...] = (
-        "allowed_tools", "max_turns", "max_budget_usd", "timeout_seconds",
+        "allowed_tools", "max_turns", "max_budget_usd", "timeout_seconds", "effort",
     )
 
     def _agent_stage(
@@ -1961,28 +1974,48 @@ class KernelRuntime:
                 + ", ".join(missing)
             )
         started = time.time()
+        # The provider appends every stream line of every attempt to the stage's log as it
+        # arrives, so a killed process leaves its whole transcript, not a 1500-character tail
+        # (D-055). A provider that does not stream ignores the path and `_record_agent` writes
+        # the worker's text there instead.
+        paths.transcripts.mkdir(parents=True, exist_ok=True)
+        transcript = paths.transcripts / f"agent-{request.role}.log"
         try:
-            result = self.provider.run(request, **run_kwargs)
+            result = self.provider.run(request, transcript=transcript, **run_kwargs)
         except BaseException as exc:
             self._record_failed_agent(
-                paths, request.role, exc, started=started, model=request.model
+                paths, request.role, exc, started=started, model=request.model,
+                effort=request.effort,
             )
             raise
-        self._record_agent(paths, request.role, result, started=started)
+        self._record_agent(paths, request.role, result, started=started, effort=request.effort)
         return result
 
-    def _record_agent(self, paths: RunPaths, role: str, result: Any, *, started: float) -> None:
-        """Write the worker's text, its telemetry, and the stage's wall time."""
+    def _record_agent(
+        self,
+        paths: RunPaths,
+        role: str,
+        result: Any,
+        *,
+        started: float,
+        effort: str | None = None,
+    ) -> None:
+        """Write the worker's text (unless the provider already streamed the whole session to
+        the same file), its telemetry, and the stage's wall time."""
         ended = time.time()
         paths.transcripts.mkdir(parents=True, exist_ok=True)
-        (paths.transcripts / f"agent-{role}.log").write_text(
-            result.content + "\n", encoding="utf-8"
-        )
+        log = paths.transcripts / f"agent-{role}.log"
+        if not log.exists():
+            log.write_text(result.content + "\n", encoding="utf-8")
         wall = round(ended - started, 3)
         telemetry = {
             "role": role,
             "outcome": "ok",
             "model": getattr(result, "model", None),
+            # The level the CLI was asked for (after any configured override) and the thinking
+            # the stream showed for it, the two numbers the effort policy is tuned from (D-055).
+            "effort": getattr(result, "effort", None) or effort,
+            "thinking_tokens": getattr(result, "thinking_tokens", None),
             "session_id": getattr(result, "session_id", None),
             "num_turns": getattr(result, "num_turns", None),
             "duration_ms": getattr(result, "duration_ms", None),
@@ -2009,6 +2042,7 @@ class KernelRuntime:
             duration_ms=telemetry["duration_ms"], cost_usd=telemetry["total_cost_usd"],
             events_seen=telemetry["events_seen"],
             over_budget=telemetry["over_budget"] or None,
+            thinking_tokens=telemetry["thinking_tokens"], effort=telemetry["effort"],
         )
 
     def _record_failed_agent(
@@ -2019,6 +2053,7 @@ class KernelRuntime:
         *,
         started: float,
         model: str | None = None,
+        effort: str | None = None,
     ) -> None:
         """Write the same stage record for a worker that failed as for one that returned.
 
@@ -2041,6 +2076,9 @@ class KernelRuntime:
             "role": role,
             "outcome": "failed",
             "model": model,
+            # The request's level; the provider's carried telemetry overrides it with the
+            # level it actually rendered when it got as far as rendering one (D-055).
+            "effort": effort,
             "error_class": type(exc).__name__,
             "error": scrub(str(exc))[-4000:],
             "attempts": getattr(exc, "attempts", 1),
@@ -2063,6 +2101,8 @@ class KernelRuntime:
             timed_out=telemetry["timed_out"] or None,
             hang=telemetry.get("hang") or None,
             over_budget=telemetry["over_budget"] or None,
+            thinking_tokens=telemetry.get("thinking_tokens"),
+            effort=telemetry.get("effort"),
         )
 
     # A merge-base diff handed to reviewers and the conformance authority. Bounded so a large

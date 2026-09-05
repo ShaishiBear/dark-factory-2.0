@@ -64,6 +64,7 @@ from factory_kernel.worker_policy import (  # noqa: E402
     ROLE_MAX_TURNS,
     STAGE_WALL_HEADROOM,
     assert_caps_fit_timeout,
+    effort,
     max_turns,
     stage_budget_seconds,
     stage_timeout_seconds,
@@ -765,6 +766,7 @@ def _bounded(role: str) -> AgentRequest:
         max_turns=max_turns(role),
         max_budget_usd=12.0,
         timeout_seconds=stage_timeout_seconds(role),
+        effort=effort(role),
     )
 
 

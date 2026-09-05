@@ -7,6 +7,7 @@ repo-owned kernel.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 READ_TOOLS = ("Read", "Glob", "Grep")
 WRITE_TOOLS = (*READ_TOOLS, "Write", "Edit")
@@ -139,6 +140,66 @@ ROLE_MAX_BUDGET_USD: dict[str, float] = {
     "governor-certifier": 2.0,
 }
 
+# The effort levels the pinned CLI accepts (`claude --help` on 2.1.245 and 2.1.259: "Effort
+# level for the current session (low, medium, high, xhigh, max)"), lowest first. The CLI's
+# documentation calls effort the control on adaptive reasoning, "whether and how much to think
+# on each step"; `high` is the CLI's default on every model the factory could route to, and
+# nothing the kernel sent before D-055 named a level, so every worker ran at the default.
+EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+
+# Every worker runs at a stated effort. Build run 33992451400 (issue #103) measured the
+# `test_author` stage of a three-criterion design (one new test file) at 2025 s, 14 turns and
+# 76,248 stream events against 5,414-30,432 for the other stages: 145 s and ~5,400 events per
+# turn where the others took 16-46 s and 476-1,790, and the stream's tail was an unbroken run
+# of `thinking_tokens` events. The worker model reasons without bound at the CLI's default
+# effort, and nothing the kernel sent bounded it. Two levels, chosen from the CLI's own
+# documentation of the scale:
+#
+# - Workers (every role that edits or drafts against a checkout) run at `medium`, the level
+#   the documentation describes as "reduces token usage for cost-sensitive work that can trade
+#   off some intelligence": one notch below the default, so thinking is bounded but not
+#   disabled. `low` is documented for "short, scoped, latency-sensitive tasks that are not
+#   intelligence-sensitive", and effort is adaptive ("whether and how much to think"), so at
+#   `low` a step may not think at all; choosing what a test should assert, or how a fix should
+#   land, is intelligence-sensitive, and the defect being corrected is unbounded thinking, not
+#   thinking. The mutation roles (`test_author`, `implement`, `repair`) therefore carry the
+#   same level as the drafting roles rather than a lower one.
+# - Judges (the five validation authorities and triage) run at `high`, the CLI's default:
+#   tool-less, single-prompt calls where reasoning is the whole job and a ten-turn cap already
+#   bounds the loop. `max` is documented as "prone to overthinking"; `xhigh` is not offered on
+#   every model and would fall back silently.
+#
+# The scale is calibrated per model ("the same level name does not represent the same
+# underlying value across models"), and the factory's route is OpenRouter's Anthropic-compatible
+# endpoint to a non-Anthropic model, so whether the route honours the level at all is measured,
+# not assumed: the worker workflow's preflight runs the model at the lowest and the highest
+# level in this table and prints `FACTORY_PREFLIGHT_EFFORT_PROBE ... honoured=true|false`
+# (`scripts/factory_effort_probe.py`). That line is data for the next tuning, never a gate.
+# Changing a level is a trust-root change; `provider.effort_overrides` in kernel.json is the
+# per-deployment override, validated against EFFORT_LEVELS and this table's roles (D-055).
+WORKER_EFFORT = "medium"
+JUDGE_EFFORT = "high"
+
+ROLE_EFFORT: dict[str, str] = {
+    "triage": JUDGE_EFFORT,
+    "plan": WORKER_EFFORT,
+    "investigate": WORKER_EFFORT,
+    "contract": WORKER_EFFORT,
+    "context": WORKER_EFFORT,
+    "architecture": WORKER_EFFORT,
+    "test_author": WORKER_EFFORT,
+    "implement": WORKER_EFFORT,
+    "review-spec": WORKER_EFFORT,
+    "review-standards": WORKER_EFFORT,
+    "repair": WORKER_EFFORT,
+    "conformance": WORKER_EFFORT,
+    "holdout": JUDGE_EFFORT,
+    "architecture-holdout": JUDGE_EFFORT,
+    "contract-certifier": JUDGE_EFFORT,
+    "design-certifier": JUDGE_EFFORT,
+    "governor-certifier": JUDGE_EFFORT,
+}
+
 # The identity every kernel-made commit carries. It is the GitHub Actions bot's own noreply
 # address, which GitHub attributes to the `github-actions[bot]` account (type Bot). An earlier
 # invented noreply address mapped to no account at all, so kernel commits resolved to null:
@@ -187,6 +248,47 @@ def max_budget_usd(role: str) -> float:
     if isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap <= 0:
         raise ValueError(f"budget cap for role {role!r} must be a positive number")
     return float(cap)
+
+
+def effort(role: str) -> str:
+    """The effort level the role runs at, from the policy table; the provider renders it as
+    `--effort <level>` on every request and applies `provider.effort_overrides` on top."""
+    try:
+        level = ROLE_EFFORT[role]
+    except KeyError as exc:
+        raise ValueError(f"no effort level for role {role!r}") from exc
+    if level not in EFFORT_LEVELS:
+        raise ValueError(f"effort level for role {role!r} is not one the CLI accepts: {level!r}")
+    return level
+
+
+def effort_rank(level: str) -> int:
+    """Position on the CLI's scale, lowest first; refuses a level the CLI does not accept."""
+    try:
+        return EFFORT_LEVELS.index(level)
+    except ValueError as exc:
+        raise ValueError(
+            f"effort level {level!r} is not one the CLI accepts: {', '.join(EFFORT_LEVELS)}"
+        ) from exc
+
+
+def validate_effort_overrides(raw: object, name: str = "provider.effort_overrides") -> dict[str, str]:
+    """`{role: level}` from kernel.json, refused unless every role is one this policy knows and
+    every level is one the CLI accepts. Absent (`None`) is no override."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"kernel {name} must be an object of role to effort level")
+    overrides: dict[str, str] = {}
+    for role, level in raw.items():
+        if not isinstance(role, str) or role not in ROLE_EFFORT:
+            raise ValueError(f"kernel {name} names a role the worker policy does not know: {role!r}")
+        if not isinstance(level, str) or level not in EFFORT_LEVELS:
+            raise ValueError(
+                f"kernel {name}.{role} must be one of {', '.join(EFFORT_LEVELS)}; got {level!r}"
+            )
+        overrides[role] = level
+    return overrides
 
 
 def stage_budget_seconds(role: str) -> int | None:

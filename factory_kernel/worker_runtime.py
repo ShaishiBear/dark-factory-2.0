@@ -13,7 +13,7 @@ from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
 from .static_gate import check_files
 from .worker_policy import (
-    KERNEL_COMMIT_ARGS, allowed_tools, max_budget_usd, max_turns, may_change_repo,
+    KERNEL_COMMIT_ARGS, allowed_tools, effort, max_budget_usd, max_turns, may_change_repo,
     stage_timeout_seconds,
 )
 from .worktree import create_detached, remove
@@ -221,6 +221,9 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 # The role's own wall clock; the provider kills the process past it and
                 # records what the stream had shown (D-054).
                 timeout_seconds=stage_timeout_seconds(role),
+                # How hard each turn may think: the level the CLI is asked for by name, so no
+                # worker runs at the default that let one stage think for 2025 s (D-055).
+                effort=effort(role),
             ),
             # A transient provider error is retried by the provider with a fresh process. A
             # mutation role may have half-written the checkout before the stream dropped, so

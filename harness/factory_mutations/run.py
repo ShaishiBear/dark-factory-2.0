@@ -151,6 +151,8 @@ COPY_FILES = (
     "tests/factory/test_factory_validation_stage_telemetry.py",
     "tests/factory/test_factory_authority_bounds.py",
     "tests/factory/test_factory_stream_timeouts.py",
+    "tests/factory/test_factory_effort_and_stream_logs.py",
+    "scripts/factory_effort_probe.py",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
 

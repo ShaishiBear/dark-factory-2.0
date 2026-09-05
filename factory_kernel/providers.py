@@ -14,10 +14,11 @@ import queue
 import subprocess
 import threading
 import time
-from typing import Any, Callable, Mapping
+from typing import IO, Any, Callable, Mapping
 
 from .agents import AgentRequest, AgentResult, ProviderCapabilities
 from .config import ProviderConfig
+from .worker_policy import EFFORT_LEVELS
 
 
 class ClaudeCliProvider:
@@ -77,12 +78,27 @@ class ClaudeCliProvider:
             return self.config.timeout_seconds
         return min(request.timeout_seconds, self.config.timeout_seconds)
 
+    def effort_level(self, request: AgentRequest) -> str | None:
+        """The effort the CLI is asked for: the configured per-role override, else the
+        request's own level. Either must be one the CLI accepts; `None` renders no flag, which
+        only the kernel's funnel refuses (D-055)."""
+        level = self.config.effort_overrides.get(request.role, request.effort)
+        if level is not None and level not in EFFORT_LEVELS:
+            raise ValueError(
+                f"effort level {level!r} for role {request.role!r} is not one the CLI accepts: "
+                + ", ".join(EFFORT_LEVELS)
+            )
+        return level
+
     def run(
         self,
         request: AgentRequest,
         *,
         before_retry: Callable[[int], None] | None = None,
+        transcript: Path | str | None = None,
     ) -> AgentResult:
+        """`transcript`, when given, is the file every stdout line of every attempt is appended
+        to as it arrives, so a process the kernel kills leaves its whole stream (D-055)."""
         # The final semantic architecture holdout deliberately uses a different model family
         # from ordinary build/review workers. It is still an untrusted model judgment; the
         # deterministic architecture guard and Evidence Bundle remain authoritative.
@@ -127,6 +143,14 @@ class ClaudeCliProvider:
         # session and returns an error envelope, which the unwrap below refuses (D-025).
         if request.max_budget_usd is not None:
             argv.extend(["--max-budget-usd", f"{request.max_budget_usd:g}"])
+        # Turns bound iterations and dollars bound the resent conversation; neither bounds
+        # how long one turn thinks. The `test_author` of run 33992451400 spent 2025 s and
+        # 76,248 events on 14 turns at the CLI's default effort. The role's level
+        # (`worker_policy.ROLE_EFFORT`, overridable per deployment) is asked for by name on
+        # every request; the kernel's funnel refuses a request without one (D-055).
+        effort = self.effort_level(request)
+        if effort is not None:
+            argv.extend(["--effort", effort])
         # Run artifacts live outside the checkout. Explicitly grant only that one additional
         # directory so workers can emit their requested JSON/Markdown without broad filesystem
         # write access. Claude's normal working-directory boundary still applies to repository
@@ -155,7 +179,7 @@ class ClaudeCliProvider:
         # the process is killed, what it showed is counted, and a second hang is terminal
         # whatever the transient budget still allows (D-054).
         transient_errors: list[str] = []
-        spent = _Spent()
+        spent = _Spent(effort=effort)
         attempts_allowed = 1 + self.config.transient_retries
         hangs = 0
         for attempt in range(1, attempts_allowed + 1):
@@ -164,9 +188,12 @@ class ClaudeCliProvider:
                     before_retry(attempt)
                 _sleep(TRANSIENT_BACKOFF_SECONDS[min(attempt - 2, len(TRANSIENT_BACKOFF_SECONDS) - 1)])
             try:
-                launched = self._launch(argv, request)
+                launched = self._launch(argv, request, attempt=attempt, transcript=transcript)
                 envelope = unwrap_result_envelope(
-                    launched.envelope_text, role=request.role, events_seen=launched.events_seen
+                    launched.envelope_text,
+                    role=request.role,
+                    events_seen=launched.events_seen,
+                    thinking_tokens=launched.thinking_tokens,
                 )
             except WorkerHungError as exc:
                 spent.add(exc.envelope)
@@ -232,9 +259,18 @@ class ClaudeCliProvider:
             attempts=attempt,
             transient_errors=tuple(transient_errors),
             events_seen=spent.events_seen,
+            thinking_tokens=spent.thinking_tokens,
+            effort=effort,
         )
 
-    def _launch(self, argv: list[str], request: AgentRequest) -> CliRun:
+    def _launch(
+        self,
+        argv: list[str],
+        request: AgentRequest,
+        *,
+        attempt: int = 1,
+        transcript: Path | str | None = None,
+    ) -> CliRun:
         """One CLI process, read as it runs.
 
         Returns the run when the process exited zero; its `envelope_text` is the final
@@ -242,16 +278,39 @@ class ClaudeCliProvider:
         wall timeout is terminal and carries what the stream showed; a hang is a
         `WorkerHungError` the retry loop may retry once; a non-zero exit is classified from
         its `result` event as before (D-040).
+
+        With `transcript`, the file is opened for append before the process starts and every
+        stdout line is written to it as the reader sees it, under an `--- attempt N ---`
+        header and over an end marker saying how the process ended. A stage killed at its
+        wall or its idle clock used to leave 1500 characters of tail in its record and no
+        log at all, so what the `test_author` of run 33992451400 wrote in 34 minutes is
+        unknown; a killed process now leaves its whole stream (D-055).
         """
         env = self._worker_env(request.environment)
         wall = self.wall_seconds(request)
-        run = _stream_cli(
-            argv,
-            cwd=request.cwd,
-            env=env,
-            wall_seconds=wall,
-            idle_seconds=self.config.idle_timeout_seconds,
-        )
+        with contextlib.ExitStack() as stack:
+            tee: IO[str] | None = None
+            if transcript is not None:
+                path = Path(transcript)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tee = stack.enter_context(path.open("a", encoding="utf-8", newline="\n"))
+                tee.write(f"--- attempt {attempt} role={request.role} started={_utc_now()} ---\n")
+                tee.flush()
+            run = _stream_cli(
+                argv,
+                cwd=request.cwd,
+                env=env,
+                wall_seconds=wall,
+                idle_seconds=self.config.idle_timeout_seconds,
+                tee=tee,
+            )
+            if tee is not None:
+                tee.write(
+                    f"--- attempt {attempt} ended rc={run.returncode} timed_out={run.timed_out} "
+                    f"hung={run.hung} elapsed={run.elapsed}s events={run.events_seen} "
+                    f"thinking={run.thinking_tokens} ---\n"
+                )
+                tee.flush()
         # What the events showed, for a process that never printed its `result`. The counts
         # (turns, tokens, events) travel on the envelope so the retry loop sums them across
         # attempts like any other attempt's; the observations below are about this process.
@@ -293,7 +352,10 @@ class ClaudeCliProvider:
             # an envelope the classifier calls transient is handed to the retry loop, anything
             # else (a terminal envelope, or stdout that is not an envelope) is refused as before.
             transient = _transient_from_stdout(
-                stdout, role=request.role, events_seen=run.events_seen
+                stdout,
+                role=request.role,
+                events_seen=run.events_seen,
+                thinking_tokens=run.thinking_tokens,
             )
             if transient is not None:
                 raise transient
@@ -369,6 +431,12 @@ class CliRun:
         return len(self.events)
 
     @property
+    def thinking_tokens(self) -> int:
+        """The thinking the stream showed (`thinking_tokens`), for a process that printed its
+        `result` and for one that was killed alike."""
+        return thinking_tokens(self.events)
+
+    @property
     def result_event(self) -> dict[str, Any] | None:
         """The final `result` event, the one that carries the envelope fields."""
         for event in reversed(self.events):
@@ -414,6 +482,40 @@ def parse_events(text: str) -> list[dict[str, Any]]:
     return events
 
 
+def thinking_tokens(events: list[dict[str, Any]]) -> int:
+    """How much the stream showed the model thinking, in the CLI's own estimate.
+
+    The CLI prints `{"type":"system","subtype":"thinking_tokens","estimated_tokens":N,
+    "estimated_tokens_delta":d,...}` as thinking streams (run 33992451400 printed 76,248 of
+    them for one stage). Whether `estimated_tokens` counts from the session's start or
+    restarts with each turn is not documented, so the sum is taken in the way that is right
+    either way: the counter is walked in order, a value below the one before it is a reset,
+    and the high-water mark of every monotone run is summed. A counter that never resets is
+    one run whose mark is its final value; one that resets per turn is one run per turn. The
+    per-event `estimated_tokens_delta` is not used: summing it would be exact only if no line
+    were ever dropped and the first event after a reset carried its own value as its delta,
+    and neither is promised, whereas a high-water mark survives a missed line (D-055).
+    """
+    total = 0
+    mark: int | None = None
+    for event in events:
+        if event.get("type") != "system" or event.get("subtype") != "thinking_tokens":
+            continue
+        value = _optional_int(event.get("estimated_tokens"))
+        if value is None or value < 0:
+            continue
+        if mark is not None and value < mark:
+            total += mark
+            mark = value
+        else:
+            mark = value
+    return total + (mark or 0)
+
+
+def _utc_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 def _stream_cli(
     argv: list[str],
     *,
@@ -421,6 +523,7 @@ def _stream_cli(
     env: Mapping[str, str],
     wall_seconds: float,
     idle_seconds: float,
+    tee: IO[str] | None = None,
 ) -> CliRun:
     """Run one CLI process and read its stdout line by line as it runs.
 
@@ -431,6 +534,10 @@ def _stream_cli(
     says which clock fired and everything the process printed before it (D-054). The prompt
     travels on argv, so stdin is closed: the worker never reads it, and an open pipe is one
     more way for a print-mode CLI to wait forever.
+
+    Every stdout line is also written to `tee` and flushed as it is read, before it is
+    parsed, so the file holds exactly what the process had printed at the moment it was
+    killed (D-055).
     """
     started = time.monotonic()
     proc = subprocess.Popen(
@@ -483,6 +590,9 @@ def _stream_cli(
             err.append(line)
             continue
         out.append(line)
+        if tee is not None:
+            tee.write(line if line.endswith("\n") else line + "\n")
+            tee.flush()
         event = parse_event(line)
         if event is not None:
             events.append(event)
@@ -531,12 +641,18 @@ def _terminal_envelope(
         return partial, {}
     if not isinstance(raw, Mapping) or "is_error" not in raw:
         return partial, {}
-    envelope = ResultEnvelope(raw, events_seen=run.events_seen)
+    envelope = ResultEnvelope(
+        raw, events_seen=run.events_seen, thinking_tokens=run.thinking_tokens
+    )
     return envelope, {"subtype": str(raw.get("subtype") or "")}
 
 
 def _transient_from_stdout(
-    stdout: str, *, role: str, events_seen: int | None = None
+    stdout: str,
+    *,
+    role: str,
+    events_seen: int | None = None,
+    thinking_tokens: int | None = None,
 ) -> TransientProviderError | None:
     """The transient error a non-zero-exit CLI process printed, if that is what it printed."""
     try:
@@ -554,7 +670,7 @@ def _transient_from_stdout(
     return TransientProviderError(
         f"agent worker role={role!r} ended in error "
         f"(subtype={subtype or 'unknown'} num_turns={raw.get('num_turns')}): {detail}",
-        ResultEnvelope(raw, events_seen=events_seen),
+        ResultEnvelope(raw, events_seen=events_seen, thinking_tokens=thinking_tokens),
     )
 
 
@@ -621,7 +737,7 @@ class _Spent:
     """Telemetry summed across every attempt of one stage, so a retried stage reports what
     it actually cost rather than only its final successful process."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, effort: str | None = None) -> None:
         self.num_turns = 0
         self.duration_ms = 0
         # Dollars are known only from a `result` event. A stage whose only attempt was killed
@@ -633,6 +749,9 @@ class _Spent:
         self.cache_creation_input_tokens = 0
         self.cache_read_input_tokens = 0
         self.events_seen = 0
+        self.thinking_tokens = 0
+        # The level every attempt of this stage was asked for (D-055).
+        self.effort = effort
 
     def add(self, envelope: ResultEnvelope) -> None:
         self.num_turns += envelope.num_turns or 0
@@ -644,6 +763,7 @@ class _Spent:
         self.cache_creation_input_tokens += envelope.cache_creation_input_tokens or 0
         self.cache_read_input_tokens += envelope.cache_read_input_tokens or 0
         self.events_seen += envelope.events_seen or 0
+        self.thinking_tokens += envelope.thinking_tokens or 0
 
     def telemetry(self) -> dict[str, Any]:
         return {
@@ -655,20 +775,30 @@ class _Spent:
             "cache_creation_input_tokens": self.cache_creation_input_tokens,
             "cache_read_input_tokens": self.cache_read_input_tokens,
             "events_seen": self.events_seen,
+            "thinking_tokens": self.thinking_tokens,
+            "effort": self.effort,
         }
 
 
 class ResultEnvelope:
     """The fields the kernel keeps from the CLI's final `result` event (the same fields the
-    `--output-format json` envelope carried), plus how many stream events preceded it."""
+    `--output-format json` envelope carried), plus how many stream events preceded it and
+    how much thinking they showed."""
 
     __slots__ = (
         "content", "session_id", "num_turns", "duration_ms", "cost_usd",
         "input_tokens", "output_tokens", "cache_creation_input_tokens",
-        "cache_read_input_tokens", "subtype", "events_seen",
+        "cache_read_input_tokens", "subtype", "events_seen", "thinking_tokens",
+        "thinking_tokens_reported",
     )
 
-    def __init__(self, raw: Mapping[str, Any], *, events_seen: int | None = None) -> None:
+    def __init__(
+        self,
+        raw: Mapping[str, Any],
+        *,
+        events_seen: int | None = None,
+        thinking_tokens: int | None = None,
+    ) -> None:
         usage = raw.get("usage") if isinstance(raw.get("usage"), Mapping) else {}
         self.content = str(raw.get("result") or "").strip()
         self.session_id = _optional_str(raw.get("session_id"))
@@ -684,6 +814,17 @@ class ResultEnvelope:
         self.cache_read_input_tokens = _optional_int(usage.get("cache_read_input_tokens")) or 0
         self.subtype = _optional_str(raw.get("subtype"))
         self.events_seen = events_seen
+        # What the stream's `thinking_tokens` events showed (`providers.thinking_tokens`), the
+        # one figure a killed process and a returned one both have. The `result` event's
+        # `usage.output_tokens_details.thinking_tokens`, when the route reports it, is kept
+        # beside it for reconciling the estimate against the bill (D-055).
+        self.thinking_tokens = thinking_tokens
+        details = (
+            usage.get("output_tokens_details")
+            if isinstance(usage.get("output_tokens_details"), Mapping)
+            else {}
+        )
+        self.thinking_tokens_reported = _optional_int(details.get("thinking_tokens"))
 
     @classmethod
     def from_events(cls, run: CliRun) -> ResultEnvelope:
@@ -716,7 +857,7 @@ class ResultEnvelope:
                 )
             },
         }
-        return cls(raw, events_seen=run.events_seen)
+        return cls(raw, events_seen=run.events_seen, thinking_tokens=run.thinking_tokens)
 
     def telemetry(self) -> dict[str, Any]:
         return {
@@ -730,11 +871,17 @@ class ResultEnvelope:
             "cache_read_input_tokens": self.cache_read_input_tokens,
             "subtype": self.subtype,
             "events_seen": self.events_seen,
+            "thinking_tokens": self.thinking_tokens,
+            "thinking_tokens_reported": self.thinking_tokens_reported,
         }
 
 
 def unwrap_result_envelope(
-    stdout: str, *, role: str, events_seen: int | None = None
+    stdout: str,
+    *,
+    role: str,
+    events_seen: int | None = None,
+    thinking_tokens: int | None = None,
 ) -> ResultEnvelope:
     """Refuse anything that is not a non-error CLI result envelope.
 
@@ -760,9 +907,12 @@ def unwrap_result_envelope(
             f"(subtype={subtype or 'unknown'} num_turns={raw.get('num_turns')}): {detail}"
         )
         if is_transient_error(detail, subtype):
-            raise TransientProviderError(message, ResultEnvelope(raw, events_seen=events_seen))
+            raise TransientProviderError(
+                message,
+                ResultEnvelope(raw, events_seen=events_seen, thinking_tokens=thinking_tokens),
+            )
         raise RuntimeError(message)
-    return ResultEnvelope(raw, events_seen=events_seen)
+    return ResultEnvelope(raw, events_seen=events_seen, thinking_tokens=thinking_tokens)
 
 
 def _optional_str(value: object) -> str | None:

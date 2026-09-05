@@ -205,13 +205,15 @@ jobs:
           # This runs the pinned CLI with the same flags factory_kernel/providers.py uses for a
           # tool-less worker, against each configured model, and refuses the run unless the CLI
           # itself reports a non-error result. A factory that cannot reason at all must stop
-          # here rather than burn a validation ladder discovering it.
+          # here rather than burn a validation ladder discovering it. Every request the kernel
+          # makes names an effort level (`--effort`, D-055); the probe names a judge's.
+          worker_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
           for model in $(python3 -c 'import json;p=json.load(open(".factory/kernel.json"))["provider"];print(p["model"]);print(p.get("architecture_model") or "")'); do
             set +e
             timeout 180 claude --bare -p "Reply with exactly the word OK and nothing else." \
               --model "$model" --permission-mode dontAsk --tools "" \
               --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands \
-              --output-format json --max-turns 2 --max-budget-usd 1 > /tmp/route-probe.json 2>/tmp/route-probe.err
+              --output-format json --max-turns 2 --max-budget-usd 1 --effort high > /tmp/route-probe.json 2>/tmp/route-probe.err
             set -e
             # Reachability is the envelope's error state, never the text of `result`: a model
             # may answer a one-word prompt with an empty final message (DeepSeek does, spending
@@ -240,6 +242,13 @@ jobs:
             }
             echo "FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=$model ${verdict#* }"
           done
+          # Whether the route honours the level is measured, not assumed: the worker model
+          # twice on one fixed reasoning prompt, one turn each, at the lowest and the highest
+          # level the policy uses (scripts/factory_effort_probe.py), counting the thinking each
+          # stream showed. The line is data for tuning `worker_policy.ROLE_EFFORT`; a
+          # `honoured=false` is printed, never a refusal (D-055).
+          timeout 400 python3 scripts/factory_effort_probe.py --model "$worker_model" \
+            || echo "FACTORY_PREFLIGHT_EFFORT_PROBE model=$worker_model low_thinking=0 high_thinking=0 honoured=false error=probe-did-not-run"
 
       - name: Create disposable validation environment
         shell: bash
