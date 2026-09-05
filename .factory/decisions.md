@@ -1162,3 +1162,34 @@ Telemetry from the run: test_author 1149 s / 13 turns, the slowest stage by far;
 130 s; review-standards 176 s; conformance 217 s; quick gate 69 s. Whole build about fifty
 minutes. The test author's cost is the next throughput question; it reads test files and
 writes new ones and has the smallest prompt of the post-contract stages.
+
+---
+
+## D-044 · One publisher
+
+**Status:** recorded · **Raised:** 2026-09-05
+
+Worker run 33941987102 built issue #49 through every stage, including the new pre-commit
+static gate (D-043), and opened PR #88. It then died in `scripts/factory_protocol.py attach`:
+`factory_provenance.py publish: error: the following arguments are required: --base`.
+
+D-030 had already listed this call as a cleanup ticket: `run_attach` published provenance
+itself, and the kernel's `_attach_and_publish` published again afterwards. D-042 then made
+`--base` a required argument of `publish` so the pack records the base the branch was cut
+from. The kernel's call was updated; the duplicate, argument-less call in the script was
+not, and because it ran first it took the build down before the correct call could run.
+
+The duplicate is removed. Provenance has exactly one publisher, the kernel's
+`_attach_and_publish`, which build, resume and re-head all share and which passes the base
+the kernel recorded at the start of the build. `tests/factory/test_factory_single_publisher.py`
+pins that `run_attach` invokes no program other than `gh`, that `factory_protocol.py` never
+names the provenance program, and that every `publish` invocation in the kernel and scripts
+passes `--base` and there is exactly one. A mutation reintroduces the argument-less
+duplicate.
+
+The lesson is narrower than "delete duplicates": when a program grows a required argument,
+every caller is a site to audit, and a caller already known to be redundant is the one most
+likely to be missed.
+
+Recovery for PR #88: its artifacts are complete and its head untouched; `resume --pr 88`
+runs attach, attach, publish and the handoff from those artifacts.

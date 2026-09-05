@@ -78,6 +78,7 @@ COPY_FILES = (
     "tests/factory/test_factory_security.py",
     "tests/factory/test_factory_scripts_import.py",
     "tests/factory/test_factory_contract_shape.py",
+    "tests/factory/test_factory_single_publisher.py",
     "tests/factory/test_factory_prompt_contracts.py",
     "tests/factory/test_factory_downstream_contracts.py",
     ".factory/methods/code-review-standards.md",

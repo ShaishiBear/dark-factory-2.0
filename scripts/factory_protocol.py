@@ -173,11 +173,9 @@ def run_attach(args: argparse.Namespace) -> None:
     back = subprocess.check_output(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"], text=True)
     if not round_trip_ok(back, "contract", c):
         die("ATTACH_FAIL: contract block did not survive the PR body round trip")
-    artifacts = os.environ.get("ARTIFACTS_DIR", "").strip() or str(Path(args.contract).resolve().parent)
-    subprocess.check_call([
-        sys.executable, str(HERE / "factory_provenance.py"), "publish",
-        "--pr", str(args.pr), "--artifacts", artifacts,
-    ], cwd=ROOT)
+    # Provenance is published exactly once, by the kernel (`_attach_and_publish`), after both
+    # attach programs have run. A second publisher here died the moment publish grew a required
+    # argument (D-044); attach edits the PR body and nothing else.
     print(f"CONTRACT_ATTACHED pr={args.pr} sha256={h}")
 
 
