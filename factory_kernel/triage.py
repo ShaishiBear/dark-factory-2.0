@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from .agents import AgentRequest
 from .providers import prompt_text
 from .runtime import KernelRuntime
+from .worker_policy import allowed_tools, max_budget_usd, max_turns
 
 
 PRIORITIES = {"critical", "high", "medium", "low"}
@@ -103,11 +104,17 @@ class TriageEngine:
             ),
             context="TRIAGE INPUT:\n" + json.dumps(context, sort_keys=True),
         )
+        # Triage decides from what is in its prompt; it gets no tools, and it is bounded in
+        # turns and dollars like every other model call the kernel makes (D-052). It has no run
+        # directory, so it is the one call that does not pass through `_agent_stage`.
         result = self.runtime.provider.run(
             AgentRequest(
                 role="triage", prompt=prompt, cwd=str(self.repo_root),
                 model=self.config.provider.model, environment={},
                 structured_schema={"type": "object"},
+                allowed_tools=allowed_tools("triage"),
+                max_turns=max_turns("triage"),
+                max_budget_usd=max_budget_usd("triage"),
             )
         )
         decisions = self._validate_decisions(result.structured_output, candidates)

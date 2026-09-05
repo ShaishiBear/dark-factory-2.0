@@ -9,11 +9,35 @@ from __future__ import annotations
 READ_TOOLS = ("Read", "Glob", "Grep")
 WRITE_TOOLS = (*READ_TOOLS, "Write", "Edit")
 
+# A judge gets no tools at all. Every validation authority runs in an empty temporary directory,
+# deliberately away from the checkout, and everything it is entitled to see (the contract, the
+# diff, the RED/GREEN proof summary, the builder pack) arrives inside its prompt; the holdout
+# prompt tells it so in its first sentence. There is nothing on disk it needs to read and nothing
+# it may write, so the tool surface is empty rather than read-only: a judge that can edit a tree
+# is a defect, and a judge that can read one is no longer blinded. The provider renders this as
+# `--tools ""` (every built-in tool disabled). Until D-052 the authorities were constructed with
+# no `allowed_tools` at all and arrived here as `None`, which the provider happened to render
+# the same way; the empty surface is now the policy's statement, not the default's accident.
+# The triage worker is the same shape: MISSION.md, FACTORY_RULES.md and the candidate batch are
+# in its prompt, and it decides, it does not investigate.
+JUDGE_TOOLS: tuple[str, ...] = ()
+
+# The five validation authorities: the blinded code holdout, the architecture holdout and the
+# three pre-code certifiers. Each is a model call the kernel makes on the validation side, and
+# each is bounded exactly as a build worker is (tools, turns, dollars).
+AUTHORITY_ROLES = frozenset({
+    "holdout",
+    "architecture-holdout",
+    "contract-certifier",
+    "design-certifier",
+    "governor-certifier",
+})
+
 # Every role invoked against a repository checkout writes either run artifacts or, for the three
 # mutation roles below, candidate checkout files. The kernel separately asserts whether repository
 # changes are permitted and commits them deterministically.
 ROLE_TOOLS: dict[str, tuple[str, ...]] = {
-    "triage": (),
+    "triage": JUDGE_TOOLS,
     "plan": WRITE_TOOLS,
     "investigate": WRITE_TOOLS,
     "contract": WRITE_TOOLS,
@@ -25,11 +49,11 @@ ROLE_TOOLS: dict[str, tuple[str, ...]] = {
     "review-standards": WRITE_TOOLS,
     "repair": WRITE_TOOLS,
     "conformance": WRITE_TOOLS,
-    "holdout": (),
-    "architecture-holdout": (),
-    "contract-certifier": (),
-    "design-certifier": (),
-    "governor-certifier": (),
+    "holdout": JUDGE_TOOLS,
+    "architecture-holdout": JUDGE_TOOLS,
+    "contract-certifier": JUDGE_TOOLS,
+    "design-certifier": JUDGE_TOOLS,
+    "governor-certifier": JUDGE_TOOLS,
 }
 
 REPO_MUTATION_ROLES = frozenset({"test_author", "implement", "repair"})
@@ -88,6 +112,11 @@ ROLE_MAX_BUDGET_USD: dict[str, float] = {
     "review-standards": 4.0,
     "repair": 12.0,
     "conformance": 12.0,
+    # The authorities are ten-turn, tool-less, single-prompt judges, the same shape as triage,
+    # so they carry triage's cap. These rows existed before D-052 but nothing read them: the
+    # validation side constructed its requests without `max_budget_usd`, so the 934-second
+    # code holdout of run 33960088633 ran against no dollar bound at all. Every authority
+    # request now carries the row, and `_agent_stage` refuses a request that arrives without one.
     "holdout": 2.0,
     "architecture-holdout": 2.0,
     "contract-certifier": 2.0,
