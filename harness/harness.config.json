@@ -16,7 +16,12 @@
   "unit_count_pattern": "UNIT_PASSED tests=(\\d+)",
 
   "driver": "http",
-  "e2e_timeout_s": 180,
+  "_e2e_timeout_s": [
+    "The watchdog for the whole e2e rung. The journey now streams the locked question twice,",
+    "once from the harness side (E2E_STREAM_PROBE) and once in the browser, each bounded by",
+    "browser.response_timeout_s, plus login probes and browser startup (D-051)."
+  ],
+  "e2e_timeout_s": 360,
   "http": {
     "start": "python harness/serve.py --port {port} --with-frontend",
     "health_path": "/api/health",

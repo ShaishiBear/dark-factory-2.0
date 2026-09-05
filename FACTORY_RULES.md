@@ -140,12 +140,14 @@ The canonical end-to-end journey is `harness/e2e.py`, driven by the pinned `agen
 
 1. API floor: `/api/health` returns 200 containing `ok`; `/api/version` returns 200; anonymous `POST` and `GET /api/conversations` return 401/403.
 2. The locked fixture (`fixture_video_id`, `question` in `harness/harness.config.json`) is configured; the frontend port is resolved.
-3. Sign in with the validation account from the environment (`DARK_FACTORY_E2E_EMAIL` / `PASSWORD`).
+3. Sign in with the validation account from the environment (`DARK_FACTORY_E2E_EMAIL` / `PASSWORD`). Before any browser opens, the harness asks each boundary itself and prints the answer: the backend login (`E2E_LOGIN_PROBE`), the frontend proxy (`E2E_PROXY_PROBE`), the bootstrap marker in the app process log and the fixture in `/api/videos` (`E2E_BOOTSTRAP_SEEN`, `E2E_VIDEOS_PROBE`), and the streaming route with the locked question (`E2E_STREAM_PROBE`, which spends one of the account's daily messages and deletes its conversation).
 4. Land on `/`, screenshot `authenticated.png`.
-5. Send the locked question; observe the streaming state.
+5. Send the locked question; record the page every half second until the answer arrives (`E2E_STREAM_UI`, `stream-states.jsonl`). The "Stop response" state must have been seen at least once unless the answer arrived within one poll.
 6. A response arrives with a timestamped citation; the URL becomes `/c/<id>`.
 7. The citation carries at least two lines and eight characters of quoted transcript evidence; screenshot `citation.png`.
 8. Clicking the citation opens the modal; both the external link (`?v=<id>&t=<s>s`) and the embedded player (`/<id>?start=<s>`) point at the locked video at the exact timestamp; screenshot `citation-modal.png`.
+
+On any failure the journey writes what the browser saw (URL, snapshots, page HTML, console, network, scrubbed cookies, screenshot) and the app process log (`app-process.log`, drained by `harness/appproc.py` from the moment the app starts) under `$ARTIFACTS_DIR/e2e-evidence/`, and prints the log's last sixty lines as `E2E_APP_LOG_TAIL`. Every value of a credential-shaped environment variable, the database DSN, the JWT secret and every session cookie is scrubbed before anything is written or printed (D-051).
 
 ### Environment
 
