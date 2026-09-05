@@ -10,7 +10,6 @@ drift apart again without a red test on the application side.
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
@@ -18,9 +17,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-os.environ.setdefault("JWT_SECRET", "test-secret-please-do-not-use-in-prod")
-os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
-
+# conftest.py sets the fake JWT_SECRET / DATABASE_URL before the app is imported.
 BOOTSTRAP = Path(__file__).resolve().parents[3] / "harness" / "bootstrap_e2e.py"
 REJECTED_LEGACY_EMAIL = "dark-factory-e2e@localhost.invalid"
 
