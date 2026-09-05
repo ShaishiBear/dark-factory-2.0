@@ -1124,6 +1124,20 @@
       "find": "            transient = _transient_from_stdout(stdout, role=request.role)\n            if transient is not None:\n                raise transient\n",
       "replace": "",
       "why": "A non-zero CLI exit would again raise the generic failure before its envelope is classified, so a dropped stream is refused instead of retried (D-040)."
+    },
+    {
+      "id": "failed-stage-record-skipped",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "            self._record_failed_agent(paths, role, exc, started=started)\n            raise",
+      "replace": "            raise",
+      "why": "A worker stage that failed would again leave no agent-<role>.json and no timing row, so a dropped stream is evidenced only by the exception text (D-041)."
+    },
+    {
+      "id": "failed-stage-error-unscrubbed",
+      "file": "factory_kernel/runtime.py",
+      "find": "            \"error\": scrub(str(exc))[-4000:],",
+      "replace": "            \"error\": str(exc)[-4000:],",
+      "why": "A provider error can echo the prompt and the prompt can echo an issue body; an unscrubbed failure record would write a secret shape into an uploaded artifact."
     }
   ]
 }

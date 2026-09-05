@@ -194,24 +194,30 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         if context.strip():
             prompt = prompt.rstrip("\n") + "\n\n" + context.strip() + "\n"
         started = time.time()
-        result = self.provider.run(
-            AgentRequest(
-                role=role,
-                prompt=prompt,
-                cwd=str(cwd),
-                model=self.config.provider.model,
-                environment=dict(env),
-                allowed_tools=allowed_tools(role),
-                # A bounded loop: the CLI stops the worker at the role's cap and the provider
-                # turns that into a failed stage (D-020).
-                max_turns=max_turns(role),
-                max_budget_usd=max_budget_usd(role),
-            ),
-            # A transient provider error is retried by the provider with a fresh process. A
-            # mutation role may have half-written the checkout before the stream dropped, so
-            # the kernel restores the worktree first; the provider itself never touches Git.
-            before_retry=lambda attempt: self._restore_worktree_before_retry(role, cwd, attempt),
-        )
+        try:
+            result = self.provider.run(
+                AgentRequest(
+                    role=role,
+                    prompt=prompt,
+                    cwd=str(cwd),
+                    model=self.config.provider.model,
+                    environment=dict(env),
+                    allowed_tools=allowed_tools(role),
+                    # A bounded loop: the CLI stops the worker at the role's cap and the provider
+                    # turns that into a failed stage (D-020).
+                    max_turns=max_turns(role),
+                    max_budget_usd=max_budget_usd(role),
+                ),
+                # A transient provider error is retried by the provider with a fresh process. A
+                # mutation role may have half-written the checkout before the stream dropped, so
+                # the kernel restores the worktree first; the provider itself never touches Git.
+                before_retry=lambda attempt: self._restore_worktree_before_retry(role, cwd, attempt),
+            )
+        except BaseException as exc:
+            # A failed stage is recorded exactly as a successful one is, then the failure
+            # propagates unchanged: the record is evidence, never a verdict (D-041).
+            self._record_failed_agent(paths, role, exc, started=started)
+            raise
         self._record_agent(paths, role, result, started=started)
 
         if role == "test_author":
