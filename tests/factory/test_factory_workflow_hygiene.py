@@ -202,5 +202,31 @@ class BranchCleanupWorkflowTests(unittest.TestCase):
         self.assertLess(guard_tip, delete)
         self.assertIn("BRANCH_CLEANUP_OK deleted=$deleted kept=$kept", self.jobs)
 
+
+class ValidationDatabaseTests(unittest.TestCase):
+    """D-053: the validation database is pgvector, as production's compose stack is.
+
+    Retrieval casts the embedding column with ``::vector`` at query time, so a plain
+    ``postgres`` image ingests fine and fails every search with ``type "vector" does not
+    exist``; the browser journey could never see a citation and nothing said why until
+    D-051 kept the app log. Migration 0006 creates the extension; the server image must
+    ship it, and the trust root pins that image in both workflows that provision the
+    disposable validation database."""
+
+    def image_of(self, path: Path) -> str:
+        text = path.read_text(encoding="utf-8")
+        block = text.split("    services:\n      postgres:\n", 1)[1].split("        env:", 1)[0]
+        match = re.search(r"^\s*image: (\S+)$", block, re.M)
+        self.assertIsNotNone(match, f"{path.name}: postgres service has no image line")
+        return match.group(1)
+
+    def test_both_workflows_provision_a_pgvector_postgres(self) -> None:
+        for path in (WORKER, REGRESSION):
+            image = self.image_of(path)
+            self.assertTrue(image.startswith("pgvector/pgvector:"), f"{path.name}: {image}")
+            # Same major as production (deploy/docker-compose.yml pins pgvector/pgvector:pg16).
+            self.assertEqual(image, "pgvector/pgvector:pg16", path.name)
+
+
 if __name__ == "__main__":
     unittest.main()

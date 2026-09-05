@@ -1716,3 +1716,54 @@ were bounded in tools, turns and dollars, so an outlier in them is a slow model,
 loop. A future authority added without its bounds fails the AST pin at test time and the
 funnel at run time; a future one added with a widened surface fails the rehearsal's
 no-authority-can-write check.
+## D-053 · The validation database is pgvector, because production's is and the retrieval SQL says `::vector`
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33963509318 (main regression, the first run carrying D-051's evidence)
+
+The first run to keep its app log named the streaming step's cause in one line. The
+bootstrap printed `E2E_BOOTSTRAP_OK fixture_video_id=pjF-0dliYhg chunks=209`, so the fixture
+ingested; on the question the backend printed `WARNING:backend.rag.tools:search_hybrid
+failed: type "vector" does not exist`, raised from `vector_search_pg` in
+`app/backend/db/repository.py` (`asyncpg.exceptions.UndefinedObjectError`), and the same
+for `search_semantic`. Both `dark-factory-worker.yml` and `dark-factory-main-regression.yml`
+provisioned the validation database from the plain `postgres:16` service image, which does
+not ship pgvector, and no migration created the extension: `0001_initial.py` creates
+`citext` and `pgcrypto` and nothing else. Production runs `pgvector/pgvector:pg16`
+(`deploy/docker-compose.yml`) and its extension was evidently created by hand once. The
+embedding column is TEXT, cast with `::vector` only at query time, so ingestion succeeds
+everywhere and only retrieval fails, degrading every answer to "no sources". The browser
+journey could never have seen a citation in validation, and every autonomous PR would have
+failed its E2E on a defect that was never the PR's.
+
+**Decision.** The validation database is the production image, and the schema creates the
+extension it depends on.
+
+- Both workflows' `postgres` service image is `pgvector/pgvector:pg16`, the same major as
+  production. The health-check options and everything else are unchanged;
+  `test_service_block_is_the_workers_verbatim` keeps the two blocks identical.
+- Migration `0006_pgvector_extension.py` runs `CREATE EXTENSION IF NOT EXISTS vector`.
+  pgvector is marked trusted, so the database owner (the app's own connection) can create
+  it without superuser rights. Downgrade is a no-op: dropping the extension would refuse
+  while any object of type `vector` exists or cascade to those objects, a shared database
+  may have other users of it, and unused it is harmless. This is the only product-code
+  change and, being a schema change, an Alembic migration as CLAUDE.md requires.
+- `deploy/README.md` says the migration creates the extension, so a fresh production
+  database needs no manual step.
+
+Pinned by `app/backend/tests/test_migration_pgvector_extension.py` (0006 follows 0005 and is
+the sole head; `upgrade()` issues exactly that statement through a fake `op`; `downgrade()`
+issues nothing; no database) and by `ValidationDatabaseTests` in
+`tests/factory/test_factory_workflow_hygiene.py` (both workflows' postgres image starts with
+`pgvector/pgvector:` and pins `pg16`); `test_worker_provisions_disposable_validation_state`
+in `tests/factory/test_factory_github_e2e_bootstrap.py`, which pinned the literal
+`postgres:16`, now pins `image: pgvector/pgvector:pg16`. Mutation
+`validation-db-without-pgvector` (the worker's image reverted to `postgres:16`) is caught.
+
+**Consequences.** The next validation or main-regression run reaches the citation step with
+retrieval working; whatever fails there next is a new cause. The validation database is
+disposable, so no existing database needs `CREATE EXTENSION` by hand; production already
+has the extension and `IF NOT EXISTS` makes the migration a no-op there. On a plain
+`postgres` image the migration now fails startup loudly instead of retrieval failing
+quietly per query. The embedding column is still TEXT cast at query time
+(`vector_search_pg`'s docstring says so); moving it to `vector(1536)` with an HNSW index is
+a separate decision.

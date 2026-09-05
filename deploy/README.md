@@ -109,7 +109,9 @@ cp /app/data/chat.db /app/data/chat.db.$(date +%s).bak
 ```
 
 ### Step 2 — Run Alembic migrations (first deploy with new build)
-The app runs `alembic upgrade head` automatically on startup.
+The app runs `alembic upgrade head` automatically on startup. Migration `0006` runs
+`CREATE EXTENSION IF NOT EXISTS vector` itself (pgvector is a trusted extension, so the
+app's database owner may), so a fresh production database needs no manual step.
 Verify it succeeded:
 ```bash
 docker compose exec app-blue alembic --config /app/backend/alembic.ini current
