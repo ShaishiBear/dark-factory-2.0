@@ -1337,3 +1337,59 @@ reset. PR #93's refusal class is `evidence_spine`, not `stale_base`, so it is no
 re-head eligible, and its head carries the old bootstrap literal; #93 is closed and #49
 rebuilt on a main that contains this fix. The next validation is the first in which the
 browser is asked to log in with an account the route accepts.
+
+## D-048 · The blinded code holdout is shown the RED evidence, because a judge shown only GREEN is right to refuse
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33955178802 (validation of PR #96, kernel 08067a0)
+
+The first validation to reach the blinded code holdout with a green browser E2E behind it
+was refused by the holdout itself, with a HIGH finding: "RED-first proof is not established
+by the supplied evidence ... the proof_summary supplies only green evidence", and a MEDIUM
+that pre-existing-test invariants were asserted but not demonstrated. The diff was three
+lines plus four acceptance tests and had passed the same holdout twice on earlier heads.
+
+**What was actually wrong.** Not the judge. `validate_pr` built the holdout's
+`proof_summary` from `test_commit`, `green_commit` and `green_results` only. The kernel had
+replayed RED at the test-author commit, checked every checkpoint failed for its declared
+reason, hashed the acceptance files, replayed GREEN at the head and verified the hashes
+again; none of that reached the judge. The holdout prompt says an absence of enough evidence
+to establish a material claim is a blocking finding. A judge that refuses on a missing
+RED-first proof when shown only GREEN is doing its job. The two earlier passes on the same
+diff were judge variance on an evidence gap, which is the worse outcome: a gate that passes
+or fails by mood is not a gate.
+
+**Decision.** Supply the evidence; do not soften the judge.
+
+- `proof_summary` now carries `red_results` (per checkpoint: `acceptance_id`, the non-zero
+  `red_exit`, `expected_failure`, whether it is `matched` in the excerpt, and a sanitised
+  `red_output_tail` of at most 600 characters placed so the expected failure is visible),
+  `red_files` (the immutable acceptance files with the SHA-256 RED recorded), `red_commit`
+  (equal to `test_commit`) and `preexisting_tests` (a count of `it(`, `test(` and
+  `def test_` definitions at base and at head for every test-shaped file the diff touches),
+  alongside the `green_results` it always had.
+- The RED half is sourced from the attached final proof and cross-checked against the
+  note-bound builder pack: the RED commit and the file map must agree, every checkpoint must
+  record a failing exit and a declared expected failure, or the run refuses at
+  `attached_evidence` before any judge is asked to trust it.
+- The pack fetch and `verify_pack` therefore run before the code holdout, not after. Both
+  are deterministic and model-free; the holdout's blinding is unchanged (contract, changed
+  files, diff, proof summary, nothing else). FACTORY_RULES §3 steps 4 and 5 swap.
+- `.factory/prompts/holdout.md` states what the kernel has already proved deterministically
+  (RED at the RED commit, GREEN at the head, immutable hash-verified acceptance files, static
+  checks, the full harness running after the verdict) and what the judge must decide (the
+  diff satisfies the contract without collateral change; any deletion or weakening of
+  existing tests is visible in the diff and the counts; nothing beyond scope). The pass/fail
+  output shape is unchanged.
+
+Pinned by `tests/factory/test_factory_holdout_evidence.py` through the rehearsal harness
+(the holdout context carries failing `red_exit` and `expected_failure` per checkpoint,
+`red_commit`, hashed `red_files`, base/head counts, GREEN kept, pack fetch and
+`verify_pack` precede the holdout in the trace, malformed or disagreeing RED evidence
+refuses before the holdout runs) and a snapshot of the prompt's proved-claims and
+judged-questions sections. Mutations `holdout-shown-only-green` and
+`pack-verified-after-holdout` are caught.
+
+**Consequences.** The attempt marker this refusal wrote on #49 is factory-caused and is
+reset by the overseer. PR #96's head is untouched and its refusal class is `code_holdout`,
+which is validator-side, so it can be validated again on a main that contains this fix
+without a re-head or a rebuild.

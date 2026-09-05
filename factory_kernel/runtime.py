@@ -51,7 +51,7 @@ from .repro import (
 from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
 from .trusted_programs import resolve_trusted_program
-from .attached import extract_block
+from .attached import extract_block, sanitise_output
 from .worker_policy import BUILDER_BLIND_PATHS, KERNEL_COMMIT_NAME, KERNEL_COMMIT_ARGS, max_turns
 from .worktree import Worktree, create_detached, remove
 
@@ -797,22 +797,6 @@ class KernelRuntime:
             ).splitlines()
             policy = self._read_json(worktree.path / ".factory/architecture.json")
 
-            holdout_context = {
-                "contract": contract,
-                "changed_files": sorted(x for x in changed if x),
-                "diff_sha256": hashlib.sha256(patch.encode()).hexdigest(),
-                "diff": patch,
-                "proof_summary": {
-                    "test_commit": proof.get("test_commit"),
-                    "green_commit": proof.get("green_commit"),
-                    "green_results": proof.get("green_results"),
-                },
-            }
-            stage = "code_holdout"
-            verdict = self._run_blinded_holdout(paths, holdout_context)
-            if verdict.get("verdict") != "pass":
-                raise NeedsHuman("blinded holdout rejected PR")
-
             stage = "provenance"
             # GitHub's baseRefOid is the current tip of main. The pack declares the base the
             # branch was actually cut from; when the two differ, main moved under the PR, and
@@ -829,7 +813,30 @@ class KernelRuntime:
                             f"{pack_base}, current {base}; main moved under the PR"
                         ),
                     )
+            # The pack is fetched and verified before the code holdout runs, not after: the
+            # holdout's proof summary carries the RED evidence, and the note-bound red-proof is
+            # the source the attached block is checked against. Both steps are deterministic and
+            # model-free, so nothing about the holdout's blinding changes (D-048).
             pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)
+
+            stage = "attached_evidence"
+            changed_files = sorted(x for x in changed if x)
+            proof_summary = self._holdout_proof_summary(
+                proof, pack, changed_files=changed_files,
+                worktree=worktree.path, base=base, head=head,
+            )
+            holdout_context = {
+                "contract": contract,
+                "changed_files": changed_files,
+                "diff_sha256": hashlib.sha256(patch.encode()).hexdigest(),
+                "diff": patch,
+                "proof_summary": proof_summary,
+            }
+            stage = "code_holdout"
+            verdict = self._run_blinded_holdout(paths, holdout_context)
+            if verdict.get("verdict") != "pass":
+                raise NeedsHuman("blinded holdout rejected PR")
+
             stage = "architecture_holdout"
             architecture_holdout = self._run_architecture_holdout(
                 paths,
@@ -1366,6 +1373,135 @@ class KernelRuntime:
             pass
 
     # ---------- independent holdouts ----------
+
+    # The failing-output excerpt each RED checkpoint contributes to the holdout's evidence.
+    HOLDOUT_RED_TAIL_CHARS = 600
+
+    # Paths the pre-existing-test count covers: anything the diff touches that is test-shaped.
+    _TEST_PATH = re.compile(
+        r"(?:^|/)(?:tests?|__tests__)/|\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|/)test_[^/]*\.py$"
+        r"|_test\.py$"
+    )
+    # One test definition: `it(`, `test(`, or `def test_`. Counted at base and head so the judge
+    # can see whether the diff removed tests it did not show being removed.
+    _TEST_DEFINITION = re.compile(r"\b(?:it|test)\s*\(|\bdef\s+test_")
+
+    def _holdout_proof_summary(
+        self,
+        proof: Mapping[str, Any],
+        pack: Mapping[str, Any],
+        *,
+        changed_files: list[str],
+        worktree: Path,
+        base: str,
+        head: str,
+    ) -> dict[str, Any]:
+        """Everything the kernel has already proved, in the form a tool-less judge can read.
+
+        A blinded judge shown only GREEN results cannot establish that the acceptance tests
+        ever failed, and a careful one refuses on that gap (D-048). The RED half of the proof is
+        deterministic evidence the kernel holds twice: in the attached final proof (which is the
+        RED proof plus the GREEN replay) and in the note-bound builder pack. This cross-checks
+        the two, then hands the judge the per-checkpoint RED outcome, the immutable acceptance
+        file hashes, and a base-versus-head count of test definitions in every test file the
+        diff touches. Nothing here is a judgement; the judge still decides.
+        """
+        red_proof = pack["artifacts"]["red-proof"]["content"]
+        test_commit = str(proof.get("test_commit") or "")
+        red_commit = str(red_proof.get("test_commit") or "")
+        if not test_commit or test_commit != red_commit:
+            raise NeedsHuman(
+                "attached proof and builder provenance disagree on the RED test commit"
+            )
+        red_files = red_proof.get("files")
+        if not isinstance(red_files, Mapping) or not red_files:
+            raise NeedsHuman("RED proof in the provenance pack has no immutable file map")
+        attached_files = proof.get("files")
+        if isinstance(attached_files, Mapping) and dict(attached_files) != dict(red_files):
+            raise NeedsHuman(
+                "attached proof and builder provenance disagree on the immutable acceptance files"
+            )
+        checkpoints = proof.get("checkpoints")
+        if not isinstance(checkpoints, list) or not checkpoints:
+            raise NeedsHuman("attached proof carries no RED checkpoints")
+        red_results: list[dict[str, Any]] = []
+        for checkpoint in checkpoints:
+            if not isinstance(checkpoint, Mapping):
+                raise NeedsHuman("attached proof carries a malformed RED checkpoint")
+            acceptance_id = str(checkpoint.get("acceptance_id") or "")
+            red_exit = checkpoint.get("red_exit")
+            expected = checkpoint.get("expected_failure")
+            if not isinstance(red_exit, int) or isinstance(red_exit, bool) or red_exit == 0:
+                raise NeedsHuman(
+                    f"RED checkpoint {acceptance_id or '?'} did not record a failing exit"
+                )
+            if not isinstance(expected, str) or not expected.strip():
+                raise NeedsHuman(
+                    f"RED checkpoint {acceptance_id or '?'} declares no expected failure"
+                )
+            tail = sanitise_output(str(checkpoint.get("red_output_tail") or ""))
+            excerpt, matched = self._red_excerpt(tail, expected, self.HOLDOUT_RED_TAIL_CHARS)
+            red_results.append(
+                {
+                    "acceptance_id": acceptance_id,
+                    "red_exit": red_exit,
+                    "expected_failure": expected,
+                    "matched": matched,
+                    "red_output_tail": excerpt,
+                }
+            )
+        return {
+            "test_commit": test_commit,
+            "green_commit": proof.get("green_commit"),
+            "green_results": proof.get("green_results"),
+            "red_commit": red_commit,
+            "red_files": {str(k): str(v) for k, v in sorted(red_files.items())},
+            "red_results": red_results,
+            "preexisting_tests": self._preexisting_tests(
+                worktree, base=base, head=head, changed_files=changed_files
+            ),
+        }
+
+    @staticmethod
+    def _red_excerpt(tail: str, expected: str, limit: int) -> tuple[str, bool]:
+        """A bounded excerpt of the failing output, placed so the expected failure is visible.
+
+        `matched` is whether the expected failure appears in the stored tail at all; the RED
+        program matched it against the full output at test time, so a False here means only
+        that the evidence has scrolled out of the retained tail, not that RED was wrong.
+        """
+        index = tail.lower().find(expected.lower())
+        if index < 0:
+            return tail[-limit:], False
+        end = min(len(tail), index + len(expected) + limit // 3)
+        return tail[max(0, end - limit):end], True
+
+    def _preexisting_tests(
+        self, worktree: Path, *, base: str, head: str, changed_files: list[str]
+    ) -> list[dict[str, Any]]:
+        """Test-definition counts at base and head for every test-shaped file the diff touches."""
+        counts: list[dict[str, Any]] = []
+        for rel in changed_files:
+            if not self._TEST_PATH.search(rel):
+                continue
+            at_base = self._show_file(worktree, base, rel)
+            at_head = self._show_file(worktree, head, rel)
+            counts.append(
+                {
+                    "path": rel,
+                    "base": len(self._TEST_DEFINITION.findall(at_base or "")),
+                    "head": len(self._TEST_DEFINITION.findall(at_head or "")),
+                    "present_at_base": at_base is not None,
+                    "present_at_head": at_head is not None,
+                }
+            )
+        return counts
+
+    def _show_file(self, worktree: Path, commit: str, rel: str) -> str | None:
+        try:
+            return self._git("show", f"{commit}:{rel}", cwd=worktree)
+        except RuntimeError:
+            return None  # absent at that commit (added or deleted by the diff)
 
     def _run_blinded_holdout(
         self, paths: RunPaths, context: Mapping[str, Any]

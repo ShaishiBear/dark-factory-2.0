@@ -53,6 +53,7 @@ COPY_FILES = (
     "scripts/factory_evidence.py",
     "scripts/factory_evidence_spine.py",
     "scripts/factory_provenance.py",
+    "scripts/factory_lease.py",
     "scripts/factory_protocol.py",
     "scripts/factory_artifacts.py",
     "scripts/factory_shapes.py",
@@ -144,6 +145,7 @@ COPY_FILES = (
     "tests/factory/test_factory_mutation_ownership.py",
     "tests/factory/test_factory_spine.py",
     "tests/factory/test_factory_evidence_spine_runtime.py",
+    "tests/factory/test_factory_holdout_evidence.py",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
 

@@ -29,6 +29,7 @@ pass for the wrong reason -- the same trap as a mutation run reporting zero caug
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from dataclasses import dataclass, field
@@ -66,6 +67,16 @@ from factory_kernel.refusal import ToolRefused  # noqa: E402
 CHANGED_FILES: tuple[str, ...] = ("app/backend/main.py",)
 HEAD = "1" * 40
 BASE = "2" * 40
+TEST_COMMIT = "3" * 40   # the test-author commit RED binds to, in the pack and the attached proof
+# The acceptance file a rehearsed PR adds, hashed as RED records it. The pack, the attached
+# proof and the range diff all name it, exactly as they do for a real factory PR.
+DEFAULT_RED_FILES: dict[str, str] = {
+    "tests/red_test.py": hashlib.sha256(b"assert True\n").hexdigest(),
+}
+RED_OUTPUT_TAIL = (
+    "FAILED tests/red_test.py::test_ac1 - AssertionError: expected the snippet to survive\n"
+    "1 failed in 0.02s\n"
+)
 NEW_HEAD = "4" * 40   # the tip after a rehearsed rebase
 NEW_TEST_COMMIT = "6" * 40   # the rebased test-author commit (an ancestor of NEW_HEAD)
 RED_SUBJECT = "test(factory): prove acceptance contract red"
@@ -99,6 +110,7 @@ class Trace:
     refusal_record: dict | None = None  # validation-refusal.json, if the run wrote one
     rehead_red_proof: dict | None = None  # red-proof.json a re-head re-issued, if any
     rehead_red_spec: dict | None = None   # rehead-test-spec.json a re-head reconstructed, if any
+    agent_prompts: dict[str, list[str]] = field(default_factory=dict)  # per role, verbatim
 
     def record(self, kind: str, name: str, *, argv: tuple[str, ...] = (), cwd: str = "") -> None:
         self.steps.append(Step(kind, name, argv, cwd))
@@ -140,6 +152,7 @@ def builder_pack(
     def rec(content: dict, source: str = "note") -> dict:
         return {"content": content, "sha256": sha256_value(content), "source": source}
 
+    files = DEFAULT_RED_FILES if red_files is None else dict(red_files)
     contract = rec({"version": "1.0", "issue": {"number": issue},
                     "acceptance_criteria": [{"id": "AC1", "text": "it works"}]})
     tickets = rec({"version": "1.0", "issue": issue, "contract_sha256": contract["sha256"]})
@@ -151,11 +164,11 @@ def builder_pack(
     artifacts = {
         "contract": contract, "tickets": tickets, "frontier": frontier,
         "context": context, "design": design,
-        "red-proof": rec({"version": "2.0", "claim": "red-proof", "test_commit": "3" * 40,
-                          "files": dict(red_files or {}),
+        "red-proof": rec({"version": "2.0", "claim": "red-proof", "test_commit": TEST_COMMIT,
+                          "files": files,
                           "checkpoints": [{"acceptance_id": "AC-1", "cwd": ".",
                                            "argv": ["pytest", "tests/red_test.py"],
-                                           "files": sorted(red_files or {}),
+                                           "files": sorted(files),
                                            "expected_failure": "AssertionError"}]}),
     }
     for claim in BUILDER_CLAIMS:
@@ -175,17 +188,19 @@ class FakeGitHub:
                  prs: tuple[Mapping[str, Any], ...] = (),
                  author: str = "github-actions[bot]",
                  author_type: str = "Bot",
-                 issue_labels: tuple[str, ...] = ("factory:needs-human",)) -> None:
+                 issue_labels: tuple[str, ...] = ("factory:needs-human",),
+                 red_files: Mapping[str, str] | None = None) -> None:
         self.trace = trace
         self.cwd = "."
         self._state = state
         self._labels = labels
         self._author = author
         self._author_type = author_type
+        self._red_files = red_files
         self._issue_labels = issue_labels
         self._head = head
         self._base = base
-        self._body = body if body is not None else _pr_body()
+        self._body = body if body is not None else _pr_body(red_files)
         self.refuse_issue_creation = refuse_issue_creation
         self.body = ""
         self._comments = list(comments)
@@ -282,6 +297,7 @@ class FakeProvider:
     def run(self, request: Any, **_provider_kwargs: Any) -> AgentResult:
         role = request.role
         self.trace.record("agent", role)
+        self.trace.agent_prompts.setdefault(role, []).append(request.prompt)
         if role not in AUTHORITY_ROLES:
             # A build-side worker (the re-head runs `conformance`): it writes nothing here, the
             # deterministic compiler that follows it is recorded like every other gate.
@@ -317,11 +333,26 @@ class FakeProvider:
                            content=json.dumps(value), structured_output=value)
 
 
-def _pr_body() -> str:
-    """The attachment format the real _extract_attached parses, not an approximation of it."""
+def _pr_body(red_files: Mapping[str, str] | None = None) -> str:
+    """The attachment format the real _extract_attached parses, not an approximation of it.
+
+    The proof is shaped like a real final GREEN proof: the RED proof (checkpoints carrying their
+    failing exit and output tail, the immutable file map) plus the GREEN replay. The validator
+    builds the holdout's RED evidence from it, so a body that only said "green" would rehearse
+    the very gap D-048 closed.
+    """
+    files = DEFAULT_RED_FILES if red_files is None else dict(red_files)
     contract = {"version": "1.0", "issue": {"number": ISSUE_NUMBER}}
-    proof = {"version": "1.0", "test_commit": "3" * 40, "green_commit": HEAD,
-             "green_results": {"passed": 1}}
+    proof = {
+        "version": "2.0", "test_commit": TEST_COMMIT, "files": files,
+        "checkpoints": [{
+            "acceptance_id": "AC-1", "cwd": ".", "argv": ["pytest", "tests/red_test.py"],
+            "files": sorted(files), "expected_failure": "AssertionError", "red_exit": 1,
+            "red_output_tail": RED_OUTPUT_TAIL,
+        }],
+        "green_commit": HEAD,
+        "green_results": [{"acceptance_id": "AC-1", "exit": 0, "output_sha256": "0" * 64}],
+    }
     def block(kind: str, value: dict) -> str:
         return (f"<!-- factory-{kind}:start -->\n```factory-{kind}\n"
                 + json.dumps(value) + "\n```\n<!-- factory-" + kind + ":end -->\n")
@@ -365,7 +396,8 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
             at = (git_state or {}).get("head", HEAD)
             for out in outputs:
                 Path(out).write_text(json.dumps({
-                    "version": "2.0", "test_commit": at, "files": dict(red_files or {}),
+                    "version": "2.0", "test_commit": at,
+                    "files": DEFAULT_RED_FILES if red_files is None else dict(red_files),
                     "checkpoints": [{"acceptance_id": "AC-1"}],
                 }), encoding="utf-8")
         if tool == "factory_evidence.py":
@@ -430,6 +462,9 @@ class Scenario:
     artifacts: Mapping[str, dict] | None = None  # resume: builder artifacts by relative name
     rebased_log: tuple[tuple[str, str], ...] | None = None  # (sha, subject) after a rebase
     red_passes_after_rebase: bool = False  # a RED checkpoint no longer fails after the rebase
+    # What `git show <commit>:<path>` returns for a path, as (text at BASE, text at any other
+    # commit); None on either side means the file is absent there.
+    file_history: Mapping[str, tuple[str | None, str | None]] | None = None
 
 
 def rehearse(scenario: Scenario) -> Trace:
@@ -471,7 +506,7 @@ def rehearse(scenario: Scenario) -> Trace:
             refuse_issue_creation=scenario.refuse_issue_creation,
             comments=scenario.comments, prs=scenario.prs,
             author=scenario.author, author_type=scenario.author_type,
-            issue_labels=scenario.issue_labels)
+            issue_labels=scenario.issue_labels, red_files=scenario.red_files)
         artifacts_dir = home / "uploaded-artifacts"
         if scenario.artifacts is not None:
             artifacts_dir.mkdir()
@@ -506,9 +541,21 @@ def rehearse(scenario: Scenario) -> Trace:
                     return "".join(f"{path}\n" for path in sorted(scenario.red_files or {}))
                 return "".join(f"{path}\n" for path in CHANGED_FILES)
             if args[:1] == ("diff",) and "--name-only" in args:
-                return "".join(f"{path}\n" for path in CHANGED_FILES)
+                # The range diff names the production files and the acceptance tests RED
+                # hashed: a factory PR always adds its own tests.
+                red = DEFAULT_RED_FILES if scenario.red_files is None else scenario.red_files
+                return "".join(f"{path}\n" for path in (*CHANGED_FILES, *sorted(red)))
             if args[:1] == ("diff",):
                 return "diff --git a/app/backend/main.py b/app/backend/main.py\n"
+            if args[:1] == ("show",) and len(args) == 2 and ":" in args[1]:
+                commit, _, rel = args[1].partition(":")
+                trace.record("control", f"git:show:{rel}")
+                history = (scenario.file_history or {}).get(rel)
+                text = None if history is None else (history[0] if commit == BASE else history[1])
+                if text is None:
+                    raise ToolRefused(["git", *args], rc=128,
+                                      output=f"fatal: path '{rel}' does not exist in '{commit}'")
+                return text
             if "rebase" in args:
                 trace.record("control", "git:rebase")
                 if "--abort" in args:
@@ -559,7 +606,18 @@ def rehearse(scenario: Scenario) -> Trace:
             trace.record("control", f"worktree_blind={'yes' if blind else 'no'}")
             return worktree
 
+        from factory_kernel import runtime as runtime_module
+
+        real_verify_pack = runtime_module.verify_pack
+
+        def recorded_verify_pack(*args: Any, **kwargs: Any) -> Any:
+            # The real verifier runs; the trace only learns *when* it ran, so ordering claims
+            # about "the pack is verified before X" are about the verification, not the fetch.
+            trace.record("control", "verify_pack")
+            return real_verify_pack(*args, **kwargs)
+
         with mock.patch("factory_kernel.runtime.create_detached", side_effect=fake_create_detached), \
+             mock.patch("factory_kernel.runtime.verify_pack", side_effect=recorded_verify_pack), \
              mock.patch("factory_kernel.runtime.remove") as removed:
             try:
                 if scenario.command == "validate":

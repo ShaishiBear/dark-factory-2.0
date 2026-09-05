@@ -358,7 +358,7 @@ class ReheadTests(unittest.TestCase):
         self.assertFalse(any(n.startswith("push_branch") for n in t.names()))
 
     def test_a_pack_without_an_immutable_file_map_refuses(self):
-        t = rehearse(stale_pr_scenario("no-red-map", red_files=None))
+        t = rehearse(stale_pr_scenario("no-red-map", red_files={}))
         self.assertEqual(t.outcome, "NeedsHuman")
         self.assertIn("immutable file map", t.error)
 
