@@ -1320,6 +1320,69 @@
       "find": "        require(\"bootstrap ingested the locked fixture\", bootstrapped, bootstrap_detail)\n",
       "replace": "        require(\"bootstrap ingested the locked fixture\", True, bootstrap_detail)\n",
       "why": "A run whose fixture ingestion never printed E2E_BOOTSTRAP_OK would still open a browser and fail at the streaming step with the missing fixture unnamed (D-051)."
+    },
+    {
+      "id": "validation-stage-records-nothing",
+      "file": "factory_kernel/runtime.py",
+      "find": "            result = self._agent_stage(\n                paths,\n                AgentRequest(\n                    role=\"holdout\",\n",
+      "replace": "            result = self.provider.run(\n                AgentRequest(\n                    role=\"holdout\",\n",
+      "why": "The blinded code holdout would call the provider directly again and leave no agent-holdout.* record and no timing row, which is how 25 minutes of run 33960088633 went unrecorded; caught by tests/factory/test_factory_validation_stage_telemetry.py (the provider.run funnel pin and the rehearsal's per-authority records) (D-050)."
+    },
+    {
+      "id": "stage-line-dropped",
+      "file": "factory_kernel/runtime.py",
+      "find": "    print(stage_line(row), flush=True)\n",
+      "replace": "",
+      "why": "No FACTORY_STAGE line would be printed as a stage ends, so the Actions log would again be silent between the dispatch banner and the traceback; caught by tests/factory/test_factory_validation_stage_telemetry.py (a stage line for every validation role, the agent and exec line shapes) (D-050)."
+    },
+    {
+      "id": "stage-line-unflushed",
+      "file": "factory_kernel/runtime.py",
+      "find": "    print(stage_line(row), flush=True)\n",
+      "replace": "    print(stage_line(row))\n",
+      "why": "Under Actions the kernel's stdout is a pipe, so an unflushed stage line reaches the job log only when the process exits, which is exactly when it stops being useful; caught by tests/factory/test_factory_validation_stage_telemetry.py (test_the_line_is_flushed) (D-050)."
+    },
+    {
+      "id": "over-budget-never-set",
+      "file": "factory_kernel/runtime.py",
+      "find": "    budget = stage_budget_seconds(role)\n    return budget is not None and wall_seconds > budget\n",
+      "replace": "    return False\n",
+      "why": "A stage that outlived its turn cap at the per-turn ceiling (the 934-second holdout of run 33960088633 against 350 s) would carry no over_budget flag in its record, row or line, and the caps could not be tuned from the data; caught by tests/factory/test_factory_validation_stage_telemetry.py (OverBudgetTests) (D-050)."
+    },
+    {
+      "id": "holdout-budget-dropped",
+      "file": "factory_kernel/runtime.py",
+      "find": "                    max_budget_usd=max_budget_usd(\"holdout\"),\n",
+      "replace": "",
+      "why": "The blinded code holdout would run with no dollar bound again, as it did for 934 seconds in run 33960088633; caught by tests/factory/test_factory_authority_bounds.py (every request site names every bound by AST, the funnel refuses the unbounded request, and the provider argv carries --max-budget-usd) (D-052)."
+    },
+    {
+      "id": "certifier-tools-widened",
+      "file": "factory_kernel/runtime.py",
+      "find": "                    structured_schema={\"type\": \"object\"},\n                    allowed_tools=allowed_tools(role),\n",
+      "replace": "                    structured_schema={\"type\": \"object\"},\n                    allowed_tools=(*allowed_tools(role), \"Write\"),\n",
+      "why": "A pre-code certifier could write files: a judge that can edit a tree is a defect, and the bound must be the policy's own value rather than a widened copy of it; caught by tests/factory/test_factory_authority_bounds.py (the AST pin that each bound is worker_policy.<bound>(role), and the rehearsal's no-authority-can-write check) (D-052)."
+    },
+    {
+      "id": "agent-stage-accepts-unbounded-request",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if missing:\n            raise RuntimeError(\n                f\"agent request for role {request.role!r} is unbounded: missing \"\n",
+      "replace": "        if False:\n            raise RuntimeError(\n                f\"agent request for role {request.role!r} is unbounded: missing \"\n",
+      "why": "The one funnel a model is run through would pass a request missing a tool policy, a turn cap or a budget straight to the provider, which renders no flag for an absent value; caught by tests/factory/test_factory_authority_bounds.py (TheFunnelRefusesAnUnboundedRequestTests) (D-052)."
+    },
+    {
+      "id": "judge-tools-widened-in-policy",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "    \"holdout\": JUDGE_TOOLS,\n",
+      "replace": "    \"holdout\": WRITE_TOOLS,\n",
+      "why": "The policy itself would hand the blinded code holdout Write and Edit, so a judge could change the tree it judges while every request site still looked correct; caught by tests/factory/test_factory_authority_bounds.py (a judge has no tools; no authority can write or run anything) (D-052)."
+    },
+    {
+      "id": "triage-turns-unbounded",
+      "file": "factory_kernel/triage.py",
+      "find": "                max_turns=max_turns(\"triage\"),\n",
+      "replace": "",
+      "why": "Triage, the one model call that does not pass through _agent_stage, would run with no turn cap and only the subprocess timeout behind it; caught by tests/factory/test_factory_authority_bounds.py (the AST pin over triage.py and the triage request test) (D-052)."
     }
   ]
 }

@@ -56,6 +56,8 @@ from .worker_policy import (
     BUILDER_BLIND_PATHS,
     KERNEL_COMMIT_NAME,
     KERNEL_COMMIT_ARGS,
+    allowed_tools,
+    max_budget_usd,
     max_turns,
     stage_budget_seconds,
 )
@@ -1561,7 +1563,9 @@ class KernelRuntime:
                     model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
+                    allowed_tools=allowed_tools("holdout"),
                     max_turns=max_turns("holdout"),
+                    max_budget_usd=max_budget_usd("holdout"),
                 ),
             )
             value = result.structured_output
@@ -1776,7 +1780,9 @@ class KernelRuntime:
                     model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
+                    allowed_tools=allowed_tools(role),
                     max_turns=max_turns(role),
+                    max_budget_usd=max_budget_usd(role),
                 ),
             )
             value = result.structured_output
@@ -1841,7 +1847,9 @@ class KernelRuntime:
                     model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
+                    allowed_tools=allowed_tools("architecture-holdout"),
                     max_turns=max_turns("architecture-holdout"),
+                    max_budget_usd=max_budget_usd("architecture-holdout"),
                 ),
             )
             value = result.structured_output
@@ -1894,14 +1902,22 @@ class KernelRuntime:
                 cwd=str(cwd),
                 model=self.config.provider.model,
                 environment=dict(env),
+                allowed_tools=allowed_tools(role),
                 max_turns=max_turns(role),
+                max_budget_usd=max_budget_usd(role),
             ),
         )
+
+    # The three bounds every request must carry before a model is run. `allowed_tools` is what
+    # the role may touch, `max_turns` how many iterations it gets, `max_budget_usd` what it may
+    # spend; the provider only renders a flag for a value that is present, so a request that
+    # arrives without one runs unbounded on that axis, silently.
+    REQUEST_BOUNDS: tuple[str, ...] = ("allowed_tools", "max_turns", "max_budget_usd")
 
     def _agent_stage(
         self, paths: RunPaths, request: AgentRequest, **run_kwargs: Any
     ) -> AgentResult:
-        """The one place a model is run: timed and recorded whether it returns or raises.
+        """The one place a model is run: bounded, timed and recorded whether it returns or raises.
 
         Validation run 33960088633 spent 25 minutes in the blinded holdout, the architecture
         holdout and the three pre-code certifiers and uploaded no `agent-<role>.*` and no
@@ -1909,7 +1925,19 @@ class KernelRuntime:
         and only the build-side `_agent` path recorded. Every stage now goes through here, so
         a stage that has no record is a stage that was never run (D-050). A failed stage is
         recorded exactly as a successful one and the failure propagates unchanged (D-041).
+
+        The same run's 934-second code holdout had no dollar bound and no declared tool
+        surface, because the validation side built its requests without them (D-052). A request
+        is refused here, before any process starts and before any record is written, unless it
+        carries every bound in `REQUEST_BOUNDS`: an unbounded request is a kernel defect, not a
+        stage that failed.
         """
+        missing = [name for name in self.REQUEST_BOUNDS if getattr(request, name) is None]
+        if missing:
+            raise RuntimeError(
+                f"agent request for role {request.role!r} is unbounded: missing "
+                + ", ".join(missing)
+            )
         started = time.time()
         try:
             result = self.provider.run(request, **run_kwargs)

@@ -1638,3 +1638,81 @@ streaming step: a refused or broken route in `E2E_STREAM_PROBE`, a missing fixtu
 `E2E_STREAM_UI`, and the backend's own words in `E2E_APP_LOG_TAIL`. The cause of run
 33960088633 itself is still unknown; this change is what makes it readable rather than a
 guess. The journey now counts 20 deterministic steps instead of 16.
+
+## D-052 · Every validation authority is bounded in tools and spend, because the 934-second holdout of run 33960088633 was bounded in neither
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33960088633 (validation of PR #99), the observation D-050 deliberately left alone
+
+D-050 reconstructed the five validation authorities of run 33960088633 from artifact
+modification times and found the blinded code holdout at 934 s against a 350 s budget. It
+also noted, and left alone because that change was data only, that the authorities were
+constructed differently from the build workers. The build side (`worker_runtime._agent`)
+passed `allowed_tools=allowed_tools(role)`, `max_turns=max_turns(role)` and
+`max_budget_usd=max_budget_usd(role)`. The validation side (`_run_blinded_holdout`,
+`_run_architecture_holdout`, `_run_precode_certifier`) and the base runtime's `_agent` passed
+`max_turns` and nothing else; triage passed nothing at all. `ClaudeCliProvider.run` renders a
+flag only for a value that is present, so a missing `max_budget_usd` is not a default budget,
+it is `--max-budget-usd` absent: the holdout's 934 s had a turn cap and the 1200 s subprocess
+timeout behind it and no dollar bound at any point. The tool surface was correct by accident:
+`allowed_tools=None` and `allowed_tools=()` both render as `--tools ""` (every built-in tool
+disabled), so the judges could touch nothing, but nothing said so; `worker_policy.ROLE_TOOLS`
+carried `()` for every authority and no request read it.
+
+**What a judge needs.** Nothing. Every authority runs in an empty temporary directory,
+deliberately away from the checkout (the rehearsal's fake provider refuses an authority whose
+`cwd` is the repository), and everything it is entitled to see arrives inside its prompt: the
+contract, the diff, the RED/GREEN proof summary, the verified builder pack. The holdout prompt
+says so in its first sentence. So the surface is empty rather than read-only: a judge that can
+edit a tree is a defect, and a judge that can read one is no longer blinded. Triage is the same
+shape (MISSION.md, FACTORY_RULES.md and the candidate batch are in its prompt; it decides, it
+does not investigate).
+
+**Decision.** Every model call carries all three bounds from the policy, and the funnel
+refuses one that does not.
+
+- `worker_policy.JUDGE_TOOLS = ()` is the tool surface of every authority and of triage,
+  stated and documented rather than defaulted; `AUTHORITY_ROLES` names the five. The budget
+  rows the authorities already had (2.0, triage's cap: ten turns, no tools, one prompt) are now
+  read, with the reason beside them.
+- Every `AgentRequest` the kernel constructs passes `allowed_tools=allowed_tools(role)`,
+  `max_turns=max_turns(role)` and `max_budget_usd=max_budget_usd(role)`: the four sites in
+  `runtime.py` (base `_agent`, the code holdout, the architecture holdout, the certifier), the
+  one in `worker_runtime.py` (already did) and the one in `triage.py`.
+- `KernelRuntime._agent_stage`, the one place a model is run (D-050), refuses a request that
+  arrives with any of `REQUEST_BOUNDS` (`allowed_tools`, `max_turns`, `max_budget_usd`) unset,
+  before a process starts and before any record is written. An unbounded request is a kernel
+  defect, not a stage that failed, so it is a plain `RuntimeError` naming the role and the
+  missing bounds rather than a recorded failed stage.
+- Observed and left alone: the provider itself still accepts an unbounded `AgentRequest` (its
+  own unit tests build them); the funnel is the guard. Triage is bounded but still calls the
+  provider directly, because it has no run directory and therefore no record; giving it one
+  is a separate change. The `over_budget` flag and the caps are unchanged: the 934 s holdout
+  would now stop at $2 rather than at the subprocess timeout, and the caps are still to be
+  tuned from the next recorded run (D-025, D-050).
+
+Pinned by `tests/factory/test_factory_authority_bounds.py`: by AST, every `AgentRequest(...)`
+in `runtime.py` (4), `worker_runtime.py` (1) and `triage.py` (1) names all three bounds, each
+a call to the policy function of the same name with the request's own `role` expression, with
+no keyword splat and no local shadow, and no other kernel module constructs one; the policy
+gives every authority and triage an empty surface, a row in every table, and triage's budget;
+the real `validate_pr` through the rehearsal harness hands the provider each of the five
+authorities with exactly the policy's tools, turns and dollars, no environment and a `cwd`
+outside the repository; the CLI provider renders the code holdout's and a certifier's request
+as `--tools ""`, `--max-turns 10`, `--max-budget-usd 2` with no `--allowedTools`; the funnel
+refuses a request missing any one bound, names every missing bound, calls no provider and
+writes no record, and runs a bounded one; both `_agent` paths are bounded; and the triage
+request is. Mutations `holdout-budget-dropped`, `certifier-tools-widened`,
+`agent-stage-accepts-unbounded-request`, `judge-tools-widened-in-policy` and
+`triage-turns-unbounded` are registered in `harness/factory_mutations/defects.json` and
+caught, as are D-050's four (`validation-stage-records-nothing`, `stage-line-dropped`,
+`stage-line-unflushed`, `over-budget-never-set`), whose registration D-050 deferred. Both
+detector files are now in the mutation runner's copy list. All nine were verified by direct
+injection on the maintainer's Windows host (the copy built by `run.py`, one defect injected,
+the two detector files run; the rehearsal needs `FACTORY_WORKDIR` set to an absolute Windows
+path there) and by CI.
+
+**Consequences.** The next validation run's five `agent-*.json` records are for stages that
+were bounded in tools, turns and dollars, so an outlier in them is a slow model, not an open
+loop. A future authority added without its bounds fails the AST pin at test time and the
+funnel at run time; a future one added with a widened surface fails the rehearsal's
+no-authority-can-write check.
