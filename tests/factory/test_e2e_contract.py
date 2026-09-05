@@ -41,6 +41,34 @@ class E2EContractTests(unittest.TestCase):
         raw = '"Video at 12:34\\nQuoted transcript evidence"'
         self.assertEqual(factory_e2e._scalar(raw), "Video at 12:34\nQuoted transcript evidence")
 
+    def test_browser_opens_the_frontend_on_the_secure_context_host(self) -> None:
+        """The session cookie is Secure (app/backend/tests/test_auth.py pins it). A browser
+        stores a Secure cookie on plain HTTP only for `localhost`, not for 127.0.0.1; opened at
+        the loopback literal, login succeeds, the cookie is dropped, /me is 401 and the app
+        returns to the login form (D-046, the first production E2E). Every browser origin the
+        harness builds must therefore be `localhost`, and the explicit-URL path must refuse
+        the loopback literal."""
+        source = (HARNESS / "e2e.py").read_text(encoding="utf-8")
+        self.assertIn('BROWSER_ORIGIN_HOST = "localhost"', source)
+        self.assertNotIn('f"http://127.0.0.1:{frontend_port}"', source)
+        self.assertNotIn('f"http://127.0.0.1:{args.frontend_port}"', source)
+        self.assertEqual(source.count("http://{BROWSER_ORIGIN_HOST}:"), 2)
+        self.assertIn("parsed_frontend.hostname == BROWSER_ORIGIN_HOST", source)
+        self.assertNotIn('hostname in {"127.0.0.1", "localhost"}', source)
+        # The backend probe may keep using the loopback literal; only the browser origin matters.
+        self.assertIn('f"http://127.0.0.1:{self.port}{path}"', source)
+
+    @unittest.skipUnless((ROOT / "app" / "backend" / "tests" / "test_auth.py").is_file(),
+                         "repo-shaped copy without the application (mutation runner)")
+    def test_secure_cookie_invariant_is_still_pinned_by_the_app(self) -> None:
+        """The harness fix moves the origin, not the cookie. The app-side test that requires
+        the Secure attribute must keep existing so the E2E cannot be made green by weakening
+        the cookie instead."""
+        auth_tests = (ROOT / "app" / "backend" / "tests" / "test_auth.py").read_text(encoding="utf-8")
+        self.assertIn('assert "secure" in lowered', auth_tests)
+
+    @unittest.skipUnless((ROOT / ".archon" / "commands" / "dark-factory-behavioral-e2e.md").is_file(),
+                         "repo-shaped copy without legacy .archon sources (mutation runner)")
     def test_validator_delegates_to_one_base_branch_browser_authority(self) -> None:
         command = (
             ROOT / ".archon" / "commands" / "dark-factory-behavioral-e2e.md"

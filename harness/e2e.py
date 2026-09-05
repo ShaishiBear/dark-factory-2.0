@@ -31,6 +31,16 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+
+# The browser must open the frontend by the `localhost` name, never by 127.0.0.1.
+# The application's session cookie is `Secure` (a MISSION security invariant, pinned by
+# app/backend/tests/test_auth.py). Browsers store a Secure cookie only from a secure
+# context; Chromium and Firefox grant that exemption to `localhost` on plain HTTP but not
+# to the literal loopback address. Opened at 127.0.0.1, login returns 200, the cookie is
+# discarded, /me answers 401 and the app bounces back to the login form -- exactly the
+# failure the first production E2E recorded (D-046). The backend itself may still be
+# addressed by 127.0.0.1; only the origin the browser sees matters.
+BROWSER_ORIGIN_HOST = "localhost"
 CONFIG = json.loads((HERE / "harness.config.json").read_text(encoding="utf-8"))
 REF = re.compile(r"\[ref=(e\d+)\]")
 CITATION = re.compile(r'button\s+"(?P<label>\d+:\d{2}\s+—\s+[^\"]+)".*\[ref=(?P<ref>e\d+)\]')
@@ -217,13 +227,13 @@ def run_e2e(app, frontend_url: str | None = None) -> int | None:
             port_file = frontend_port_file(app.port)
             require("frontend rendezvous exists", port_file.is_file(), str(port_file))
             frontend_port = int(port_file.read_text(encoding="utf-8").strip())
-            frontend_url = f"http://127.0.0.1:{frontend_port}"
+            frontend_url = f"http://{BROWSER_ORIGIN_HOST}:{frontend_port}"
         else:
             parsed_frontend = urlparse(frontend_url)
             require(
-                "frontend URL is an explicit local HTTP endpoint",
+                "frontend URL is an explicit local HTTP endpoint on the secure-context host",
                 parsed_frontend.scheme == "http"
-                and parsed_frontend.hostname in {"127.0.0.1", "localhost"}
+                and parsed_frontend.hostname == BROWSER_ORIGIN_HOST
                 and parsed_frontend.port is not None,
                 frontend_url,
             )
@@ -311,7 +321,7 @@ def main() -> int:
             return 2
 
     app = ExistingApp(args.backend_port)
-    frontend_url = f"http://127.0.0.1:{args.frontend_port}"
+    frontend_url = f"http://{BROWSER_ORIGIN_HOST}:{args.frontend_port}"
     print(
         f"E2E_ATTACH backend={args.backend_port} frontend={args.frontend_port} authority=canonical-harness",
         flush=True,

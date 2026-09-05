@@ -1215,6 +1215,13 @@
       "find": "        if changed != sorted(files):\n            raise NeedsHuman(\"rebased test-author commit does not change exactly the RED-hashed files; re-head refused\")\n",
       "replace": "        if False:\n            raise NeedsHuman(\"rebased test-author commit does not change exactly the RED-hashed files; re-head refused\")\n",
       "why": "RED would be replayed at a commit that also changes production files, which the evidence bundle's reconstruction refuses; the re-head must refuse first."
+    },
+    {
+      "id": "e2e-browser-origin-loopback-literal",
+      "file": "harness/e2e.py",
+      "find": "BROWSER_ORIGIN_HOST = \"localhost\"",
+      "replace": "BROWSER_ORIGIN_HOST = \"127.0.0.1\"",
+      "why": "The browser would open the frontend at the loopback literal, the Secure session cookie would be discarded, and every login in the E2E would bounce back to the form (D-046)."
     }
   ]
 }
