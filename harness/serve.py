@@ -103,6 +103,23 @@ def _terminate(proc: subprocess.Popen[str] | None) -> None:
         proc.wait(timeout=5)
 
 
+def frontend_launch(backend_port: int, frontend_port: int) -> tuple[list[str], dict[str, str]]:
+    """The Vite child's argv and environment.
+
+    The page posts a relative `/api/...`; `vite.config.ts` proxies that to `VITE_API_TARGET`
+    and, absent one, to port 8000, where nothing listens under the harness. The variable
+    must therefore name the backend this process starts, on the loopback literal the backend
+    binds. `harness/e2e.py` proves the boundary before any browser (`E2E_PROXY_PROBE`).
+    """
+    env = dict(os.environ)
+    env["VITE_API_TARGET"] = f"http://127.0.0.1:{backend_port}"
+    argv = [
+        "bun", "run", "dev", "--", "--host", "127.0.0.1",
+        "--port", str(frontend_port), "--strictPort",
+    ]
+    return argv, env
+
+
 def _bootstrap_validation(python: Path) -> None:
     proc = subprocess.run(
         [str(python), str(ROOT / "harness" / "bootstrap_e2e.py")],
@@ -169,17 +186,18 @@ def main() -> int:
 
         if args.with_frontend:
             frontend_port = _free_port()
-            frontend_env = dict(os.environ)
-            frontend_env["VITE_API_TARGET"] = f"http://127.0.0.1:{args.port}"
+            frontend_argv, frontend_env = frontend_launch(args.port, frontend_port)
             frontend = subprocess.Popen(
-                ["bun", "run", "dev", "--", "--host", "127.0.0.1",
-                 "--port", str(frontend_port), "--strictPort"],
-                cwd=FRONTEND, env=frontend_env, stdout=sys.stdout, stderr=sys.stderr,
-                text=True,
+                frontend_argv, cwd=FRONTEND, env=frontend_env,
+                stdout=sys.stdout, stderr=sys.stderr, text=True,
             )
             _wait_http(f"http://127.0.0.1:{frontend_port}/", frontend, timeout=60)
             rendezvous.write_text(str(frontend_port), encoding="utf-8")
-            print(f"FRONTEND_STARTED port={frontend_port}", flush=True)
+            print(
+                f"FRONTEND_STARTED port={frontend_port} "
+                f"api_target={frontend_env['VITE_API_TARGET']}",
+                flush=True,
+            )
 
         backend = subprocess.Popen(
             [str(backend_python), "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1",

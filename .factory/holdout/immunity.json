@@ -515,6 +515,48 @@
           "value": "ROOT = Path.cwd().resolve()"
         }
       ]
+    },
+    {
+      "id": "IMM-018",
+      "status": "active",
+      "source": {
+        "kind": "decision",
+        "ref": "D-049"
+      },
+      "failure_class": "a browser target resolved by page text instead of by accessible role and name",
+      "lesson": "The canonical browser journey resolved a control as the first snapshot line containing the query text. agent-browser lists the React root first as a generic node named by the page's whole text (React delegates every listener to it), so both credential fills resolved to the root, `fill` on that div reported success, and the click submitted a form the browser blocked on its empty required fields with no request and no alert. Two earlier decisions (D-046, D-047) fixed real but insufficient causes because nothing read the fields back and the failure dump died with the runner. A target is now resolved by parsed role and accessible name only, container roles are never targets, every filled field is read back before the submit, a probe crosses the frontend origin before any browser, and the dump is written under the uploaded artifacts directory.",
+      "assertions": [
+        {
+          "kind": "text_contains",
+          "path": "harness/e2e.py",
+          "value": "def _ref(snapshot: str, role: str, name: str) -> str:"
+        },
+        {
+          "kind": "text_contains",
+          "path": "harness/e2e.py",
+          "value": "if node_role == role and node_name.startswith(name):"
+        },
+        {
+          "kind": "text_contains",
+          "path": "harness/e2e.py",
+          "value": "if role in CONTAINER_ROLES:"
+        },
+        {
+          "kind": "text_contains",
+          "path": "harness/e2e.py",
+          "value": "\"E2E_FIELD_CHECK \""
+        },
+        {
+          "kind": "text_contains",
+          "path": "harness/e2e.py",
+          "value": "f\"E2E_PROXY_PROBE url={url} status={status}"
+        },
+        {
+          "kind": "text_contains",
+          "path": "harness/e2e.py",
+          "value": "candidate = Path(configured).expanduser().resolve() / \"e2e-evidence\""
+        }
+      ]
     }
   ]
 }

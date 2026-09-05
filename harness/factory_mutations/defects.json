@@ -1257,6 +1257,41 @@
       "find": "            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)\n\n            stage = \"attached_evidence\"\n            changed_files = sorted(x for x in changed if x)\n            proof_summary = self._holdout_proof_summary(\n                proof, pack, changed_files=changed_files,\n                worktree=worktree.path, base=base, head=head,\n            )\n            holdout_context = {\n                \"contract\": contract,\n                \"changed_files\": changed_files,\n                \"diff_sha256\": hashlib.sha256(patch.encode()).hexdigest(),\n                \"diff\": patch,\n                \"proof_summary\": proof_summary,\n            }\n            stage = \"code_holdout\"\n            verdict = self._run_blinded_holdout(paths, holdout_context)\n            if verdict.get(\"verdict\") != \"pass\":\n                raise NeedsHuman(\"blinded holdout rejected PR\")\n\n            stage = \"architecture_holdout\"\n",
       "replace": "            pack_dir = paths.artifacts / \"spine\"\n            self._exec(\n                [\n                    \"python\", \"scripts/factory_provenance.py\", \"fetch\",\n                    \"--head\", head, \"--base\", base, \"--issue\", str(linked_issue),\n                    \"--output-dir\", str(pack_dir),\n                ],\n                cwd=self.repo_root,\n                env={\"FACTORY_REPO\": self.config.repository},\n                credential_scope=\"github\",\n                timeout=240,\n                transcript=paths.transcripts / \"provenance-fetch.log\",\n            )\n            pack = self._read_json(pack_dir / \"builder-provenance.json\")\n\n            stage = \"attached_evidence\"\n            changed_files = sorted(x for x in changed if x)\n            proof_summary = self._holdout_proof_summary(\n                proof, pack, changed_files=changed_files,\n                worktree=worktree.path, base=base, head=head,\n            )\n            holdout_context = {\n                \"contract\": contract,\n                \"changed_files\": changed_files,\n                \"diff_sha256\": hashlib.sha256(patch.encode()).hexdigest(),\n                \"diff\": patch,\n                \"proof_summary\": proof_summary,\n            }\n            stage = \"code_holdout\"\n            verdict = self._run_blinded_holdout(paths, holdout_context)\n            if verdict.get(\"verdict\") != \"pass\":\n                raise NeedsHuman(\"blinded holdout rejected PR\")\n\n            stage = \"provenance\"\n            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)\n            stage = \"architecture_holdout\"\n",
       "why": "The RED evidence handed to the holdout would be cross-checked against a pack nobody had verified yet; verify_pack must precede the judge that relies on it (D-048)."
+    },
+    {
+      "id": "e2e-ref-matches-line-text-not-role",
+      "file": "harness/e2e.py",
+      "find": "        if node_role == role and node_name.startswith(name):\n            return ref\n",
+      "replace": "        if name in node_name:\n            return ref\n",
+      "why": "Any node whose text contains the query would be a target again, and the React root container is listed first with every visible string in its name: both credential fills would land on that div, report Done, and the form would be submitted empty (D-049, regression run 33953697016)."
+    },
+    {
+      "id": "e2e-field-check-assumed-filled",
+      "file": "harness/e2e.py",
+      "find": "    filled, detail = _check_fields(\n        session, {email_ref: (\"email\", email), password_ref: (\"password\", password)})\n",
+      "replace": "    filled, detail = True, \"\"\n",
+      "why": "The harness would submit the form without reading the fields back, so a fill that landed nowhere would again surface only as a 20-second predicate timeout with the form still showing (D-049)."
+    },
+    {
+      "id": "e2e-proxy-probe-assumed-green",
+      "file": "harness/e2e.py",
+      "find": "        proxy_status, proxy_cookie, proxy_body = _probe_proxy_login(frontend_url, email, password)\n",
+      "replace": "        proxy_status, proxy_cookie, proxy_body = 200, True, \"\"\n",
+      "why": "The browser would start without proof that the frontend origin proxies the login to the backend and returns the session cookie; a wrong proxy target or a stripped cookie would be indistinguishable from a page bug (D-049)."
+    },
+    {
+      "id": "e2e-server-vite-api-target-not-exported",
+      "file": "harness/serve.py",
+      "find": "    env[\"VITE_API_TARGET\"] = f\"http://127.0.0.1:{backend_port}\"\n",
+      "replace": "    env.pop(\"VITE_API_TARGET\", None)\n",
+      "why": "The Vite child would proxy every /api request to its default port 8000, where nothing listens under the harness; the backend probe would stay green while the browser's login never reached the route (D-049 boundary)."
+    },
+    {
+      "id": "e2e-evidence-dump-outside-run-artifacts",
+      "file": "harness/e2e.py",
+      "find": "        candidate = Path(configured).expanduser().resolve() / \"e2e-evidence\"\n",
+      "replace": "        candidate = Path(tempfile.gettempdir()) / f\"dark-factory-e2e-{session}\"\n",
+      "why": "The failure dump would be written to the runner's temp directory instead of the uploaded artifacts directory and die with the runner, which is what made D-049 a local re-derivation instead of a read (run 33953697016)."
     }
   ]
 }
