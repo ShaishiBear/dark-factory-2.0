@@ -59,9 +59,13 @@ def request(role: str = "test_author") -> AgentRequest:
 
 
 class Runs:
-    """A fake subprocess.run that hands out canned stdouts in order and counts launches."""
+    """A fake subprocess.run that hands out canned stdouts in order and counts launches.
 
-    def __init__(self, *stdouts: str) -> None:
+    An item may be a `(returncode, stdout)` pair to model the CLI exiting non-zero, which it does
+    when the session ended in error while still printing its envelope on stdout.
+    """
+
+    def __init__(self, *stdouts) -> None:
         self.stdouts = list(stdouts)
         self.calls = 0
 
@@ -69,7 +73,12 @@ class Runs:
         self.calls += 1
         if not self.stdouts:
             raise AssertionError("provider launched more processes than the test allowed")
-        return mock.Mock(returncode=0, stdout=self.stdouts.pop(0), stderr="")
+        item = self.stdouts.pop(0)
+        rc, out = item if isinstance(item, tuple) else (0, item)
+        return mock.Mock(returncode=rc, stdout=out, stderr="")
+
+
+FIXTURE = ROOT / "tests" / "factory" / "fixtures" / "provider" / "run-33933101233-test-author-stream-closed.json"
 
 
 class ClassificationTests(unittest.TestCase):
@@ -174,6 +183,71 @@ class RetryTests(unittest.TestCase):
         with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
             result = provider().run(request())
         self.assertEqual((result.attempts, result.transient_errors), (1, ()))
+
+
+class NonZeroExitTests(unittest.TestCase):
+    """The eighteenth canary defect (D-040): the CLI exits non-zero on an error session and still
+    prints its envelope; the generic failure used to fire before that envelope was classified,
+    so the retry built for exactly this never ran. Run 33933101233's envelope is the fixture."""
+
+    def setUp(self) -> None:
+        patcher = mock.patch.object(providers_module, "_sleep", side_effect=lambda s: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_run_33933101233_envelope_is_transient(self):
+        text = FIXTURE.read_text(encoding="utf-8")
+        raw = json.loads(text)
+        self.assertTrue(raw["is_error"])
+        self.assertEqual(raw["subtype"], "success")
+        self.assertIn("stream closed before completion", raw["result"])
+        err = providers_module._transient_from_stdout(text, role="test_author")
+        self.assertIsInstance(err, TransientProviderError)
+        self.assertEqual(err.envelope.num_turns, 6)
+
+    def test_a_nonzero_exit_with_a_transient_envelope_is_retried(self):
+        runs = Runs((1, FIXTURE.read_text(encoding="utf-8")), envelope())
+        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+            result = provider().run(request())
+        self.assertEqual(runs.calls, 2)
+        self.assertEqual(result.attempts, 2)
+        self.assertEqual(result.content, "done")
+        self.assertIn("stream closed", result.transient_errors[0])
+        self.assertEqual(result.num_turns, 6 + 3)
+
+    def test_a_nonzero_exit_with_a_terminal_envelope_is_not_retried(self):
+        runs = Runs((1, envelope(is_error=True, subtype="error_max_turns", result="Reached max turns")), envelope())
+        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+            with self.assertRaises(RuntimeError) as ctx:
+                provider().run(request())
+        self.assertNotIsInstance(ctx.exception, TransientProviderError)
+        self.assertEqual(runs.calls, 1)
+        self.assertIn("rc=1", str(ctx.exception))
+
+    def test_a_nonzero_exit_with_a_transient_word_in_a_cap_envelope_is_not_retried(self):
+        runs = Runs((1, envelope(is_error=True, subtype="error_max_budget", result="503 budget")), envelope())
+        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+            with self.assertRaises(RuntimeError):
+                provider().run(request())
+        self.assertEqual(runs.calls, 1)
+
+    def test_a_nonzero_exit_with_non_envelope_stdout_keeps_the_generic_error(self):
+        runs = Runs((1, "Segmentation fault: stream closed before completion"), envelope())
+        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+            with self.assertRaises(RuntimeError) as ctx:
+                provider().run(request())
+        self.assertNotIsInstance(ctx.exception, TransientProviderError)
+        self.assertEqual(runs.calls, 1)
+        self.assertIn("agent worker failed role='test_author' rc=1", str(ctx.exception))
+
+    def test_transient_nonzero_exits_beyond_the_budget_are_refused(self):
+        fx = FIXTURE.read_text(encoding="utf-8")
+        runs = Runs((1, fx), (1, fx), (1, fx), envelope())
+        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+            with self.assertRaises(RuntimeError) as ctx:
+                provider().run(request())
+        self.assertEqual(runs.calls, 3)
+        self.assertIn("3 time(s)", str(ctx.exception))
 
 
 class ConfigTests(unittest.TestCase):

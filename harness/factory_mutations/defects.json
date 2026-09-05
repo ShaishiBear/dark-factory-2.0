@@ -1117,6 +1117,13 @@
       "find": "    without_escapes = _ANSI.sub(\"\", text)\n    return _CONTROL.sub(REPLACEMENT, without_escapes)",
       "replace": "    return text",
       "why": "The symptom check and the stored evidence would silently disagree with what a validator can parse."
+    },
+    {
+      "id": "provider-nonzero-exit-bypasses-transient-classification",
+      "file": "factory_kernel/providers.py",
+      "find": "            transient = _transient_from_stdout(stdout, role=request.role)\n            if transient is not None:\n                raise transient\n",
+      "replace": "",
+      "why": "A non-zero CLI exit would again raise the generic failure before its envelope is classified, so a dropped stream is refused instead of retried (D-040)."
     }
   ]
 }

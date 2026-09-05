@@ -1041,3 +1041,31 @@ fault, and the probe must not encode one model's habits as the definition of "re
 
 A mutation (`worker-route-probe-requires-result-text`) restores the text requirement and is
 caught by the structure test. Issue #49's escalation from this run is un-escalated by hand.
+
+---
+
+## D-040 · A non-zero CLI exit is classified before it is refused
+
+**Status:** recorded · **Raised:** 2026-09-05
+
+The eighteenth canary defect (worker run 33933101233, issue #49). Investigate, contract,
+context and the governor passed on the fully audited kernel; the test author then ended with
+`API Error: stream closed before completion` after six turns, the same drop that killed the same
+stage in run 33918953996. D-031 added a retry for exactly that pattern, and it never fired: the
+CLI exits non-zero when a session ends in error, and `_launch` raised the generic "agent worker
+failed rc=1" before the envelope on stdout was ever classified. The retry only saw error
+envelopes from zero-exit processes, which in practice is not how the CLI reports a stream drop.
+
+Now a non-zero exit first parses stdout as the result envelope; if it is one and the classifier
+calls it transient, the existing retry loop (worktree restore, backoff, summed telemetry) handles
+it. A terminal envelope, or stdout that is not an envelope, is refused exactly as before. Caps,
+budgets and model errors are never retried. Run 33933101233's envelope is a fixture.
+
+Why the test author: not its prompt. Its assembled prompt is the smallest of the post-contract
+stages (about 2k chars of role prompt, no pinned methods, a 10k brief of contract, issue and
+deferred symptom), smaller than context (8.5k plus brief) or implement (7.4k plus brief). Both
+drops happened at the same wall-clock position, six to seven turns into a stage that reads test
+files and writes new ones, and the stage records no telemetry when it fails because
+`_record_agent` runs only on success; the failing envelope itself is the only evidence. With the
+retry now reachable, the next drop is measured instead of fatal. A failed stage should also
+leave a telemetry record; that is a separate change to `_record_agent`'s call site.
