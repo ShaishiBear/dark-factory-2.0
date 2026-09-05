@@ -1187,6 +1187,13 @@
       "find": "            if self._static_gate_or_retry(\n                role, cwd, paths, env, static_retry=static_retry, context=context,\n            ):\n                return\n            subject = (",
       "replace": "            subject = (",
       "why": "A lint failure in production files would surface only at the whole-tree quick gate, where it ends the build instead of being repaired once."
+    },
+    {
+      "id": "protocol-attach-publishes-again-without-base",
+      "file": "scripts/factory_protocol.py",
+      "find": "    print(f\"CONTRACT_ATTACHED pr={args.pr} sha256={h}\")\n",
+      "replace": "    subprocess.check_call([sys.executable, str(HERE / \"factory_provenance.py\"), \"publish\", \"--pr\", str(args.pr), \"--artifacts\", str(Path(args.contract).resolve().parent)], cwd=ROOT)\n    print(f\"CONTRACT_ATTACHED pr={args.pr} sha256={h}\")\n",
+      "why": "A second, argument-less publisher would return to the attach path and die on publish's required --base, losing a fully built PR at its last step (run 33941987102)."
     }
   ]
 }
