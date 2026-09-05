@@ -308,3 +308,68 @@ describe('formatSources', () => {
     expect(result.split('- [Test Video]').length).toBe(3);
   });
 });
+
+// Issue #49 acceptance: every formatCitation fallback branch must emit the
+// complete list-item shape — leading `- ` marker, em-dash + range, then the
+// two-space-indented snippet blockquote on its own line. Fixtures use the
+// 10–20 s range so the emitted fragment (timestamp link unavailable) — 0:10–0:20
+// is byte-identical to the issue's quoted output (em-dash U+2014, en-dash U+2013).
+describe('formatCitation export fallback acceptance (issue #49)', () => {
+  const baseCitation = {
+    chunk_id: 'chunk-1',
+    video_id: 'vid-1',
+    video_title: 'Test Video Title',
+    video_url: 'https://www.youtube.com/watch?v=abc123',
+    start_seconds: 10,
+    end_seconds: 20,
+    snippet: 'Test snippet text',
+  };
+
+  it('AC-1: youtube fallback keeps snippet blockquote on its own line', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = formatCitation({
+      ...baseCitation,
+      video_url: 'not-a-url',
+      snippet: 'Relevant text',
+    });
+    expect(result).toContain('\n  > "Relevant text"');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-2: youtube fallback emits list marker and unavailable fragment', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = formatCitation({
+      ...baseCitation,
+      video_url: 'not-a-url',
+      snippet: 'Relevant text',
+    });
+    expect(result).toContain('- Test Video Title (timestamp link unavailable) — 0:10–0:20');
+    expect(result.startsWith('- ')).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  it('AC-3: dynamous empty lesson_url fallback emits list marker', () => {
+    const citation = {
+      ...baseCitation,
+      source_type: 'dynamous' as const,
+      video_url: '',
+      lesson_url: '',
+    };
+    const result = formatCitation(citation);
+    expect(result).toContain('- Test Video Title — 0:10–0:20');
+    expect(result.startsWith('- ')).toBe(true);
+    expect(result).not.toContain('](');
+    expect(result).toContain('\n  > "Test snippet text"');
+  });
+
+  it('AC-4: youtube url without v param follows the same fallback shape', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'https://www.youtube.com/' };
+    const result = formatCitation(citation);
+    expect(result).toContain('- Test Video Title (timestamp link unavailable) — 0:10–0:20');
+    expect(result.startsWith('- ')).toBe(true);
+    expect(result).not.toContain('[Test Video Title](');
+    expect(result).toContain('\n  > "Test snippet text"');
+    warnSpy.mockRestore();
+  });
+});
