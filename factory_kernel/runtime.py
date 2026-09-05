@@ -923,6 +923,7 @@ class KernelRuntime:
 
     # ---------- model-free re-head ----------
 
+    REHEAD_RED_LOG = "rehead-red-gate.log"
     REHEAD_GREEN_LOG = "rehead-green-gate.log"
     REHEAD_FINAL_GREEN_LOG = "rehead-final-green-gate.log"
 
@@ -933,9 +934,12 @@ class KernelRuntime:
         say main moved under the PR -- and it changes nothing the builder was certified on: the
         contract, context, design, governor verdict and RED-hashed acceptance tests travel
         through the verified provenance pack and must be byte-identical at the new head. What is
-        recomputed is exactly what a new head invalidates: GREEN, impact, drift, conformance, the
-        quick gate, the attached proof and the provenance note. Validation then runs in full from
-        the new head and reuses nothing. One re-head per PR; a second stale refusal escalates.
+        recomputed is exactly what a new head invalidates: the RED proof (a rebase rewrites the
+        test-author commit, so RED is replayed at the rebased commit and re-issued with that
+        commit as `test_commit`, never re-bound by editing), GREEN, impact, drift, conformance,
+        the quick gate, the attached proof and the provenance note. Validation then runs in full
+        from the new head and reuses nothing. One re-head per PR; a second stale refusal
+        escalates (D-045).
         """
         self.check_stop()
         info = self.github.pr(pr_number, holdout_safe=True)
@@ -994,6 +998,10 @@ class KernelRuntime:
             # The rebased branch is now cut from new_base; that, and only that, is what the
             # republished pack records (D-042).
             env = self._run_env(paths, base_ref=f"origin/{default}", base_sha=new_base)
+            # A rebase rewrote the test-author commit, so the pack's RED proof names a commit
+            # that no longer exists in this history. RED is replayed at the rebased commit and
+            # re-issued with it as `test_commit`; the proof chain is rebuilt, not edited (D-045).
+            self._reissue_red(pack, paths, worktree.path, env, new_base=new_base, new_head=new_head)
             self._rehead_green(paths, worktree.path, env, output="green-proof.json", log=self.REHEAD_GREEN_LOG)
             self._agent(
                 "conformance", worktree.path, paths,
@@ -1042,8 +1050,9 @@ class KernelRuntime:
                 pr_number,
                 marker + f"\nDark Factory re-headed this PR onto `{new_base}` without a model "
                 f"(old head `{head}`, new head `{new_head}`). The certified contract, design and "
-                "RED tests are unchanged; GREEN, conformance and the quick gate were re-run at the "
-                "new head. Independent validation now runs again in full.",
+                "RED tests are unchanged; RED was replayed at the rebased test-author commit and "
+                "GREEN, conformance and the quick gate were re-run at the new head. Independent "
+                "validation now runs again in full.",
             )
             self.github.remove_pr_label(pr_number, self.config.labels["needs_fix"])
             self._hand_to_review(pr_number)
@@ -1242,6 +1251,88 @@ class KernelRuntime:
             timeout=600,
             transcript=paths.transcripts / log,
         )
+
+    RED_SUBJECT = "test(factory): prove acceptance contract red"
+
+    def _locate_rebased_test_commit(self, pack: Mapping[str, Any], cwd: Path, *,
+                                    new_base: str, new_head: str) -> str:
+        """Find the rebased test-author commit by shape, not by the hash the pack names.
+
+        The rebased branch must carry exactly the commits the build made, in order: the
+        test-author commit first (its subject is fixed by git_authority), then the
+        implementation commit(s). The test-author commit must change exactly the RED-hashed
+        acceptance files and nothing else, which is also what the evidence bundle replays.
+        Anything else is not a re-head of this build and is refused.
+        """
+        files = pack["artifacts"]["red-proof"]["content"].get("files")
+        if not isinstance(files, Mapping) or not files:
+            raise NeedsHuman("RED proof in the provenance pack has no immutable file map")
+        listing = self._git("log", "--reverse", "--format=%H%x1f%s", f"{new_base}..{new_head}", cwd=cwd)
+        commits = [line.split("\x1f", 1) for line in listing.splitlines() if line.strip()]
+        if not commits or len(commits[0]) != 2 or commits[0][1].strip() != self.RED_SUBJECT:
+            raise NeedsHuman("rebased history does not start with the test-author commit; re-head refused")
+        if any(len(c) == 2 and c[1].strip() == self.RED_SUBJECT for c in commits[1:]):
+            raise NeedsHuman("rebased history carries more than one test-author commit; re-head refused")
+        test_commit = commits[0][0].strip()
+        if not re.fullmatch(r"[0-9a-f]{40,64}", test_commit):
+            raise NeedsHuman("rebased test-author commit has no exact object identity")
+        changed = sorted(
+            x for x in self._git("diff", "--name-only", f"{test_commit}^", test_commit, cwd=cwd).splitlines() if x
+        )
+        if changed != sorted(files):
+            raise NeedsHuman("rebased test-author commit does not change exactly the RED-hashed files; re-head refused")
+        return test_commit
+
+    def _reissue_red(self, pack: Mapping[str, Any], paths: RunPaths, cwd: Path,
+                     env: Mapping[str, str], *, new_base: str, new_head: str) -> str:
+        """Replay RED at the rebased test-author commit and re-issue the proof there.
+
+        The pack's `red-proof.json` is the spec: the same checkpoints, the same declared files.
+        `factory_proof.py red` is run with HEAD detached at the rebased test commit so the
+        proof it writes binds `test_commit` to a commit that is an ancestor of the new head and
+        whose parent diff is exactly the declared files, which is what the evidence bundle
+        reconstructs. Every checkpoint must still fail for its declared reason; a checkpoint
+        that passes after the rebase means main changed the behaviour under test, and that is
+        a new build, not a re-head. The worktree is returned to the branch tip afterwards.
+        """
+        test_commit = self._locate_rebased_test_commit(pack, cwd, new_base=new_base, new_head=new_head)
+        old_proof = pack["artifacts"]["red-proof"]["content"]
+        spec = {
+            "version": "2.0",
+            "checkpoints": [
+                {k: cp[k] for k in ("acceptance_id", "cwd", "argv", "files", "expected_failure")}
+                for cp in old_proof.get("checkpoints", [])
+            ],
+        }
+        if not spec["checkpoints"]:
+            raise NeedsHuman("RED proof in the provenance pack has no checkpoints")
+        spec_path = paths.artifacts / "rehead-test-spec.json"
+        self._write_json(spec_path, spec)
+        branch = self._git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
+        self._git("checkout", "--detach", test_commit, cwd=cwd)
+        try:
+            self._exec(
+                [
+                    "python", "scripts/factory_proof.py", "red",
+                    "--spec", str(spec_path),
+                    "--output", str(paths.artifacts / "red-proof.json"),
+                ],
+                cwd=cwd,
+                env=env,
+                credential_scope="none",
+                timeout=600,
+                transcript=paths.transcripts / self.REHEAD_RED_LOG,
+            )
+        finally:
+            self._git("checkout", branch, cwd=cwd)
+        reissued = self._read_json(paths.artifacts / "red-proof.json")
+        if str(reissued.get("test_commit") or "") != test_commit:
+            raise NeedsHuman("re-issued RED proof is not bound to the rebased test-author commit")
+        try:
+            self._git("merge-base", "--is-ancestor", test_commit, new_head, cwd=cwd)
+        except RuntimeError as exc:
+            raise NeedsHuman("re-issued RED test commit is not an ancestor of the new head") from exc
+        return test_commit
 
     @staticmethod
     def _materialize_builder_artifacts(pack: Mapping[str, Any], artifacts: Path) -> None:

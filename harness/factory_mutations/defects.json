@@ -1194,6 +1194,27 @@
       "find": "    print(f\"CONTRACT_ATTACHED pr={args.pr} sha256={h}\")\n",
       "replace": "    subprocess.check_call([sys.executable, str(HERE / \"factory_provenance.py\"), \"publish\", \"--pr\", str(args.pr), \"--artifacts\", str(Path(args.contract).resolve().parent)], cwd=ROOT)\n    print(f\"CONTRACT_ATTACHED pr={args.pr} sha256={h}\")\n",
       "why": "A second, argument-less publisher would return to the attach path and die on publish's required --base, losing a fully built PR at its last step (run 33941987102)."
+    },
+    {
+      "id": "rehead-keeps-old-test-commit",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._reissue_red(pack, paths, worktree.path, env, new_base=new_base, new_head=new_head)\n",
+      "replace": "",
+      "why": "After a rebase the pack's RED proof names a commit that no longer exists in the branch; skipping the re-issue hands validation a proof whose test_commit is not an ancestor of the head."
+    },
+    {
+      "id": "rehead-red-commit-ancestor-unchecked",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._git(\"merge-base\", \"--is-ancestor\", test_commit, new_head, cwd=cwd)\n",
+      "replace": "            pass\n",
+      "why": "A re-issued RED proof bound to a commit outside the rebased history would be handed to validation instead of refused at the re-head."
+    },
+    {
+      "id": "rehead-accepts-any-commit-shape",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if changed != sorted(files):\n            raise NeedsHuman(\"rebased test-author commit does not change exactly the RED-hashed files; re-head refused\")\n",
+      "replace": "        if False:\n            raise NeedsHuman(\"rebased test-author commit does not change exactly the RED-hashed files; re-head refused\")\n",
+      "why": "RED would be replayed at a commit that also changes production files, which the evidence bundle's reconstruction refuses; the re-head must refuse first."
     }
   ]
 }

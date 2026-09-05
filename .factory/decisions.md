@@ -1193,3 +1193,51 @@ likely to be missed.
 
 Recovery for PR #88: its artifacts are complete and its head untouched; `resume --pr 88`
 runs attach, attach, publish and the handoff from those artifacts.
+
+---
+
+## D-045 · A rebase rewrites the test-author commit; RED is replayed there, never re-bound
+
+**Status:** recorded · **Raised:** 2026-09-05
+
+Worker run 33944595689 was the first production re-head. It did everything D-023 and D-042
+promised: fetched the certified pack at its declared base, rebased PR #88 onto current main
+(new head 65721af9, base 7fe0c7f6), verified the RED-hashed files byte-identical, replayed
+GREEN, ran conformance, the final GREEN and the quick gate, republished, and handed the PR
+back to validation in the same dispatch. Validation then refused: `test-author commit is not
+an ancestor of current PR head`.
+
+A rebase rewrites every commit. The pack's `red-proof.json` named the pre-rebase test-author
+commit as `test_commit`; `scripts/factory_evidence.py` requires that commit to be an ancestor
+of the head, to change exactly the declared acceptance files, and to go red when replayed
+there. The re-head had checked the files and never the commit, so it handed validation a
+proof chain whose anchor no longer existed in the branch.
+
+Two ways to fix it were on the table. Re-binding `test_commit` in the proof to the rebased
+hash would have been a one-line edit of evidence: the kernel writing into a proof what a
+replay is supposed to establish. That is the shape of every circular certification IMM-004
+and IMM-006 exist to refuse, and it is not done. Instead the re-head locates the rebased
+test-author commit by shape (the first commit above the new base, carrying the subject
+`git_authority` gives every test-author commit, and changing exactly the RED-hashed files and
+nothing else; anything else is refused as not a re-head of this build), checks out that
+commit detached, and runs `factory_proof.py red` against a spec reconstructed from the pack's
+own checkpoints. The proof it writes binds `test_commit` to the rebased commit because that is
+where it ran; every checkpoint must still fail for its declared reason, and a checkpoint that
+passes after the rebase is refused, because main changed the behaviour under test and that is
+a new build, not a re-head. The kernel then verifies the re-issued commit is an ancestor of
+the new head, returns the worktree to the branch tip, and continues with GREEN exactly as
+before. The RED binding is rebuilt by replay, not rewritten by hand.
+
+The one-re-head-per-PR cap (D-023) counts re-heads, not their outcomes. PR #88 has used its
+re-head; the marker was written before the validation that refused. The cap is left as it is:
+a second re-head after a kernel-side refusal would need the kernel to judge its own failure
+as not the PR's, and that judgement is exactly what the cap exists to keep out of the loop.
+#88 is closed and issue #49 rebuilt on the fixed kernel; the attempt budget was not charged,
+because `stale_base` never writes the validation-failed marker.
+
+Regression tests: a rehearsed re-head produces a red-proof whose `test_commit` is the rebased
+test commit and an ancestor of the new head, in order between the rebase and GREEN; a RED
+checkpoint that passes after the rebase refuses before any GREEN or push; a rebased history
+without the test-author commit first, or with a test commit that changes other files, refuses.
+Mutations: the re-issue skipped (old test_commit kept); the ancestor check on the re-issued
+commit dropped; the commit-shape check dropped.
