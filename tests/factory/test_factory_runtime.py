@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from factory_kernel.agents import AgentRequest
 from factory_kernel.config import ProviderConfig, load_config
-from factory_kernel.providers import ClaudeCliProvider
+from factory_kernel.providers import ClaudeCliProvider, CliRun
 from factory_kernel.runtime import FactoryStopped, KernelRuntime
 
 
@@ -36,9 +36,9 @@ class ConfigTests(unittest.TestCase):
 
 
 class ProviderTests(unittest.TestCase):
-    @patch("factory_kernel.providers.subprocess.run")
+    @patch("factory_kernel.providers._stream_cli")
     def test_claude_cli_is_a_worker_not_an_authority(self, run):
-        run.return_value = Mock(returncode=0, stdout='{"type": "result", "subtype": "success", "is_error": false, "result": "done", "num_turns": 1, "duration_ms": 10, "total_cost_usd": 0.0, "session_id": "s", "usage": {"input_tokens": 1, "output_tokens": 1}}', stderr="")
+        run.return_value = CliRun(returncode=0, stdout='{"type": "result", "subtype": "success", "is_error": false, "result": "done", "num_turns": 1, "duration_ms": 10, "total_cost_usd": 0.0, "session_id": "s", "usage": {"input_tokens": 1, "output_tokens": 1}}', stderr="")
         provider = ClaudeCliProvider(
             ProviderConfig(
                 provider_id="claude-cli", binary="claude", model="sonnet", timeout_seconds=60
@@ -57,9 +57,9 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("--model", argv)
         self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
 
-    @patch("factory_kernel.providers.subprocess.run")
+    @patch("factory_kernel.providers._stream_cli")
     def test_architecture_holdout_routes_to_independent_model(self, run):
-        run.return_value = Mock(returncode=0, stdout='{"type": "result", "subtype": "success", "is_error": false, "result": "{\\"version\\":\\"1.0\\"}", "num_turns": 1, "duration_ms": 10, "total_cost_usd": 0.0, "session_id": "s", "usage": {"input_tokens": 1, "output_tokens": 1}}', stderr="")
+        run.return_value = CliRun(returncode=0, stdout='{"type": "result", "subtype": "success", "is_error": false, "result": "{\\"version\\":\\"1.0\\"}", "num_turns": 1, "duration_ms": 10, "total_cost_usd": 0.0, "session_id": "s", "usage": {"input_tokens": 1, "output_tokens": 1}}', stderr="")
         provider = ClaudeCliProvider(
             ProviderConfig(
                 provider_id="claude-cli",
@@ -82,9 +82,9 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--model") + 1], "opus")
         self.assertEqual(result.model, "opus")
 
-    @patch("factory_kernel.providers.subprocess.run")
+    @patch("factory_kernel.providers._stream_cli")
     def test_worker_failure_fails_closed(self, run):
-        run.return_value = Mock(returncode=7, stdout="", stderr="bad")
+        run.return_value = CliRun(returncode=7, stdout="", stderr="bad")
         provider = ClaudeCliProvider(
             ProviderConfig(
                 provider_id="claude-cli", binary="claude", model="sonnet", timeout_seconds=60

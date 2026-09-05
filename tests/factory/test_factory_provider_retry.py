@@ -24,7 +24,7 @@ from factory_kernel import providers as providers_module  # noqa: E402
 from factory_kernel.agents import AgentRequest, AgentResult  # noqa: E402
 from factory_kernel.config import ProviderConfig, TRANSIENT_RETRIES_MAX, load_config  # noqa: E402
 from factory_kernel.providers import (  # noqa: E402
-    TRANSIENT_BACKOFF_SECONDS, TRANSIENT_ERROR_PATTERNS, ClaudeCliProvider,
+    TRANSIENT_BACKOFF_SECONDS, TRANSIENT_ERROR_PATTERNS, ClaudeCliProvider, CliRun,
     TransientProviderError, is_transient_error, unwrap_result_envelope,
 )
 from factory_kernel.worker_policy import REPO_MUTATION_ROLES  # noqa: E402
@@ -59,10 +59,11 @@ def request(role: str = "test_author") -> AgentRequest:
 
 
 class Runs:
-    """A fake subprocess.run that hands out canned stdouts in order and counts launches.
+    """A fake `_stream_cli` that hands out canned process outcomes in order and counts launches.
 
     An item may be a `(returncode, stdout)` pair to model the CLI exiting non-zero, which it does
-    when the session ended in error while still printing its envelope on stdout.
+    when the session ended in error while still printing its envelope on stdout, or a `CliRun`
+    for a process the kernel killed.
     """
 
     def __init__(self, *stdouts) -> None:
@@ -74,8 +75,10 @@ class Runs:
         if not self.stdouts:
             raise AssertionError("provider launched more processes than the test allowed")
         item = self.stdouts.pop(0)
+        if isinstance(item, CliRun):
+            return item
         rc, out = item if isinstance(item, tuple) else (0, item)
-        return mock.Mock(returncode=rc, stdout=out, stderr="")
+        return CliRun(returncode=rc, stdout=out, stderr="")
 
 
 FIXTURE = ROOT / "tests" / "factory" / "fixtures" / "provider" / "run-33933101233-test-author-stream-closed.json"
@@ -123,7 +126,7 @@ class RetryTests(unittest.TestCase):
 
     def test_one_transient_failure_then_success_is_one_retry_with_summed_telemetry(self):
         runs = Runs(transient(), envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             result = provider().run(request())
         self.assertEqual(runs.calls, 2)
         self.assertEqual(result.content, "done")
@@ -137,7 +140,7 @@ class RetryTests(unittest.TestCase):
 
     def test_transient_failures_beyond_the_retry_budget_are_refused_with_the_last_error(self):
         runs = Runs(transient(), transient("overloaded"), transient("socket hang up"), envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             with self.assertRaises(RuntimeError) as ctx:
                 provider(retries=2).run(request())
         self.assertEqual(runs.calls, 3, "1 + transient_retries processes, never more")
@@ -153,7 +156,7 @@ class RetryTests(unittest.TestCase):
         ):
             with self.subTest(stdout=stdout[:60]):
                 runs = Runs(stdout, envelope())
-                with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+                with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
                     with self.assertRaises(RuntimeError):
                         provider().run(request())
                 self.assertEqual(runs.calls, 1)
@@ -161,7 +164,7 @@ class RetryTests(unittest.TestCase):
 
     def test_zero_retries_refuses_the_first_transient_error(self):
         runs = Runs(transient(), envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             with self.assertRaises(RuntimeError):
                 provider(retries=0).run(request())
         self.assertEqual(runs.calls, 1)
@@ -174,13 +177,13 @@ class RetryTests(unittest.TestCase):
             order.append("launch")
             return runs(argv, **kwargs)
 
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=launch):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=launch):
             provider().run(request(), before_retry=lambda attempt: order.append(f"restore:{attempt}"))
         self.assertEqual(order, ["launch", "restore:2", "launch"])
 
     def test_a_successful_first_attempt_reports_one_attempt_and_no_errors(self):
         runs = Runs(envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             result = provider().run(request())
         self.assertEqual((result.attempts, result.transient_errors), (1, ()))
 
@@ -207,7 +210,7 @@ class NonZeroExitTests(unittest.TestCase):
 
     def test_a_nonzero_exit_with_a_transient_envelope_is_retried(self):
         runs = Runs((1, FIXTURE.read_text(encoding="utf-8")), envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             result = provider().run(request())
         self.assertEqual(runs.calls, 2)
         self.assertEqual(result.attempts, 2)
@@ -217,7 +220,7 @@ class NonZeroExitTests(unittest.TestCase):
 
     def test_a_nonzero_exit_with_a_terminal_envelope_is_not_retried(self):
         runs = Runs((1, envelope(is_error=True, subtype="error_max_turns", result="Reached max turns")), envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             with self.assertRaises(RuntimeError) as ctx:
                 provider().run(request())
         self.assertNotIsInstance(ctx.exception, TransientProviderError)
@@ -226,14 +229,14 @@ class NonZeroExitTests(unittest.TestCase):
 
     def test_a_nonzero_exit_with_a_transient_word_in_a_cap_envelope_is_not_retried(self):
         runs = Runs((1, envelope(is_error=True, subtype="error_max_budget", result="503 budget")), envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             with self.assertRaises(RuntimeError):
                 provider().run(request())
         self.assertEqual(runs.calls, 1)
 
     def test_a_nonzero_exit_with_non_envelope_stdout_keeps_the_generic_error(self):
         runs = Runs((1, "Segmentation fault: stream closed before completion"), envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             with self.assertRaises(RuntimeError) as ctx:
                 provider().run(request())
         self.assertNotIsInstance(ctx.exception, TransientProviderError)
@@ -243,7 +246,7 @@ class NonZeroExitTests(unittest.TestCase):
     def test_transient_nonzero_exits_beyond_the_budget_are_refused(self):
         fx = FIXTURE.read_text(encoding="utf-8")
         runs = Runs((1, fx), (1, fx), (1, fx), envelope())
-        with mock.patch("factory_kernel.providers.subprocess.run", side_effect=runs):
+        with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             with self.assertRaises(RuntimeError) as ctx:
                 provider().run(request())
         self.assertEqual(runs.calls, 3)

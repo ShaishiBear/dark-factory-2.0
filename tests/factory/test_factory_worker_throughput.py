@@ -24,11 +24,11 @@ if str(ROOT) not in sys.path:
 from factory_kernel import providers, runtime as runtime_module  # noqa: E402
 from factory_kernel.agents import AgentRequest, AgentResult  # noqa: E402
 from factory_kernel.config import ProviderConfig  # noqa: E402
-from factory_kernel.providers import ClaudeCliProvider, unwrap_result_envelope  # noqa: E402
+from factory_kernel.providers import ClaudeCliProvider, CliRun, unwrap_result_envelope  # noqa: E402
 from factory_kernel.runtime import KernelRuntime, RunPaths, STAGE_TIMINGS  # noqa: E402
 from factory_kernel.worker_policy import (  # noqa: E402
     OBSERVED_SECONDS_PER_TURN_CEILING, ROLE_MAX_BUDGET_USD, ROLE_MAX_TURNS, ROLE_TOOLS,
-    assert_caps_fit_timeout, max_budget_usd, max_turns,
+    assert_caps_fit_timeout, max_budget_usd, max_turns, stage_timeout_seconds,
 )
 
 RUNTIME = ROOT / "factory_kernel" / "runtime.py"
@@ -81,8 +81,10 @@ class TurnCapPolicyTests(unittest.TestCase):
 
 
 class CapsFitTimeoutTests(unittest.TestCase):
-    """Worker run 33908589032 measured 33.85 s per turn; the 1200 s timeout fires near 35 turns.
-    A cap above that is unreachable, and a timeout records no envelope and no telemetry (D-025)."""
+    """Worker run 33908589032 measured 33.85 s per turn; the then 1200 s timeout fired near 35
+    turns. A cap above that is unreachable, and a timeout records no envelope and no telemetry
+    (D-025). Each role now has its own wall (`stage_timeout_seconds`) and the configured
+    timeout is the maximum every wall must fit under (D-054)."""
 
     def test_every_cap_fits_under_the_checked_in_timeout(self):
         kernel = json.loads((ROOT / ".factory" / "kernel.json").read_text(encoding="utf-8"))
@@ -90,14 +92,16 @@ class CapsFitTimeoutTests(unittest.TestCase):
         assert_caps_fit_timeout(timeout)
         for role, cap in ROLE_MAX_TURNS.items():
             self.assertLessEqual(cap * OBSERVED_SECONDS_PER_TURN_CEILING, timeout, role)
+            self.assertLessEqual(stage_timeout_seconds(role), timeout, role)
 
     def test_a_cap_the_timeout_would_beat_is_refused(self):
         with mock.patch.dict(ROLE_MAX_TURNS, {"implement": 120}):
             with self.assertRaisesRegex(ValueError, "implement"):
-                assert_caps_fit_timeout(1200)
+                assert_caps_fit_timeout(2700)
 
     def test_ceiling_is_at_least_the_measured_rate(self):
-        self.assertGreaterEqual(OBSERVED_SECONDS_PER_TURN_CEILING, 34)
+        # 40.4 s/turn was measured on `investigate` in build run 33987381035 (D-054).
+        self.assertGreaterEqual(OBSERVED_SECONDS_PER_TURN_CEILING, 41)
 
     def test_every_role_has_a_positive_budget(self):
         self.assertEqual(set(ROLE_MAX_BUDGET_USD), set(ROLE_TOOLS))
@@ -110,17 +114,17 @@ class CapsFitTimeoutTests(unittest.TestCase):
 
 
 class ProviderArgvTests(unittest.TestCase):
-    @mock.patch("factory_kernel.providers.subprocess.run")
+    @mock.patch("factory_kernel.providers._stream_cli")
     def test_argv_carries_the_budget_cap(self, run):
-        run.return_value = mock.Mock(returncode=0, stdout=envelope(), stderr="")
+        run.return_value = CliRun(returncode=0, stdout=envelope(), stderr="")
         provider().run(AgentRequest(role="implement", prompt="p", cwd="/tmp", max_turns=30, max_budget_usd=12.0))
         argv = run.call_args.args[0]
         self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "12")
         self.assertEqual(argv[argv.index("--max-turns") + 1], "30")
 
-    @mock.patch("factory_kernel.providers.subprocess.run")
+    @mock.patch("factory_kernel.providers._stream_cli")
     def test_cache_fields_are_kept_and_default_to_zero(self, run):
-        run.return_value = mock.Mock(returncode=0, stdout=envelope(
+        run.return_value = CliRun(returncode=0, stdout=envelope(
             usage={"input_tokens": 50, "output_tokens": 7,
                    "cache_creation_input_tokens": 11, "cache_read_input_tokens": 900}), stderr="")
         result = provider().run(AgentRequest(role="implement", prompt="p", cwd="/tmp"))
@@ -131,26 +135,31 @@ class ProviderArgvTests(unittest.TestCase):
         self.assertEqual(env.cache_read_input_tokens, 0)
         self.assertIn("cache_read_input_tokens", env.telemetry())
 
-    @mock.patch("factory_kernel.providers.subprocess.run")
+    @mock.patch("factory_kernel.providers._stream_cli")
     def test_timeout_raises_a_failed_stage_naming_the_role(self, run):
-        import subprocess as sp
-        run.side_effect = sp.TimeoutExpired(cmd=["claude"], timeout=60, output="partial text so far")
-        with self.assertRaisesRegex(RuntimeError, r"timed out role='context' after .*timeout_seconds=60.*partial text") as ctx:
+        run.return_value = CliRun(
+            returncode=None, stdout='{"type":"system","subtype":"init","note":"partial text so far"}\n',
+            stderr="", timed_out=True, elapsed=60.0,
+        )
+        with self.assertRaisesRegex(RuntimeError, r"timed out role='context' after 60.0s \(timeout_seconds=60, max_turns=24.*partial text") as ctx:
             provider().run(AgentRequest(role="context", prompt="p", cwd="/tmp", max_turns=24))
-        self.assertIsInstance(ctx.exception.__cause__, sp.TimeoutExpired)
+        self.assertTrue(ctx.exception.timed_out)
+        self.assertEqual(ctx.exception.telemetry["events_seen"], 1)
 
     def test_budget_stopped_envelope_fails_the_stage(self):
         with self.assertRaisesRegex(RuntimeError, "error_max_budget"):
             unwrap_result_envelope(envelope(subtype="error_max_budget_usd", result=""), role="implement")
 
 
-    @mock.patch("factory_kernel.providers.subprocess.run")
+    @mock.patch("factory_kernel.providers._stream_cli")
     def test_argv_carries_the_cap_and_structured_output(self, run):
-        run.return_value = mock.Mock(returncode=0, stdout=envelope(), stderr="")
+        run.return_value = CliRun(returncode=0, stdout=envelope(), stderr="")
         result = provider().run(AgentRequest(role="implement", prompt="p", cwd="/tmp", max_turns=120))
         argv = run.call_args.args[0]
         self.assertEqual(argv[argv.index("--max-turns") + 1], "120")
-        self.assertEqual(argv[argv.index("--output-format") + 1], "json")
+        # Read as it runs (D-054); print mode refuses stream-json without --verbose.
+        self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
+        self.assertIn("--verbose", argv)
         # Isolation flags are untouched.
         for flag in ("--bare", "--strict-mcp-config", "--disable-slash-commands"):
             self.assertIn(flag, argv)
@@ -163,15 +172,15 @@ class ProviderArgvTests(unittest.TestCase):
         self.assertEqual(result.output_tokens, 7)
         self.assertEqual(result.session_id, "s-1")
 
-    @mock.patch("factory_kernel.providers.subprocess.run")
+    @mock.patch("factory_kernel.providers._stream_cli")
     def test_no_cap_means_no_flag(self, run):
-        run.return_value = mock.Mock(returncode=0, stdout=envelope(), stderr="")
+        run.return_value = CliRun(returncode=0, stdout=envelope(), stderr="")
         provider().run(AgentRequest(role="implement", prompt="p", cwd="/tmp"))
         self.assertNotIn("--max-turns", run.call_args.args[0])
 
-    @mock.patch("factory_kernel.providers.subprocess.run")
+    @mock.patch("factory_kernel.providers._stream_cli")
     def test_structured_roles_parse_the_unwrapped_text(self, run):
-        run.return_value = mock.Mock(
+        run.return_value = CliRun(
             returncode=0, stdout=envelope(result='{"version":"1.0","verdict":"pass"}'), stderr="",
         )
         result = provider().run(AgentRequest(
@@ -203,9 +212,9 @@ class ResultEnvelopeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "result envelope"):
             unwrap_result_envelope('{"version":"1.0"}', role="implement")
 
-    @mock.patch("factory_kernel.providers.subprocess.run")
+    @mock.patch("factory_kernel.providers._stream_cli")
     def test_provider_refuses_an_error_envelope_even_at_rc_zero(self, run):
-        run.return_value = mock.Mock(returncode=0, stdout=envelope(is_error=True), stderr="")
+        run.return_value = CliRun(returncode=0, stdout=envelope(is_error=True), stderr="")
         with self.assertRaisesRegex(RuntimeError, "ended in error"):
             provider().run(AgentRequest(role="review-spec", prompt="p", cwd="/tmp"))
 

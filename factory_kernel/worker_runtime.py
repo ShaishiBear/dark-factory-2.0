@@ -12,7 +12,10 @@ from .prompt_render import literal_artifacts_dir_entries, render_prompt
 from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
 from .static_gate import check_files
-from .worker_policy import KERNEL_COMMIT_ARGS, allowed_tools, max_budget_usd, max_turns, may_change_repo
+from .worker_policy import (
+    KERNEL_COMMIT_ARGS, allowed_tools, max_budget_usd, max_turns, may_change_repo,
+    stage_timeout_seconds,
+)
 from .worktree import create_detached, remove
 
 
@@ -215,6 +218,9 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 # turns that into a failed stage (D-020).
                 max_turns=max_turns(role),
                 max_budget_usd=max_budget_usd(role),
+                # The role's own wall clock; the provider kills the process past it and
+                # records what the stream had shown (D-054).
+                timeout_seconds=stage_timeout_seconds(role),
             ),
             # A transient provider error is retried by the provider with a fresh process. A
             # mutation role may have half-written the checkout before the stream dropped, so

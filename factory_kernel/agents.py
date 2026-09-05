@@ -37,6 +37,10 @@ class AgentRequest:
     environment: Mapping[str, str] = field(default_factory=dict)
     max_turns: int | None = None
     max_budget_usd: float | None = None
+    # The wall clock one CLI process for this request may run, in seconds: the role's own wall
+    # (`worker_policy.stage_timeout_seconds`), never above the provider's configured maximum.
+    # Absent, the provider falls back to that maximum (D-054).
+    timeout_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if not self.role.strip():
@@ -55,6 +59,12 @@ class AgentRequest:
             or self.max_budget_usd <= 0
         ):
             raise ValueError("agent max_budget_usd must be a positive number when set")
+        if self.timeout_seconds is not None and (
+            isinstance(self.timeout_seconds, bool)
+            or not isinstance(self.timeout_seconds, int)
+            or self.timeout_seconds <= 0
+        ):
+            raise ValueError("agent timeout_seconds must be a positive integer when set")
 
 
 @dataclass(frozen=True)
@@ -76,6 +86,9 @@ class AgentResult:
     # sum across attempts.
     attempts: int = 1
     transient_errors: tuple[str, ...] = ()
+    # How many stream events the provider read from the CLI across every attempt (the
+    # progress the stage showed while it ran); `None` for a provider that does not stream.
+    events_seen: int | None = None
 
 
 class AgentProvider(Protocol):

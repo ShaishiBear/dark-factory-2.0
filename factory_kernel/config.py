@@ -7,17 +7,27 @@ import os
 from pathlib import Path, PurePosixPath
 from typing import Mapping
 
+IDLE_TIMEOUT_SECONDS_DEFAULT = 420
+
 
 @dataclass(frozen=True)
 class ProviderConfig:
     provider_id: str
     binary: str
     model: str
+    # The global maximum wall clock for one CLI process. Each role runs under its own, smaller
+    # wall (`worker_policy.stage_timeout_seconds`, carried on the request); this is the ceiling
+    # every one of those must fit under (`assert_caps_fit_timeout`), and the wall a request
+    # without one falls back to (D-054).
     timeout_seconds: int
     architecture_model: str = ""
     # How many times a stage is re-launched after an explicitly transient provider error
     # (a dropped stream, a 5xx, a rate limit). 0..3; terminal errors are never retried (D-031).
     transient_retries: int = 2
+    # A process that has printed no stream event for this long is hung, not slow: the CLI
+    # emits an event per model turn and per tool call, and the longest legitimate gap is one
+    # model call. The kernel kills it, records what it saw and retries once (D-054).
+    idle_timeout_seconds: int = IDLE_TIMEOUT_SECONDS_DEFAULT
 
 
 TRANSIENT_RETRIES_MAX = 3
@@ -149,6 +159,16 @@ def load_config(path: str | Path) -> KernelConfig:
     if not work_root.is_absolute():
         raise ValueError("kernel runtime work root must be absolute")
 
+    timeout_seconds = _positive_int(provider.get("timeout_seconds"), "provider.timeout_seconds")
+    idle_timeout_seconds = _positive_int(
+        provider.get("idle_timeout_seconds", IDLE_TIMEOUT_SECONDS_DEFAULT),
+        "provider.idle_timeout_seconds",
+    )
+    if idle_timeout_seconds > timeout_seconds:
+        raise ValueError(
+            "kernel provider.idle_timeout_seconds must not exceed provider.timeout_seconds"
+        )
+
     return KernelConfig(
         version="1.0",
         repository=_string(root.get("repository"), "repository"),
@@ -160,11 +180,12 @@ def load_config(path: str | Path) -> KernelConfig:
             architecture_model=_string(
                 provider.get("architecture_model"), "provider.architecture_model"
             ),
-            timeout_seconds=_positive_int(provider.get("timeout_seconds"), "provider.timeout_seconds"),
+            timeout_seconds=timeout_seconds,
             transient_retries=_bounded_int(
                 provider.get("transient_retries"), "provider.transient_retries",
                 low=0, high=TRANSIENT_RETRIES_MAX,
             ),
+            idle_timeout_seconds=idle_timeout_seconds,
         ),
         runtime=RuntimeConfig(
             max_attempts=_positive_int(runtime.get("max_attempts"), "runtime.max_attempts"),

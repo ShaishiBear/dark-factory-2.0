@@ -1767,3 +1767,136 @@ has the extension and `IF NOT EXISTS` makes the migration a no-op there. On a pl
 quietly per query. The embedding column is still TEXT cast at query time
 (`vector_search_pg`'s docstring says so); moving it to `vector(1536)` with an HNSW index is
 a separate decision.
+## D-054 · A worker's timeout is measured on its event stream, and leaves telemetry, because the 1200-second `test_author` of run 33987381035 left none
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33987381035 (build of issue #103)
+
+The run's stage lines, printed live by D-050's funnel:
+
+```
+FACTORY_STAGE kind=agent name=investigate seconds=888.607 turns=22 cost_usd=1.467 outcome=ok
+FACTORY_STAGE kind=agent name=contract seconds=280.317 turns=12 cost_usd=0.836 outcome=ok
+FACTORY_STAGE kind=agent name=context seconds=696.978 turns=30 cost_usd=1.478 outcome=ok
+FACTORY_STAGE kind=agent name=architecture seconds=262.363 turns=12 cost_usd=0.649 outcome=ok
+FACTORY_STAGE kind=agent name=test_author seconds=1200.121 turns=0 cost_usd=0.0 outcome=failed over_budget=true
+```
+
+`test_author` died at the 1200 s subprocess timeout: `subprocess.TimeoutExpired`, refused as
+`agent worker timed out role='test_author' after 1200.1s (timeout_seconds=1200,
+max_turns=30); partial output:` and nothing after the colon. Its record
+(`agent-test_author.json`) says `attempts=1`, `num_turns=0`, `duration_ms=0`,
+`total_cost_usd=0`, `timed_out=true`, `transient_errors=[]`. Two facts follow.
+
+**(a) The stage that most needed measuring left nothing.** With `--output-format json` the
+CLI prints its one envelope when the session ends, so a process killed before then has
+printed nothing at all. Whether the worker had done twenty-nine turns of work or none, whether
+it was hung on a stuck API stream or slowly writing tests, cannot be told from the record:
+`turns=0` means "no envelope", not "no turns". The build died at its most expensive stage
+with zero evidence, twenty minutes after the last thing it said.
+
+**(b) The stated ceiling was already refuted by the data.** `OBSERVED_SECONDS_PER_TURN_CEILING
+= 35` (D-025, stated from one 33.85 s/turn observation) and the same run measured
+`investigate` at 888.6 / 22 = 40.4 s per turn (the others: contract 23.4, context 23.2,
+architecture 21.9). A 30-turn worker at 40.4 s needs 1212 s; the single global wall of
+1200 s sat exactly on the turn budget, so a worker that legitimately used its cap at the
+observed rate was killed rather than stopped at `--max-turns` with a clean envelope.
+
+**Decision.** The timeout is measured on the event stream, per role, and a killed process
+still reports what it showed.
+
+- **Stream-aware launch.** The CLI is run with `--output-format stream-json --verbose` (in
+  print mode the CLI refuses `stream-json` without `--verbose`; verified against the
+  installed 2.1.259). It prints one JSON object per line as the session runs. The shapes the
+  kernel relies on, from a probe of the installed CLI: `{"type":"system","subtype":"init",
+  "session_id":...,"model":...}`; `{"type":"assistant","message":{"id":...,"usage":{
+  "input_tokens","output_tokens","cache_creation_input_tokens","cache_read_input_tokens"},
+  "content":[...]},"session_id":...}` (possibly once per content block of the same message
+  id); `{"type":"user","message":{"content":[{"type":"tool_result",...}]}}`; and the final
+  `{"type":"result","subtype":...,"is_error":...,"result":...,"num_turns":...,
+  "duration_ms":...,"total_cost_usd":...,"usage":{...},"session_id":...}`, which carries
+  exactly the fields the `json` envelope did. `_stream_cli` reads stdout line by line on a
+  reader thread with a timestamp per event; `_launch` hands the final `result` event to the
+  unchanged `unwrap_result_envelope`, so every consumer sees what it saw before. The parser
+  is tolerant (a line that is not a JSON object with a string `type` is ignored), and a
+  one-line `json` envelope is a stream of exactly one `result` event, so nothing is coupled
+  to the flag; the `json` format is dropped outright rather than kept selectable, because
+  keeping it would keep the defect selectable. The prompt travels on argv, so stdin is now
+  `DEVNULL`: the worker never reads it, and an open pipe is one more way for a print-mode
+  CLI to wait forever.
+- **Idle-hang detection.** `provider.idle_timeout_seconds` (`kernel.json`, default 420,
+  refused above `timeout_seconds`): no stream event for that long kills the process. A
+  working CLI prints an event per model turn and per tool call, so the longest legitimate
+  silence is one model call; the slowest turn observed is 40.4 s, and seven minutes is ten
+  times that. The kill raises `WorkerHungError`, a `TransientProviderError` whose envelope
+  is what the events showed (turns per distinct assistant message id, tokens summed per
+  message, the session id) and whose telemetry is the hang itself (`hang=true`,
+  `last_event_age_s`, `wall_seconds_last_attempt`, the last five event lines as
+  `partial_output`, capped at 1500 characters). The existing retry loop relaunches it once
+  (`HANG_RETRIES = 1`), calling `before_retry` first so a mutation role's worktree is
+  restored (D-031); a second hang is terminal whatever the transient budget still allows,
+  because a process that hangs twice on the same prompt is not suffering the network.
+- **Per-role wall.** `worker_policy.stage_timeout_seconds(role) = ceil(max_turns(role) ×
+  OBSERVED_SECONDS_PER_TURN_CEILING × 1.5)`: 2025 s for a 30-turn role, 1620 s for `context`
+  (24), 1350 s for `triage` (20), 675 s for the ten-turn judges. The 1.5× headroom is for the
+  work between turns that is not a model call and for the spread the four observations
+  already show (21.9 to 40.4 s/turn). Every `AgentRequest` carries it as `timeout_seconds`
+  (all six construction sites; the `_agent_stage` funnel requires it as the fourth bound
+  beside tools, turns and dollars, D-052); the provider uses it as the wall for each process,
+  clamped to `provider.timeout_seconds`, which is raised to 2700 and becomes the global
+  maximum every wall must fit under (`assert_caps_fit_timeout`), not a wall itself.
+- **The ceiling is stated from data, not tuned.** `OBSERVED_SECONDS_PER_TURN_CEILING = 45`,
+  citing the run's four observations in the comment beside it. It is a ceiling above the
+  highest measured rate with a margin; the caps are unchanged, and `over_budget` keeps its
+  meaning (`max_turns × ceiling` exceeded, now 1350 s for a 30-turn role).
+- **A timed-out or hung stage leaves telemetry.** The refusal carries the partial envelope,
+  the retry loop sums it with every earlier attempt's, and `_record_failed_agent` writes the
+  sum: `num_turns`, tokens, `events_seen`, `last_event_age_s`, `partial_output`,
+  `timed_out`/`hang`, and the role's `timeout_seconds`. The stage line gains three optional
+  fields, `FACTORY_STAGE ... outcome=failed [events=N] [timed_out=true] [hang=true]
+  [over_budget=true]`, and a returned stage now also says `events=N`. Dollars are known only
+  from a `result` event, so a stage whose only attempt was killed before one reports its cost
+  as unknown (omitted from the line) rather than as a false `0.0`.
+
+Pinned by `tests/factory/test_factory_stream_timeouts.py`, whose end-to-end cases launch a
+fake CLI (a Python script the test writes, emitting stream-json lines with controllable
+pacing) through the provider's own argv and reader: a streamed session yields the same
+`AgentResult` the json envelope did, with `--output-format stream-json --verbose` in the
+argv; a hung process is killed at the idle timeout, recorded (`hang`, `events_seen` and
+turns summed across attempts, `last_event_age_s`, the partial output), retried exactly once
+with the restore hook called, then terminal; a hang followed by a healthy process is one
+retry whose turns include the hung attempt's; events 0.3 s apart under a 1 s idle timeout
+are progress, not a hang; a process killed at the request's 2 s wall (configured maximum
+60 s) records partial turns, tokens and events and is not retried; the reader is given the
+request's wall and the configured idle timeout, and a wall above the maximum is clamped;
+the partial envelope counts one turn per assistant message id and leaves the cost unknown;
+the record, row and stage line of a timed-out and of a hung stage carry the fields above;
+every role's wall is `ceil(cap × 45 × 1.5)`, fits under the checked-in 2700, and the old
+1200 could not hold a 30-turn role; the ceiling is above 40.4 and `over_budget` still means
+the turn budget; `idle_timeout_seconds` is parsed, defaults to 420 when absent, and refuses
+non-positive, non-integer and larger-than-`timeout_seconds` values. Updated:
+`test_factory_worker_throughput.py` (argv, the timeout carrying `events_seen`, the ceiling at
+least 41), `test_factory_authority_bounds.py` (the fourth bound at every site, from
+`stage_timeout_seconds`), `test_factory_validation_stage_telemetry.py` (the stage-line shape,
+the holdout budget now 450 s), and the provider tests that faked `subprocess.run` now fake
+`_stream_cli` with a `CliRun`. Mutations `idle-detection-never-fires`, `hang-not-retried`,
+`timed-out-telemetry-dropped`, `per-role-wall-ignored` and `ceiling-reverted-to-35` (with
+`assert_caps_fit_timeout` still passing) are registered in
+`harness/factory_mutations/defects.json`, the detector file is in the runner's copy list,
+and each was verified by direct injection on the maintainer's Windows host (the copy built by
+`run.py`, one defect injected, the two detector files run).
+
+**Observed and left alone.** The brief for this change assumed the test author runs the
+unit suites itself; it cannot (`WRITE_TOOLS` carries no Bash, and the
+`worker-shell-tool-enabled` mutation keeps it that way). The kernel runs the static gate and
+the suites after the author returns, outside the stage's wall. The headroom is for tool
+calls and turn variance, not for test runs. The caps and the dollar backstops are unchanged;
+the walls and the idle timeout are the next numbers to tune from `stage-timings.jsonl`
+(D-025), and the first stream-read build is the evidence for that.
+
+**Consequences.** A hung worker now costs at most two idle timeouts (14 minutes) plus a
+restore before the stage is refused with its evidence, instead of twenty silent minutes with
+none; a slow worker is stopped at `--max-turns` with a clean envelope before its wall, as
+D-025 intended; a stage that is killed says what it had done. A 30-turn stage may now run
+2025 s rather than 1200 s before its wall, so a build's worst case is longer, but bounded
+per role and measured per turn. The next build's stage lines carry `events=N`, and the
+next timed-out stage, if there is one, is a record to read rather than a gap to reconstruct.

@@ -56,10 +56,12 @@ from .worker_policy import (
     BUILDER_BLIND_PATHS,
     KERNEL_COMMIT_NAME,
     KERNEL_COMMIT_ARGS,
+    ROLE_MAX_TURNS,
     allowed_tools,
     max_budget_usd,
     max_turns,
     stage_budget_seconds,
+    stage_timeout_seconds,
 )
 from .worktree import Worktree, create_detached, remove
 
@@ -98,13 +100,21 @@ def record_stage_timing(
 
 def stage_line(row: Mapping[str, Any]) -> str:
     """`FACTORY_STAGE kind=... name=... seconds=... [turns=...] [cost_usd=...] outcome=...
-    [over_budget=true]`: the row as one log line, with the fields that do not apply left out."""
+    [events=...] [timed_out=true] [hang=true] [over_budget=true]`: the row as one log line,
+    with the fields that do not apply left out. `events` is how many stream events the
+    provider read; a timed-out or hung stage still says what it had shown by then (D-054)."""
     fields = [f"kind={row['kind']}", f"name={row['name']}", f"seconds={row['seconds']}"]
     if row.get("num_turns") is not None:
         fields.append(f"turns={row['num_turns']}")
     if row.get("cost_usd") is not None:
         fields.append(f"cost_usd={row['cost_usd']}")
     fields.append(f"outcome={row['outcome']}")
+    if row.get("events_seen") is not None:
+        fields.append(f"events={row['events_seen']}")
+    if row.get("timed_out"):
+        fields.append("timed_out=true")
+    if row.get("hang"):
+        fields.append("hang=true")
     if row.get("over_budget"):
         fields.append("over_budget=true")
     return STAGE_LINE_PREFIX + " " + " ".join(fields)
@@ -119,6 +129,11 @@ def over_budget(role: str, wall_seconds: float) -> bool:
     """
     budget = stage_budget_seconds(role)
     return budget is not None and wall_seconds > budget
+
+
+def _stage_wall(role: str) -> int | None:
+    """The role's own wall clock for the record; `None` for a role without a turn cap."""
+    return stage_timeout_seconds(role) if role in ROLE_MAX_TURNS else None
 
 
 def _iso(timestamp: float) -> str:
@@ -1566,6 +1581,7 @@ class KernelRuntime:
                     allowed_tools=allowed_tools("holdout"),
                     max_turns=max_turns("holdout"),
                     max_budget_usd=max_budget_usd("holdout"),
+                    timeout_seconds=stage_timeout_seconds("holdout"),
                 ),
             )
             value = result.structured_output
@@ -1783,6 +1799,7 @@ class KernelRuntime:
                     allowed_tools=allowed_tools(role),
                     max_turns=max_turns(role),
                     max_budget_usd=max_budget_usd(role),
+                    timeout_seconds=stage_timeout_seconds(role),
                 ),
             )
             value = result.structured_output
@@ -1850,6 +1867,7 @@ class KernelRuntime:
                     allowed_tools=allowed_tools("architecture-holdout"),
                     max_turns=max_turns("architecture-holdout"),
                     max_budget_usd=max_budget_usd("architecture-holdout"),
+                    timeout_seconds=stage_timeout_seconds("architecture-holdout"),
                 ),
             )
             value = result.structured_output
@@ -1905,14 +1923,18 @@ class KernelRuntime:
                 allowed_tools=allowed_tools(role),
                 max_turns=max_turns(role),
                 max_budget_usd=max_budget_usd(role),
+                timeout_seconds=stage_timeout_seconds(role),
             ),
         )
 
-    # The three bounds every request must carry before a model is run. `allowed_tools` is what
+    # The four bounds every request must carry before a model is run. `allowed_tools` is what
     # the role may touch, `max_turns` how many iterations it gets, `max_budget_usd` what it may
-    # spend; the provider only renders a flag for a value that is present, so a request that
-    # arrives without one runs unbounded on that axis, silently.
-    REQUEST_BOUNDS: tuple[str, ...] = ("allowed_tools", "max_turns", "max_budget_usd")
+    # spend, `timeout_seconds` how long its process may run; the provider only renders a flag
+    # for a value that is present (and falls back to the global maximum wall for a missing
+    # timeout), so a request that arrives without one runs unbounded on that axis, silently.
+    REQUEST_BOUNDS: tuple[str, ...] = (
+        "allowed_tools", "max_turns", "max_budget_usd", "timeout_seconds",
+    )
 
     def _agent_stage(
         self, paths: RunPaths, request: AgentRequest, **run_kwargs: Any
@@ -1969,11 +1991,14 @@ class KernelRuntime:
             "output_tokens": getattr(result, "output_tokens", None),
             "wall_seconds": wall,
             "budget_seconds": stage_budget_seconds(role),
+            "timeout_seconds": _stage_wall(role),
             "over_budget": over_budget(role, wall),
             # A stage retried after a transient provider error reports every process it took
             # and why; the counts above are summed across them (D-031).
             "attempts": getattr(result, "attempts", 1),
             "transient_errors": list(getattr(result, "transient_errors", ()) or ()),
+            # How many stream events the provider read across those processes (D-054).
+            "events_seen": getattr(result, "events_seen", None),
         }
         (paths.transcripts / f"agent-{role}.json").write_text(
             json.dumps(telemetry, sort_keys=True, indent=2, default=str) + "\n", encoding="utf-8"
@@ -1982,6 +2007,7 @@ class KernelRuntime:
             paths.transcripts, kind="agent", name=role, started=started, ended=ended,
             outcome="ok", model=telemetry["model"], num_turns=telemetry["num_turns"],
             duration_ms=telemetry["duration_ms"], cost_usd=telemetry["total_cost_usd"],
+            events_seen=telemetry["events_seen"],
             over_budget=telemetry["over_budget"] or None,
         )
 
@@ -2001,6 +2027,11 @@ class KernelRuntime:
         `test_author` stream drops had only the exception text as evidence (D-040, D-041).
         The error text is scrubbed of every secret shape the guard knows before it is written,
         because a provider error can echo the prompt and the prompt can echo an issue body.
+
+        A timed-out or hung process carries what its event stream had shown (turns, cost,
+        `events_seen`, `last_event_age_s`, the last event lines as `partial_output`) in the
+        provider's telemetry, so the record and the stage line of the stage that died at its
+        wall are not empty, as the `test_author` record of run 33987381035 was (D-054).
         """
         ended = time.time()
         paths.transcripts.mkdir(parents=True, exist_ok=True)
@@ -2017,6 +2048,7 @@ class KernelRuntime:
             "timed_out": bool(getattr(exc, "timed_out", False)),
             "wall_seconds": wall,
             "budget_seconds": stage_budget_seconds(role),
+            "timeout_seconds": _stage_wall(role),
             "over_budget": over_budget(role, wall),
             **({k: v for k, v in carried.items()} if isinstance(carried, Mapping) else {}),
         }
@@ -2027,7 +2059,9 @@ class KernelRuntime:
             paths.transcripts, kind="agent", name=role, started=started, ended=ended,
             outcome="failed", error_class=type(exc).__name__, model=model,
             num_turns=telemetry.get("num_turns"), cost_usd=telemetry.get("total_cost_usd"),
+            events_seen=telemetry.get("events_seen"),
             timed_out=telemetry["timed_out"] or None,
+            hang=telemetry.get("hang") or None,
             over_budget=telemetry["over_budget"] or None,
         )
 
