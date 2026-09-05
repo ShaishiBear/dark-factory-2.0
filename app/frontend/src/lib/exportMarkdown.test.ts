@@ -270,6 +270,51 @@ describe('formatCitation', () => {
     expect(result).toContain('0:10–0:20');
     expect(result).toContain('> "Test snippet text"');
   });
+
+  it('AC-1: keeps the snippet blockquote when video_url is unparseable', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toContain('> "Relevant text"');
+    expect(result).toContain('\n  > "Relevant text"');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-2: keeps the list marker on the unparseable-URL fallback', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[exportMarkdown] Skipping timestamp link — invalid video_url: "not-a-url"',
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('AC-3: keeps the list marker on the Dynamous empty-lesson_url fallback', () => {
+    const citation = {
+      ...baseCitation,
+      source_type: 'dynamous' as const,
+      video_url: '',
+      lesson_url: '',
+    };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Test snippet text"');
+  });
+
+  it('AC-4: fixes the no-v-param fallback identically to the invalid-URL one', () => {
+    const citation = { ...baseCitation, video_url: 'https://www.youtube.com/' };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    expect(result).not.toContain('[Test Video Title](');
+    expect(result).toContain('> "Test snippet text"');
+  });
 });
 
 describe('formatSources', () => {
@@ -306,5 +351,14 @@ describe('formatSources', () => {
   it('should join multiple citations with newline', () => {
     const result = formatSources([mockCitation, { ...mockCitation, chunk_id: 'chunk-2' }]);
     expect(result.split('- [Test Video]').length).toBe(3);
+  });
+
+  it('AC-5: every rendered source entry starts with its own list marker', () => {
+    const fallback = { ...mockCitation, chunk_id: 'chunk-fallback', video_url: 'not-a-url' };
+    const success = { ...mockCitation, chunk_id: 'chunk-success' };
+    const result = formatSources([fallback, success]);
+    const entryLines = result.split('**Sources:**\n')[1].split('\n');
+    expect(entryLines[0]).toMatch(/^- /);
+    expect(entryLines[2]).toMatch(/^- /);
   });
 });
