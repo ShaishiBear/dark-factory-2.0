@@ -22,6 +22,8 @@ export function formatCitation(citation: Citation): string {
   if (!citation.snippet?.trim()) return '';
 
   const range = `${formatTimestamp(citation.start_seconds)}–${formatTimestamp(citation.end_seconds)}`;
+  // Every citation entry ends with this blockquote line, indented under its '- ' list marker.
+  const quote = `\n  > "${citation.snippet}"`;
 
   // Issue #147: Dynamous citations link to the Circle lesson_url. Circle
   // doesn't support timestamp deep-links, so the (MM:SS–MM:SS) range is
@@ -29,10 +31,10 @@ export function formatCitation(citation: Citation): string {
   if (citation.source_type === 'dynamous') {
     const lessonUrl = citation.lesson_url?.trim();
     if (!lessonUrl) {
-      return `${citation.video_title} — ${range}\n  > "${citation.snippet}"`;
+      return `- ${citation.video_title} — ${range}${quote}`;
     }
     const link = `[${citation.video_title}](${lessonUrl})`;
-    return `- ${link} — ${range}\n  > "${citation.snippet}"`;
+    return `- ${link} — ${range}${quote}`;
   }
 
   // Default / 'youtube': embedded player + ?t= deep-link.
@@ -43,19 +45,19 @@ export function formatCitation(citation: Citation): string {
     console.warn(
       `[exportMarkdown] Skipping timestamp link — invalid video_url: "${citation.video_url}"`,
     );
-    return `${citation.video_title} (timestamp link unavailable) — ${range}`;
+    return `- ${citation.video_title} (timestamp link unavailable) — ${range}${quote}`;
   }
 
   if (!videoId) {
     console.warn(
       `[exportMarkdown] Skipping timestamp link — invalid video_url: "${citation.video_url}"`,
     );
-    return `${citation.video_title} (timestamp link unavailable) — ${range}`;
+    return `- ${citation.video_title} (timestamp link unavailable) — ${range}${quote}`;
   }
 
   const externalUrl = `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(citation.start_seconds)}s`;
   const link = `[${citation.video_title}](${externalUrl})`;
-  return `- ${link} — ${range}\n  > "${citation.snippet}"`;
+  return `- ${link} — ${range}${quote}`;
 }
 
 export function formatSources(sources: Citation[]): string {
