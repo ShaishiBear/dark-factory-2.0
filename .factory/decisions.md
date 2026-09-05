@@ -1241,3 +1241,38 @@ checkpoint that passes after the rebase refuses before any GREEN or push; a reba
 without the test-author commit first, or with a test commit that changes other files, refuses.
 Mutations: the re-issue skipped (old test_commit kept); the ancestor check on the re-issued
 commit dropped; the commit-shape check dropped.
+
+---
+
+## D-046 · The browser opens `localhost`, because the session cookie is Secure
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33947564054 (validation of PR #91)
+
+The first production browser E2E got further than any before it: static 5/5, 1470 unit
+tests, `APP_STARTED`, the login page rendered, both fields were filled, "Log in" was
+clicked. Twenty seconds later the snapshot still showed the login form. The harness had
+never passed anywhere; this was its first real execution.
+
+**Diagnosis.** `app/backend/routes/auth.py` mints the session cookie with `secure=True`
+(`_set_session_cookie`, pinned by `app/backend/tests/test_auth.py`, a MISSION security
+invariant). `harness/e2e.py` opened the frontend at `http://127.0.0.1:<port>`. Browsers
+store a `Secure` cookie only from a secure context; Chromium and Firefox exempt the
+`localhost` name on plain HTTP but not the loopback literal. So `POST /api/auth/login`
+returned 200 with a `Set-Cookie` the browser discarded; `useAuth.refresh()` called
+`/api/auth/me`, got 401, set the user to null; `RequireAuth` navigated back to `/login`;
+the predicate "Ask anything about the video library" (which does exist verbatim in
+`ChatArea.tsx`) never appeared. Everything else checked out: the bootstrap creates the
+user with the same bcrypt hasher login verifies; Circle verification without configuration
+returns non-member without raising, and non-members see the chat surface; the signup
+rate limiter is not on the login path.
+
+**Fix.** The harness, not the app: `BROWSER_ORIGIN_HOST = "localhost"` for every browser
+origin, and the explicit-URL path refuses anything else. The Secure cookie is untouched
+and a contract test asserts the app-side pin still exists, so the E2E cannot be made green
+by weakening the cookie. The backend is still probed at `127.0.0.1`.
+
+**Consequences.** The refusal wrote one `validation-failed` attempt marker on #49; it is
+environmental and the overseer resets it. PR #91's head predates this fix and the full
+harness runs at the PR head's tree, so #91 needs a re-head (its one re-head is unspent)
+or a rebuild for the fix to reach it. The E2E is still unproven end to end; the next
+validation is the first that can reach the citation steps.
