@@ -270,6 +270,51 @@ describe('formatCitation', () => {
     expect(result).toContain('0:10–0:20');
     expect(result).toContain('> "Test snippet text"');
   });
+
+  it('AC-1: keeps the quoted snippet on its own line when video_url is unparseable', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toContain('> "Relevant text"');
+    expect(result.split('\n').some((line) => line.trim() === '> "Relevant text"')).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  it('AC-2: keeps the list marker when video_url is unparseable', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    expect(result).not.toContain('[Test Video Title](');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-3: keeps the list marker for a Dynamous citation without lesson_url', () => {
+    const citation = {
+      ...baseCitation,
+      source_type: 'dynamous' as const,
+      video_url: '',
+      lesson_url: '',
+    };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Test snippet text"');
+    expect(result.split('\n').some((line) => line.trim() === '> "Test snippet text"')).toBe(true);
+  });
+
+  it('AC-4: keeps the list marker and the quoted snippet when the v param is missing', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'https://www.youtube.com/' };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable) — 0:10–0:20');
+    expect(result).toContain('> "Test snippet text"');
+    expect(result).not.toContain('[Test Video Title](');
+    warnSpy.mockRestore();
+  });
 });
 
 describe('formatSources', () => {
