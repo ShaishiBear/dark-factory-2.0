@@ -20,7 +20,8 @@ GATE_OK mode=quick
 
 | File | Origin |
 |---|---|
-| `ci.py` · `appproc.py` | **Verbatim from the `build-dark-factory` skill.** The ladder and the app-process manager are the same in every factory; do not edit them here. |
+| `ci.py` | **Verbatim from the `build-dark-factory` skill.** The ladder is the same in every factory; do not edit it here. |
+| `appproc.py` | From the same skill, with one repo-owned addition: `HttpApp` drains the child's combined output to `app-process.log` on a daemon thread from before the health wait, and `APP_STARTED` names the file (D-051). The rest is the skill's. |
 | `harness.config.json` | This repo. Every command DynaChat runs. |
 | `static.py` · `unit.py` | This repo. `ci.py` runs one command per rung and DynaChat is two stacks, so the split lives here rather than in the ladder. |
 | `serve.py` | This repo. Starts the backend, or refuses with a named reason. |

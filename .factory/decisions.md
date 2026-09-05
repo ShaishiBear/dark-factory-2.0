@@ -1565,3 +1565,76 @@ progress live; cap tuning for the authorities happens after that run, from its n
 from this one's reconstruction. The refusal that ended run 33960088633 (`evidence_spine`, the
 browser journey timing out on the chat page after a successful login) is a separate defect
 and is not addressed here.
+
+## D-051 · The streaming step carries its own evidence, because the app process log was a pipe nobody read
+
+**Status:** recorded · **Raised:** 2026-09-05 · **Run:** 33960088633 (validation of PR #99, after D-049)
+
+The first validation to get past the browser login failed at the streaming step:
+`E2E_FAIL browser state did not appear in 10s`, waiting for the transient "Stop response"
+button. The evidence dump D-049 made uploadable said what the page looked like and nothing
+about why. `network.txt` held `POST /api/conversations/<id>/messages (Fetch)` with no status,
+followed by two green GETs; the snapshot showed the question, the "Send message" button, no
+assistant text and no inline error; `console.txt` and `errors.txt` were Vite and React
+Router noise; `page.html` was 73 bytes of `Missing arguments for: get html`, because the
+capture called `get html` without the selector the CLI requires. The one place the backend
+says why a stream breaks (`OpenRouter streaming API error` / `Unexpected error during
+streaming` in `llm/openrouter.py`, uvicorn's traceback, the bootstrap's own
+`E2E_BOOTSTRAP_OK` line printed through `serve.py`) was the app process's stdout, which
+`appproc.HttpApp` opened as a pipe and read only on the never-healthy path. After
+`APP_STARTED` nothing drained it; everything printed was lost, and a child that filled the
+64 KiB buffer would have blocked. The run could not be reproduced locally (no database, no
+keys), so the next run has to carry its own evidence.
+
+**Decision.** Ask every boundary from the harness side before the browser, record the
+stream window instead of waiting for one transient state, and keep the app log.
+
+- `harness/appproc.py`: `HttpApp` drains the child's combined output on a daemon thread
+  into `app-process.log` (under `$ARTIFACTS_DIR`, else a temp file) from before the health
+  wait; the never-healthy path reads that file; `APP_STARTED` prints `app_log=<path>`. The
+  README's "verbatim from the skill" note now names this one addition.
+- `harness/e2e.py` after the login probes and before any browser: when
+  `DARK_FACTORY_E2E_BOOTSTRAP=1` the app log must carry `E2E_BOOTSTRAP_OK
+  fixture_video_id=<locked id>` (`E2E_BOOTSTRAP_SEEN`, else `E2E_BOOTSTRAP_MISSING` and a
+  refusal); `GET /api/videos` with the session cookie must list the fixture
+  (`E2E_VIDEOS_PROBE count=N fixture_present=<bool>`); then the streaming route is asked the
+  locked question through the frontend origin, reading the body incrementally with the
+  journey's `response_timeout_s` (`E2E_STREAM_PROBE status=<n> content_type=<ct>
+  first_byte_ms=<n> events=<n> tokens=<n> sources=<bool> done=<bool> error=<payload or ->`
+  plus the first 300 scrubbed characters of the body). The probe passes only on 200 with at
+  least one token and no error payload; an explicit error payload fails it with that error
+  as the named cause. The probe's conversation is deleted so the browser still lands on an
+  empty surface. It spends one of the synthetic account's 25 daily messages; the validation
+  database is disposable, so the counter starts at zero each run.
+- The 10-second wait for "Stop response" is replaced by a recorder that snapshots the page
+  every half second until the citation predicate holds or `response_timeout_s` elapses,
+  writing each distinct state (stop button, send button, inline error, assistant text,
+  citation) with its timestamp to `e2e-evidence/stream-states.jsonl` and printing
+  `E2E_STREAM_UI states=[...]`. The transient state is not a hard requirement: the step
+  passes when "Stop response" was seen at least once or the answer arrived within one poll.
+  The citation and modal requirements are unchanged.
+- `page.html` is captured with `get html html` (the document element).
+- `e2e_timeout_s` in `harness.config.json` rises from 180 to 360: the rung now streams the
+  question twice, each bounded by `response_timeout_s` (90), plus probes and browser startup.
+- On any failure, browser or probe, the scrubbed app log is copied into the evidence dump
+  as `app-process.log` and its last sixty lines are printed as `E2E_APP_LOG_TAIL`. Scrubbing
+  covers the validation password, every environment value whose name ends in `_KEY`,
+  `_SECRET`, `_TOKEN` or `_PASSWORD`, `DATABASE_URL` and the password inside it,
+  `JWT_SECRET`, session cookie values and bearer tokens.
+
+Pinned by `tests/factory/test_e2e_stream_evidence.py` (the SSE parser; the probe's marker,
+its requirement on status, token and error payload, its cookie and cleanup; the recorder's
+timeline file and its pass rule; the bootstrap check's seen/missing/absent-log/other-video
+answers and its refusal before the browser; the videos probe; the scrubber; the app-log tail
+on every failure; a child that prints more than the pipe holds still becomes healthy under
+`HttpApp`; and the structural rule that the drain thread starts before the health wait) and
+by the updated fakes in `tests/factory/test_e2e_contract.py`. Mutations
+`e2e-stream-probe-accepts-any-status`, `e2e-stream-window-requires-transient-stop`,
+`e2e-app-log-tail-not-printed` and `e2e-bootstrap-missing-non-fatal` are caught.
+
+**Consequences.** The next validation or main-regression run names its own cause at the
+streaming step: a refused or broken route in `E2E_STREAM_PROBE`, a missing fixture in
+`E2E_BOOTSTRAP_MISSING` or `E2E_VIDEOS_PROBE`, a page that never streamed in
+`E2E_STREAM_UI`, and the backend's own words in `E2E_APP_LOG_TAIL`. The cause of run
+33960088633 itself is still unknown; this change is what makes it readable rather than a
+guess. The journey now counts 20 deterministic steps instead of 16.

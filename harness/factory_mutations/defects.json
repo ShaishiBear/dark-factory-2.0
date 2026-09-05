@@ -1292,6 +1292,34 @@
       "find": "        candidate = Path(configured).expanduser().resolve() / \"e2e-evidence\"\n",
       "replace": "        candidate = Path(tempfile.gettempdir()) / f\"dark-factory-e2e-{session}\"\n",
       "why": "The failure dump would be written to the runner's temp directory instead of the uploaded artifacts directory and die with the runner, which is what made D-049 a local re-derivation instead of a read (run 33953697016)."
+    },
+    {
+      "id": "e2e-stream-probe-accepts-any-status",
+      "file": "harness/e2e.py",
+      "find": "    ok = raw[\"status\"] == 200 and parsed[\"tokens\"] >= 1 and parsed[\"error\"] == \"-\"\n",
+      "replace": "    ok = parsed[\"tokens\"] >= 1 and parsed[\"error\"] == \"-\"\n",
+      "why": "A streaming route answering 5xx with a token-shaped body would pass the harness-side stream probe, and the browser would then fail on a predicate timeout with the route's refusal unnamed (D-051)."
+    },
+    {
+      "id": "e2e-stream-window-requires-transient-stop",
+      "file": "harness/e2e.py",
+      "find": "    arrived_at_once = matched is not None and polls <= 1\n",
+      "replace": "    arrived_at_once = False\n",
+      "why": "The transient Stop button would become a hard requirement again: an answer that lands before the first poll never shows it, so a fast, correct stream would fail the journey (D-051)."
+    },
+    {
+      "id": "e2e-app-log-tail-not-printed",
+      "file": "harness/e2e.py",
+      "find": "            _dump_app_log(app, _artifact_dir(f\"df-{os.getpid()}-{app.port}\"), secrets)\n",
+      "replace": "            pass\n",
+      "why": "A failed journey would print nothing from the app process log, so the backend's own streaming error line and uvicorn's traceback would stay in a file nobody uploads, which is what made run 33960088633 undiagnosable (D-051)."
+    },
+    {
+      "id": "e2e-bootstrap-missing-non-fatal",
+      "file": "harness/e2e.py",
+      "find": "        require(\"bootstrap ingested the locked fixture\", bootstrapped, bootstrap_detail)\n",
+      "replace": "        require(\"bootstrap ingested the locked fixture\", True, bootstrap_detail)\n",
+      "why": "A run whose fixture ingestion never printed E2E_BOOTSTRAP_OK would still open a browser and fail at the streaming step with the missing fixture unnamed (D-051)."
     }
   ]
 }

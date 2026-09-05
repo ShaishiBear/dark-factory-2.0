@@ -25,17 +25,21 @@ The universal parts, kept in one place because getting them wrong is subtle:
 """
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+APP_LOG_NAME = "app-process.log"
 
 
 class AppDidNotStart(RuntimeError):
@@ -46,6 +50,53 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def app_log_path(port: int) -> Path:
+    """Where the child's combined stdout/stderr is written.
+
+    Under the run's `ARTIFACTS_DIR` (the directory whose `e2e-evidence/` subdirectory the
+    workflows upload) it is `app-process.log`; without one it is a temp file that survives
+    only on the host. Never inside the repository: a log under the worktree would show up
+    as an uncommitted change in the very tree being judged.
+    """
+    configured = os.environ.get("ARTIFACTS_DIR", "").strip()
+    if configured:
+        base = Path(configured).expanduser().resolve()
+        if ROOT not in (base, *base.parents):
+            base.mkdir(parents=True, exist_ok=True)
+            return base / APP_LOG_NAME
+    fd, name = tempfile.mkstemp(prefix=f"dark-factory-app-{port}-", suffix=".log")
+    os.close(fd)
+    return Path(name)
+
+
+def _pump(stream, path: Path) -> None:
+    """Copy a child's output to `path` line by line until EOF.
+
+    Runs on a daemon thread so the pipe is always being read: a child whose pipe nobody
+    drains blocks on `write` once the 64 KiB buffer fills, and everything it printed
+    before that (the bootstrap marker, uvicorn's tracebacks, Vite's output) is lost when
+    the harness only reads the pipe on the never-healthy path.
+    """
+    try:
+        with path.open("a", encoding="utf-8", errors="replace") as handle:
+            for line in stream:
+                handle.write(line)
+                handle.flush()
+    finally:
+        stream.close()
+
+
+def read_log_tail(path: Path | None, lines: int = 60) -> str:
+    """The last `lines` lines of a log file, or '' when there is no readable log."""
+    if path is None:
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return "\n".join(text.splitlines()[-lines:])
 
 
 def _argv(cmd: str) -> list[str]:
@@ -72,16 +123,30 @@ class HttpApp:
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.proc: subprocess.Popen | None = None
+        # The child's combined stdout/stderr, drained from the moment it starts. `run_e2e`
+        # reads it for the bootstrap marker and copies it into the evidence dump.
+        self.app_log: Path | None = None
+        self._drain: threading.Thread | None = None
 
     def __enter__(self) -> "HttpApp":
         cmd = self.cfg.get("start", "").replace("{port}", str(self.port))
         if not cmd:
             raise AppDidNotStart("driver=http but http.start is empty in harness.config.json")
+        self.app_log = app_log_path(self.port)
         self.proc = subprocess.Popen(_argv(cmd), cwd=ROOT, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True,
                                      encoding="utf-8", errors="replace")
+        # Drain BEFORE waiting on health. The first version read the pipe only when health
+        # never came; after APP_STARTED nothing read it, so the bootstrap marker, uvicorn's
+        # streaming tracebacks and Vite's output were lost, and a full pipe would have
+        # blocked the child (run 33960088633).
+        self._drain = threading.Thread(
+            target=_pump, args=(self.proc.stdout, self.app_log),
+            name=f"app-log-{self.port}", daemon=True,
+        )
+        self._drain.start()
         self._await_health()
-        print(f"APP_STARTED port={self.port}", flush=True)
+        print(f"APP_STARTED port={self.port} app_log={self.app_log}", flush=True)
         return self
 
     def __exit__(self, *exc) -> None:
@@ -91,6 +156,14 @@ class HttpApp:
                 self.proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+        if self._drain is not None:
+            self._drain.join(timeout=5)
+
+    def log_tail(self, lines: int = 60) -> str:
+        """The last `lines` lines the child printed so far."""
+        if self._drain is not None and self.proc is not None and self.proc.poll() is not None:
+            self._drain.join(timeout=2)
+        return read_log_tail(self.app_log, lines)
 
     def _await_health(self) -> None:
         path = self.cfg.get("health_path", "/health")
@@ -99,10 +172,9 @@ class HttpApp:
         last = "never answered"
         while time.time() < deadline:
             if self.proc and self.proc.poll() is not None:
-                out = (self.proc.stdout.read() if self.proc.stdout else "") or ""
                 raise AppDidNotStart(
-                    f"the app exited with {self.proc.returncode} before answering:\n"
-                    f"{out[-1500:]}")
+                    f"the app exited with {self.proc.returncode} before answering "
+                    f"(app_log={self.app_log}):\n{self.log_tail(40)[-1500:]}")
             try:
                 status, body, _ = self.get(path)
                 if status == 200 and (not want or want in body):
@@ -113,7 +185,7 @@ class HttpApp:
             time.sleep(0.2)
         raise AppDidNotStart(
             f"never became healthy in time. Last: {last}. This is a FAILURE, not "
-            f"'not testable'.")
+            f"'not testable'. app_log={self.app_log}:\n{self.log_tail(40)[-1500:]}")
 
     def get(self, path: str, follow: bool = False, headers: dict | None = None):
         """(status, body, headers). `follow=False` so a redirect stays VISIBLE -

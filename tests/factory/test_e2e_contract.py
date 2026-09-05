@@ -167,27 +167,52 @@ REAL_CHAT_SNAPSHOT = (
 LOGIN_FORM = REAL_LOGIN_SNAPSHOT
 
 
+FIXTURE_VIDEO_ID = json.loads(
+    (HARNESS / "harness.config.json").read_text(encoding="utf-8"))["browser"]["fixture_video_id"]
+HEALTHY_STREAM = {
+    "status": 200, "content_type": "text/event-stream", "first_byte_ms": 1200,
+    "body": 'data: "The video"\n\ndata: " is about"\n\nevent: sources\ndata: [{"chunk_id":"c1"}]'
+            '\n\ndata: [DONE]\n\n',
+    "transport": "",
+}
+
+
 class _App:
-    """Only the two calls run_e2e makes before the browser, plus the login probe."""
+    """Only the calls run_e2e makes before the browser: the API floor, the login probe and
+    the catalog probe. No `app_log`: the standalone adapter without a captured log."""
 
     port = 8765
 
     def __init__(self, login_status: int, login_body: str, headers: dict[str, str]):
         self.login = (login_status, login_body, headers)
         self.posts: list[tuple[str, str]] = []
+        self.gets: list[tuple[str, dict[str, str] | None]] = []
 
-    def get(self, path: str):
+    def get(self, path: str, headers: dict[str, str] | None = None):
+        self.gets.append((path, headers))
         if path == "/api/health":
             return 200, '{"status":"ok"}', {}
         if path == "/api/version":
             return 200, "{}", {}
+        if path == "/api/videos":
+            return 200, json.dumps([
+                {"id": "v1", "url": f"https://www.youtube.com/watch?v={FIXTURE_VIDEO_ID}"}]), {}
         return 401, "{}", {}
 
-    def post(self, path: str, body: str):
+    def post(self, path: str, body: str, headers: dict[str, str] | None = None):
         self.posts.append((path, body))
         if path == "/api/auth/login":
             return self.login
         return 401, "{}", {}
+
+
+def healthy_http_json(method: str, url: str, body, cookie: str):
+    """The frontend-origin JSON calls the stream probe makes, answered as the app would."""
+    if method == "POST" and url.endswith("/api/conversations"):
+        return 201, '{"id":"conv-probe"}', {}
+    if method == "DELETE":
+        return 204, "", {}
+    return 404, "{}", {}
 
 
 class E2ELoginEvidenceTests(unittest.TestCase):
@@ -198,10 +223,13 @@ class E2ELoginEvidenceTests(unittest.TestCase):
     whenever the journey breaks."""
 
     def setUp(self) -> None:
-        self._env = {k: os.environ.get(k) for k in ("ARTIFACTS_DIR",)}
+        self._env = {k: os.environ.get(k) for k in ("ARTIFACTS_DIR", "DARK_FACTORY_E2E_BOOTSTRAP")}
+        os.environ.pop("DARK_FACTORY_E2E_BOOTSTRAP", None)
         self._orig_browser = factory_e2e._browser
         self._orig_env = factory_e2e._load_validation_env
         self._orig_post = factory_e2e._post_json
+        self._orig_http_json = factory_e2e._http_json
+        self._orig_stream = factory_e2e._stream_request
         factory_e2e._load_validation_env = lambda: (EMAIL, PASSWORD)
         # The proxy probe posts through the frontend origin; by default it answers as a
         # healthy Vite proxy would. Individual tests replace it.
@@ -212,11 +240,17 @@ class E2ELoginEvidenceTests(unittest.TestCase):
             return 200, '{"id":"u1"}', {"set-cookie": "session=tok; HttpOnly; Secure; Path=/"}
 
         factory_e2e._post_json = healthy_proxy
+        # The stream probe (harness-side POST of the question) answers as a healthy route
+        # would; tests/factory/test_e2e_stream_evidence.py exercises its own refusals.
+        factory_e2e._http_json = healthy_http_json
+        factory_e2e._stream_request = lambda url, body, cookie, timeout_s: dict(HEALTHY_STREAM)
 
     def tearDown(self) -> None:
         factory_e2e._browser = self._orig_browser
         factory_e2e._load_validation_env = self._orig_env
         factory_e2e._post_json = self._orig_post
+        factory_e2e._http_json = self._orig_http_json
+        factory_e2e._stream_request = self._orig_stream
         for key, value in self._env.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -270,7 +304,7 @@ class E2ELoginEvidenceTests(unittest.TestCase):
         canned = {
             ("get", "url"): "http://localhost:5173/login\n",
             ("snapshot",): f'- alert: value is not a valid email address\n{LOGIN_FORM}',
-            ("get", "html"): f'<input value="{PASSWORD}"><div role="alert">nope</div>',
+            ("get", "html", "html"): f'<input value="{PASSWORD}"><div role="alert">nope</div>',
             ("console",): "[error] Failed to load resource: 422\n",
             ("errors",): "",
             ("network", "requests"): "POST /api/auth/login 422\n",
