@@ -1,11 +1,13 @@
 """Fail-closed configuration for the repo-owned Dark Factory runtime."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path, PurePosixPath
 from typing import Mapping
+
+from .worker_policy import validate_effort_overrides
 
 IDLE_TIMEOUT_SECONDS_DEFAULT = 420
 
@@ -28,6 +30,11 @@ class ProviderConfig:
     # emits an event per model turn and per tool call, and the longest legitimate gap is one
     # model call. The kernel kills it, records what it saw and retries once (D-054).
     idle_timeout_seconds: int = IDLE_TIMEOUT_SECONDS_DEFAULT
+    # Per-deployment `{role: level}` on top of `worker_policy.ROLE_EFFORT`; the provider applies
+    # it when it renders `--effort`. Validated at load against the roles the policy knows and
+    # the levels the CLI accepts, so a typo is a refused configuration, not a silent default
+    # (D-055).
+    effort_overrides: Mapping[str, str] = field(default_factory=dict)
 
 
 TRANSIENT_RETRIES_MAX = 3
@@ -186,6 +193,7 @@ def load_config(path: str | Path) -> KernelConfig:
                 low=0, high=TRANSIENT_RETRIES_MAX,
             ),
             idle_timeout_seconds=idle_timeout_seconds,
+            effort_overrides=validate_effort_overrides(provider.get("effort_overrides")),
         ),
         runtime=RuntimeConfig(
             max_attempts=_positive_int(runtime.get("max_attempts"), "runtime.max_attempts"),

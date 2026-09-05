@@ -60,7 +60,7 @@ STAGE_LINE = re.compile(
     r"^FACTORY_STAGE kind=(?P<kind>agent|exec) name=(?P<name>\S+) seconds=(?P<seconds>\d+(\.\d+)?)"
     r"(?: turns=(?P<turns>\d+))?(?: cost_usd=(?P<cost>\S+))? outcome=(?P<outcome>ok|failed|refused)"
     r"(?: events=(?P<events>\d+))?(?P<timed_out> timed_out=true)?(?P<hang> hang=true)?"
-    r"(?P<over> over_budget=true)?$"
+    r"(?P<over> over_budget=true)?(?: thinking=(?P<thinking>\d+))?(?: effort=(?P<effort>\S+))?$"
 )
 
 
@@ -129,8 +129,8 @@ class ValidationStagesAreRecordedTests(unittest.TestCase):
         cls.contents: dict[str, str] = {}
         original = KernelRuntime._record_agent
 
-        def spy(self, paths, role, result, *, started):
-            original(self, paths, role, result, started=started)
+        def spy(self, paths, role, result, *, started, **kwargs):
+            original(self, paths, role, result, started=started, **kwargs)
             # The rehearsal's work root is deleted when it returns, so read the files now.
             cls.records[role] = _record(paths, role)
             cls.rows[role] = next(r for r in _rows(paths) if r["name"] == role)

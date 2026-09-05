@@ -1425,6 +1425,41 @@
       "find": "OBSERVED_SECONDS_PER_TURN_CEILING = 45\n",
       "replace": "OBSERVED_SECONDS_PER_TURN_CEILING = 35\n",
       "why": "The per-turn ceiling would sit below the 40.4 s/turn build run 33987381035 measured, so every wall and every over_budget flag would be computed from a rate the data already refutes, while assert_caps_fit_timeout still passes; caught by tests/factory/test_factory_stream_timeouts.py (the ceiling is stated from the run's four observations) and tests/factory/test_factory_worker_throughput.py (the ceiling is at least the measured rate) (D-054)."
+    },
+    {
+      "id": "effort-flag-dropped",
+      "file": "factory_kernel/providers.py",
+      "find": "        effort = self.effort_level(request)\n        if effort is not None:\n            argv.extend([\"--effort\", effort])\n",
+      "replace": "        effort = self.effort_level(request)\n        if False:\n            argv.extend([\"--effort\", effort])\n",
+      "why": "Every worker would again run at the CLI's default effort with nothing bounding how long a turn thinks, which is the 2025-second, 76,248-event test_author of run 33992451400; caught by tests/factory/test_factory_effort_and_stream_logs.py (a worker asks for medium and a judge for high; a configured override wins) (D-055)."
+    },
+    {
+      "id": "judge-effort-lowered-to-worker-level",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "JUDGE_EFFORT = \"high\"\n",
+      "replace": "JUDGE_EFFORT = \"medium\"\n",
+      "why": "The five validation authorities and triage, tool-less single-prompt calls where reasoning is the whole job, would judge at the workers' cost-trimmed level; caught by tests/factory/test_factory_effort_and_stream_logs.py (judges think harder than workers; a judge says high) (D-055)."
+    },
+    {
+      "id": "stream-tee-dropped",
+      "file": "factory_kernel/providers.py",
+      "find": "                idle_seconds=self.config.idle_timeout_seconds,\n                tee=tee,\n",
+      "replace": "                idle_seconds=self.config.idle_timeout_seconds,\n                tee=None,\n",
+      "why": "A stage killed at its wall or its idle clock would again leave only the 1500-character tail in its record and no stream in agent-<role>.log, so what a worker did in 34 minutes could not be read; caught by tests/factory/test_factory_effort_and_stream_logs.py (a wall-killed stage leaves everything it printed; a hung stage leaves its stream; the kernel record keeps the streamed log) (D-055)."
+    },
+    {
+      "id": "thinking-telemetry-always-zero",
+      "file": "factory_kernel/providers.py",
+      "find": "    return total + (mark or 0)\n",
+      "replace": "    return 0\n",
+      "why": "Every stage would report thinking=0 whatever its stream showed, so the effort levels could never be tuned from the records and the preflight probe would always print honoured=false; caught by tests/factory/test_factory_effort_and_stream_logs.py (high-water marks are summed across resets; the record, row and line carry it; the probe line when the route honours the level) (D-055)."
+    },
+    {
+      "id": "effort-override-not-validated",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "        if not isinstance(level, str) or level not in EFFORT_LEVELS:\n            raise ValueError(\n                f\"kernel {name}.{role} must be one of {', '.join(EFFORT_LEVELS)}; got {level!r}\"\n            )\n",
+      "replace": "        if not isinstance(level, str):\n            raise ValueError(\n                f\"kernel {name}.{role} must be one of {', '.join(EFFORT_LEVELS)}; got {level!r}\"\n            )\n",
+      "why": "A misspelt level in kernel.json would load, and every stage of that role would be refused at launch by the provider instead of at configuration by the loader, one dispatch per hour; caught by tests/factory/test_factory_effort_and_stream_logs.py (a level the CLI does not accept is refused at load) (D-055)."
     }
   ]
 }

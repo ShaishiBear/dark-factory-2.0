@@ -11,7 +11,9 @@
     "_timeout_seconds": "The global maximum wall for one CLI process. Each role runs under its own wall, worker_policy.stage_timeout_seconds(role) = ceil(max_turns * 45 s/turn * 1.5), and every one of those must fit under this maximum (assert_caps_fit_timeout); 2700 covers the 2025 s a 30-turn role needs. Raised from 1200, which sat exactly on a 30-turn worker's budget at the measured 40.4 s/turn (D-054).",
     "transient_retries": 2,
     "idle_timeout_seconds": 420,
-    "_idle_timeout_seconds": "A process that prints no stream-json event for this long is killed as hung, recorded, and retried once (D-054)."
+    "_idle_timeout_seconds": "A process that prints no stream-json event for this long is killed as hung, recorded, and retried once (D-054).",
+    "effort_overrides": {},
+    "_effort_overrides": "Per-role {role: level} on top of worker_policy.ROLE_EFFORT (workers medium, judges high), rendered as --effort on every request. Levels are the CLI's: low, medium, high, xhigh, max; roles are the policy's. A typo refuses the configuration. Empty means the policy as written (D-055)."
   },
   "runtime": {
     "max_attempts": 2,

@@ -59,7 +59,7 @@ class ScriptedProvider:
         self.writes = list(writes)
         self.requests: list = []
 
-    def run(self, request, before_retry=None):
+    def run(self, request, before_retry=None, **_kwargs):
         self.requests.append(request)
         rel, text = self.writes.pop(0)
         target = Path(request.cwd) / rel
@@ -150,9 +150,9 @@ class AcceptanceGateTests(unittest.TestCase):
         seen: list[str] = []
 
         class Peek(ScriptedProvider):
-            def run(self, request, before_retry=None):
+            def run(self, request, before_retry=None, **_kwargs):
                 seen.append((Path(request.cwd) / TEST_FILE).read_text(encoding="utf-8") if (Path(request.cwd) / TEST_FILE).exists() else "<absent>")
-                return super().run(request, before_retry)
+                return super().run(request, before_retry, **_kwargs)
 
         provider = Peek([(TEST_FILE, "bad\n"), (TEST_FILE, "good\n")])
         static = ScriptedStatic([False, True])

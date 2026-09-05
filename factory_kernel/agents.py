@@ -31,6 +31,11 @@ class AgentRequest:
     prompt: str
     cwd: str
     model: str | None = None
+    # The effort level the CLI is asked for (`--effort`), from `worker_policy.effort(role)`; the
+    # provider validates it against the levels the CLI accepts and applies the configured
+    # per-role override. Required by the kernel's `_agent_stage` funnel like the bounds below:
+    # a request without one runs at the CLI's default, which is what let the `test_author`
+    # of run 33992451400 think for 2025 s (D-055).
     effort: str | None = None
     structured_schema: Mapping[str, Any] | None = None
     allowed_tools: tuple[str, ...] | None = None
@@ -49,6 +54,8 @@ class AgentRequest:
             raise ValueError("agent prompt must be non-empty")
         if not self.cwd.strip():
             raise ValueError("agent cwd must be non-empty")
+        if self.effort is not None and (not isinstance(self.effort, str) or not self.effort.strip()):
+            raise ValueError("agent effort must be a non-empty string when set")
         if self.max_turns is not None and (
             isinstance(self.max_turns, bool) or not isinstance(self.max_turns, int) or self.max_turns <= 0
         ):
@@ -89,6 +96,11 @@ class AgentResult:
     # How many stream events the provider read from the CLI across every attempt (the
     # progress the stage showed while it ran); `None` for a provider that does not stream.
     events_seen: int | None = None
+    # The thinking the stream showed, summed across attempts (`providers.thinking_tokens`), and
+    # the effort level the CLI was actually asked for after any configured override; `None`
+    # for a provider that has neither (D-055).
+    thinking_tokens: int | None = None
+    effort: str | None = None
 
 
 class AgentProvider(Protocol):
