@@ -145,6 +145,18 @@ def max_budget_usd(role: str) -> float:
     return float(cap)
 
 
+def stage_budget_seconds(role: str) -> int | None:
+    """The wall clock a stage is expected to fit in: its turn cap at the per-turn ceiling.
+
+    Telemetry only. A stage that runs longer is flagged `over_budget` in its record and its
+    stage line and nothing else happens: the flag exists so the caps can be tuned from
+    measured runs rather than from estimates (D-050). `None` for a role without a turn cap.
+    """
+    if role not in ROLE_MAX_TURNS:
+        return None
+    return max_turns(role) * OBSERVED_SECONDS_PER_TURN_CEILING
+
+
 def assert_caps_fit_timeout(timeout_seconds: int) -> None:
     """Refuse any turn cap the subprocess timeout would cut off first."""
     for role, cap in ROLE_MAX_TURNS.items():

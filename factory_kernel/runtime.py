@@ -18,7 +18,7 @@ import time
 import uuid
 from typing import Any, Mapping
 
-from .agents import AgentRequest
+from .agents import AgentRequest, AgentResult
 from .canonical import canonical_bytes
 from .config import KernelConfig
 from .credential_env import scoped_environment
@@ -52,22 +52,33 @@ from .review import AXES, ROLE_FOR_AXIS, ReviewInvalid, aggregate, read_axes
 from .pr_body import render_pr_body
 from .trusted_programs import resolve_trusted_program
 from .attached import extract_block, sanitise_output
-from .worker_policy import BUILDER_BLIND_PATHS, KERNEL_COMMIT_NAME, KERNEL_COMMIT_ARGS, max_turns
+from .worker_policy import (
+    BUILDER_BLIND_PATHS,
+    KERNEL_COMMIT_NAME,
+    KERNEL_COMMIT_ARGS,
+    max_turns,
+    stage_budget_seconds,
+)
 from .worktree import Worktree, create_detached, remove
 
 STAGE_TIMINGS = "stage-timings.jsonl"
+STAGE_LINE_PREFIX = "FACTORY_STAGE"
 
 
 def record_stage_timing(
     transcripts: Path, *, kind: str, name: str, started: float, ended: float, **extra: Any
-) -> None:
-    """Append one line per stage so a run's wall time can be read back per stage.
+) -> dict[str, Any]:
+    """Append one line per stage so a run's wall time can be read back per stage, and print
+    the same stage to stdout as it ends.
 
     Observability only: nothing reads this file to decide anything. `started`/`ended` are
-    `time.time()` values; the ISO forms are for humans reading the artifact.
+    `time.time()` values; the ISO forms are for humans reading the artifact. The printed line
+    is flushed because the kernel's stdout is a pipe under Actions and a buffered print reaches
+    the job log only when the process exits, which for the 25 silent minutes of validation run
+    33960088633 meant never while it mattered (D-050).
     """
     transcripts.mkdir(parents=True, exist_ok=True)
-    row = {
+    row: dict[str, Any] = {
         "kind": kind,
         "name": name,
         "started_at": _iso(started),
@@ -75,8 +86,37 @@ def record_stage_timing(
         "seconds": round(ended - started, 3),
     }
     row.update({k: v for k, v in extra.items() if v is not None})
+    if "outcome" not in row:
+        row["outcome"] = "ok" if row.get("rc", 0) == 0 else "refused"
     with (transcripts / STAGE_TIMINGS).open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, sort_keys=True) + "\n")
+    print(stage_line(row), flush=True)
+    return row
+
+
+def stage_line(row: Mapping[str, Any]) -> str:
+    """`FACTORY_STAGE kind=... name=... seconds=... [turns=...] [cost_usd=...] outcome=...
+    [over_budget=true]`: the row as one log line, with the fields that do not apply left out."""
+    fields = [f"kind={row['kind']}", f"name={row['name']}", f"seconds={row['seconds']}"]
+    if row.get("num_turns") is not None:
+        fields.append(f"turns={row['num_turns']}")
+    if row.get("cost_usd") is not None:
+        fields.append(f"cost_usd={row['cost_usd']}")
+    fields.append(f"outcome={row['outcome']}")
+    if row.get("over_budget"):
+        fields.append("over_budget=true")
+    return STAGE_LINE_PREFIX + " " + " ".join(fields)
+
+
+def over_budget(role: str, wall_seconds: float) -> bool:
+    """Telemetry-only flag: the stage outlived `max_turns(role)` turns at the per-turn ceiling.
+
+    No behaviour hangs on it. It marks the records the caps are meant to be tuned from, so a
+    stage like the 934-second code holdout of run 33960088633 (cap 10 turns, budget 350 s) is
+    visible as the outlier it is instead of an unrecorded gap (D-050).
+    """
+    budget = stage_budget_seconds(role)
+    return budget is not None and wall_seconds > budget
 
 
 def _iso(timestamp: float) -> str:
@@ -1512,7 +1552,8 @@ class KernelRuntime:
                 preamble="This invocation is intentionally isolated from the repository checkout.",
                 context="HOLDOUT INPUT:\n" + json.dumps(context, sort_keys=True),
             )
-            result = self.provider.run(
+            result = self._agent_stage(
+                paths,
                 AgentRequest(
                     role="holdout",
                     prompt=prompt,
@@ -1521,7 +1562,7 @@ class KernelRuntime:
                     environment={},
                     structured_schema={"type": "object"},
                     max_turns=max_turns("holdout"),
-                )
+                ),
             )
             value = result.structured_output
             if not isinstance(value, Mapping) or value.get("version") != "1.0":
@@ -1726,7 +1767,8 @@ class KernelRuntime:
                     f"{claim_id} CERTIFICATION INPUT:\n" + json.dumps(inputs, sort_keys=True)
                 ),
             )
-            result = self.provider.run(
+            result = self._agent_stage(
+                paths,
                 AgentRequest(
                     role=role,
                     prompt=prompt,
@@ -1735,7 +1777,7 @@ class KernelRuntime:
                     environment={},
                     structured_schema={"type": "object"},
                     max_turns=max_turns(role),
-                )
+                ),
             )
             value = result.structured_output
             if not isinstance(value, Mapping) or value.get("version") != "1.0":
@@ -1790,7 +1832,8 @@ class KernelRuntime:
                 preamble="You are the independent architecture holdout. " + suffix,
                 context="ARCHITECTURE HOLDOUT INPUT:\n" + json.dumps(context, sort_keys=True),
             )
-            result = self.provider.run(
+            result = self._agent_stage(
+                paths,
                 AgentRequest(
                     role="architecture-holdout",
                     prompt=prompt,
@@ -1799,7 +1842,7 @@ class KernelRuntime:
                     environment={},
                     structured_schema={"type": "object"},
                     max_turns=max_turns("architecture-holdout"),
-                )
+                ),
             )
             value = result.structured_output
             if not isinstance(value, Mapping):
@@ -1843,8 +1886,8 @@ class KernelRuntime:
             ),
             context=context,
         )
-        started = time.time()
-        result = self.provider.run(
+        self._agent_stage(
+            paths,
             AgentRequest(
                 role=role,
                 prompt=prompt,
@@ -1852,9 +1895,31 @@ class KernelRuntime:
                 model=self.config.provider.model,
                 environment=dict(env),
                 max_turns=max_turns(role),
-            )
+            ),
         )
-        self._record_agent(paths, role, result, started=started)
+
+    def _agent_stage(
+        self, paths: RunPaths, request: AgentRequest, **run_kwargs: Any
+    ) -> AgentResult:
+        """The one place a model is run: timed and recorded whether it returns or raises.
+
+        Validation run 33960088633 spent 25 minutes in the blinded holdout, the architecture
+        holdout and the three pre-code certifiers and uploaded no `agent-<role>.*` and no
+        timing row for any of them, because those authorities called `provider.run` directly
+        and only the build-side `_agent` path recorded. Every stage now goes through here, so
+        a stage that has no record is a stage that was never run (D-050). A failed stage is
+        recorded exactly as a successful one and the failure propagates unchanged (D-041).
+        """
+        started = time.time()
+        try:
+            result = self.provider.run(request, **run_kwargs)
+        except BaseException as exc:
+            self._record_failed_agent(
+                paths, request.role, exc, started=started, model=request.model
+            )
+            raise
+        self._record_agent(paths, request.role, result, started=started)
+        return result
 
     def _record_agent(self, paths: RunPaths, role: str, result: Any, *, started: float) -> None:
         """Write the worker's text, its telemetry, and the stage's wall time."""
@@ -1863,8 +1928,10 @@ class KernelRuntime:
         (paths.transcripts / f"agent-{role}.log").write_text(
             result.content + "\n", encoding="utf-8"
         )
+        wall = round(ended - started, 3)
         telemetry = {
             "role": role,
+            "outcome": "ok",
             "model": getattr(result, "model", None),
             "session_id": getattr(result, "session_id", None),
             "num_turns": getattr(result, "num_turns", None),
@@ -1872,22 +1939,32 @@ class KernelRuntime:
             "total_cost_usd": getattr(result, "cost_usd", None),
             "input_tokens": getattr(result, "input_tokens", None),
             "output_tokens": getattr(result, "output_tokens", None),
-            "wall_seconds": round(ended - started, 3),
+            "wall_seconds": wall,
+            "budget_seconds": stage_budget_seconds(role),
+            "over_budget": over_budget(role, wall),
             # A stage retried after a transient provider error reports every process it took
             # and why; the counts above are summed across them (D-031).
             "attempts": getattr(result, "attempts", 1),
             "transient_errors": list(getattr(result, "transient_errors", ()) or ()),
         }
         (paths.transcripts / f"agent-{role}.json").write_text(
-            json.dumps(telemetry, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+            json.dumps(telemetry, sort_keys=True, indent=2, default=str) + "\n", encoding="utf-8"
         )
         record_stage_timing(
             paths.transcripts, kind="agent", name=role, started=started, ended=ended,
-            num_turns=telemetry["num_turns"], duration_ms=telemetry["duration_ms"],
+            outcome="ok", model=telemetry["model"], num_turns=telemetry["num_turns"],
+            duration_ms=telemetry["duration_ms"], cost_usd=telemetry["total_cost_usd"],
+            over_budget=telemetry["over_budget"] or None,
         )
 
     def _record_failed_agent(
-        self, paths: RunPaths, role: str, exc: BaseException, *, started: float
+        self,
+        paths: RunPaths,
+        role: str,
+        exc: BaseException,
+        *,
+        started: float,
+        model: str | None = None,
     ) -> None:
         """Write the same stage record for a worker that failed as for one that returned.
 
@@ -1900,15 +1977,19 @@ class KernelRuntime:
         ended = time.time()
         paths.transcripts.mkdir(parents=True, exist_ok=True)
         carried = getattr(exc, "telemetry", None)
+        wall = round(ended - started, 3)
         telemetry = {
             "role": role,
             "outcome": "failed",
+            "model": model,
             "error_class": type(exc).__name__,
             "error": scrub(str(exc))[-4000:],
             "attempts": getattr(exc, "attempts", 1),
             "transient_errors": [scrub(str(e)) for e in (getattr(exc, "transient_errors", ()) or ())],
             "timed_out": bool(getattr(exc, "timed_out", False)),
-            "wall_seconds": round(ended - started, 3),
+            "wall_seconds": wall,
+            "budget_seconds": stage_budget_seconds(role),
+            "over_budget": over_budget(role, wall),
             **({k: v for k, v in carried.items()} if isinstance(carried, Mapping) else {}),
         }
         (paths.transcripts / f"agent-{role}.json").write_text(
@@ -1916,8 +1997,10 @@ class KernelRuntime:
         )
         record_stage_timing(
             paths.transcripts, kind="agent", name=role, started=started, ended=ended,
-            outcome="failed", error_class=type(exc).__name__,
-            num_turns=telemetry.get("num_turns"), timed_out=telemetry["timed_out"] or None,
+            outcome="failed", error_class=type(exc).__name__, model=model,
+            num_turns=telemetry.get("num_turns"), cost_usd=telemetry.get("total_cost_usd"),
+            timed_out=telemetry["timed_out"] or None,
+            over_budget=telemetry["over_budget"] or None,
         )
 
     # A merge-base diff handed to reviewers and the conformance authority. Bounded so a large
