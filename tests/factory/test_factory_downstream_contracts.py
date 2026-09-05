@@ -20,10 +20,12 @@ for entry in (str(ROOT), str(ROOT / "scripts")):
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
+from factory_shapes import test_shaped  # noqa: E402
+
+from factory_kernel.agents import AgentResult  # noqa: E402
 from factory_kernel.git_authority import _test_oriented as commit_test_shaped  # noqa: E402
 from factory_kernel.repro import OBSERVED_ARTIFACT, RED_TAIL_CHARS  # noqa: E402
 from factory_kernel.runtime import KernelRuntime  # noqa: E402
-from factory_shapes import test_shaped  # noqa: E402
 
 PROMPTS = ROOT / ".factory" / "prompts"
 METHODS = ROOT / ".factory" / "methods"
@@ -215,12 +217,17 @@ class ValidatorSideBriefTests(unittest.TestCase):
         class Provider:
             def run(self, request, **_kwargs):
                 captured["prompt"] = request.prompt
-                return mock.Mock(structured_output={"version": "1.0", "certifies": "contract", "verdict": "pass", "findings": []})
+                verdict = {"version": "1.0", "certifies": "contract", "verdict": "pass", "findings": []}
+                # A real result, not a Mock: the stage is recorded on return (D-050), and the
+                # record serialises what the provider reported.
+                return AgentResult(provider_id="p", model="m", content=json.dumps(verdict),
+                                   structured_output=verdict)
 
         rt.provider = Provider()
         with tempfile.TemporaryDirectory() as tmp:
             rt._write_json = lambda path, value: None
-            rt._run_precode_certifier(mock.Mock(artifacts=Path(tmp)), claim_id="contract", role="contract-certifier", inputs={})
+            paths = mock.Mock(artifacts=Path(tmp), transcripts=Path(tmp) / "transcripts")
+            rt._run_precode_certifier(paths, claim_id="contract", role="contract-certifier", inputs={})
         self.assertIn('"certifies": "contract"', captured["prompt"])
         self.assertIn('"verdict": "pass|fail"', captured["prompt"])
         self.assertIn('"severity": "critical|high|medium|low"', captured["prompt"])

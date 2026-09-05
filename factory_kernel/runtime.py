@@ -1948,7 +1948,7 @@ class KernelRuntime:
             "transient_errors": list(getattr(result, "transient_errors", ()) or ()),
         }
         (paths.transcripts / f"agent-{role}.json").write_text(
-            json.dumps(telemetry, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+            json.dumps(telemetry, sort_keys=True, indent=2, default=str) + "\n", encoding="utf-8"
         )
         record_stage_timing(
             paths.transcripts, kind="agent", name=role, started=started, ended=ended,
