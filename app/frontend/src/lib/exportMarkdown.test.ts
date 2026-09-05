@@ -270,6 +270,48 @@ describe('formatCitation', () => {
     expect(result).toContain('0:10–0:20');
     expect(result).toContain('> "Test snippet text"');
   });
+
+  it('AC-1: YouTube fallback keeps the snippet blockquote when video_url cannot be parsed', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toContain('> "Relevant text"');
+    expect(result).toContain('\n  > "Relevant text"');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-2: YouTube fallback keeps the leading list marker for an unparsable video_url', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result.startsWith('- ')).toBe(true);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-3: Dynamous fallback without lesson_url keeps the leading list marker', () => {
+    const citation = {
+      ...baseCitation,
+      source_type: 'dynamous' as const,
+      video_url: '',
+      lesson_url: '',
+    };
+    const result = formatCitation(citation);
+    expect(result.startsWith('- ')).toBe(true);
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Test snippet text"');
+  });
+
+  it('AC-4: YouTube fallback without v param keeps the snippet blockquote and list marker', () => {
+    const citation = { ...baseCitation, video_url: 'https://www.youtube.com/' };
+    const result = formatCitation(citation);
+    expect(result.startsWith('- ')).toBe(true);
+    expect(result).toContain('\n  > "Test snippet text"');
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    expect(result).not.toContain('[Test Video Title](');
+  });
 });
 
 describe('formatSources', () => {
