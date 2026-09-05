@@ -1159,6 +1159,34 @@
       "find": "                \"--base\", base_sha,\n",
       "replace": "                \"--base\", self._git(\"rev-parse\", f\"origin/{self.config.default_branch}\"),\n",
       "why": "publish would record the base branch tip at publish time instead of the commit the branch was cut from, which is exactly the false binding the first production pack carried."
+    },
+    {
+      "id": "acceptance-static-gate-skipped",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "            if self._static_gate_or_retry(\n                \"test_author\", cwd, paths, env, static_retry=static_retry, context=context,\n            ):\n                return\n            commit_acceptance_tests(cwd, paths.artifacts / \"test-spec.json\")",
+      "replace": "            commit_acceptance_tests(cwd, paths.artifacts / \"test-spec.json\")",
+      "why": "A lint-failing acceptance test would be RED-hashed and frozen again, dooming the build at the quick gate with no stage able to repair it."
+    },
+    {
+      "id": "static-gate-retry-unbounded",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        if static_retry >= STATIC_RETRIES:\n            raise NeedsHuman(",
+      "replace": "        if False:\n            raise NeedsHuman(",
+      "why": "A worker that never produces lint-clean files would be re-run without bound, burning the stage budget on every attempt."
+    },
+    {
+      "id": "static-gate-after-red-commit",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "            if self._static_gate_or_retry(\n                \"test_author\", cwd, paths, env, static_retry=static_retry, context=context,\n            ):\n                return\n            commit_acceptance_tests(cwd, paths.artifacts / \"test-spec.json\")\n            return",
+      "replace": "            commit_acceptance_tests(cwd, paths.artifacts / \"test-spec.json\")\n            if self._static_gate_or_retry(\n                \"test_author\", cwd, paths, env, static_retry=static_retry, context=context,\n            ):\n                return\n            return",
+      "why": "Running the gate after the RED commit is too late: the files are already frozen, and a retry would be refused by the commit authority for touching immutable tests."
+    },
+    {
+      "id": "implement-static-gate-skipped",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "            if self._static_gate_or_retry(\n                role, cwd, paths, env, static_retry=static_retry, context=context,\n            ):\n                return\n            subject = (",
+      "replace": "            subject = (",
+      "why": "A lint failure in production files would surface only at the whole-tree quick gate, where it ends the build instead of being repaired once."
     }
   ]
 }
