@@ -1383,6 +1383,13 @@
       "find": "                max_turns=max_turns(\"triage\"),\n",
       "replace": "",
       "why": "Triage, the one model call that does not pass through _agent_stage, would run with no turn cap and only the subprocess timeout behind it; caught by tests/factory/test_factory_authority_bounds.py (the AST pin over triage.py and the triage request test) (D-052)."
+    },
+    {
+      "id": "validation-db-without-pgvector",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "        image: pgvector/pgvector:pg16\n",
+      "replace": "        image: postgres:16\n",
+      "why": "The validation database would lack the vector extension, so every retrieval query would fail with `type \"vector\" does not exist` while ingestion succeeded, and the browser journey could never see a citation (D-053)."
     }
   ]
 }

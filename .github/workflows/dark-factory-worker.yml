@@ -42,7 +42,7 @@ jobs:
       ANTHROPIC_BASE_URL: https://openrouter.ai/api
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
