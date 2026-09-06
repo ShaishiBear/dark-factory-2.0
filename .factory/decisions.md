@@ -3067,6 +3067,91 @@ direct injection on the maintainer's Windows host.
 
 ---
 
+## D-069 · A refused RED is handed back once, with its evidence, because a build died on one mis-declared string with the correct test already on disk
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34054922788 (issue #103, the deepest build so far)
+
+Every stage before RED went right. `investigate`, `contract`, `context` and `architecture`
+returned. The `test_author` drafted on its first run; the static gate's new formatter pass
+(D-068) fixed the whitespace deterministically instead of spending a model stage on it; the
+turn-cap path (D-065) was ready and did not need to fire. Then:
+
+```
+PROOF_FAIL: AC-1 RED failed for the wrong reason
+  argv: ["npx","vitest","run","src/__tests__/ChatArea-strictmode-first-send.test.tsx"]
+  cwd: app/frontend   rc: 1   seconds: 4.527
+  expected_failure: 'Unable to find an accessible element with the role "button"'
+```
+
+D-056's evidence makes the defect readable, and what it shows is not a wrong test. The test
+failed, on the unchanged tree, for the bug. The `expected_failure` the author declared was
+simply not a string that command printed: it declared the message `getByRole` produces while
+the test's own query is a label query, which prints `Unable to find a label with the text
+of: ...`. One mis-declared string ended a build of roughly $15 and forty-five minutes with the
+correct acceptance test already committed to disk.
+
+**The gap.** The kernel already had the right shape for exactly this, one stage earlier. Since
+D-043 the scoped static gate hands its checker's own output back to the role that wrote the
+files, once, and ends the build on a second failure — because the only worker that can fix a
+file is the one that can still edit it. The RED gate had no such path, and since D-056 it
+produces precisely the evidence a hand-back needs: the acceptance id, the argv, the cwd, the exit
+code, the seconds, the declared string, the refusal reason and the output tail, on stderr and in
+`red-proof-failure.json`.
+
+**Decision.** One hand-back for a refused RED (`RED_HANDBACK_ATTEMPTS = 1`,
+`KernelRuntime._red_gate`). When `scripts/factory_proof.py red` refuses, the kernel undoes the
+test-author commit (`git reset --mixed` to the head that stage started from, which returns the
+draft to the checkout uncommitted, where its author can still edit it), re-runs `test_author`
+once with the refusal appended to its original context — the same context it had, so the
+contract, the design and any `DEFERRED REPRO SYMPTOM` still reach it — and then re-runs the
+**whole** gate from scratch. A second refusal ends the build exactly as before.
+
+**What the hand-back is not.** It is not a licence to weaken the test. The brief says the two
+corrections that are open: make the declared `expected_failure` a stable fragment of what the
+command actually printed, or change the test's own query so it produces the failure declared.
+It says every rule still holds unchanged — every AC keeps exactly one checkpoint, at least one
+checkpoint is red, a guard still passes on the unchanged tree, a red checkpoint's file is still
+one the author wrote or changed (D-064), a deferred repro symptom still appears verbatim — and
+that the gate re-runs from scratch and will refuse again if the failure is still for the wrong
+reason. Two ways of answering by proving less are refused deterministically by name before the
+gate is re-run (`red_handback_weakened_spec`, `_refuse_weakened_spec`): fewer checkpoints than
+the first attempt declared, and a `red` checkpoint re-declared as a `guard`, which has no
+`expected_failure` and only has to exit 0. The refusal names the change.
+
+**What is not handed back.** A hand-back is for a mis-declared `red` checkpoint and nothing
+else. A `guard` checkpoint's refusal means the contract or the tree is wrong, not the
+declaration. A launch or timeout `fault` means the command never produced output the author
+could have mis-declared. A refusal with no `red-proof-failure.json` at all happened before any
+checkpoint ran — an invalid spec, an undeclared file in the test commit — and has no checkpoint
+evidence to hand back. All three end the build on the first refusal, as today.
+
+**Nothing is lost.** Both attempts survive, on the same principle as D-058: `red-gate.log` and
+`red-gate.2.log`, `red-proof-failure.json` (the first attempt, under the plain name every reader
+already knows) and `red-proof-failure.2.json` (the second, suffixed exactly as
+`stage_record_name` suffixes the second run of a stage), and the per-stage records
+`agent-test_author.json` and `agent-test_author.2.json` with `stage_run=2` on the timing row.
+The needs-human comment carries both: `_proof_failure_evidence` quotes the first refusal as
+always, and `_red_handback_evidence` says the gate refused twice and quotes the second.
+
+**Consequences.** The class of build this recovers is the one where the model was right and its
+paperwork was wrong, which on the evidence of run 34054922788 is a real and expensive class. The
+cost when the hand-back does not help is one extra `test_author` process and one extra gate run
+— bounded at one, like every other hand-back in the kernel. `test-author.md` gains one paragraph
+on what an `expected_failure` must be and what a hand-back may and may not change. Pinned by
+`tests/factory/test_factory_red_handback.py` (a wrong-reason refusal triggers exactly one
+hand-back and a second gate run; the brief carries the argv, cwd, rc, seconds, declared string,
+reason and output tail plus the author's original context; the undo returns the uncommitted
+draft and the accepted build ends with one test commit on the base; a second refusal ends the
+build with both records under their own names and both attempts in the comment; a re-draft that
+drops a checkpoint or downgrades a red one to a guard is refused by name before the gate re-runs;
+a guard refusal, a launch fault, a timeout fault and a refusal with no record are not handed
+back; per-attempt records and `stage_run` numbering). Mutations `red-refusal-never-handed-back`,
+`red-hand-back-is-unbounded`, `red-hand-back-weakening-check-dropped` and
+`red-hand-back-second-record-overwrites-the-first` in `harness/factory_mutations/defects.json`,
+each verified by direct injection on the maintainer's Windows host.
+
+---
+
 ## D-070 · The answered probes run daily, not on every dispatch, because six effort readings and five thinking-cap readings had already answered their questions
 
 **Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34017959979, 34024234313, 34027157595, 34028620229, 34031504603, 34033360798, 34042566216, 34047586142, 34054922788 (every worker run whose preflight printed all four probe lines)

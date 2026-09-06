@@ -313,12 +313,31 @@ class WorkerBriefTests(unittest.TestCase):
                 found[node.args[0].value] = node
         return found
 
+    def _resolve(self, node):
+        """Follow a context `build_issue` assigned to a local name first.
+
+        The test author's context is built once into `test_author_context` and handed both to
+        the author and to its RED hand-back, so the call site carries a Name (D-069).
+        """
+        if not isinstance(node, ast.Name):
+            return node
+        for stmt in ast.walk(self.build):
+            if (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+                and stmt.targets[0].id == node.id
+            ):
+                return stmt.value
+        raise AssertionError(f"{node.id} is not assigned inside build_issue")
+
     def test_post_contract_workers_receive_the_contract_not_only_its_hash(self):
         calls = self._agent_calls()
         for role in ("context", "architecture", "test_author"):
             call = calls[role]
             context = next((k.value for k in call.keywords if k.arg == "context"), None)
             self.assertIsNotNone(context, f"{role} worker gets no context")
+            context = self._resolve(context)
             # D-030: the test author's brief is `_worker_brief(...) + _deferred_symptom_brief(...)`;
             # the left operand must still be the brief.
             if isinstance(context, ast.BinOp):

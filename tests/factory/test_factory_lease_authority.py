@@ -130,6 +130,10 @@ class BuilderCallSiteTests(unittest.TestCase):
         cls.handoff = _function(cls.tree, "KernelRuntime", "_attach_and_publish")
         cls.rehead = _function(cls.tree, "KernelRuntime", "rehead_pr")
         cls.rehead_green = _function(cls.tree, "KernelRuntime", "_rehead_green")
+        # The build's RED gate lives in its own helper since D-069, because a refusal may be
+        # handed back to `test_author` once and the whole gate re-run; the credential scope of
+        # the command it runs is judged here exactly as when build_issue ran it inline.
+        cls.red_gate = _function(cls.tree, "KernelRuntime", "_red_gate")
 
     def _protocol_and_proof_execs(self, func):
         found = []
@@ -145,6 +149,7 @@ class BuilderCallSiteTests(unittest.TestCase):
     def test_protocol_and_proof_run_without_github_credentials(self):
         calls = (
             self._protocol_and_proof_execs(self.build)
+            + self._protocol_and_proof_execs(self.red_gate)
             + self._protocol_and_proof_execs(self.repair)
             + self._protocol_and_proof_execs(self.handoff)
             + self._protocol_and_proof_execs(self.rehead)
