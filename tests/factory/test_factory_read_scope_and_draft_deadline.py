@@ -1,21 +1,29 @@
-"""A builder reads only its product tree, and must draft before its turns run out (D-057).
+"""A builder reads only its product tree, and its draft deadline records (D-057, D-066).
 
 Four builds of issue #103 died in `test_author`. The last (run 34002520477) made 46 Read calls
 and no Write or Edit in 31 turns: it read kernel source, the harness, biome and tsconfig, and
 set out to "verify the kernel's deferred-repro check", then hit its 30-turn cap
 (`error_max_turns`, 1925 s, $4.54). Issue #49's test author (run 33999901008) wrote its first
-file at turn ~5 of 15. Issue #103's seventh build (34024234313), the first on MiniMax M3,
-was killed by the 0.6 deadline at turn 18 after 17 in-scope Reads at one per turn, before its
-first write; the fraction is 0.8 since (D-063). Two bounds, pinned here.
+file at turn ~5 of 15. Issue #103's seventh build (34024234313), the first on MiniMax M3, was
+killed by the 0.6 deadline at turn 18 after 17 in-scope Reads at one per turn, and its
+eleventh (34042566216) by the 0.8 deadline at turn 25 after 22, both before a first write and
+both on a model that wrote a complete test file in other runs. One bound and one signal,
+pinned here.
 
-The read scope: every tool-bearing role carries a `PathScope` from `worker_policy.ROLE_PATH_SCOPE`
-(the product tree under `app/`, `docs/`, the root docs, and the run's artifacts; the trust root
-denied), the provider renders it as the CLI's `Read(...)`/`Edit(...)` allow and deny rules
-instead of bare tool names, and the `_agent_stage` funnel refuses a repository-mutation request
-that carries no scope. The draft deadline: for `test_author`, `implement` and `repair`, the
-provider's stream reader kills the process when a turn past `ceil(cap * 0.8)` begins with no
-Write/Edit tool_use seen, and the stage is refused as `no_draft_by_turn` with the reads it made,
-never retried; the prompts state both bounds, the deadline rendered from the policy.
+The read scope (the bound): every tool-bearing role carries a `PathScope` from
+`worker_policy.ROLE_PATH_SCOPE` (the product tree under `app/`, `docs/`, the root docs, and the
+run's artifacts; the trust root denied), the provider renders it as the CLI's
+`Read(...)`/`Edit(...)` allow and deny rules instead of bare tool names, and the `_agent_stage`
+funnel refuses a repository-mutation request that carries no scope.
+
+The draft deadline (the signal): for `test_author`, `implement` and `repair`, the provider's
+stream reader notes a turn past `ceil(cap * 0.8)` that begins with no Write/Edit tool_use seen
+and keeps reading. Nothing is killed and nothing is refused: the stage runs on to its turn cap
+or its wall, `draft_deadline_missed=true reads=N` reaches its record, its timing row and its
+`FACTORY_STAGE` line, and D-065's path decides — the gates on a draft, `no_draft_at_cap` /
+`no_spec_at_cap` on nothing (`test_factory_cap_ends_the_loop.py` owns that path; this file
+pins the entry to it). The prompts state the scope and the deadline, the deadline rendered
+from the policy and worded as advice.
 
 The end-to-end cases reuse the fake CLI of `test_factory_stream_timeouts.py`.
 """
@@ -43,6 +51,7 @@ for entry in (str(ROOT), str(HERE), str(ROOT / "scripts")):
 
 import factory_read_scope_probe as probe  # noqa: E402
 from test_factory_red_evidence_and_stop import FakeGitHub, FakeWorktree  # noqa: E402
+from test_factory_static_gate import git, repo  # noqa: E402
 from test_factory_stream_timeouts import (  # noqa: E402
     _FakeCliCase,
     _runtime,
@@ -60,10 +69,10 @@ from factory_kernel.agents import AgentRequest, AgentResult, PathScope  # noqa: 
 from factory_kernel.config import ProviderConfig, load_config  # noqa: E402
 from factory_kernel.prompt_render import KERNEL_PLACEHOLDERS, PromptRenderError  # noqa: E402
 from factory_kernel.providers import (  # noqa: E402
+    CAP_SUBTYPE,
     FILES_READ_CAP,
     ClaudeCliProvider,
     CliRun,
-    DraftDeadlineMissed,
     DraftWatch,
     ProviderStageError,
     path_rules,
@@ -71,6 +80,7 @@ from factory_kernel.providers import (  # noqa: E402
 from factory_kernel.runtime import (  # noqa: E402
     STAGE_TIMINGS,
     KernelRuntime,
+    NeedsHuman,
     RunPaths,
     stage_line,
 )
@@ -95,7 +105,10 @@ from factory_kernel.worker_policy import (  # noqa: E402
     path_scope,
     stage_timeout_seconds,
 )
-from factory_kernel.worker_runtime import WorkerControlledRuntime  # noqa: E402
+from factory_kernel.worker_runtime import (  # noqa: E402
+    NO_DRAFT_AT_CAP,
+    WorkerControlledRuntime,
+)
 
 PROMPT_DIR = ROOT / ".factory" / "prompts"
 WORKER_WORKFLOW = ROOT / ".github" / "workflows" / "dark-factory-worker.yml"
@@ -145,11 +158,24 @@ def tool_result(text: str, *, is_error: bool = False) -> dict:
     return event
 
 
+# What the CLI prints when `--max-turns` ended the session, and the number of turns its
+# envelope reports: one more than the turns the stream showed, as run 34033360798 did.
+CAP_TEXT = "Reached max turns (30)"
+
+
 def reading_steps(
-    count: int, *, write_turn: int | None = None, reads_per_turn: int = 1, pace: float = 0.01
+    count: int,
+    *,
+    write_turn: int | None = None,
+    reads_per_turn: int = 1,
+    pace: float = 0.01,
+    cap: bool = False,
 ) -> list[dict]:
     """`count` turns; each turn is a text event, `reads_per_turn` Read tool_use events sharing
-    the turn's message id, and a tool result. At `write_turn` the tool call is a Write."""
+    the turn's message id, and a tool result. At `write_turn` the tool call is a Write. With
+    `cap`, the session ends the way the CLI ends one it stopped at `--max-turns`: an
+    `error_max_turns` envelope and exit 1, which for a mutation role is the loop ending and
+    not a failed stage (D-065)."""
     steps: list[dict] = [{"emit": init_event()}]
     for n in range(1, count + 1):
         steps.append({"sleep": pace, "emit": assistant_event(f"msg_{n}", f"turn {n}")})
@@ -167,7 +193,17 @@ def reading_steps(
                     }
                 )
         steps.append({"emit": tool_result("ok")})
-    steps.append({"emit": result_event(num_turns=count)})
+    if cap:
+        steps.append(
+            {
+                "emit": result_event(
+                    subtype=CAP_SUBTYPE, is_error=True, result=CAP_TEXT, num_turns=count + 1
+                )
+            }
+        )
+        steps.append({"exit": 1})
+    else:
+        steps.append({"emit": result_event(num_turns=count)})
     return steps
 
 
@@ -478,7 +514,12 @@ class PromptTextTests(unittest.TestCase):
                 text = self._prompt(name)
                 self.assertIn(SCOPE_SENTENCE, text)
                 self.assertIn("by turn $DRAFT_DEADLINE_TURN", text)
-                self.assertIn("the kernel ends the stage if nothing is written by then", text)
+                self.assertIn(
+                    "the kernel records a stage that has written nothing by then, and your "
+                    "turn cap ends the loop",
+                    text,
+                )
+                self.assertNotIn("the kernel ends the stage if nothing is written", text)
 
     def test_the_test_author_is_no_longer_invited_to_verify_the_kernel(self):
         text = self._prompt("test-author.md")
@@ -536,7 +577,7 @@ class DeadlinePolicyTests(unittest.TestCase):
 
 
 class DraftWatchTests(unittest.TestCase):
-    def test_turns_are_distinct_message_ids_and_the_kill_is_the_turn_past_the_deadline(self):
+    def test_turns_are_distinct_message_ids_and_the_deadline_is_only_noted(self):
         watch = DraftWatch(2)
         events = [
             assistant_event("m1", "a"),
@@ -545,97 +586,58 @@ class DraftWatchTests(unittest.TestCase):
             assistant_event("m2", "b"),
             tool_use_event("m2", "Glob", {"pattern": "**/*.py"}),
         ]
-        self.assertFalse(any(watch.observe(e, index=i) for i, e in enumerate(events)))
+        for index, event in enumerate(events):
+            self.assertIsNone(watch.observe(event, index=index), "observe decides nothing")
         self.assertEqual(watch.turns, 2)
+        self.assertFalse(watch.deadline_missed)
         self.assertEqual(watch.reads, 2, "Glob is not a Read")
         self.assertEqual(watch.files_read, ["app/x.py", "app/y.py"])
-        self.assertTrue(watch.observe(assistant_event("m3", "c"), index=5))
+        watch.observe(assistant_event("m3", "c"), index=5)
         self.assertEqual(watch.turns, 3)
+        self.assertTrue(watch.deadline_missed, "the turn past the deadline began unwritten")
 
     def test_a_write_in_time_disarms_it(self):
         watch = DraftWatch(2)
-        self.assertFalse(watch.observe(assistant_event("m1", "a"), index=0))
-        self.assertFalse(watch.observe(tool_use_event("m2", "Edit", {"file_path": "a"}), index=1))
+        watch.observe(assistant_event("m1", "a"), index=0)
+        watch.observe(tool_use_event("m2", "Edit", {"file_path": "a"}), index=1)
         self.assertEqual(watch.wrote_at_turn, 2)
         for n in range(3, 40):
-            self.assertFalse(watch.observe(assistant_event(f"m{n}", "x"), index=n))
+            watch.observe(assistant_event(f"m{n}", "x"), index=n)
+        self.assertFalse(watch.deadline_missed)
+
+    def test_a_write_past_the_deadline_leaves_the_observation_standing(self):
+        """The flag is sticky: a run that read past its deadline and then drafted says both,
+        because the reads are what the cost of that stage is read from (D-066)."""
+        watch = DraftWatch(2)
+        for n in range(1, 4):
+            watch.observe(assistant_event(f"m{n}", "x"), index=n)
+        self.assertTrue(watch.deadline_missed)
+        watch.observe(tool_use_event("m4", "Write", {"file_path": "app/a.test.ts"}), index=4)
+        self.assertEqual(watch.wrote_at_turn, 4)
+        self.assertTrue(watch.deadline_missed)
 
     def test_no_deadline_only_counts(self):
         watch = DraftWatch(None)
         for n in range(1, 40):
-            self.assertFalse(
-                watch.observe(tool_use_event(f"m{n}", "Read", {"file_path": "f"}), index=n)
-            )
+            watch.observe(tool_use_event(f"m{n}", "Read", {"file_path": "f"}), index=n)
         self.assertEqual((watch.turns, watch.reads), (39, 39))
+        self.assertFalse(watch.deadline_missed)
 
 
 class DeadlineFakeCliTests(_FakeCliCase):
-    def test_a_worker_that_only_reads_is_killed_at_the_deadline_and_not_retried(self):
-        self.scenario(reading_steps(30))
-        restores: list[int] = []
-        with self.assertRaises(ProviderStageError) as ctx:
-            provider_for(self.binary, retries=2, timeout=60, idle=5).run(
-                request(), before_retry=restores.append
-            )
-        exc = ctx.exception
-        self.assertIsInstance(exc, DraftDeadlineMissed)
-        self.assertEqual(len(self.launches()), 1, "not transient, never relaunched")
-        self.assertEqual(restores, [])
-        self.assertEqual(exc.attempts, 1)
-        self.assertFalse(exc.timed_out)
-        self.assertNotIn("hang", exc.telemetry)
-        self.assertIs(exc.telemetry["draft_deadline_missed"], True)
-        self.assertEqual(exc.telemetry["subtype"], "no_draft_by_turn")
-        self.assertEqual(exc.telemetry["draft_deadline_turn"], 24)
-        self.assertEqual(exc.telemetry["num_turns"], 25, "turn 25 began; that is the kill")
-        self.assertEqual(exc.telemetry["reads"], 24)
-        self.assertEqual(len(exc.telemetry["files_read"]), 24)
-        self.assertEqual(exc.telemetry["files_read"][0], "factory_kernel/f1_0.py")
-        self.assertIsNone(exc.telemetry["total_cost_usd"], "no result event: cost unknown")
-        self.assertIn("wrote nothing by turn 24 of 30", str(exc))
-        self.assertIn("reads=24", str(exc))
-        self.assertIn("factory_kernel/f1_0.py", str(exc))
-        self.assertIn("not retried", str(exc))
+    """The deadline through a real process: nothing is killed, everything is recorded."""
 
-    def test_a_worker_that_wrote_at_turn_two_is_untouched(self):
-        self.scenario(reading_steps(25, write_turn=2))
-        result = provider_for(self.binary, retries=0, timeout=60, idle=5).run(request())
-        self.assertEqual(result.content, "done")
-        self.assertEqual(result.num_turns, 25)
-        self.assertEqual(len(self.launches()), 1)
-
-    def test_a_drafting_role_has_no_deadline(self):
-        self.scenario(reading_steps(25))
-        result = provider_for(self.binary, retries=0, timeout=60, idle=5).run(
-            request("review-spec")
-        )
-        self.assertEqual(result.num_turns, 25)
-
-    def test_the_deadline_follows_the_requests_own_cap(self):
-        self.scenario(reading_steps(25))
-        with self.assertRaises(DraftDeadlineMissed) as ctx:
-            provider_for(self.binary, retries=0, timeout=60, idle=5).run(request(max_turns=10))
-        self.assertEqual(ctx.exception.telemetry["draft_deadline_turn"], 8)
-        self.assertEqual(ctx.exception.telemetry["num_turns"], 9)
-
-    def test_the_paths_read_are_capped_in_the_record_and_the_count_is_not(self):
-        self.scenario(reading_steps(30, reads_per_turn=3))
-        with self.assertRaises(DraftDeadlineMissed) as ctx:
-            provider_for(self.binary, retries=0, timeout=60, idle=5).run(request())
-        self.assertEqual(ctx.exception.telemetry["reads"], 72)
-        self.assertEqual(len(ctx.exception.telemetry["files_read"]), FILES_READ_CAP)
-        self.assertEqual(FILES_READ_CAP, 40)
-
-    def test_the_stage_record_row_and_line_say_so(self):
-        self.scenario(reading_steps(30))
+    def _stage(self, steps: list[dict], role: str = "test_author", **overrides):
+        """One stage through the kernel's funnel; returns the result, record, row and line."""
+        self.scenario(steps)
         with tempfile.TemporaryDirectory() as tmp:
             paths = RunPaths.create(Path(tmp), "run")
             rt = _runtime(Path(tmp), provider_for(self.binary, retries=2, timeout=60, idle=5))
             out = io.StringIO()
-            with contextlib.redirect_stdout(out), self.assertRaises(DraftDeadlineMissed):
-                rt._agent_stage(paths, request())
+            with contextlib.redirect_stdout(out):
+                result = rt._agent_stage(paths, request(role, **overrides))
             record = json.loads(
-                (paths.transcripts / "agent-test_author.json").read_text(encoding="utf-8")
+                (paths.transcripts / f"agent-{role}.json").read_text(encoding="utf-8")
             )
             (row,) = [
                 json.loads(line)
@@ -643,26 +645,140 @@ class DeadlineFakeCliTests(_FakeCliCase):
                 .read_text(encoding="utf-8")
                 .splitlines()
             ]
-            log = (paths.transcripts / "agent-test_author.log").read_text(encoding="utf-8")
+            log = (paths.transcripts / f"agent-{role}.log").read_text(encoding="utf-8")
         line = next(t for t in out.getvalue().splitlines() if t.startswith("FACTORY_STAGE "))
-        self.assertEqual(record["outcome"], "failed")
-        self.assertEqual(record["error_class"], "DraftDeadlineMissed")
-        self.assertEqual(record["subtype"], "no_draft_by_turn")
+        return result, record, row, line, log
+
+    def test_a_worker_that_only_reads_runs_to_its_cap_and_the_cap_rule_refuses_it(self):
+        """D-057's kill is retired: the reader watches the whole run and the CLI's own turn
+        cap ends it, which is D-065's path — here with nothing in the checkout, so
+        `no_draft_at_cap`, not `no_draft_by_turn`."""
+        self.scenario(reading_steps(30, cap=True))
+        restores: list[int] = []
+        result = provider_for(self.binary, retries=2, timeout=60, idle=5).run(
+            request(), before_retry=restores.append
+        )
+        self.assertEqual(len(self.launches()), 1, "a cap is not a transient error")
+        self.assertEqual(restores, [])
+        self.assertEqual(result.attempts, 1)
+        # Every turn was read to the end: nothing ended the process at turn 25.
+        self.assertEqual(result.reads, 30)
+        self.assertEqual(result.files_read[0], "factory_kernel/f1_0.py")
+        self.assertEqual(result.files_read[-1], "factory_kernel/f30_0.py")
+        self.assertIs(result.draft_deadline_missed, True)
+        self.assertEqual(result.draft_deadline_turn, 24)
+        # The turn cap is what ended the loop, and D-065's rule is what judges the draft.
+        self.assertTrue(result.cap_reached)
+        self.assertEqual(result.num_turns, 31)
+        home = Path(tempfile.mkdtemp(dir=self.tmp))
+        root = repo(home)
+        self.assertEqual(git(root, "status", "--porcelain"), "", "nothing was drafted")
+        paths = RunPaths.create(home, "run")
+        rt = object.__new__(WorkerControlledRuntime)
+        with self.assertRaises(NeedsHuman) as ctx:
+            rt._require_draft_at_cap("test_author", root, paths, result)
+        self.assertIn(NO_DRAFT_AT_CAP, str(ctx.exception))
+        self.assertIn("reached its turn cap", str(ctx.exception))
+        self.assertNotIn("no_draft_by_turn", str(ctx.exception))
+
+    def test_a_worker_that_drafts_past_the_deadline_completes_with_it_recorded(self):
+        """The run this change exists for: a first write at turn 26, seven turns inside the
+        worker's own budget and two past the deadline that used to kill it."""
+        result, record, row, line, log = self._stage(reading_steps(30, write_turn=26))
+        self.assertEqual(result.content, "done")
+        self.assertEqual(result.num_turns, 30)
+        self.assertFalse(result.cap_reached)
+        self.assertIs(result.draft_deadline_missed, True)
+        self.assertEqual(result.reads, 29, "every turn but the write")
+        self.assertEqual(record["outcome"], "ok")
+        self.assertNotIn("error_class", record)
         self.assertIs(record["draft_deadline_missed"], True)
         self.assertEqual(record["draft_deadline_turn"], 24)
-        self.assertEqual(record["reads"], 24)
-        self.assertEqual(record["num_turns"], 25)
-        self.assertEqual(len(record["files_read"]), 24)
-        self.assertEqual(record["attempts"], 1)
-        self.assertFalse(record["timed_out"])
+        self.assertEqual(record["reads"], 29)
+        self.assertEqual(len(record["files_read"]), 29)
         self.assertIs(row["draft_deadline_missed"], True)
-        self.assertEqual(row["reads"], 24)
-        self.assertIn(" turns=25 ", line)
-        self.assertIn(" outcome=failed events=", line)
-        self.assertIn(" draft_deadline_missed=true reads=24", line)
+        self.assertEqual(row["reads"], 29)
+        self.assertEqual(row["outcome"], "ok")
+        self.assertIn(" turns=30 ", line)
+        self.assertIn(" outcome=ok events=", line)
+        self.assertIn(" draft_deadline_missed=true reads=29", line)
+        self.assertNotIn("cap_reached=true", line)
+        self.assertIn("msg_30", log, "the whole stream, because nothing cut it short")
+
+    def test_a_worker_that_wrote_at_turn_two_is_untouched(self):
+        self.scenario(reading_steps(25, write_turn=2))
+        result = provider_for(self.binary, retries=0, timeout=60, idle=5).run(request())
+        self.assertEqual(result.content, "done")
+        self.assertEqual(result.num_turns, 25)
+        self.assertEqual(len(self.launches()), 1)
+        self.assertFalse(result.draft_deadline_missed)
+        self.assertIsNone(result.draft_deadline_turn)
+
+    def test_a_drafting_role_has_no_deadline(self):
+        self.scenario(reading_steps(25))
+        result = provider_for(self.binary, retries=0, timeout=60, idle=5).run(
+            request("review-spec")
+        )
+        self.assertEqual(result.num_turns, 25)
+        self.assertFalse(result.draft_deadline_missed)
+
+    def test_the_deadline_follows_the_requests_own_cap(self):
+        self.scenario(reading_steps(25))
+        result = provider_for(self.binary, retries=0, timeout=60, idle=5).run(request(max_turns=10))
+        self.assertIs(result.draft_deadline_missed, True)
+        self.assertEqual(result.draft_deadline_turn, 8)
+        self.assertEqual(result.num_turns, 25, "the note at turn 9 stopped nothing")
+
+    def test_the_paths_read_are_capped_in_the_record_and_the_count_is_not(self):
+        _result, record, row, _line, _log = self._stage(reading_steps(30, reads_per_turn=3))
+        self.assertEqual(record["reads"], 90)
+        self.assertEqual(row["reads"], 90)
+        self.assertEqual(len(record["files_read"]), FILES_READ_CAP)
+        self.assertEqual(FILES_READ_CAP, 40)
+
+    def test_a_stage_that_died_at_its_wall_still_carries_what_it_read(self):
+        """A process the wall or the idle clock kills after its deadline keeps the note: the
+        observation rides on every way out of `_launch`, not only on the returned result."""
+        # Thirty read-only turns, then silence: the deadline passes at turn 25 and the wall
+        # kills the process while it is still going.
+        steps = reading_steps(30)
+        steps.insert(-1, {"sleep": 30})
+        self.scenario(steps)
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RunPaths.create(Path(tmp), "run")
+            rt = _runtime(Path(tmp), provider_for(self.binary, retries=0, timeout=5, idle=30))
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                self.assertRaises(ProviderStageError) as ctx,
+            ):
+                rt._agent_stage(paths, request())
+            record = json.loads(
+                (paths.transcripts / "agent-test_author.json").read_text(encoding="utf-8")
+            )
+        self.assertTrue(ctx.exception.timed_out)
+        self.assertIs(record["draft_deadline_missed"], True)
+        self.assertEqual(record["draft_deadline_turn"], 24)
+        self.assertGreaterEqual(record["reads"], 24)
+        self.assertIs(record["timed_out"], True)
+
+    def test_the_stage_record_row_and_line_say_so(self):
+        result, record, row, line, log = self._stage(reading_steps(30, cap=True))
+        self.assertEqual(record["outcome"], "ok", "the cap ended the loop, not the stage")
+        self.assertTrue(record["cap_reached"])
+        self.assertIs(record["draft_deadline_missed"], True)
+        self.assertEqual(record["draft_deadline_turn"], 24)
+        self.assertEqual(record["reads"], 30)
+        self.assertEqual(record["num_turns"], 31)
+        self.assertEqual(len(record["files_read"]), 30)
+        self.assertEqual(record["attempts"], 1)
+        self.assertIs(row["draft_deadline_missed"], True)
+        self.assertEqual(row["reads"], 30)
+        self.assertIn(" turns=31 ", line)
+        self.assertIn(" outcome=ok events=", line)
+        self.assertIn(" cap_reached=true draft_deadline_missed=true reads=30", line)
         self.assertNotIn("timed_out=true", line)
-        self.assertIn("msg_25", log, "the stream is kept up to the kill")
-        self.assertNotIn("msg_30", log)
+        self.assertTrue(result.cap_reached)
+        self.assertIn("msg_30", log, "the stream runs to the cap")
 
     def test_a_healthy_session_records_no_deadline_fields(self):
         self.scenario(healthy_steps())
@@ -708,61 +824,73 @@ class StageLineTests(unittest.TestCase):
 # --- the needs-human comment --------------------------------------------------------------------
 
 
-def _missed(files: list[str] | None = None) -> DraftDeadlineMissed:
-    return DraftDeadlineMissed(
-        "agent worker role='test_author' wrote nothing by turn 24 of 30",
-        telemetry={
-            "subtype": "no_draft_by_turn",
-            "draft_deadline_missed": True,
-            "draft_deadline_turn": 24,
-            "reads": 46,
-            "num_turns": 19,
-            "files_read": files
-            if files is not None
-            else ["factory_kernel/runtime.py", "harness/ci.py"],
-        },
+def _missed_record(paths: RunPaths, files: list[str] | None = None) -> None:
+    """The stage record a `test_author` leaves after passing its deadline and running to its
+    cap: the four fields the provider observed, beside the counts every record carries."""
+    (paths.transcripts / "agent-test_author.json").write_text(
+        json.dumps(
+            {
+                "role": "test_author",
+                "record": "agent-test_author",
+                "outcome": "ok",
+                "num_turns": 31,
+                "draft_deadline_missed": True,
+                "draft_deadline_turn": 24,
+                "reads": 46,
+                "files_read": files
+                if files is not None
+                else ["factory_kernel/runtime.py", "harness/ci.py"],
+            }
+        ),
+        encoding="utf-8",
     )
 
 
 class CommentEvidenceTests(unittest.TestCase):
     def test_the_evidence_names_the_reads_and_the_files(self):
-        text = KernelRuntime._draft_deadline_evidence(_missed())
-        self.assertIn("no_draft_by_turn", text)
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RunPaths.create(Path(tmp), "run")
+            _missed_record(paths)
+            text = KernelRuntime._draft_deadline_evidence(paths)
+        self.assertIn("draft_deadline_missed=true", text)
+        self.assertIn("`test_author`", text)
         self.assertIn("46 Read call(s)", text)
         self.assertIn("by turn 24", text)
-        self.assertIn("turns seen: 19", text)
-        self.assertIn("not retried", text)
+        self.assertIn("turns seen: 31", text)
+        self.assertIn("recorded, not enforced", text)
+        self.assertIn("ran on to its turn cap", text)
         self.assertIn("factory_kernel/runtime.py", text)
         self.assertIn("harness/ci.py", text)
         self.assertIn("Files read (first 2)", text)
+        self.assertNotIn("no_draft_by_turn", text)
 
-    def test_other_failures_add_nothing_and_the_combined_evidence_is_the_sum(self):
-        self.assertEqual(KernelRuntime._draft_deadline_evidence(RuntimeError("x")), "")
-        self.assertEqual(
-            KernelRuntime._draft_deadline_evidence(ProviderStageError("x", timed_out=True)), ""
-        )
+    def test_a_run_without_one_adds_nothing_and_the_combined_evidence_is_the_sum(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RunPaths.create(Path(tmp), "run")
-            self.assertEqual(
-                KernelRuntime._failure_evidence(paths, _missed()),
-                KernelRuntime._draft_deadline_evidence(_missed()),
-            )
+            self.assertEqual(KernelRuntime._draft_deadline_evidence(paths), "")
             self.assertEqual(KernelRuntime._failure_evidence(paths, RuntimeError("x")), "")
+            _missed_record(paths)
+            self.assertEqual(
+                KernelRuntime._failure_evidence(paths, RuntimeError("x")),
+                KernelRuntime._draft_deadline_evidence(paths),
+            )
 
     def test_the_evidence_is_capped_and_scrubbed(self):
-        text = KernelRuntime._draft_deadline_evidence(
-            _missed([f"app/very/long/path/number/{n}.py" for n in range(400)])
-        )
-        self.assertLessEqual(len(text), 3000)
-        # Assembled at run time: the guard scans added lines for this very shape (D-057).
-        token = "ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789ABCD"
-        text = KernelRuntime._draft_deadline_evidence(_missed([f"app/x.py?token={token}"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RunPaths.create(Path(tmp), "run")
+            _missed_record(paths, [f"app/very/long/path/number/{n}.py" for n in range(400)])
+            self.assertLessEqual(len(KernelRuntime._draft_deadline_evidence(paths)), 3000)
+            # Assembled at run time: the guard scans added lines for this very shape (D-057).
+            token = "ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+            _missed_record(paths, [f"app/x.py?token={token}"])
+            text = KernelRuntime._draft_deadline_evidence(paths)
         self.assertNotIn(token, text)
         self.assertIn("app/x.py", text)
 
 
 class BuildCommentTests(unittest.TestCase):
-    """build_issue driven to its first model stage against fakes; the stage raises the miss."""
+    """build_issue driven to its first model stage against fakes. The stage records the missed
+    deadline and is refused by D-065's `no_draft_at_cap`, and the comment carries both."""
 
     def setUp(self) -> None:
         import dataclasses
@@ -795,7 +923,12 @@ class BuildCommentTests(unittest.TestCase):
         rt._lease_heartbeat = lambda *args, **kwargs: None  # type: ignore[method-assign]
 
         def agent(role, cwd, paths, *, context="", env):
-            raise _missed()
+            _missed_record(paths)
+            raise NeedsHuman(
+                "test_author reached its turn cap (31 turns, `error_max_turns`) and left no "
+                f"change in the checkout (`{NO_DRAFT_AT_CAP}`): there is no draft for the "
+                "gates to judge"
+            )
 
         rt._agent = agent  # type: ignore[method-assign]
         with (
@@ -804,16 +937,15 @@ class BuildCommentTests(unittest.TestCase):
             ),
             mock.patch("factory_kernel.runtime.remove"),
             contextlib.redirect_stdout(io.StringIO()),
-            self.assertRaises(DraftDeadlineMissed),
+            self.assertRaises(NeedsHuman),
         ):
             rt.build_issue(49)
         self.assertIn((49, "factory:needs-human"), gh.added)
         ((number, body),) = gh.comments
         self.assertEqual(number, 49)
-        self.assertIn(
-            "builder failed closed: agent worker role='test_author' wrote nothing by turn 24", body
-        )
-        self.assertIn("no_draft_by_turn", body)
+        self.assertIn("test_author reached its turn cap (31 turns, `error_max_turns`)", body)
+        self.assertIn(NO_DRAFT_AT_CAP, body)
+        self.assertIn("draft_deadline_missed=true", body)
         self.assertIn("46 Read call(s)", body)
         self.assertIn("factory_kernel/runtime.py", body)
 
