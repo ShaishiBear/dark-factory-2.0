@@ -51,7 +51,13 @@ class MainRegressionWorkflowTests(unittest.TestCase):
             self.assertRegex(line, r"@[0-9a-f]{40}$", line)
         self.assertEqual(pinned_versions(self.text), pinned_versions(self.worker))
         self.assertIn("npm install -g agent-browser@0.35.0", self.text)
-        self.assertNotIn("claude-code", self.text, "the regression never launches a model worker")
+        # D-070: the regression runs the four preflight probes, which launch the pinned worker
+        # CLI, so it pins the CLI at exactly the version the worker pins. It still dispatches
+        # no factory action: no `python -m factory_kernel` anywhere in this file.
+        pin = re.search(r"npm install -g @anthropic-ai/claude-code@\S+", self.worker).group(0)
+        self.assertIn(pin, self.text)
+        self.assertEqual(self.text.count("claude-code@"), 1)
+        self.assertNotIn("python -m factory_kernel", self.text, "the regression never dispatches")
 
     def test_service_block_is_the_workers_verbatim(self) -> None:
         block_start, block_end = "    services:\n      postgres:\n", "          --health-retries 5\n"
@@ -137,6 +143,158 @@ class MainRegressionWorkflowTests(unittest.TestCase):
         self.assertEqual(factory_labels, {"factory:needs-human"}, factory_labels)
         self.assertIn("<!-- dark-factory-main-regression -->", step)
         self.assertTrue(step.rstrip().endswith("exit 1"), "a failed regression must fail the run")
+
+
+ROUTE_PROBE = "Prove the worker's model route with the pinned CLI"
+ANSWERED_PROBES = (
+    "Probe whether the route honours an effort level",
+    "Probe whether the route honours a thinking budget",
+    "Prove the worker's read scope with the pinned CLI",
+)
+PROBE_INPUT = "run_answered_probes"
+PROBE_GATE = "if: ${{ inputs.run_answered_probes == true || inputs.run_answered_probes == 'true' }}"
+# Every marker the four probes print. The archived corpus is read out of the run logs by these
+# exact prefixes, so a change to one of them silently ends a measurement series (D-070).
+PROBE_MARKERS = (
+    "FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=$model ${verdict#* }",
+    "FACTORY_PREFLIGHT_EFFORT_PROBE model=$worker_model low_thinking=0 high_thinking=0 "
+    "honoured=false error=probe-did-not-run",
+    "FACTORY_PREFLIGHT_THINKING_CAP_PROBE model=$worker_model uncapped=0 cap1024=0 cap0=0 "
+    "honoured=false error=probe-did-not-run",
+    "FACTORY_PREFLIGHT_READ_SCOPE_PROBE model=$worker_model denied_outside_scope=false "
+    "attempted_outside_scope=false read_inside_scope=false read_artifacts=false "
+    "grep_denied_outside_scope=false glob_outside_scope=false tools=none tools_missing=none "
+    "events=0 error=probe-did-not-run",
+)
+
+
+def steps(text: str) -> dict[str, str]:
+    """Every `- name:` step of the file's single job, keyed by name, in file order."""
+    parts = text.split("\n      - name: ")
+    out: dict[str, str] = {}
+    for part in parts[1:]:
+        name, _, body = part.partition("\n")
+        assert name not in out, f"two steps named {name}"
+        out[name] = body
+    return out
+
+
+def run_block(step: str) -> str:
+    """The step's shell body: everything from `run: |` on."""
+    return step[step.index("        run: |\n") :]
+
+
+class AnsweredProbesRunDailyTests(unittest.TestCase):
+    """D-070: the effort, thinking-cap and read-scope probes are answered questions.
+
+    Six effort readings on this route flipped run to run with no stable signal, five
+    thinking-cap readings read honoured=false, and the read-scope probe has reported
+    denied_outside_scope=true and tools_missing=none on every reading since the tool-surface
+    fix. Measuring them again on every hourly dispatch cost 275-510 s of wall clock and three
+    model calls per run and told nobody anything new, so they move to the daily regression on
+    main and to an opt-in dispatch input. The model ROUTE probe does not move: an unreachable
+    slug must refuse before a stage burns its budget, and that answer can differ every hour.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.worker = WORKER.read_text(encoding="utf-8")
+        cls.regression = REGRESSION.read_text(encoding="utf-8")
+        cls.worker_steps = steps(cls.worker)
+        cls.regression_steps = steps(cls.regression)
+
+    def test_the_worker_input_defaults_to_not_running_them(self) -> None:
+        head = self.worker.split("permissions:", 1)[0]
+        declaration = head.split(f"      {PROBE_INPUT}:\n", 1)
+        self.assertEqual(len(declaration), 2, f"the worker declares no {PROBE_INPUT} input")
+        declaration = declaration[1].split("\n\n", 1)[0]
+        self.assertIn("type: boolean", declaration)
+        self.assertIn("default: false", declaration)
+        self.assertNotIn("default: true", declaration)
+        self.assertIn("required: false", declaration)
+
+    def test_the_route_probe_runs_on_every_worker_dispatch(self) -> None:
+        step = self.worker_steps[ROUTE_PROBE]
+        self.assertNotIn("if:", step.split("        run: |", 1)[0])
+        self.assertIn("FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model", step)
+        self.assertIn("exit 1", step)
+        self.assertIn("scripts/factory_models.py --list", step)
+
+    def test_the_three_answered_probes_are_gated_by_the_input(self) -> None:
+        for name in ANSWERED_PROBES:
+            with self.subTest(name):
+                head = self.worker_steps[name].split("        run: |", 1)[0]
+                self.assertIn(PROBE_GATE, head)
+
+    def test_the_gated_steps_are_still_ordered_after_the_route_probe(self) -> None:
+        order = list(self.worker_steps)
+        places = [order.index(name) for name in (ROUTE_PROBE, *ANSWERED_PROBES)]
+        self.assertEqual(places, sorted(places), places)
+        self.assertLess(places[-1], order.index("Dispatch exactly one factory action"))
+
+    def test_nothing_else_on_the_worker_is_gated_by_the_input(self) -> None:
+        gated = [name for name, step in self.worker_steps.items() if PROBE_GATE in step]
+        self.assertEqual(gated, list(ANSWERED_PROBES), gated)
+
+    def test_all_four_probes_run_in_the_daily_regression(self) -> None:
+        order = list(self.regression_steps)
+        for name in (ROUTE_PROBE, *ANSWERED_PROBES):
+            with self.subTest(name):
+                self.assertIn(name, self.regression_steps)
+                self.assertLess(order.index(name), order.index("Full canonical harness on main"))
+                head = self.regression_steps[name].split("        run: |", 1)[0]
+                self.assertNotIn("if:", head, "the daily job measures every probe every day")
+        self.assertNotIn(PROBE_GATE, self.regression, "the daily job runs them unconditionally")
+
+    def test_every_regression_probe_carries_the_route_and_the_credential(self) -> None:
+        self.assertIn("ANTHROPIC_BASE_URL: https://openrouter.ai/api", self.regression)
+        for name in (ROUTE_PROBE, *ANSWERED_PROBES):
+            with self.subTest(name):
+                head = self.regression_steps[name].split("        run: |", 1)[0]
+                self.assertIn("ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}", head)
+                # A probe never decides whether the harness runs or whether the issue is filed.
+                self.assertIn("continue-on-error: true", head)
+
+    def test_the_regression_probe_bodies_are_the_workers_byte_for_byte(self) -> None:
+        """One marker corpus spans both workflows only if the same program produced it."""
+        for name in (ROUTE_PROBE, *ANSWERED_PROBES):
+            with self.subTest(name):
+                self.assertEqual(
+                    run_block(self.regression_steps[name]),
+                    run_block(self.worker_steps[name]),
+                )
+
+    def test_the_marker_formats_are_unchanged_in_both_workflows(self) -> None:
+        for marker in PROBE_MARKERS:
+            with self.subTest(marker.split()[0]):
+                self.assertIn(marker, self.worker)
+                self.assertIn(marker, self.regression)
+
+    def test_the_two_measurements_stay_data_and_the_scope_stays_a_refusal(self) -> None:
+        for name in ANSWERED_PROBES[:2]:
+            with self.subTest(name):
+                block = run_block(self.worker_steps[name])
+                self.assertIn("honoured=false", block)
+                self.assertNotIn("exit 1", block)
+                self.assertNotIn("FACTORY_PREFLIGHT_REFUSED", block)
+        scope = run_block(self.worker_steps[ANSWERED_PROBES[2]])
+        self.assertIn('if [ "$rc" = "2" ]', scope)
+        self.assertIn("FACTORY_PREFLIGHT_REFUSED the pinned CLI let a scoped worker read", scope)
+        self.assertIn("exit 1", scope)
+
+    def test_the_read_scope_is_still_enforced_where_it_is_cheap_and_deterministic(self) -> None:
+        """The live probe is evidence about the route, not what keeps the scope honest.
+
+        What keeps it honest is the rendered argv, asserted on every gate by
+        tests/factory/test_factory_read_scope_and_draft_deadline.py, which needs no model
+        call and no network. This test only holds that the assertion exists, so the probe
+        can move to a daily cadence without the property going unchecked.
+        """
+        argv_test = (
+            ROOT / "tests" / "factory" / "test_factory_read_scope_and_draft_deadline.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("def test_a_mutation_role_is_told_paths_not_bare_tools", argv_test)
+        self.assertIn("def test_the_deny_rules_cover_every_protected_root", argv_test)
 
 
 class TrustRootHygieneTests(unittest.TestCase):

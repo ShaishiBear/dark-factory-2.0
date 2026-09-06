@@ -341,6 +341,24 @@ class ScopeOnArgvTests(unittest.TestCase):
         self.assertNotIn("Read(./app/**)", deny)
         self.assertEqual(argv[argv.index("--add-dir") + 1], str(self.artifacts))
 
+    def test_the_deny_rules_cover_every_protected_root(self):
+        """The whole policy list, not the five roots the brief happens to name.
+
+        This assertion and the one above it are what keep the read scope honest between
+        daily runs of the live probe: they read the argv the kernel actually renders, need
+        no model call and no network, and run in every gate (D-057, D-070).
+        """
+        argv = self.argv("test_author")
+        deny = _flag(argv, "--disallowedTools")
+        self.assertEqual(argv[argv.index("--tools") + 1].split(","), list(WRITE_TOOLS))
+        self.assertEqual(len(WRITE_TOOLS), 5, WRITE_TOOLS)
+        for path in TRUST_ROOT_DENY_PATHS:
+            with self.subTest(path):
+                self.assertIn(f"Read(./{path})", deny)
+                self.assertIn(f"Edit(./{path})", deny)
+        self.assertEqual(len(deny), 2 * len(TRUST_ROOT_DENY_PATHS), deny)
+        self.assertNotIn(f"Read(./{ARCHITECTURE_POLICY_PATH})", deny, "the documented exception")
+
     def test_the_artifacts_directory_is_an_absolute_rule_for_reads_and_writes(self):
         argv = self.argv("implement")
         allow = _flag(argv, "--allowedTools")

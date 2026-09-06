@@ -20,6 +20,18 @@ bootstrap = load_module("factory_bootstrap_e2e", HARNESS / "bootstrap_e2e.py")
 serve = load_module("factory_serve", HARNESS / "serve.py")
 
 
+def _input_declaration(inputs: str, name: str) -> str:
+    """The lines under one `workflow_dispatch` input, up to the next key or comment."""
+    lines = inputs.splitlines()
+    start = lines.index("      " + name)
+    body = []
+    for line in lines[start + 1 :]:
+        if line.startswith("      ") and not line.startswith("       "):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
 class GitHubE2EBootstrapTests(unittest.TestCase):
     def test_bootstrap_accepts_only_dedicated_loopback_database(self) -> None:
         self.assertTrue(
@@ -183,9 +195,14 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             encoding="utf-8"
         )
         inputs = workflow.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
+        # Scoped to the resume pair: the worker declares another dispatch input as well
+        # (D-070's run_answered_probes), and what this test is about is that both resume
+        # inputs are optional and empty by default.
         for name in ("resume_pr:", "resume_run_id:"):
             self.assertIn(name, inputs)
-        self.assertEqual(inputs.count("required: false"), 2)
+            declaration = _input_declaration(inputs, name)
+            self.assertIn("required: false", declaration)
+            self.assertIn("default: ''", declaration)
         self.assertEqual(inputs.count("default: ''"), 2)
         self.assertIn("actions: read", workflow.split("permissions:", 1)[1].split("concurrency:", 1)[0])
         # Lone input refuses, in the preflight, before any toolchain is installed.
