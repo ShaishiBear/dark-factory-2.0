@@ -1733,6 +1733,34 @@
       "find": "             [\"bun\", \"x\", \"biome\", \"format\", \"--write\", *frontend])\n",
       "replace": "             [\"bun\", \"x\", \"biome\", \"check\", \"--write\", \"--unsafe\", *frontend])\n",
       "why": "The gate would rewrite the worker's code, not its whitespace: 'biome check --write' applies lint fixes, which can change behaviour, to files the worker is about to have committed and RED-hashed, so a machine edit no worker and no reviewer ever saw would enter the acceptance tests; only formatting is safe to apply unasked; caught by tests/factory/test_factory_static_gate.py (the formatter commands are the repository's own formatters, and no lint-fix flag appears anywhere in the module) (D-068)."
+    },
+    {
+      "id": "red-refusal-never-handed-back",
+      "file": "factory_kernel/runtime.py",
+      "find": "                if record is None or attempt > RED_HANDBACK_ATTEMPTS:\n",
+      "replace": "                if record is None or attempt > 0:\n",
+      "why": "The RED gate would end the build on the first refusal again, which is the old behaviour that cost build run 34054922788 about $15 and forty-five minutes for one mis-declared expected_failure with the correct test already on disk: the author declared the message getByRole prints while its own query was a label query, and nothing ever told it so; caught by tests/factory/test_factory_red_handback.py (a wrong-reason refusal triggers exactly one hand-back and a second RED run, and the re-run author is given the refusal's argv, rc, seconds, declared string and output tail) (D-069)."
+    },
+    {
+      "id": "red-hand-back-is-unbounded",
+      "file": "factory_kernel/runtime.py",
+      "find": "RED_HANDBACK_ATTEMPTS = 1\n",
+      "replace": "RED_HANDBACK_ATTEMPTS = 99\n",
+      "why": "A worker that cannot answer the gate would be re-run until the run's wall or budget ended it, paying a full test_author process per attempt with nothing converging - the same unbounded shape the static gate refused to take (D-043, STATIC_RETRIES = 1). One hand-back is a correction; an unbounded one is a loop; caught by tests/factory/test_factory_red_handback.py (the bound is one, and three consecutive refusals still run the author exactly twice and the gate exactly twice) (D-069)."
+    },
+    {
+      "id": "red-hand-back-weakening-check-dropped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        self._refuse_weakened_spec(before, self._spec_shape(spec_path))\n",
+      "replace": "        _ = (before, self._spec_shape(spec_path))\n",
+      "why": "The hand-back would become a licence to weaken the test: the cheapest way to make a wrong-reason refusal disappear is to drop the checkpoint or re-declare it kind guard, which has no expected_failure and only has to exit 0, so the gate would go green while proving strictly less than the first attempt did and the build would ship an acceptance suite the refusal itself had talked the author out of; caught by tests/factory/test_factory_red_handback.py (a re-draft that drops a checkpoint or downgrades a red one to a guard is refused as red_handback_weakened_spec, naming the change, before the gate is re-run) (D-069)."
+    },
+    {
+      "id": "red-hand-back-second-record-overwrites-the-first",
+      "file": "factory_kernel/runtime.py",
+      "find": "        second = paths.artifacts / RED_FAILURE_ARTIFACT\n        if second.is_file():\n            second.replace(paths.artifacts / RED_FAILURE_ARTIFACT_2)\n        KernelRuntime._write_json(paths.artifacts / RED_FAILURE_ARTIFACT, dict(first))\n",
+      "replace": "        second = paths.artifacts / RED_FAILURE_ARTIFACT\n        if not second.is_file():\n            KernelRuntime._write_json(second, dict(first))\n",
+      "why": "The hand-back would destroy the evidence it was given: the gate writes red-proof-failure.json on every attempt, so without the rename only the second attempt's record survives and the needs-human comment could not show what the author was actually told the first time - the same class of loss as the overwritten agent-test_author.json of run 34008561672, which left a 2687-second stage with no record (D-058); caught by tests/factory/test_factory_red_handback.py (both attempts survive as red-proof-failure.json and red-proof-failure.2.json with their own reasons and exit codes, and the comment names both) (D-069)."
     }
   ]
 }

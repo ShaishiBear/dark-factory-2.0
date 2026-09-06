@@ -280,11 +280,15 @@ class KernelWiringTests(unittest.TestCase):
 
     def test_build_issue_closes_the_deferred_loop_after_red_before_implement(self):
         src = RUNTIME.read_text(encoding="utf-8")
-        red = src.index('"python", "scripts/factory_proof.py", "red"')
+        red = src.index("self._red_gate(")
         close = src.index("self._close_deferred_repro(paths.artifacts)")
         implement = src.index('self._agent(\n                "implement"')
         self.assertLess(red, close)
         self.assertLess(close, implement)
+        # The gate is still `factory_proof.py red`; since D-069 build_issue reaches it through
+        # `_red_gate`, which may hand ONE refusal back to `test_author` and re-run the gate.
+        gate = src[src.index("def _red_gate("):]
+        self.assertIn('"python", "scripts/factory_proof.py", "red"', gate)
 
     def test_red_proof_records_a_bounded_output_tail(self):
         source = (ROOT / "scripts" / "factory_proof.py").read_text(encoding="utf-8")

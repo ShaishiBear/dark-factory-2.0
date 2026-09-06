@@ -76,6 +76,25 @@ STOP_ISSUE_RE = re.compile(r"(?m)^\s*#(\d+)\b")
 # How much of a refused checkpoint's output the needs-human comment quotes (D-056).
 PROOF_FAILURE_COMMENT_CHARS = 3000
 
+# One hand-back for a refused RED, modelled on the static gate's one (D-043). A RED refusal
+# that names a `red` checkpoint and carries no launch/timeout fault is a declaration error the
+# author can still correct: build run 34054922788 died on `AC-1 RED failed for the wrong
+# reason` with the correct test already on disk, because the declared `expected_failure` was
+# the message `getByRole` prints while the test's own query prints another one. The kernel
+# undoes the test commit, re-runs `test_author` once with the refusal in its context, and
+# re-runs the whole gate from scratch; a second refusal ends the build exactly as before, with
+# both attempts' evidence in the needs-human comment (D-069).
+RED_HANDBACK_ATTEMPTS = 1
+# The refusal name for a hand-back that answered the gate by making the spec weaker.
+RED_HANDBACK_WEAKENED = "red_handback_weakened_spec"
+# The first attempt's failure record keeps the plain name every reader already knows; the
+# second attempt's is suffixed, exactly as `stage_record_name` suffixes the second run of a
+# stage (D-058). Neither overwrites the other.
+RED_FAILURE_ARTIFACT = "red-proof-failure.json"
+RED_FAILURE_ARTIFACT_2 = "red-proof-failure.2.json"
+# How much of the refused checkpoint's output the hand-back brief carries to its author.
+RED_HANDBACK_TAIL_CHARS = 3000
+
 
 def record_stage_timing(
     transcripts: Path, *, kind: str, name: str, started: float, ended: float, **extra: Any
@@ -573,26 +592,25 @@ class KernelRuntime:
             )
 
             # A fresh model process authors acceptance checkpoints; deterministic RED is authority.
+            test_author_context = self._worker_brief(
+                paths, contract_hash=contract_hash, issue_context=issue_context
+            ) + self._deferred_symptom_brief(paths.artifacts)
+            # The head the test-author commit will sit on, so a RED hand-back can undo exactly
+            # that commit and give the author back the uncommitted draft it wrote (D-069).
+            pre_test_head = self._git("rev-parse", "HEAD", cwd=worktree.path)
             self._agent(
                 "test_author",
                 worktree.path,
                 paths,
-                context=self._worker_brief(
-                    paths, contract_hash=contract_hash, issue_context=issue_context
-                ) + self._deferred_symptom_brief(paths.artifacts),
+                context=test_author_context,
                 env=env,
             )
-            self._exec(
-                [
-                    "python", "scripts/factory_proof.py", "red",
-                    "--spec", str(paths.artifacts / "test-spec.json"),
-                    "--output", str(paths.artifacts / "red-proof.json"),
-                ],
-                cwd=worktree.path,
-                env=env,
-                credential_scope="none",
-                timeout=600,
-                transcript=paths.transcripts / "red-gate.log",
+            self._red_gate(
+                worktree.path,
+                paths,
+                env,
+                author_context=test_author_context,
+                pre_test_head=pre_test_head,
             )
             # A deferred repro promised that the acceptance tests would show the symptom; RED
             # has now run them on the unchanged tree, so the promise is checked here, not
@@ -717,6 +735,259 @@ class KernelRuntime:
             if handed_off:
                 remove(self.repo_root, worktree)
 
+    def _red_gate(
+        self,
+        cwd: Path,
+        paths: RunPaths,
+        env: Mapping[str, str],
+        *,
+        author_context: str,
+        pre_test_head: str,
+    ) -> None:
+        """Run the deterministic RED authority, handing ONE refusal back to its author.
+
+        The gate itself is unchanged and is still the authority: `scripts/factory_proof.py red`
+        replays every checkpoint on the unchanged tree and refuses on anything but the declared
+        failure. What changes is what a refusal that the author can still correct costs. Build
+        run 34054922788 ended on `AC-1 RED failed for the wrong reason` after every earlier stage
+        had succeeded: the test failed exactly as intended, but the `expected_failure` the author
+        declared was the message `getByRole` prints while the test's own query prints another,
+        so one mis-declared string threw away a correct test and forty-five minutes of work.
+
+        The static gate has had this shape since D-043: hand the checker's own output back to the
+        role that wrote the files, once, and end the build on a second failure. Since D-056 a RED
+        refusal produces exactly the evidence such a hand-back needs. So: on a hand-backable
+        refusal the kernel undoes the test-author commit (`git reset --mixed` to the head the
+        stage started from, which returns the draft to the checkout uncommitted, where the author
+        can still edit it), re-runs `test_author` with the refusal appended to its original
+        context, refuses a re-draft that dropped a checkpoint or downgraded a `red` one to a
+        `guard` (`red_handback_weakened_spec`), and re-runs the WHOLE gate from scratch. The
+        second refusal ends the build as before. Both attempts survive: `red-gate.log` and
+        `red-gate.2.log`, `red-proof-failure.json` and `red-proof-failure.2.json`, and the stage
+        records the base runtime already numbers per run (D-058).
+
+        `_red_handback_record` decides what is handed back: only a `red` checkpoint's refusal
+        with no launch/timeout fault, and only when the gate got far enough to write a record.
+        """
+        first: Mapping[str, Any] | None = None
+        try:
+            for attempt in range(1, RED_HANDBACK_ATTEMPTS + 2):
+                log = "red-gate.log" if attempt == 1 else f"red-gate.{attempt}.log"
+                try:
+                    self._exec(
+                        [
+                            "python", "scripts/factory_proof.py", "red",
+                            "--spec", str(paths.artifacts / "test-spec.json"),
+                            "--output", str(paths.artifacts / "red-proof.json"),
+                        ],
+                        cwd=cwd,
+                        env=env,
+                        credential_scope="none",
+                        timeout=600,
+                        transcript=paths.transcripts / log,
+                    )
+                    return
+                except ToolRefused as exc:
+                    record = self._red_handback_record(paths, exc)
+                    if record is None or attempt > RED_HANDBACK_ATTEMPTS:
+                        raise
+                    first = record
+                    # This attempt's record is now in hand; taking it off disk means the next
+                    # attempt's gate run writes its own rather than being read as this one's.
+                    (paths.artifacts / RED_FAILURE_ARTIFACT).unlink()
+                    self._red_handback(
+                        cwd,
+                        paths,
+                        env,
+                        record=record,
+                        author_context=author_context,
+                        pre_test_head=pre_test_head,
+                    )
+        finally:
+            # However this gate ends once a hand-back has happened - proved, refused again,
+            # refused as weakened, stopped - the first attempt's record goes back on disk under
+            # its own name, so the evidence the author was shown is never the price of showing it.
+            if first is not None:
+                self._keep_both_red_failures(paths, first)
+
+    def _red_handback_record(
+        self, paths: RunPaths, exc: BaseException
+    ) -> Mapping[str, Any] | None:
+        """The refused checkpoint's record when the refusal is the author's to correct, else None.
+
+        A hand-back exists for one thing: a `red` checkpoint whose declaration does not match
+        what its command actually prints. Everything else is somebody else's defect and is
+        refused now, exactly as before. `None` when the refusal is not `factory_proof.py red`;
+        when no `red-proof-failure.json` was written, so the gate refused before any checkpoint
+        ran (an invalid spec, an undeclared file in the test commit) and there is no checkpoint
+        evidence to hand back; when the refused checkpoint is a `guard`, whose failure means the
+        contract or the tree is wrong rather than a declaration; or when `fault` is set, because
+        a command that could not be launched or that timed out printed nothing the author could
+        have mis-declared. Reading only: `_red_gate` takes the record off disk when it actually
+        hands back, so a final refusal's record is still there for `_keep_both_red_failures`.
+        """
+        if not isinstance(exc, ToolRefused) or exc.tool != "factory_proof.py":
+            return None
+        if exc.phase != "red":
+            return None
+        path = paths.artifacts / RED_FAILURE_ARTIFACT
+        if not path.is_file():
+            return None
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(record, Mapping):
+            return None
+        if str(record.get("checkpoint_kind") or "red") != "red":
+            return None
+        if record.get("fault"):
+            return None
+        return record
+
+    @staticmethod
+    def _keep_both_red_failures(paths: RunPaths, first: Mapping[str, Any]) -> None:
+        """Both attempts' failure records survive: the first plain, the second suffixed.
+
+        The gate writes `red-proof-failure.json` whatever the attempt, so without this the
+        second run's record would be the only one left and the hand-back would have destroyed the
+        evidence it was given. Whatever is on disk now belongs to the second attempt and is moved
+        to `red-proof-failure.2.json`, which `_red_handback_evidence` reads; the first attempt's
+        record is written back under the plain name every reader (`_proof_failure_evidence`, the
+        uploaded-artifact glob) already knows. A second run that wrote no record of its own -
+        because it proved RED, or was refused as weakened, or refused before any checkpoint ran -
+        leaves only the first, which is still the record of a hand-back that happened (D-069).
+        """
+        second = paths.artifacts / RED_FAILURE_ARTIFACT
+        if second.is_file():
+            second.replace(paths.artifacts / RED_FAILURE_ARTIFACT_2)
+        KernelRuntime._write_json(paths.artifacts / RED_FAILURE_ARTIFACT, dict(first))
+
+    def _red_handback(
+        self,
+        cwd: Path,
+        paths: RunPaths,
+        env: Mapping[str, str],
+        *,
+        record: Mapping[str, Any],
+        author_context: str,
+        pre_test_head: str,
+    ) -> None:
+        """Undo the test commit, re-run `test_author` with the refusal, refuse a weaker spec."""
+        spec_path = paths.artifacts / "test-spec.json"
+        before = self._spec_shape(spec_path)
+        print(
+            "FACTORY_RED_HANDBACK acceptance_id="
+            f"{record.get('acceptance_id')} reason={str(record.get('reason') or '')!r}",
+            flush=True,
+        )
+        # Back to the head the first `test_author` started from: the files it wrote are in the
+        # checkout again, uncommitted, so the author edits them in place rather than re-drafting
+        # from nothing, and the commit authority applies its three rules (D-064) to the whole
+        # re-drafted set exactly as it did the first time.
+        self._git("reset", "--mixed", pre_test_head, cwd=cwd)
+        self._agent(
+            "test_author",
+            cwd,
+            paths,
+            context=author_context.rstrip("\n") + "\n\n" + self._red_handback_brief(record),
+            env=env,
+        )
+        self._refuse_weakened_spec(before, self._spec_shape(spec_path))
+
+    @staticmethod
+    def _spec_shape(spec_path: Path) -> tuple[int, dict[str, str]]:
+        """`(checkpoint count, {acceptance_id: kind})` of a test spec, for the weakening check.
+
+        Reads defensively: a spec the kernel cannot parse yields `(0, {})`, which can only make
+        the comparison more permissive, never refuse a build the gate would have accepted. The
+        gate and the commit authority judge the spec's shape; this reads only what it takes to
+        see the hand-back make it smaller.
+        """
+        try:
+            value = json.loads(spec_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return 0, {}
+        checkpoints = value.get("checkpoints") if isinstance(value, Mapping) else None
+        if not isinstance(checkpoints, list):
+            return 0, {}
+        kinds: dict[str, str] = {}
+        for checkpoint in checkpoints:
+            if isinstance(checkpoint, Mapping) and isinstance(
+                checkpoint.get("acceptance_id"), str
+            ):
+                kinds[checkpoint["acceptance_id"]] = str(checkpoint.get("kind") or "red")
+        return len(checkpoints), kinds
+
+    @staticmethod
+    def _refuse_weakened_spec(
+        before: tuple[int, dict[str, str]], after: tuple[int, dict[str, str]]
+    ) -> None:
+        """A hand-back may correct the declaration; it may not answer the gate by weakening it.
+
+        The two ways a re-draft could make RED pass by proving less, both refused by name so the
+        needs-human comment says which change was made: fewer checkpoints than the first attempt
+        declared, and a `red` checkpoint turned into a `guard` (a guard has no `expected_failure`
+        and only has to exit 0, so downgrading is how a wrong-reason refusal disappears without
+        the test getting any better). Everything else the gate itself still judges: every AC
+        keeps exactly one checkpoint, at least one is red, guards pass on the unchanged tree, a
+        red checkpoint's file is changed, the deferred repro symptom appears verbatim (D-069).
+        """
+        (before_count, before_kinds), (after_count, after_kinds) = before, after
+        if after_count < before_count:
+            dropped = sorted(set(before_kinds) - set(after_kinds))
+            raise NeedsHuman(
+                f"`{RED_HANDBACK_WEAKENED}`: the RED hand-back reduced the acceptance "
+                f"checkpoints from {before_count} to {after_count}"
+                + (f" (dropped {dropped})" if dropped else "")
+                + "; a hand-back may correct the declared expected_failure or the test's own "
+                "query, never the strength of the test"
+            )
+        downgraded = sorted(
+            ac for ac, kind in before_kinds.items()
+            if kind == "red" and after_kinds.get(ac) == "guard"
+        )
+        if downgraded:
+            raise NeedsHuman(
+                f"`{RED_HANDBACK_WEAKENED}`: the RED hand-back turned red checkpoint(s) "
+                f"{downgraded} into guards; a guard declares no expected_failure and only has "
+                "to exit 0, so this answers the refusal by proving less rather than by "
+                "correcting the declaration"
+            )
+
+    @staticmethod
+    def _red_handback_brief(record: Mapping[str, Any]) -> str:
+        """What the re-run `test_author` is told: the refusal, and what it may not do about it."""
+        argv = record.get("argv")
+        argv_text = json.dumps(argv) if isinstance(argv, list) else "?"
+        tail = scrub(str(record.get("output_tail") or ""))[-RED_HANDBACK_TAIL_CHARS:]
+        return (
+            "RED GATE REFUSAL (kernel-run, deterministic). The acceptance tests you wrote were "
+            "committed and `scripts/factory_proof.py red` replayed every checkpoint on the "
+            "unchanged tree. It refused:\n"
+            f"  reason: {record.get('reason')}\n"
+            f"  acceptance_id: {record.get('acceptance_id')}\n"
+            f"  argv: {argv_text}\n"
+            f"  cwd: {record.get('cwd')}\n"
+            f"  rc: {record.get('rc')}\n"
+            f"  seconds: {record.get('seconds')}\n"
+            f"  declared expected_failure: {record.get('expected_failure')!r}\n"
+            f"  output tail of that command:\n{tail}\n\n"
+            "That commit has been undone; the files you wrote are in the checkout again, "
+            "uncommitted, and you edit them in place. Two corrections are open to you: make the "
+            "declared `expected_failure` a stable fragment of what the command above actually "
+            "printed, or change the test's own query so it produces the failure you declared. "
+            "The strength of the test is not open to you. Every rule still holds exactly as "
+            "before: every contract AC keeps exactly one checkpoint, at least one checkpoint is "
+            "`red`, a `guard` checkpoint must still pass on the unchanged tree, every `red` "
+            "checkpoint's file must still be one you wrote or changed, and a DEFERRED REPRO "
+            "SYMPTOM, if this run carries one, must still appear verbatim in some checkpoint's "
+            "failing output. Dropping a checkpoint or turning a `red` checkpoint into a `guard` "
+            f"is refused by name (`{RED_HANDBACK_WEAKENED}`) and ends the build. The kernel then "
+            "re-runs the whole RED gate from scratch and will refuse again if the failure is "
+            "still for the wrong reason. This is the only hand-back."
+        )
+
     def _release_stopped_build(
         self,
         issue: int,
@@ -772,13 +1043,51 @@ class KernelRuntime:
     @classmethod
     def _failure_evidence(cls, paths: RunPaths, exc: BaseException) -> str:
         """Everything the needs-human comment quotes beside the reason: a refused proof
-        gate's record (D-056), the reads of a stage that passed its draft deadline with
-        nothing written (D-057, D-066) and the mutation stages of this run that returned at
-        their turn cap (D-065)."""
+        gate's record (D-056), the second refusal of a RED gate that was handed back once
+        (D-069), the reads of a stage that passed its draft deadline with nothing written
+        (D-057, D-066) and the mutation stages of this run that returned at their turn cap
+        (D-065)."""
         return (
             cls._proof_failure_evidence(paths, exc)
+            + cls._red_handback_evidence(paths)
             + cls._draft_deadline_evidence(paths)
             + cls._cap_reached_evidence(paths)
+        )
+
+    @staticmethod
+    def _red_handback_evidence(paths: RunPaths) -> str:
+        """The second RED refusal of a build whose first was handed back, for the comment.
+
+        `_proof_failure_evidence` above quotes `red-proof-failure.json`, which after a
+        hand-back is the FIRST attempt's record, the one the author was shown. This block
+        names the hand-back and quotes `red-proof-failure.2.json`, the refusal that actually
+        ended the build, so the comment carries both attempts rather than leaving a reader to
+        wonder why the quoted refusal was answered and the build died anyway. A build with no
+        hand-back has no second record and adds nothing (D-069).
+        """
+        path = paths.artifacts / RED_FAILURE_ARTIFACT_2
+        if not path.is_file():
+            return ""
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return ""
+        if not isinstance(record, Mapping):
+            return ""
+        tail = scrub(str(record.get("output_tail") or ""))[-PROOF_FAILURE_COMMENT_CHARS:]
+        argv = record.get("argv")
+        argv_text = " ".join(str(a) for a in argv) if isinstance(argv, list) else "?"
+        return (
+            "\n\nRED hand-back: the gate refused twice. The first refusal "
+            f"(`{RED_FAILURE_ARTIFACT}` above, `red-gate.log`) was handed back to `test_author`, "
+            "which re-drafted with that evidence in its context; the kernel then re-ran the "
+            "whole gate and it refused again "
+            f"(`{RED_FAILURE_ARTIFACT_2}`, `red-gate.2.log`): "
+            f"{record.get('acceptance_id')} ran `{argv_text}` in `{record.get('cwd')}`, "
+            f"rc={record.get('rc')}, seconds={record.get('seconds')}, "
+            f"expected_failure={record.get('expected_failure')!r} - "
+            f"{record.get('reason')}."
+            f"\nSecond output tail:\n```\n{tail}\n```"
         )
 
     @staticmethod
