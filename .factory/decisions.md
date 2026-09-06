@@ -2604,3 +2604,11 @@ variable predates both by a long way, and the probe's line will show it either w
 lever on this route. If it is, one row in `ROLE_THINKING_CAP` bounds what six builds could
 not; if it is not, the factory knows the CLI's last thinking control is closed to it here
 and the remaining question is the route or the model, not the level.
+
+---
+
+## D-060 · A guard behaviour keeps its `AC-N` id, because the first build after D-058 wrote `AC-G1` and the compiler refused it without naming the rule
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34015187797 (issue #49, the first build after D-058)
+
+The contract worker read D-058's guard wording and numbered its three guards `AC-G1..AC-G3`; the compiler refused `invalid/duplicate behavior id AC-G1`, correctly, and the build ended at needs-human with a message that named neither the rule nor the fact that the behaviour was otherwise sound. `kind` is a field on a behaviour and never changes its id: both prompts now say so, `contract.md` with an ordinary behaviour and a guard side by side, the refusal names the rule (`behavior ids must be AC-1..AC-N in order; got 'AC-G1'`) and says when the id is the behaviour's only fault, and the compiler still does not renumber, because the certifiers hash the contract as the worker wrote it. Pinned by `tests/factory/test_factory_guard_behavior_ids.py` (the run's contract is a fixture: refused as written, compiled once its guards are `AC-5..AC-7`); mutation `contract-guard-id-scheme-accepted` in `harness/factory_mutations/defects.json`.

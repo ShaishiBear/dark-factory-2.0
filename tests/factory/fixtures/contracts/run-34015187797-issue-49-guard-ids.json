@@ -1,0 +1,86 @@
+{
+  "version": "2.0",
+  "issue": {
+    "number": 49,
+    "title": "fix(export): markdown export drops the transcript snippet when a citation URL cannot be parsed"
+  },
+  "summary": "Fix the three fallback return statements of formatCitation in app/frontend/src/lib/exportMarkdown.ts (YouTube with unparseable video_url, YouTube with a video_url lacking the v parameter, Dynamous with an empty lesson_url) so every fallback emits the canonical list-item format the valid-link paths already use: a leading '- ' marker plus the two-space-indented '\\n  > \"<snippet>\"' transcript blockquote. This restores the quoted snippet (MISSION 'RAG responses with rich citations') and stops fallback entries merging into the previous list item. The only production file is app/frontend/src/lib/exportMarkdown.ts; acceptance tests are new cases in the existing app/frontend/src/lib/exportMarkdown.test.ts (describe 'formatCitation'). AC-1 through AC-4 are RED on the unchanged tree and GREEN after the fix; the three guard behaviors (AC-G1..AC-G3) already hold and must keep holding. Repro record is REPRO DEFERRED TO RED: no existing command fails, and the acceptance tests must demonstrate the symptom '> \"Relevant text\"' (blockquote line) missing today.",
+  "behaviors": [
+    {
+      "id": "AC-1",
+      "given": "a YouTube citation (no source_type) whose video_url is 'not-a-url' (unparseable by `new URL`) and whose snippet is 'Relevant text', with the remaining fields as the suite's baseCitation (video_title 'Test Video Title', start_seconds 10, end_seconds 20)",
+      "when": "formatCitation is called with that citation",
+      "then": "the returned string contains the blockquote line > \"Relevant text\" on its own line — i.e. the output includes `> \"Relevant text\"` preceded by a newline, in the canonical two-space-indented `\\n  > \"<snippet>\"` form the valid-link paths emit (today the fallback returns only 'Test Video Title (timestamp link unavailable) — 0:10–0:20' with no blockquote, so this assertion fails before the fix)",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    },
+    {
+      "id": "AC-2",
+      "given": "the same citation as AC-1 (video_url 'not-a-url', snippet 'Relevant text')",
+      "when": "formatCitation is called with it",
+      "then": "the returned string starts with '- ' (a proper list item, not a lazy continuation of the previous entry) and still contains '(timestamp link unavailable)' and the range '0:10–0:20' (en dash U+2013, from formatTimestamp)",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    },
+    {
+      "id": "AC-3",
+      "given": "a citation with source_type 'dynamous', an empty lesson_url ('' or whitespace-only, falsy after trim) and snippet 'Relevant text'",
+      "when": "formatCitation is called with it",
+      "then": "the returned string starts with '- ', contains no '](' (it must not gain a link), and still contains its blockquote line > \"Relevant text\" on its own line",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    },
+    {
+      "id": "AC-4",
+      "given": "a YouTube citation whose video_url is 'https://www.youtube.com/' (parseable by `new URL` but with no v parameter) and whose snippet is 'Relevant text'",
+      "when": "formatCitation is called with it",
+      "then": "the returned string starts with '- ', contains '(timestamp link unavailable)' and '0:10–0:20', and contains the blockquote line > \"Relevant text\" on its own line (the issue names this second YouTube fallback condition — 'or has no v parameter' — as equally defective, sharing the same return template)",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    },
+    {
+      "id": "AC-G1",
+      "kind": "guard",
+      "given": "a YouTube citation with a valid video_url 'https://www.youtube.com/watch?v=abc123' (v parameter present) and snippet 'Test snippet text', as in the suite's baseCitation",
+      "when": "formatCitation is called with it",
+      "then": "the returned string is unchanged from today's canonical shape: it starts with '- ', contains '[Test Video Title](https://www.youtube.com/watch?v=abc123&t=10s)', contains '0:10–0:20', and contains the blockquote line `> \"Test snippet text\"`",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    },
+    {
+      "id": "AC-G2",
+      "kind": "guard",
+      "given": "a citation with source_type 'dynamous' and lesson_url 'https://community.dynamous.ai/c/module-1/lessons/123' and snippet 'Test snippet text'",
+      "when": "formatCitation is called with it",
+      "then": "the returned string is unchanged from today's linked-Dynamous shape: it starts with '- ', contains '[Test Video Title](https://community.dynamous.ai/c/module-1/lessons/123)', does not contain 'youtube.com' or '(timestamp link unavailable)', contains '0:10–0:20', and contains the blockquote line `> \"Test snippet text\"`",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    },
+    {
+      "id": "AC-G3",
+      "kind": "guard",
+      "given": "the invalid-URL citation of AC-1 (video_url 'not-a-url') with console.warn spied",
+      "when": "formatCitation is called with it",
+      "then": "console.warn is called with exactly '[exportMarkdown] Skipping timestamp link — invalid video_url: \"not-a-url\"' — the exact message the existing test asserts, which both YouTube fallback branches must keep verbatim",
+      "seam": "app/frontend/src/lib/exportMarkdown.ts#formatCitation"
+    }
+  ],
+  "invariants": [
+    "Every current case in app/frontend/src/lib/exportMarkdown.test.ts keeps passing (issue requirement: 'every current case must keep passing'); app/frontend/src/lib/exportMarkdown.ts is the only production file changed.",
+    "The exact console.warn message '[exportMarkdown] Skipping timestamp link — invalid video_url: \"<video_url>\"' is preserved on both YouTube fallback branches (unparseable URL and missing v parameter); the existing invalid-URL test asserts it verbatim.",
+    "The YouTube fallback keeps the substrings '(timestamp link unavailable)' and the formatTimestamp range '0:10–0:20' (en dash U+2013).",
+    "The Dynamous empty-lesson_url fallback gains only the '- ' plain-text marker — it must not gain a link (its output contains no '](').",
+    "The blockquote uses the canonical two-space-indented '\\n  > \"<snippet>\"' form so it sits on its own line, matching the valid-link return templates (source lines 35 and 58) and keeping formatSources' newline-joined list renderable.",
+    "formatCitation still returns '' for empty, whitespace-only, or missing snippet, and formatSources' '**Sources:**' header and newline join are unchanged."
+  ],
+  "out_of_scope": [
+    "Backend, database schema, and any dependency changes — no new or version-changed packages, so no '## Dependency justification' block is needed.",
+    "app/frontend/src/components/CitationModal.tsx, Message.tsx, ChatArea.tsx, Sidebar.tsx, and every other component, hook, or page.",
+    "The valid-URL and valid-lesson_url return templates beyond leaving them intact (pinned by guard checkpoints AC-G1/AC-G2).",
+    "formatTimestamp, the export header, and the filename slug in exportConversationAsMarkdown.",
+    "formatSources' joining semantics, including the pre-existing stray blank line when a citation's snippet is empty.",
+    "Splitting the duplicated console.warn into distinct messages for the unparseable-URL vs missing-v-param branches."
+  ],
+  "risks": [
+    "The RED proof for AC-1 (and AC-4) depends on `new URL('not-a-url')` throwing in the vitest runtime; if it parsed, control reaches the identical missing-v template, so the observable symptom is the same either way — checkpoints should assert the returned string, not which branch fired.",
+    "A fix that rewrites the shared fallback template could break the existing exact console.warn assertion or drop '(timestamp link unavailable)' / the en-dash range; AC-2, AC-4, and AC-G3 pin these substrings.",
+    "Assertions must use the en dash U+2013 in '0:10–0:20' exactly as the existing suite does; an ASCII hyphen would pass or fail for the wrong reason.",
+    "The test file carries biome-ignore comments that must survive edits; run the frontend gate (bun run tsc --noEmit, bun x biome check src, bun run test) so the static and unit rungs stay green."
+  ],
+  "ambiguities": [],
+  "dependencies": []
+}

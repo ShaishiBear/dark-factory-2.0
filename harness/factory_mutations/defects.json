@@ -1565,6 +1565,13 @@
       "find": "    return within_cap(thinking, cap) and clearly_below(thinking, uncapped)\n",
       "replace": "    return not (within_cap(thinking, cap) and clearly_below(thinking, uncapped))\n",
       "why": "The preflight line would print honoured=true exactly when the route ignored MAX_THINKING_TOKENS, and the table every row of which waits on that line would be filled in on the strength of the opposite of the evidence; caught by tests/factory/test_factory_thinking_cap.py (a cap is honoured only when both hold; the line when the route ignores the variable) (D-059)."
+    },
+    {
+      "id": "contract-guard-id-scheme-accepted",
+      "file": "scripts/factory_protocol.py",
+      "find": "AC = re.compile(r\"^AC-[1-9][0-9]*$\")\n",
+      "replace": "AC = re.compile(r\"^AC-[A-Z]?[1-9][0-9]*$\")\n",
+      "why": "A guard behaviour written as `AC-G1` (run 34015187797, the first build after D-058) would compile, the certifiers would hash an id scheme the prompt never defined, and the test author and the design's ac_mapping would be handed ids outside the one scheme every downstream authority matches with `^AC-[1-9][0-9]*$`; caught by tests/factory/test_factory_guard_behavior_ids.py (`AC-G1` is refused with the rule named; the run's contract is refused and compiles once its guards are `AC-5..AC-7`) (D-060)."
     }
   ]
 }
