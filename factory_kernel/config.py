@@ -7,7 +7,11 @@ import os
 from pathlib import Path, PurePosixPath
 from typing import Mapping
 
-from .worker_policy import validate_effort_overrides, validate_thinking_cap_overrides
+from .worker_policy import (
+    validate_effort_overrides,
+    validate_model_overrides,
+    validate_thinking_cap_overrides,
+)
 
 IDLE_TIMEOUT_SECONDS_DEFAULT = 420
 
@@ -41,6 +45,14 @@ class ProviderConfig:
     # disabled) or a budget of at least 1024 tokens, the smallest the CLI sends as given
     # (D-059).
     thinking_cap_overrides: Mapping[str, int] = field(default_factory=dict)
+    # Per-deployment `{role: model_slug}`: the model a role runs on instead of `model`. The
+    # provider resolves a request's model as the request's own explicit choice (the kernel's
+    # own requests name none), else this table's row, else `architecture_model` for the
+    # architecture holdout, else `model`. Validated at load against the roles the policy knows
+    # and a non-empty slug; the worker workflow's route probe runs every distinct value here
+    # before any stage does (`scripts/factory_models.py --list`). The one lever left for a
+    # role on a route that honours neither `--effort` nor `MAX_THINKING_TOKENS` (D-061).
+    model_overrides: Mapping[str, str] = field(default_factory=dict)
 
 
 TRANSIENT_RETRIES_MAX = 3
@@ -203,6 +215,7 @@ def load_config(path: str | Path) -> KernelConfig:
             thinking_cap_overrides=validate_thinking_cap_overrides(
                 provider.get("thinking_cap_overrides")
             ),
+            model_overrides=validate_model_overrides(provider.get("model_overrides")),
         ),
         runtime=RuntimeConfig(
             max_attempts=_positive_int(runtime.get("max_attempts"), "runtime.max_attempts"),

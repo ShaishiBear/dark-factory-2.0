@@ -74,7 +74,6 @@ class ProviderTests(unittest.TestCase):
                 role="architecture-holdout",
                 prompt="judge architecture",
                 cwd="/tmp",
-                model="sonnet",
                 structured_schema={"type": "object"},
             )
         )

@@ -585,7 +585,9 @@ class ThinkingInTheRecordTests(unittest.TestCase):
         self.assertEqual(record["effort"], "medium")
         self.assertEqual(row["thinking_tokens"], 19)
         self.assertEqual(row["effort"], "medium")
-        self.assertTrue(line.endswith(" outcome=ok events=8 thinking=19 effort=medium"), line)
+        self.assertTrue(
+            line.endswith(" outcome=ok events=8 thinking=19 effort=medium model=m"), line
+        )
 
     def test_a_killed_stage(self):
         record, row, line = self._stage(
@@ -596,12 +598,12 @@ class ThinkingInTheRecordTests(unittest.TestCase):
         self.assertTrue(record["timed_out"])
         self.assertEqual(row["thinking_tokens"], 250)
         self.assertIn(" outcome=failed events=4 timed_out=true", line)
-        self.assertTrue(line.endswith(" thinking=250 effort=medium"), line)
+        self.assertTrue(line.endswith(" thinking=250 effort=medium model=m"), line)
 
     def test_a_judge_says_high(self):
         record, _row, line = self._stage(_with_thinking([50]), role="holdout")
         self.assertEqual(record["effort"], "high")
-        self.assertTrue(line.endswith(" thinking=50 effort=high"), line)
+        self.assertTrue(line.endswith(" thinking=50 effort=high model=m"), line)
 
     def test_thinking_is_summed_across_a_hung_attempt_and_its_retry(self):
         record, _row, line = self._stage(

@@ -117,14 +117,24 @@ class ClaudeCliProvider:
         return level
 
     def model_for(self, request: AgentRequest) -> str:
-        # The final semantic architecture holdout deliberately uses a different model family
-        # from ordinary build/review workers. It is still an untrusted model judgment; the
-        # deterministic architecture guard and Evidence Bundle remain authoritative.
-        return (
-            self.config.architecture_model
-            if request.role == "architecture-holdout" and self.config.architecture_model
-            else request.model or self.config.model
-        )
+        """The model one process of `request` runs on, in order: the request's own explicit
+        choice; the configured per-role override (`provider.model_overrides`); the
+        architecture holdout's own model; the worker model. The kernel's own requests name no
+        model, so for a stage this resolution is the whole story, and the stage record and
+        the FACTORY_STAGE line say what it resolved to (D-061).
+
+        The architecture holdout deliberately uses a different model family from ordinary
+        build/review workers. It is still an untrusted model judgment; the deterministic
+        architecture guard and Evidence Bundle remain authoritative.
+        """
+        if request.model:
+            return request.model
+        override = self.config.model_overrides.get(request.role)
+        if override:
+            return override
+        if request.role == "architecture-holdout" and self.config.architecture_model:
+            return self.config.architecture_model
+        return self.config.model
 
     def argv_for(self, request: AgentRequest) -> list[str]:
         """The CLI command line for one process of `request`: the same rendering `run` uses,
