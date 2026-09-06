@@ -186,7 +186,7 @@ def protected_path(path: str) -> bool:
     name = Path(path).name
     return (
         path in {
-            "FACTORY_RULES.md", "MISSION.md", "CLAUDE.md",
+            "FACTORY_RULES.md", "MISSION.md", "CLAUDE.md", "PROGRAMME.md",
             ".factory/kernel.json", ".factory/evidence-spine.json",
             ".factory/architecture.json", ".factory/locks/floor.json",
             "scripts/frontier_filter.py",
