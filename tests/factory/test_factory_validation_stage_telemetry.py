@@ -57,7 +57,8 @@ VALIDATION_ROLES = (
 )
 
 STAGE_LINE = re.compile(
-    r"^FACTORY_STAGE kind=(?P<kind>agent|exec) name=(?P<name>\S+) seconds=(?P<seconds>\d+(\.\d+)?)"
+    r"^FACTORY_STAGE kind=(?P<kind>agent|exec) name=(?P<name>\S+)(?: stage_run=(?P<stage_run>\d+))?"
+    r" seconds=(?P<seconds>\d+(\.\d+)?)(?: attempts=(?P<attempts>\d+))?"
     r"(?: turns=(?P<turns>\d+))?(?: cost_usd=(?P<cost>\S+))? outcome=(?P<outcome>ok|failed|refused)"
     r"(?: events=(?P<events>\d+))?(?P<timed_out> timed_out=true)?(?P<hang> hang=true)?"
     r"(?P<over> over_budget=true)?(?: thinking=(?P<thinking>\d+))?(?: effort=(?P<effort>\S+))?$"

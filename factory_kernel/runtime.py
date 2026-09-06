@@ -114,8 +114,16 @@ def stage_line(row: Mapping[str, Any]) -> str:
     hung stage still says what it had shown by then (D-054). `thinking` is the thinking those
     events showed, in the CLI's estimate, and `effort` the level the CLI was asked for (D-055).
     `draft_deadline_missed` marks a mutation worker killed for writing nothing by its draft
-    deadline, with the `Read` calls it made by then (D-057)."""
-    fields = [f"kind={row['kind']}", f"name={row['name']}", f"seconds={row['seconds']}"]
+    deadline, with the `Read` calls it made by then (D-057). `stage_run=N` (after the name,
+    only when N > 1) marks the Nth time the kernel ran this stage in the run, and `attempts=N`
+    (after the seconds, only when N > 1) how many CLI processes that stage took; the 2687 s
+    `test_author` of run 34008561672 was two processes and its row said neither (D-058)."""
+    fields = [f"kind={row['kind']}", f"name={row['name']}"]
+    if row.get("stage_run") is not None and row["stage_run"] > 1:
+        fields.append(f"stage_run={row['stage_run']}")
+    fields.append(f"seconds={row['seconds']}")
+    if row.get("attempts") is not None and row["attempts"] > 1:
+        fields.append(f"attempts={row['attempts']}")
     if row.get("num_turns") is not None:
         fields.append(f"turns={row['num_turns']}")
     if row.get("cost_usd") is not None:
@@ -154,6 +162,26 @@ def over_budget(role: str, wall_seconds: float) -> bool:
 def _stage_wall(role: str) -> int | None:
     """The role's own wall clock for the record; `None` for a role without a turn cap."""
     return stage_timeout_seconds(role) if role in ROLE_MAX_TURNS else None
+
+
+def stage_record_name(transcripts: Path, role: str) -> tuple[str, int]:
+    """The record stem and run index for the next run of `role` in this run directory.
+
+    `agent-<role>` for the first run of a stage, `agent-<role>.2`, `.3`, ... for every later
+    one, chosen as the first stem with neither a `.json` nor a `.log` on disk. The static-gate
+    hand-back runs `test_author` again (D-043), and the review-repair path can run `repair`
+    twice; until D-058 the second run's `agent-<role>.json` overwrote the first's, so the
+    2687-second, 41-turn first `test_author` of run 34008561672 survived only as headers in
+    the appended log. The worker workflow's upload glob (`transcripts/agent-*.json|log`)
+    catches every suffix.
+    """
+    base = f"agent-{role}"
+    run = 1
+    stem = base
+    while (transcripts / f"{stem}.json").exists() or (transcripts / f"{stem}.log").exists():
+        run += 1
+        stem = f"{base}.{run}"
+    return stem, run
 
 
 def _iso(timestamp: float) -> str:
@@ -764,11 +792,17 @@ class KernelRuntime:
         tail = scrub(str(record.get("output_tail") or ""))[-PROOF_FAILURE_COMMENT_CHARS:]
         argv = record.get("argv")
         argv_text = " ".join(str(a) for a in argv) if isinstance(argv, list) else "?"
+        kind = str(record.get("checkpoint_kind") or "red")
+        declared = (
+            "kind=guard (kept behaviour; must pass before and after)"
+            if kind == "guard"
+            else f"expected_failure={record.get('expected_failure')!r}"
+        )
         return (
             f"\n\n{str(record.get('stage') or exc.phase).upper()} gate evidence "
             f"(`{path.name}` in the run's uploaded artifacts): {record.get('acceptance_id')} "
             f"ran `{argv_text}` in `{record.get('cwd')}`, rc={record.get('rc')}, "
-            f"seconds={record.get('seconds')}, expected_failure={record.get('expected_failure')!r}."
+            f"seconds={record.get('seconds')}, {declared}."
             f"\nOutput tail:\n```\n{tail}\n```"
         )
 
@@ -1523,14 +1557,7 @@ class KernelRuntime:
         a new build, not a re-head. The worktree is returned to the branch tip afterwards.
         """
         test_commit = self._locate_rebased_test_commit(pack, cwd, new_base=new_base, new_head=new_head)
-        old_proof = pack["artifacts"]["red-proof"]["content"]
-        spec = {
-            "version": "2.0",
-            "checkpoints": [
-                {k: cp[k] for k in ("acceptance_id", "cwd", "argv", "files", "expected_failure")}
-                for cp in old_proof.get("checkpoints", [])
-            ],
-        }
+        spec = self.rehead_spec_from(pack["artifacts"]["red-proof"]["content"])
         if not spec["checkpoints"]:
             raise NeedsHuman("RED proof in the provenance pack has no checkpoints")
         spec_path = paths.artifacts / "rehead-test-spec.json"
@@ -1571,6 +1598,29 @@ class KernelRuntime:
             target = artifacts / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(canonical_bytes(records[claim_id]["content"]))
+
+    @staticmethod
+    def rehead_spec_from(old_proof: Mapping[str, Any]) -> dict[str, Any]:
+        """The test spec `factory_proof.py red` is re-run from at a re-head: the pack's own
+        checkpoints, seams dropped (the proof compiler derives them).
+
+        A checkpoint's `kind` (red or guard) travels with it and a guard carries no
+        `expected_failure`, so a guard is replayed as a guard. A proof from before guards
+        existed has neither key and is reconstructed as the 2.0 spec it came from (D-058).
+        """
+        checkpoints = [
+            {
+                k: cp[k]
+                for k in ("acceptance_id", "kind", "cwd", "argv", "files", "expected_failure")
+                if k in cp
+            }
+            for cp in old_proof.get("checkpoints", [])
+            if isinstance(cp, Mapping)
+        ]
+        return {
+            "version": "2.1" if any("kind" in cp for cp in checkpoints) else "2.0",
+            "checkpoints": checkpoints,
+        }
 
     @staticmethod
     def _verify_red_unchanged(pack: Mapping[str, Any], worktree: Path) -> None:
@@ -1651,7 +1701,34 @@ class KernelRuntime:
             acceptance_id = str(checkpoint.get("acceptance_id") or "")
             red_exit = checkpoint.get("red_exit")
             expected = checkpoint.get("expected_failure")
-            if not isinstance(red_exit, int) or isinstance(red_exit, bool) or red_exit == 0:
+            kind = str(checkpoint.get("kind") or "red")
+            if not isinstance(red_exit, int) or isinstance(red_exit, bool):
+                raise NeedsHuman(f"RED checkpoint {acceptance_id or '?'} did not record an exit")
+            tail = sanitise_output(str(checkpoint.get("red_output_tail") or ""))
+            if kind == "guard":
+                # A guard pins kept behaviour: it passed on the unchanged tree and declares no
+                # failure. The judge is shown it as a guard, not as an unverified behaviour
+                # (D-058).
+                if red_exit != 0:
+                    raise NeedsHuman(
+                        f"guard checkpoint {acceptance_id or '?'} did not pass on the unchanged tree"
+                    )
+                if expected is not None:
+                    raise NeedsHuman(
+                        f"guard checkpoint {acceptance_id or '?'} declares an expected failure"
+                    )
+                red_results.append(
+                    {
+                        "acceptance_id": acceptance_id,
+                        "kind": "guard",
+                        "red_exit": 0,
+                        "expected_failure": None,
+                        "matched": None,
+                        "red_output_tail": tail[-self.HOLDOUT_RED_TAIL_CHARS:],
+                    }
+                )
+                continue
+            if red_exit == 0:
                 raise NeedsHuman(
                     f"RED checkpoint {acceptance_id or '?'} did not record a failing exit"
                 )
@@ -1659,11 +1736,11 @@ class KernelRuntime:
                 raise NeedsHuman(
                     f"RED checkpoint {acceptance_id or '?'} declares no expected failure"
                 )
-            tail = sanitise_output(str(checkpoint.get("red_output_tail") or ""))
             excerpt, matched = self._red_excerpt(tail, expected, self.HOLDOUT_RED_TAIL_CHARS)
             red_results.append(
                 {
                     "acceptance_id": acceptance_id,
+                    "kind": "red",
                     "red_exit": red_exit,
                     "expected_failure": expected,
                     "matched": matched,
@@ -1773,8 +1850,11 @@ class KernelRuntime:
             "Judge only whether the compiled contract is a faithful, complete and correctly "
             "scoped capture of the supplied issue: every requirement the issue states is "
             "represented by an acceptance criterion, nothing is silently dropped or narrowed, "
-            "and nothing is invented beyond what the issue asks. You are not reviewing any "
-            "design or implementation, and you have deliberately not been shown one."
+            "and nothing is invented beyond what the issue asks. A behaviour of kind `guard` "
+            "pins behaviour the issue says is kept: it is verified by a checkpoint that must "
+            "pass before and after the change, and is not an unverified or invented "
+            "requirement. You are not reviewing any design or implementation, and you have "
+            "deliberately not been shown one."
         ),
         "design": (
             "Judge only whether the supplied design is a sound, complete and policy-consistent "
@@ -2143,16 +2223,22 @@ class KernelRuntime:
         # (D-055). A provider that does not stream ignores the path and `_record_agent` writes
         # the worker's text there instead.
         paths.transcripts.mkdir(parents=True, exist_ok=True)
-        transcript = paths.transcripts / f"agent-{request.role}.log"
+        # A stage the kernel runs again in the same run gets its own record and log
+        # (`agent-<role>.2.*`), never the first run's files (D-058).
+        record, stage_run = stage_record_name(paths.transcripts, request.role)
+        transcript = paths.transcripts / f"{record}.log"
         try:
             result = self.provider.run(request, transcript=transcript, **run_kwargs)
         except BaseException as exc:
             self._record_failed_agent(
                 paths, request.role, exc, started=started, model=request.model,
-                effort=request.effort,
+                effort=request.effort, record=record, stage_run=stage_run,
             )
             raise
-        self._record_agent(paths, request.role, result, started=started, effort=request.effort)
+        self._record_agent(
+            paths, request.role, result, started=started, effort=request.effort,
+            record=record, stage_run=stage_run,
+        )
         return result
 
     def _record_agent(
@@ -2163,17 +2249,30 @@ class KernelRuntime:
         *,
         started: float,
         effort: str | None = None,
+        record: str | None = None,
+        stage_run: int = 1,
     ) -> None:
         """Write the worker's text (unless the provider already streamed the whole session to
-        the same file), its telemetry, and the stage's wall time."""
+        the same file), its telemetry, and the stage's wall time.
+
+        `record` is the file stem (`agent-<role>`, or `agent-<role>.N` for the Nth run of the
+        stage in this run directory, `stage_record_name`) and `stage_run` that N. `wall_seconds`
+        spans every CLI process the stage took plus the backoff between them, so it can exceed
+        the role's per-process wall: the record says `attempts` and, when a process was killed
+        for silence before one returned, `hang` and `hangs` (D-058).
+        """
         ended = time.time()
         paths.transcripts.mkdir(parents=True, exist_ok=True)
-        log = paths.transcripts / f"agent-{role}.log"
+        record = record or f"agent-{role}"
+        log = paths.transcripts / f"{record}.log"
         if not log.exists():
             log.write_text(result.content + "\n", encoding="utf-8")
         wall = round(ended - started, 3)
+        hangs = int(getattr(result, "hangs", 0) or 0)
         telemetry = {
             "role": role,
+            "record": record,
+            "stage_run": stage_run,
             "outcome": "ok",
             "model": getattr(result, "model", None),
             # The level the CLI was asked for (after any configured override) and the thinking
@@ -2194,10 +2293,15 @@ class KernelRuntime:
             # and why; the counts above are summed across them (D-031).
             "attempts": getattr(result, "attempts", 1),
             "transient_errors": list(getattr(result, "transient_errors", ()) or ()),
+            # How many of those processes were killed for silence before one returned; a
+            # stage that hung once and completed on the retry is flagged like one that died
+            # hanging, with the count beside it (D-058).
+            "hangs": hangs,
+            "hang": hangs > 0,
             # How many stream events the provider read across those processes (D-054).
             "events_seen": getattr(result, "events_seen", None),
         }
-        (paths.transcripts / f"agent-{role}.json").write_text(
+        (paths.transcripts / f"{record}.json").write_text(
             json.dumps(telemetry, sort_keys=True, indent=2, default=str) + "\n", encoding="utf-8"
         )
         record_stage_timing(
@@ -2205,6 +2309,8 @@ class KernelRuntime:
             outcome="ok", model=telemetry["model"], num_turns=telemetry["num_turns"],
             duration_ms=telemetry["duration_ms"], cost_usd=telemetry["total_cost_usd"],
             events_seen=telemetry["events_seen"],
+            attempts=telemetry["attempts"], hang=telemetry["hang"] or None,
+            record=record, stage_run=stage_run,
             over_budget=telemetry["over_budget"] or None,
             thinking_tokens=telemetry["thinking_tokens"], effort=telemetry["effort"],
         )
@@ -2218,6 +2324,8 @@ class KernelRuntime:
         started: float,
         model: str | None = None,
         effort: str | None = None,
+        record: str | None = None,
+        stage_run: int = 1,
     ) -> None:
         """Write the same stage record for a worker that failed as for one that returned.
 
@@ -2234,10 +2342,13 @@ class KernelRuntime:
         """
         ended = time.time()
         paths.transcripts.mkdir(parents=True, exist_ok=True)
+        record = record or f"agent-{role}"
         carried = getattr(exc, "telemetry", None)
         wall = round(ended - started, 3)
         telemetry = {
             "role": role,
+            "record": record,
+            "stage_run": stage_run,
             "outcome": "failed",
             "model": model,
             # The request's level; the provider's carried telemetry overrides it with the
@@ -2254,7 +2365,7 @@ class KernelRuntime:
             "over_budget": over_budget(role, wall),
             **({k: v for k, v in carried.items()} if isinstance(carried, Mapping) else {}),
         }
-        (paths.transcripts / f"agent-{role}.json").write_text(
+        (paths.transcripts / f"{record}.json").write_text(
             json.dumps(telemetry, sort_keys=True, indent=2, default=str) + "\n", encoding="utf-8"
         )
         record_stage_timing(
@@ -2262,6 +2373,7 @@ class KernelRuntime:
             outcome="failed", error_class=type(exc).__name__, model=model,
             num_turns=telemetry.get("num_turns"), cost_usd=telemetry.get("total_cost_usd"),
             events_seen=telemetry.get("events_seen"),
+            attempts=telemetry["attempts"], record=record, stage_run=stage_run,
             timed_out=telemetry["timed_out"] or None,
             hang=telemetry.get("hang") or None,
             over_budget=telemetry["over_budget"] or None,

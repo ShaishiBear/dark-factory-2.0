@@ -14,6 +14,18 @@ PROOF_BLOCK = re.compile(r"\n?<!-- factory-proof:start -->.*?<!-- factory-proof:
 DESIGN_BLOCK = re.compile(r"\n?<!-- factory-design:start -->.*?<!-- factory-design:end -->\n?", re.S)
 
 def die(msg): print(f"PROOF_FAIL: {msg}", file=sys.stderr); raise SystemExit(1)
+# A test spec is 2.0 (every checkpoint a red one) or 2.1 (each checkpoint carries `kind`). A
+# `red` checkpoint must fail on the unchanged tree for its declared reason and pass after the
+# implementation; a `guard` pins kept behaviour and must exit 0 at RED and at every GREEN, and
+# declares no expected_failure. `kind` absent means red, so a 2.0 spec reads exactly as before.
+# Build run 34008561672 declared a red checkpoint for an AC whose Then pinned kept behaviour, and
+# RED refused it as `unexpectedly passed`, correctly: the protocol had no other shape (D-058).
+SPEC_VERSIONS=('2.0','2.1')
+CHECKPOINT_KINDS=('red','guard')
+# The keys a test plan carries per checkpoint, in this order; a key a checkpoint lacks (a guard's
+# expected_failure, a 2.0 proof's kind) is left out, so a plan digest of a kind-less proof is
+# what it was before guards existed. scripts/factory_evidence.plan_from_proof uses the same rule.
+PLAN_KEYS=('acceptance_id','kind','seams','cwd','argv','files','expected_failure')
 CHECKPOINT_SCRUBBED_ENV=('GH_TOKEN','GITHUB_TOKEN')
 RED_TAIL_CHARS=2000  # keep equal to factory_kernel.repro.RED_TAIL_CHARS; a test pins the pair
 def checkpoint_env():
@@ -55,19 +67,40 @@ def refuse(kind, cp, reason, *, rc, out, seconds, fault=None, stage=None):
     # evidence travels with it (D-056).
     tail=output_tail(out)
     evidence={'version':'1.0','kind':kind,'stage':stage or kind,'acceptance_id':cp['acceptance_id'],
+              'checkpoint_kind':checkpoint_kind(cp),
               'argv':list(cp['argv']),'cwd':cp['cwd'],'rc':rc,'fault':fault,'seconds':seconds,
-              'expected_failure':cp['expected_failure'],'reason':reason,'output_tail':tail}
+              'expected_failure':cp.get('expected_failure'),'reason':reason,'output_tail':tail}
     root=os.environ.get('ARTIFACTS_DIR','').strip()
     if root:
         try: write(Path(root)/failure_artifact(kind),evidence)
         except OSError as e: print(f'PROOF_WARN could not write {failure_artifact(kind)}: {e}',file=sys.stderr)
     rc_text='none (never exited)' if rc is None else str(rc)
+    declared=(f"  expected_failure: {cp['expected_failure']!r}\n" if checkpoint_kind(cp)=='red'
+              else "  kind: guard (kept behaviour; must exit 0 on the unchanged tree and after the implementation)\n")
     die(f"{reason}\n  argv: {json.dumps(cp['argv'])}\n  cwd: {cp['cwd']}\n  rc: {rc_text}\n  seconds: {seconds}\n"
-        f"  expected_failure: {cp['expected_failure']!r}\n"
+        +declared+
         f"  output tail (last {OUTPUT_TAIL_LINES} lines, at most {OUTPUT_TAIL_CHARS} chars):\n{tail}")
+def checkpoint_kind(cp): return cp.get('kind') or 'red'
+def prove_guard(cp, stage):
+    # One guard checkpoint: kept behaviour, so it must exit 0 both on the unchanged tree (stage
+    # 'red') and after the implementation ('green'/'final-green'). A guard that fails at RED
+    # is a wrong test or a wrong contract, never evidence of a bug; one that fails at GREEN is
+    # the implementation breaking what the contract said it keeps (D-058).
+    ac=cp['acceptance_id']; kind='red' if stage=='red' else 'green'
+    rc,out,seconds,fault=run(cp['argv'],cp['cwd'])
+    if fault: refuse(kind,cp,f"{ac} guard command {FAULT_TEXT[fault]}",rc=rc,out=out,seconds=seconds,fault=fault,stage=stage)
+    if rc!=0:
+        reason=f"{ac} guard failed on the unchanged tree" if stage=='red' else f"{ac} guard broken by the implementation"
+        refuse(kind,cp,reason,rc=rc,out=out,seconds=seconds,stage=stage)
+    print(f"GUARD_CHECKPOINT {ac} stage={stage} rc={rc} seconds={seconds}")
+    return rc,out,seconds
 def prove_red(cp):
-    # One checkpoint on the unchanged tree: it must fail, and fail for its declared reason.
+    # One checkpoint on the unchanged tree: a red one must fail, and fail for its declared
+    # reason; a guard must pass.
     ac=cp['acceptance_id']
+    if checkpoint_kind(cp)=='guard':
+        rc,out,seconds=prove_guard(cp,'red')
+        return dict(cp,red_exit=rc,red_seconds=seconds,red_output_sha256=hashlib.sha256(out.encode()).hexdigest(),red_output_tail=out[-RED_TAIL_CHARS:])
     rc,out,seconds,fault=run(cp['argv'],cp['cwd'])
     if fault: refuse('red',cp,f"{ac} RED command {FAULT_TEXT[fault]}",rc=rc,out=out,seconds=seconds,fault=fault)
     if rc==0: refuse('red',cp,f"{ac} RED command unexpectedly passed",rc=rc,out=out,seconds=seconds)
@@ -78,11 +111,15 @@ def prove_red(cp):
     return dict(cp,red_exit=rc,red_seconds=seconds,red_output_sha256=hashlib.sha256(out.encode()).hexdigest(),red_output_tail=out[-RED_TAIL_CHARS:])
 def prove_green(cp, stage='green'):
     ac=cp['acceptance_id']
+    if checkpoint_kind(cp)=='guard':
+        rc,out,seconds=prove_guard(cp,stage)
+        return {'acceptance_id':ac,'kind':'guard','exit':rc,'seconds':seconds,'output_sha256':hashlib.sha256(out.encode()).hexdigest()}
     rc,out,seconds,fault=run(cp['argv'],cp['cwd'])
     if fault: refuse('green',cp,f"{ac} GREEN command {FAULT_TEXT[fault]}",rc=rc,out=out,seconds=seconds,fault=fault,stage=stage)
     if rc!=0: refuse('green',cp,f"{ac} GREEN command failed",rc=rc,out=out,seconds=seconds,stage=stage)
     print(f"GREEN_CHECKPOINT {ac} rc={rc} seconds={seconds}")
     return {'acceptance_id':ac,'exit':rc,'seconds':seconds,'output_sha256':hashlib.sha256(out.encode()).hexdigest()}
+def guards_in(checkpoints): return sum(1 for cp in checkpoints if checkpoint_kind(cp)=='guard')
 def sha(p): return hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
 def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False)+'\n'
 def digest(v): return hashlib.sha256(canonical(v).encode()).hexdigest()
@@ -124,34 +161,53 @@ def test_oriented(path):
     # One predicate shared with git_authority.commit_acceptance_tests and the architecture guard
     # (scripts/factory_shapes.test_shaped): a declared file is either a test to all three or to none.
     return _shared_test_shaped(path)
-def checkpoint(value):
-    required={'acceptance_id','cwd','argv','files','expected_failure'}
+def checkpoint(value, version='2.0'):
+    required={'acceptance_id','cwd','argv','files'}
     if not isinstance(value,dict) or required-value.keys(): die('test checkpoint missing fields')
     ac=value['acceptance_id']
     if not isinstance(ac,str) or not re.fullmatch(r'AC-[1-9][0-9]*',ac): die('invalid acceptance_id')
+    kind=value.get('kind','red')
+    if kind not in CHECKPOINT_KINDS: die(f'{ac} kind must be one of {list(CHECKPOINT_KINDS)}')
+    if kind=='guard' and version=='2.0': die(f'{ac} guard checkpoints require test-spec version 2.1')
+    if kind=='guard':
+        # A guard has nothing to fail for: an expected_failure on it is the shape of a red
+        # checkpoint and is refused as malformed rather than ignored.
+        if 'expected_failure' in value: die(f'{ac} guard checkpoint must not declare expected_failure')
+    else:
+        if 'expected_failure' not in value: die('test checkpoint missing fields')
+        if not isinstance(value['expected_failure'],str) or len(value['expected_failure'].strip())<3: die(f'{ac} expected_failure too weak')
     if not isinstance(value['argv'],list) or not value['argv'] or any(not isinstance(x,str) or not x for x in value['argv']): die(f'{ac} argv must be non-empty strings')
     if not isinstance(value['files'],list) or not value['files'] or any(not isinstance(x,str) or not x for x in value['files']): die(f'{ac} files must be non-empty strings')
-    if not isinstance(value['expected_failure'],str) or len(value['expected_failure'].strip())<3: die(f'{ac} expected_failure too weak')
     cwd=ROOT/value['cwd']
     if not cwd.is_dir() or ROOT not in cwd.resolve().parents and cwd.resolve()!=ROOT: die(f'{ac} unsafe cwd')
     for f in value['files']:
         p=Path(f)
         if p.is_absolute() or '..' in p.parts or not (ROOT/p).is_file(): die(f'{ac} unsafe/missing test file {f}')
         if not test_oriented(f): die(f'{ac} acceptance file is not test-oriented: {f}')
-    return dict(value)
+    return dict(value,kind=kind)
+def behavior_kinds(contract):
+    # A contract behaviour may declare `kind: "guard"` (scripts/factory_protocol.validate_contract);
+    # absent means an ordinary behaviour. The RED gate holds the test author to it.
+    return {b.get('id'):(b.get('kind') or 'behaviour') for b in contract.get('behaviors',[]) if isinstance(b,dict)}
 def spec(path):
     s=load(path)
-    if not isinstance(s,dict) or s.get('version')!='2.0' or not isinstance(s.get('checkpoints'),list) or not s['checkpoints']:
-        die('test spec must be version 2.0 with checkpoints')
+    if not isinstance(s,dict) or s.get('version') not in SPEC_VERSIONS or not isinstance(s.get('checkpoints'),list) or not s['checkpoints']:
+        die(f'test spec must be version {" or ".join(SPEC_VERSIONS)} with checkpoints')
     contract,design,ids=artifacts()
-    cps=[checkpoint(x) for x in s['checkpoints']]
+    cps=[checkpoint(x,s['version']) for x in s['checkpoints']]
     actual=[x['acceptance_id'] for x in cps]
     if len(actual)!=len(set(actual)) or set(actual)!=set(ids): die('test checkpoints must cover every contract AC exactly once')
+    # A spec of only guards would prove that nothing changed; RED exists to prove that
+    # something did. At least one checkpoint must be able to fail on the unchanged tree.
+    if guards_in(cps)==len(cps): die('test spec must declare at least one red checkpoint; a spec of only guards proves no change')
+    kinds=behavior_kinds(contract)
     for cp in cps:
+        if kinds.get(cp['acceptance_id'])=='guard' and cp['kind']!='guard':
+            die(f"{cp['acceptance_id']} is a guard behaviour in the contract; its checkpoint must be kind guard, not red")
         seams=design['ac_mapping'].get(cp['acceptance_id'])
         if not isinstance(seams,list) or not seams: die(f"{cp['acceptance_id']} has no compiled design seam")
         cp['seams']=seams
-    return {'version':'2.0','contract_sha256':digest(contract),'design_sha256':digest(design),'checkpoints':cps}
+    return {'version':s['version'],'contract_sha256':digest(contract),'design_sha256':digest(design),'checkpoints':cps,'guards':guards_in(cps)}
 def clean():
     if subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip(): die('worktree must be clean')
 def changed(parent='HEAD^',head='HEAD'):
@@ -227,7 +283,7 @@ def bind_architecture(result, head):
 def plan_from(proof_or_spec,test_commit):
     cps=[]
     for cp in proof_or_spec['checkpoints']:
-        cps.append({k:cp[k] for k in ('acceptance_id','seams','cwd','argv','files','expected_failure')})
+        cps.append({k:cp[k] for k in PLAN_KEYS if k in cp})
     return {'version':'1.0','contract_sha256':proof_or_spec['contract_sha256'],
             'design_sha256':proof_or_spec['design_sha256'],'test_commit':test_commit,'checkpoints':cps}
 def red(a):
@@ -239,13 +295,15 @@ def red(a):
     after=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(); clean()
     if before!=after: die('RED commands moved HEAD')
     files={f:sha(f) for f in declared}
+    # The proof stays version 2.0: a 2.0 proof whose checkpoints carry no `kind` is exactly a
+    # proof of red checkpoints, and every reader defaults an absent kind to red (D-058).
     base={'version':'2.0','test_commit':before,'contract_sha256':s['contract_sha256'],
-          'design_sha256':s['design_sha256'],'files':files,'checkpoints':results}
+          'design_sha256':s['design_sha256'],'files':files,'checkpoints':results,'guards':guards_in(results)}
     plan=plan_from(base,before)
     root=Path(os.environ['ARTIFACTS_DIR']); write(root/'test-plan.json',plan)
     proof=dict(base,test_plan_sha256=digest(plan))
     write(a.output,proof)
-    print(f"RED_PROVED criteria={len(results)} tests={len(files)} commit={before} seconds={round(sum(r['red_seconds'] for r in results),3)}")
+    print(f"RED_PROVED criteria={len(results)} tests={len(files)} commit={before} seconds={round(sum(r['red_seconds'] for r in results),3)} guards={guards_in(results)}")
 def green(a):
     clean(); p=load(a.proof)
     if p.get('version')!='2.0' or not isinstance(p.get('checkpoints'),list) or not p['checkpoints']: die('GREEN requires v2 RED proof')
@@ -262,7 +320,7 @@ def green(a):
     if impact: result['change_impact']=impact
     if stage=='final-green': result=bind_architecture(result,before)
     write(a.output,result)
-    print(f"GREEN_PROVED criteria={len(green_results)} tests={len(p['files'])} commit={before} seconds={round(sum(g['seconds'] for g in green_results),3)}")
+    print(f"GREEN_PROVED criteria={len(green_results)} tests={len(p['files'])} commit={before} seconds={round(sum(g['seconds'] for g in green_results),3)} guards={guards_in(p['checkpoints'])}")
 def attach(a):
     clean(); p=load(a.proof)
     results=p.get('green_results')

@@ -373,10 +373,22 @@ def contract_ids(contract: dict) -> list[str]:
     return [b["id"] for b in contract["behaviors"]]
 
 
+# The keys a test plan carries per checkpoint; a key a checkpoint lacks (a guard's
+# expected_failure, a pre-guard proof's kind) is left out. Must equal scripts/factory_proof.PLAN_KEYS
+# and its rule, or every proof's `test_plan_sha256` would fail to reconstruct here (D-058).
+PLAN_KEYS = ("acceptance_id", "kind", "seams", "cwd", "argv", "files", "expected_failure")
+CHECKPOINT_KINDS = ("red", "guard")
+
+
+def checkpoint_kind(cp: dict) -> str:
+    """`red` unless the checkpoint says `guard`; a kind-less checkpoint predates guards."""
+    return cp.get("kind") or "red"
+
+
 def plan_from_proof(proof: dict) -> dict:
     cps = []
     for cp in proof["checkpoints"]:
-        cps.append({k: cp[k] for k in ("acceptance_id", "seams", "cwd", "argv", "files", "expected_failure")})
+        cps.append({k: cp[k] for k in PLAN_KEYS if k in cp})
     return {
         "version": "1.0", "contract_sha256": proof["contract_sha256"],
         "design_sha256": proof["design_sha256"], "test_commit": proof["test_commit"],
@@ -385,20 +397,33 @@ def plan_from_proof(proof: dict) -> dict:
 
 
 def validate_checkpoint(cp: object) -> dict:
-    required = {"acceptance_id", "seams", "cwd", "argv", "files", "expected_failure",
-                "red_exit", "red_output_sha256"}
+    required = {"acceptance_id", "seams", "cwd", "argv", "files", "red_exit", "red_output_sha256"}
     if not isinstance(cp, dict) or required - cp.keys():
         die("proof checkpoint missing required fields")
     if not re.fullmatch(r"AC-[1-9][0-9]*", str(cp["acceptance_id"])):
         die("proof checkpoint has invalid acceptance_id")
+    kind = checkpoint_kind(cp)
+    if kind not in CHECKPOINT_KINDS:
+        die(f"proof checkpoint {cp['acceptance_id']} has invalid kind {kind!r}")
     for key in ("seams", "files", "argv"):
         if not isinstance(cp[key], list) or not cp[key] or any(not isinstance(x, str) or not x for x in cp[key]):
             die(f"proof checkpoint {cp['acceptance_id']} has invalid {key}")
     if not isinstance(cp["cwd"], str) or not cp["cwd"]:
         die("proof checkpoint cwd is invalid")
+    if not HEX64.fullmatch(str(cp["red_output_sha256"])):
+        die("proof checkpoint does not contain valid RED evidence")
+    if kind == "guard":
+        # A guard pins kept behaviour: it passed on the unchanged tree and declares no failure.
+        if "expected_failure" in cp:
+            die(f"proof guard checkpoint {cp['acceptance_id']} carries expected_failure")
+        if int(cp["red_exit"]) != 0:
+            die(f"proof guard checkpoint {cp['acceptance_id']} did not pass on the unchanged tree")
+        return cp
+    if "expected_failure" not in cp:
+        die("proof checkpoint missing required fields")
     if not isinstance(cp["expected_failure"], str) or len(cp["expected_failure"].strip()) < 3:
         die("proof checkpoint expected_failure is too weak")
-    if int(cp["red_exit"]) == 0 or not HEX64.fullmatch(str(cp["red_output_sha256"])):
+    if int(cp["red_exit"]) == 0:
         die("proof checkpoint does not contain valid RED evidence")
     return cp
 
@@ -427,6 +452,8 @@ def validate_proof_fields(proof: dict, head: str, contract: dict, contract_hash:
     expected = contract_ids(contract)
     if len(ids) != len(set(ids)) or set(ids) != set(expected):
         die("proof checkpoints must cover every contract AC exactly once")
+    if cps and all(checkpoint_kind(cp) == "guard" for cp in cps):
+        die("proof declares only guard checkpoints; nothing was proved red")
     if any(f not in proof["files"] for cp in cps for f in cp["files"]):
         die("checkpoint references a test outside immutable proof files")
     plan = plan_from_proof(proof)
@@ -445,6 +472,13 @@ def validate_red_result(returncode: int, output: str, expected_failure: str) -> 
         die("independent RED replay unexpectedly passed")
     if expected_failure.lower() not in output.lower():
         die("independent RED replay failed for the wrong reason")
+
+
+def validate_guard_result(returncode: int, stage: str) -> None:
+    """A guard checkpoint pins kept behaviour: it must exit 0 at the RED commit and at the head."""
+    if returncode != 0:
+        die(f"independent {stage} replay: guard failed"
+            + (" on the unchanged tree" if stage == "RED" else " at the head"))
 
 
 def share_runtime(red_root: Path) -> None:
@@ -483,11 +517,15 @@ def replay_red(proof: dict) -> list[dict]:
                     die(f"{cp['acceptance_id']} RED cwd is unsafe")
                 result = run(list(cp["argv"]), cwd=cwd, timeout=300, check=False)
                 output = (result.stdout or "") + (result.stderr or "")
-                validate_red_result(result.returncode, output, cp["expected_failure"])
+                if checkpoint_kind(cp) == "guard":
+                    validate_guard_result(result.returncode, "RED")
+                else:
+                    validate_red_result(result.returncode, output, cp["expected_failure"])
                 results.append({
-                    "acceptance_id": cp["acceptance_id"], "exit": result.returncode,
+                    "acceptance_id": cp["acceptance_id"], "kind": checkpoint_kind(cp),
+                    "exit": result.returncode,
                     "output_sha256": hashlib.sha256(output.encode()).hexdigest(),
-                    "expected_failure": cp["expected_failure"],
+                    "expected_failure": cp.get("expected_failure"),
                 })
             return results
         finally:
@@ -503,10 +541,13 @@ def replay_green(proof: dict) -> list[dict]:
             die(f"{cp['acceptance_id']} GREEN cwd is unsafe")
         result = run(list(cp["argv"]), cwd=cwd, timeout=300, check=False)
         output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode:
+        if checkpoint_kind(cp) == "guard":
+            validate_guard_result(result.returncode, "GREEN")
+        elif result.returncode:
             die(f"{cp['acceptance_id']} independent GREEN replay failed")
         results.append({
-            "acceptance_id": cp["acceptance_id"], "exit": result.returncode,
+            "acceptance_id": cp["acceptance_id"], "kind": checkpoint_kind(cp),
+            "exit": result.returncode,
             "output_sha256": hashlib.sha256(output.encode()).hexdigest(),
         })
     return results
@@ -524,7 +565,9 @@ def verify_proof(proof: dict, head: str, contract: dict, contract_hash: str) -> 
     green = replay_green(proof)
     return {
         "test_commit": proof["test_commit"], "green_commit": head,
-        "criteria": len(proof["checkpoints"]), "files": proof["files"],
+        "criteria": len(proof["checkpoints"]),
+        "guards": sum(1 for cp in proof["checkpoints"] if checkpoint_kind(cp) == "guard"),
+        "files": proof["files"],
         "test_plan_sha256": proof["test_plan_sha256"],
         "design_sha256": proof["design_sha256"],
         "red_replay": red, "green_replay": green,
