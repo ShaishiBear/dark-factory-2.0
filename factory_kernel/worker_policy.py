@@ -349,13 +349,20 @@ ROLE_PATH_SCOPE: dict[str, PathScope] = {
 
 # A repository-mutation worker that has written nothing by this fraction of its turn cap is
 # not going to: the process is killed and the stage refused as `no_draft_by_turn`, not retried.
-# The data: issue #49's test author (run 33999901008) wrote its first file at turn ~5 of the
-# 15 it used (11 Reads, 3 Edits, 618 s, $1.28, RED proved); issue #103's third build
-# (33997386843) wrote at turn ~30 of 33 and its RED was refused; its fourth (34002520477)
-# never wrote in 31 turns (46 Reads, 1925 s, $4.54, `error_max_turns`). 0.6 of a 30-turn cap
-# is turn 18: three times the healthy draft turn, and well before the cap the two dead builds
-# spent (D-057).
-DRAFT_DEADLINE_FRACTION = 0.6
+# The data, three points. Issue #49's test author (run 33999901008, GLM) wrote its first file
+# at turn ~5 of the 15 it used (11 Reads, 3 Edits, 618 s, $1.28, RED proved): healthy. Issue
+# #103's fourth build (34002520477, GLM) never wrote in 31 turns (46 Reads, 1925 s, $4.54,
+# `error_max_turns`): the run the deadline exists for, and 0.6 (turn 18 of 30) was set from
+# these two (D-057). Issue #103's seventh build (34024234313), the first on MiniMax M3, was
+# killed by that deadline at turn 18 after 247 s and 17 Reads at one per turn, 13 s a turn,
+# every read inside scope and about the component test it was to write (the hook and its test,
+# ChatArea, ChatInput, App, two existing component tests, package.json, biome.json,
+# vite.config.ts, main.tsx, useMessages, authApi, useAuth, and the three artifacts): a fast,
+# disciplined model doing a legitimate ~20-read task, ended four minutes in before its first
+# write. 0.8 of a 30-turn cap is turn 24: a run that only reads is still ended as turn 25
+# begins, seven turns short of the 31 the fourth build spent, and a one-read-per-turn model has
+# room to read a component test's neighbourhood before it drafts (D-063).
+DRAFT_DEADLINE_FRACTION = 0.8
 
 
 def allowed_tools(role: str) -> tuple[str, ...]:

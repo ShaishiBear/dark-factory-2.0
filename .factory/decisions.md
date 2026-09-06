@@ -2799,3 +2799,52 @@ next is untouched.
 was built from, and either `sources=true fixture_in_sources=true` from the probe or
 `reason=no-sources-event` with the tool-call count, before a browser opens. A citation
 the browser cannot find is no longer a browser finding.
+
+---
+
+## D-063 · The draft deadline is 0.8 of the cap, because the first MiniMax M3 build was ended at turn 18 after seventeen in-scope reads
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34024234313 (the seventh build of issue #103, the first on MiniMax M3 for the mutation roles), 33999901008 and 34002520477 (D-057's two points)
+
+D-057 set `DRAFT_DEADLINE_FRACTION = 0.6` (turn 18 of 30) from two points: issue #49's
+test author on GLM wrote at turn ~5 of 15, and issue #103's fourth build on GLM made 46
+Reads and no Write in 31 turns. The seventh build of issue #103, the first with D-061's
+`model_overrides` sending `test_author`, `implement` and `repair` to `minimax/minimax-m3`,
+is the third point, and it contradicts the value:
+
+```
+FACTORY_STAGE kind=agent name=test_author seconds=247.176 turns=19 outcome=failed events=32493 draft_deadline_missed=true reads=17 thinking=47272 effort=medium model=minimax/minimax-m3
+```
+
+Thirteen seconds a turn, one Read a turn, seventeen Reads, every one inside scope and every
+one about the React component test it was to write: the hook and its test, `ChatArea`,
+`ChatInput`, `App`, two existing component tests, `package.json`, `biome.json`,
+`vite.config.ts`, `main.tsx`, `useMessages`, `authApi`, `useAuth`, and the three artifacts.
+The deadline killed it as turn 19 began, four minutes in, before its first write. That is
+not the run D-057 described (a slow model reading the kernel for half an hour); it is a
+fast, disciplined model doing a legitimate ~20-read task, and 18 was set without seeing one.
+
+**Decision.** `DRAFT_DEADLINE_FRACTION = 0.8`: `draft_deadline_turn(role) = ceil(cap × 0.8)`,
+turn 24 of 30 for the three mutation roles. A run that only reads is still ended as turn 25
+begins, seven turns short of the 31 the fourth build spent, and a one-read-per-turn model
+has room to read a component test's neighbourhood before it drafts. Nothing else about the
+deadline changes: the same roles, the same kill on the first turn past it, the same
+`no_draft_by_turn` refusal with the reads and the paths, never retried, the same
+`$DRAFT_DEADLINE_TURN` rendered from the policy into the three prompts.
+
+Pinned by `tests/factory/test_factory_read_scope_and_draft_deadline.py` (the fraction and
+the turn, now also above 18; the request's own cap of 10 gives 8; through the fake CLI a
+worker that only reads is killed as turn 25 begins with 24 reads, the record, row, line and
+log say so, and the prompt renders `draft by turn 24 of`). The constant's comment in
+`factory_kernel/worker_policy.py` carries the three data points. The three deadline
+mutations in `harness/factory_mutations/defects.json` edit `providers.py`, not the fraction,
+and inject unchanged.
+
+**Observed and left alone.** Whether 24 is enough for M3 on an `implement` or `repair`
+stage is the next build's evidence; the fraction is one number and moves on data. A
+returned stage still does not record its reads (D-057), so the healthy draft turn on M3 is
+read from the transcript, not the stage line.
+
+**Consequences.** The next M3 `test_author` that reads its neighbourhood at one file a
+turn gets to its first write; a pure-reading run costs at most 24 turns before the stage is
+refused with the list of what it read.
