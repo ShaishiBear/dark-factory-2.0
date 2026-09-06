@@ -1523,6 +1523,34 @@
       "find": "class DraftDeadlineMissed(ProviderStageError):\n",
       "replace": "class DraftDeadlineMissed(WorkerHungError):\n",
       "why": "A missed deadline would be handled as a hang: the worktree restored and the same prompt relaunched once against the same tree, so a worker that reads for eighteen turns would be paid for twice before the stage was refused; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that only reads is killed at the deadline and not retried: one launch, no restore, attempts=1) (D-057)."
+    },
+    {
+      "id": "guard-failure-at-green-ignored",
+      "file": "scripts/factory_proof.py",
+      "find": "    if rc!=0:\n        reason=f\"{ac} guard failed on the unchanged tree\" if stage=='red' else f\"{ac} guard broken by the implementation\"\n        refuse(kind,cp,reason,rc=rc,out=out,seconds=seconds,stage=stage)\n",
+      "replace": "    if rc!=0 and stage=='red':\n        reason=f\"{ac} guard failed on the unchanged tree\"\n        refuse(kind,cp,reason,rc=rc,out=out,seconds=seconds,stage=stage)\n",
+      "why": "A guard checkpoint that fails after the implementation would be recorded as a GREEN result with a non-zero exit and the build would go on, so the kept behaviour the contract pinned (issue #103's AC-3: switching conversations still aborts the old stream) could be broken by the very change that was supposed to keep it; caught by tests/factory/test_factory_guard_checkpoints.py (a guard broken by the implementation is refused at green with `green-proof-failure.json`; the evidence bundle accepts only exit-0 guard results) (D-058)."
+    },
+    {
+      "id": "guard-only-spec-accepted",
+      "file": "scripts/factory_proof.py",
+      "find": "    if guards_in(cps)==len(cps): die('test spec must declare at least one red checkpoint; a spec of only guards proves no change')\n",
+      "replace": "    if guards_in(cps)>len(cps): die('test spec must declare at least one red checkpoint; a spec of only guards proves no change')\n",
+      "why": "A test author could declare every checkpoint a guard, RED would prove that nothing fails on the unchanged tree, and GREEN would prove the same after the change: a build with no red loop at all, wearing a RED_PROVED line; caught by tests/factory/test_factory_guard_checkpoints.py (a spec of only guards is refused) (D-058)."
+    },
+    {
+      "id": "guard-treated-as-red",
+      "file": "scripts/factory_proof.py",
+      "find": "    if checkpoint_kind(cp)=='guard':\n        rc,out,seconds=prove_guard(cp,'red')\n",
+      "replace": "    if checkpoint_kind(cp)=='guard' and False:\n        rc,out,seconds=prove_guard(cp,'red')\n",
+      "why": "A guard would run through the red path at RED and be refused as `unexpectedly passed`, which is exactly build run 34008561672's refusal: the protocol would once again have no way to express kept behaviour while the prompt and the contract said it did; caught by tests/factory/test_factory_guard_checkpoints.py (a guard that passes on the unchanged tree is proved at RED; `red` proves the red checkpoint red and the guard green with guards=1) (D-058)."
+    },
+    {
+      "id": "second-attempt-record-overwrites-the-first",
+      "file": "factory_kernel/runtime.py",
+      "find": "    while (transcripts / f\"{stem}.json\").exists() or (transcripts / f\"{stem}.log\").exists():\n        run += 1\n        stem = f\"{base}.{run}\"\n    return stem, run\n",
+      "replace": "    return stem, run\n",
+      "why": "Every run of a stage would write `agent-<role>.json` and stream into `agent-<role>.log`, so the static-gate hand-back's second `test_author` would again overwrite the first run's record (the 2687 s, 41-turn, two-process first run of 34008561672 survived only as headers in the appended log) and every row would say stage_run=1; caught by tests/factory/test_factory_stage_runs.py (the second run writes its own json and log and the first survives; the hand-back re-run keeps the first run's record; each run leaves its own row and line) (D-058)."
     }
   ]
 }

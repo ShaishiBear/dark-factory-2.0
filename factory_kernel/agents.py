@@ -132,6 +132,10 @@ class AgentResult:
     # sum across attempts.
     attempts: int = 1
     transient_errors: tuple[str, ...] = ()
+    # How many of those attempts were killed for silence (`providers.WorkerHungError`) before
+    # one returned. A stage that hung once and then completed says so in its record and its
+    # timing row instead of only in the text of `transient_errors` (D-058).
+    hangs: int = 0
     # How many stream events the provider read from the CLI across every attempt (the
     # progress the stage showed while it ran); `None` for a provider that does not stream.
     events_seen: int | None = None

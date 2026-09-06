@@ -2323,3 +2323,165 @@ that is not drafting by turn 18 costs at most eighteen turns before the stage is
 the list of what it read, instead of thirty-one turns and $4.54 before a cap that says
 nothing. The preflight makes one more bounded model call per run, and refuses the run if the
 CLI ever stops honouring the rules the boundary is made of.
+
+---
+
+## D-058 · A checkpoint can guard kept behaviour, and every run of a stage keeps its record, because run 34008561672 refused a correct test and lost a 2687-second one
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34008561672 (the fifth build of issue #103, the first with D-057's read scope and draft deadline)
+
+The build got further than any before it: `investigate`, `contract`, `context` and
+`architecture` returned, `test_author` wrote its file, the static gate handed a biome
+formatting failure back once (D-043), the second `test_author` fixed it in 473 s, the kernel
+committed, and RED ran:
+
+```
+RED_CHECKPOINT AC-1 rc=1 seconds=1.955
+RED_CHECKPOINT AC-2 rc=1 seconds=2.883
+PROOF_FAIL: AC-3 RED command unexpectedly passed
+  argv: ["bunx", "vitest", "run", "src/components/ChatArea.test.tsx", "-t", "AC-3"]
+  rc: 0
+  expected_failure: 'switching conversations must abort the in-flight stream'
+```
+
+D-056's evidence made the refusal readable, and what it shows is not a wrong test. Two
+defects, one in the protocol and one in the record.
+
+**(a) The proof protocol could not express kept behaviour.** The contract compiled AC-3 as
+*given* "a stream is in flight for /c/a", *when* "the conversation id actually changes,
+navigating from /c/a to /c/b mid-stream", *then* "the old stream's fetch is aborted and
+streaming state resets ...; this kept behaviour is pinned by the existing 'conversationId
+reset' tests, which must stay green". The issue itself says that behaviour "is kept and
+tested", and the contract's `invariants` say it again. The test author read all of that,
+wrote a test that exercises it, and declared the only checkpoint shape `test-spec.json` 2.0
+has: `expected_failure` required, must fail at RED, must pass at GREEN. Its `notes` even say
+AC-3 "is expected to pass on current main while remaining green after the fix; its
+expected_failure fragment is the assertion message that fires if a fix overcorrects". The
+RED gate refused, correctly, because a test of kept behaviour passes on the unchanged tree by
+definition. The protocol had no way to say "this must pass before AND after", so an issue that
+legitimately carries a kept-behaviour acceptance item could not be built, whatever any worker
+did.
+
+**(b) The static-gate hand-back overwrote the first run's record.** The run's transcripts hold
+one `agent-test_author.json`: 473 s, 23 turns, `attempts=1`, the second run's. The stage-timings
+file has two `test_author` rows, and the first says `seconds=2687.134 turns=41
+cost_usd=4.657 over_budget=true`, against a 2025-second wall for the role. Nothing in the row
+says how, and the record that would have is gone; the streamed log survived only because the
+provider opens it for append, so it holds three `--- attempt N ---` headers, two of them
+"attempt 1". Reading those headers answers the question the row could not: **the first
+`test_author` was two CLI processes.** Attempt 1 ran 717.8 s and 14 turns, then the CLI
+returned `is_error: true`, `terminal_reason: api_error`, `result: "API Error: stream closed
+before completion"` with rc=1; the provider classified that as transient (D-031) and
+relaunched. Attempt 2 started at 04:06:04, ran 1964.2 s and 27 turns, wrote the test file and
+the spec, and returned. 717.8 + backoff + 1964.2 = 2687 s. `wall_seconds` is measured across
+the whole stage, the per-process wall is per process, and neither attempt hung or timed out;
+`hang=true` would have been wrong, `attempts=2` would have been right, and the record would
+have said `attempts=2` had it not been overwritten. The timing row did not carry `attempts`
+at all, so even the surviving evidence said nothing.
+
+**Decision.** A checkpoint declares its kind, and every run of a stage keeps its own files.
+
+- **`test-spec.json` version 2.1.** Each checkpoint carries `kind: "red" | "guard"`; absent
+  means `red`, so a 2.0 spec reads exactly as before and a 2.1 spec with only red
+  checkpoints has the identical outcome. A `red` checkpoint keeps today's semantics to the
+  letter. A `guard` checkpoint has no `expected_failure` (one that declares it is refused as
+  malformed, `guard checkpoint must not declare expected_failure`) and must exit 0 at RED and
+  at every GREEN: `prove_guard` refuses `guard failed on the unchanged tree` at RED and
+  `guard broken by the implementation` at GREEN and final GREEN, through the same `refuse`
+  path D-056 built, so `red-proof-failure.json` / `green-proof-failure.json` carry the argv,
+  cwd, rc, seconds, output tail and now `checkpoint_kind`. At least one checkpoint must be
+  red (`a spec of only guards proves no change`), every AC still has exactly one checkpoint,
+  and a `guard` in a 2.0 spec is refused (`guard checkpoints require test-spec version
+  2.1`). The proof stays version 2.0: a kind-less checkpoint is a red one to every reader
+  (`checkpoint_kind`), the proof carries `guards=N`, the `RED_PROVED`/`GREEN_PROVED` lines
+  end `guards=N`, a guard's GREEN result says `kind: guard`, and the test plan carries
+  `kind` for every checkpoint that has one and omits `expected_failure` for a guard
+  (`PLAN_KEYS`, the same tuple and the same "leave out what the checkpoint lacks" rule in
+  `factory_proof.plan_from` and `factory_evidence.plan_from_proof`, so a pre-guard proof's
+  `test_plan_sha256` still reconstructs).
+- **The evidence bundle judges a guard as a guard.** `validate_checkpoint` accepts a guard
+  only with `red_exit == 0` and no `expected_failure` and a red checkpoint exactly as before;
+  a proof of only guards is refused before any replay; `replay_red` and `replay_green` route
+  a guard through `validate_guard_result` (exit 0 at both, `independent RED replay: guard
+  failed on the unchanged tree` / `independent GREEN replay: guard failed at the head`), and
+  the bundle counts `guards` beside `criteria`. The kernel's readers follow: the holdout's
+  `proof_summary.red_results[]` carries `kind`, shows a guard with `red_exit: 0`,
+  `expected_failure: null`, `matched: null` and its passing tail, and refuses a guard that
+  recorded a failing exit or an expected failure; the re-head reconstructs its spec through
+  `rehead_spec_from`, which carries `kind` and omits a guard's `expected_failure` (a
+  pre-guard proof is reconstructed as the 2.0 spec it came from); the needs-human comment
+  says `kind=guard` where it said `expected_failure=`; and `verify_deferred_in_red` is
+  untouched, because a guard's tail is passing output and a deferred symptom must be shown by
+  a failure.
+- **The contract may say it.** A behaviour may carry `kind: "guard"` (`BEHAVIOR_KINDS`,
+  default `behaviour`, never inserted, so a contract without it hashes as it always did),
+  and the RED gate holds the author to it: a contract guard behaviour with a red checkpoint
+  is refused before anything runs. The reverse is allowed, because a Then that says "kept"
+  needs no contract key. ACs are counted and certified exactly as before; the contract
+  certifier's question and the holdout prompt each gain one sentence saying a guard is
+  verified kept behaviour, not an unverified or invented requirement.
+- **The prompts state the rule.** `test-author.md` asks for version 2.1, defines both kinds,
+  and says: an AC of kind `guard`, or whose Then says the behaviour is kept, preserved or
+  must stay green, gets a `guard` checkpoint, never a `red` one; at least one must be red.
+  `contract.md` says when a behaviour may carry `"kind": "guard"` and not to use it for the
+  behaviour the issue asks to change.
+- **Every run of a stage keeps its record.** `runtime.stage_record_name` picks
+  `agent-<role>` for the first run of a role in a run directory and `agent-<role>.2`, `.3`,
+  ... for each later one, the first stem with neither a `.json` nor a `.log` on disk; the
+  funnel streams into `<stem>.log` and `_record_agent` / `_record_failed_agent` write
+  `<stem>.json`, so the hand-back's second `test_author` no longer touches the first's
+  files. The worker workflow's upload glob (`transcripts/agent-*.json|log`) already catches
+  every suffix. Each record and each timing row says `record` and `stage_run`; the stage
+  line prints `stage_run=N` after the name when N > 1.
+- **A record says how many processes it took.** `AgentResult.hangs` counts the attempts the
+  provider killed for silence before one returned; `_record_agent` writes `attempts`,
+  `hangs` and `hang` (`hangs > 0`) into the record and the row, and the stage line prints
+  `attempts=N` after the seconds when N > 1 and `hang=true` for a returned stage as it
+  already did for a failed one. Run 34008561672's first `test_author` would now print
+  `FACTORY_STAGE kind=agent name=test_author seconds=2687.134 attempts=2 turns=41 ...` and
+  its record would survive as `agent-test_author.json` beside the hand-back's
+  `agent-test_author.2.json`.
+
+Pinned by `tests/factory/test_factory_guard_checkpoints.py`: a 2.0 spec is accepted and reads
+as red; a 2.1 red-only spec has the same outcome as 2.0; a guard beside a red is accepted
+and counted; a spec of only guards, a guard with `expected_failure`, a red without one, a
+guard in a 2.0 spec, an unknown kind, an unknown version, a contract guard behaviour with a
+red checkpoint, and a duplicate AC are each refused by name; a guard that passes on the
+unchanged tree is proved at RED with `GUARD_CHECKPOINT`, one that fails is refused with the
+D-056 evidence and `checkpoint_kind`, one that passes at GREEN is proved, one broken by the
+implementation is refused at final GREEN with its record, a launch failure is refused, a red
+checkpoint keeps its semantics; `red` then `green` on a real repository with one red and one
+guard print `guards=1`, write a 2.0 proof with `guards`, a plan whose digest both programs
+reconstruct, GREEN results labelled per kind, and a proof the evidence bundle accepts
+checkpoint by checkpoint; the bundle's `validate_checkpoint`, only-guards refusal, guard
+replay verdicts, replay routing and plan rule; the contract kind is accepted, an unknown one
+refused, no default inserted, the keyed spelling carries it; the holdout summary, the re-head
+spec (both shapes and its call site), the comment evidence; and the prompt sentences and
+rules text. By `tests/factory/test_factory_stage_runs.py`: the stem for the first, second and
+third run and a log-only first run; two runs through the funnel write both records and logs
+with the first intact, two rows and two lines with `stage_run`, a failed second run beside a
+returned first; the real static-gate hand-back keeps both runs; a hang then a healthy
+process records `attempts=2`, `hang=true`, `hangs=1` in the record, row and line; a dropped
+stream then a healthy process (run 34008561672's shape) records `attempts=2` and no hang; a
+single-process stage reads as before; the provider's `hangs` count; the stage-line shape; and
+the record helpers with and without a stem. Updated: `test_factory_validation_stage_telemetry.py`
+(the line regex admits `stage_run` and `attempts`). Mutations `guard-failure-at-green-ignored`,
+`guard-only-spec-accepted`, `guard-treated-as-red` and
+`second-attempt-record-overwrites-the-first` are registered in
+`harness/factory_mutations/defects.json`, both detector files are in the runner's copy list,
+and each was verified by direct injection on the maintainer's Windows host (the copy built
+by `run.py`, one defect injected, the two detector files run).
+
+**Observed and left alone.** The transient retry that made the first `test_author` two
+processes is D-031 working as designed; whether a 717-second attempt that ends in `stream
+closed before completion` should be retried at all, given that the relaunch cost 1964 s and
+$3.58 more, is a budget question this decision only makes visible. The 41 turns and $4.66 of
+that stage are the D-055 effort question. The rehearsal fakes (`harness/rehearsal.py`) still
+build kind-less 2.0 specs and proofs, which is the backward-compatible shape and needs no
+change. The local factory suite runs green on the maintainer's Windows host once
+`FACTORY_WORKDIR` names an absolute path; `kernel.json`'s `work_root` is a runner path.
+
+**Consequences.** An issue that says "this behaviour is kept and tested" can be built: the
+contract can say so, the test author can guard it, and RED proves the guard green instead of
+refusing the build for a test that did what it should. A stage the kernel runs twice leaves
+two records, and a record that outlived its wall says why.

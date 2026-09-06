@@ -157,6 +157,9 @@ COPY_FILES = (
     ".factory/prompts/implement.md",
     "scripts/factory_read_scope_probe.py",
     "tests/factory/test_factory_read_scope_and_draft_deadline.py",
+    "tests/factory/test_factory_guard_checkpoints.py",
+    "tests/factory/test_factory_stage_runs.py",
+    "FACTORY_RULES.md",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
 

@@ -15,6 +15,7 @@ from factory_kernel.attached import round_trip_ok  # noqa: E402
 from factory_shapes import normalise_lists  # noqa: E402
 
 AC = re.compile(r"^AC-[1-9][0-9]*$")
+BEHAVIOR_KINDS = ("behaviour", "guard")
 DEPENDENCY_ECOSYSTEMS = ("python", "javascript")
 DEPENDENCY_FIELDS = ("name", "purpose", "why_existing_insufficient", "maintenance_evidence")
 PACKAGE_NAME = re.compile(r"^[A-Za-z0-9@][A-Za-z0-9._/@\[\]-]*$")
@@ -103,6 +104,12 @@ def validate_contract(c: dict, issue: int | None = None) -> str:
         ids.add(b["id"])
         if any(not isinstance(b[k], str) or not b[k].strip() for k in ("given", "when", "then", "seam")):
             die(f"behavior {b['id']} has an empty field")
+        # A behaviour whose Then pins kept behaviour may say so: `kind: "guard"` tells the test
+        # author (and the RED gate, which holds it to this) that the checkpoint must pass on the
+        # unchanged tree and after the change. Absent means an ordinary behaviour; the key is
+        # never inserted, so a contract that does not use it hashes as it always did (D-058).
+        if "kind" in b and b["kind"] not in BEHAVIOR_KINDS:
+            die(f"behavior {b['id']} kind must be one of {list(BEHAVIOR_KINDS)}")
     for key in ("invariants", "out_of_scope", "risks"):
         if not isinstance(c[key], list) or any(not isinstance(x, str) or not x.strip() for x in c[key]): die(f"{key} must be strings")
     validate_dependencies(c.get("dependencies", []))

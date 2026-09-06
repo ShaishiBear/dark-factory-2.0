@@ -282,6 +282,7 @@ class ClaudeCliProvider:
             cache_read_input_tokens=spent.cache_read_input_tokens,
             attempts=attempt,
             transient_errors=tuple(transient_errors),
+            hangs=hangs,
             events_seen=spent.events_seen,
             thinking_tokens=spent.thinking_tokens,
             effort=effort,
