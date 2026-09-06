@@ -20,6 +20,20 @@ from typing import Any, Mapping
 
 from .agents import AgentRequest, AgentResult
 from .canonical import canonical_bytes
+from .carry import (
+    CARRY_IDENTITY_ARTIFACT,
+    CARRY_POLICY_PATHS,
+    CarryMiss,
+    age_minutes as carry_age_minutes,
+    hit_line as carry_hit_line,
+    identity_record as carry_identity_record,
+    issue_digest,
+    miss_line as carry_miss_line,
+    policy_digest,
+    recompiled_mismatches,
+    restore as restore_carry,
+    verify_carry,
+)
 from .config import KernelConfig
 from .credential_env import scoped_environment
 from .github_cli import GitHubClient
@@ -488,108 +502,80 @@ class KernelRuntime:
             issue_context = self._issue_context(issue)
 
             role = "investigate" if self._is_bug(labels) else "plan"
-            self._agent(role, worktree.path, paths, context=issue_context, env=env)
-            # plan.md / investigation.md are read by no deterministic program, only by the
-            # contract worker. A worker that wrote nothing would otherwise pass silently and the
-            # contract would be drawn from the issue alone (D-028).
-            self._require_stage_note(paths.artifacts, role)
-            contract_context = issue_context
-            if role == "investigate":
-                # The red loop is a precondition of the contract: the kernel executes the
-                # proposed repro and refuses to continue unless it fails for the named reason.
-                contract_context = issue_context + "\n\n" + self._observe_repro(
-                    paths.artifacts, worktree.path
-                )
-            self._agent("contract", worktree.path, paths, context=contract_context, env=env)
-            self._exec(
-                [
-                    "python", "scripts/factory_protocol.py", "contract",
-                    "--input", str(paths.artifacts / "task-contract.raw.json"),
-                    "--output", str(paths.artifacts / "task-contract.json"),
-                    "--hash-output", str(paths.artifacts / "task-contract.sha256"),
-                    "--issue", str(issue_number),
-                ],
-                cwd=worktree.path,
-                env=env,
-                credential_scope="none",
-                timeout=120,
-                transcript=paths.transcripts / "contract-gate.log",
-            )
-            self._lease_heartbeat("start", issue_number, "contract", paths, cwd=worktree.path)
-
-            contract_hash = (paths.artifacts / "task-contract.sha256").read_text(
-                encoding="utf-8"
-            ).strip()
-            # The worker used to receive only the hash and had to rediscover the task from
-            # disk; that was the slowest stage of the first canary (D-020). The validated
-            # contract is what the kernel is already holding, so it travels in the prompt. The
-            # hash stays first: it is the binding the deterministic compiler re-verifies.
-            self._agent(
-                "context",
-                worktree.path,
+            skipped_roles = (role, "contract", "context", "architecture")
+            # A retry of the same issue at the same base reuses the upstream work it already
+            # certified: the four model stages below are skipped, and every deterministic
+            # authority over their artifacts is re-run instead of being trusted. A miss for any
+            # reason runs the full build (D-071).
+            if not self._carry_reuse(
                 paths,
-                context=self._worker_brief(
-                    paths, contract_hash=contract_hash, issue_context=issue_context
-                ),
-                env=env,
-            )
-            self._exec(
-                [
-                    "python", "scripts/factory_protocol.py", "context",
-                    "--input", str(paths.artifacts / "context.raw.json"),
-                    "--contract", str(paths.artifacts / "task-contract.json"),
-                    "--output", str(paths.artifacts / "context.json"),
-                ],
-                cwd=worktree.path,
-                env=env,
-                credential_scope="none",
-                timeout=180,
-                transcript=paths.transcripts / "context-gate.log",
-            )
-            self._lease_heartbeat("touch", issue_number, "design-context", paths, cwd=worktree.path)
-
-            self._agent(
-                "architecture",
                 worktree.path,
-                paths,
-                context=self._worker_brief(
-                    paths, contract_hash=contract_hash, issue_context=issue_context,
-                    include_design=True, include_applicable_policy=True,
-                ),
-                env=env,
-            )
-            self._exec(
-                [
-                    "python", "scripts/factory_architecture.py", "compile",
-                    "--policy", ".factory/architecture.json",
-                    "--input", str(paths.artifacts / "architecture-governor.raw.json"),
-                    "--contract", str(paths.artifacts / "task-contract.json"),
-                    "--context", str(paths.artifacts / "context.json"),
-                    "--design", str(paths.artifacts / "design.json"),
-                    "--output", str(paths.artifacts / "architecture-governor.json"),
-                ],
-                cwd=worktree.path,
-                env=env,
-                timeout=120,
-                transcript=paths.transcripts / "architecture-gate.log",
-            )
-            governor = self._read_json(paths.artifacts / "architecture-governor.json")
-            if governor.get("decision") != "proceed":
-                required = governor.get("required_changes")
-                details = "; ".join(required) if isinstance(required, list) else ""
-                raise NeedsHuman(
-                    f"architecture governor returned {governor.get('decision')}: {details}"
+                env,
+                issue=issue,
+                issue_number=issue_number,
+                base_sha=base_sha,
+                skipped_roles=skipped_roles,
+            ):
+                self._agent(role, worktree.path, paths, context=issue_context, env=env)
+                # plan.md / investigation.md are read by no deterministic program, only by the
+                # contract worker. A worker that wrote nothing would otherwise pass silently and
+                # the contract would be drawn from the issue alone (D-028).
+                self._require_stage_note(paths.artifacts, role)
+                contract_context = issue_context
+                if role == "investigate":
+                    # The red loop is a precondition of the contract: the kernel executes the
+                    # proposed repro and refuses to continue unless it fails for the named reason.
+                    contract_context = issue_context + "\n\n" + self._observe_repro(
+                        paths.artifacts, worktree.path
+                    )
+                self._agent("contract", worktree.path, paths, context=contract_context, env=env)
+                self._gate_contract(paths, worktree.path, env, issue_number)
+                self._lease_heartbeat("start", issue_number, "contract", paths, cwd=worktree.path)
+
+                contract_hash = self._contract_hash(paths)
+                # The worker used to receive only the hash and had to rediscover the task from
+                # disk; that was the slowest stage of the first canary (D-020). The validated
+                # contract is what the kernel is already holding, so it travels in the prompt.
+                # The hash stays first: it is the binding the deterministic compiler re-verifies.
+                self._agent(
+                    "context",
+                    worktree.path,
+                    paths,
+                    context=self._worker_brief(
+                        paths, contract_hash=contract_hash, issue_context=issue_context
+                    ),
+                    env=env,
                 )
-            self._exec(
-                [
-                    "python", "scripts/factory_architecture.py", "scope",
-                    "--governor", str(paths.artifacts / "architecture-governor.json"),
-                    "--action", "implement",
-                ],
-                cwd=worktree.path,
-                env=env,
-                timeout=60,
-            )
+                self._gate_context(paths, worktree.path, env)
+                self._lease_heartbeat(
+                    "touch", issue_number, "design-context", paths, cwd=worktree.path
+                )
+
+                self._agent(
+                    "architecture",
+                    worktree.path,
+                    paths,
+                    context=self._worker_brief(
+                        paths, contract_hash=contract_hash, issue_context=issue_context,
+                        include_design=True, include_applicable_policy=True,
+                    ),
+                    env=env,
+                )
+                self._gate_architecture(paths, worktree.path, env)
+                self._require_governor_proceed(paths)
+                self._gate_architecture_scope(paths, worktree.path, env)
+                # Upstream is certified: everything above has passed its deterministic gate.
+                # The carry is written here and nowhere else, and never before this point.
+                self._carry_write(
+                    paths,
+                    worktree.path,
+                    env,
+                    issue=issue,
+                    issue_number=issue_number,
+                    base_sha=base_sha,
+                    run_id=run_id,
+                )
+            contract_hash = self._contract_hash(paths)
 
             # A fresh model process authors acceptance checkpoints; deterministic RED is authority.
             test_author_context = self._worker_brief(
@@ -987,6 +973,313 @@ class KernelRuntime:
             "re-runs the whole RED gate from scratch and will refuse again if the failure is "
             "still for the wrong reason. This is the only hand-back."
         )
+
+    # ---------- the certified upstream: its deterministic authorities, and its carry ----------
+    #
+    # Every authority below runs on both paths through `build_issue`: the fresh path, where a
+    # model has just written the artifact, and the carry path, where the artifact was restored
+    # from a previous build of the same issue at the same base. They are the reason a restored
+    # artifact can be trusted, so there is exactly one copy of each call and both paths make it
+    # (D-071).
+
+    CARRY_NOTE_FILE = "carry-note.json"
+
+    def _gate_contract(
+        self, paths: RunPaths, cwd: Path, env: Mapping[str, str], issue_number: int,
+        *, prefix: str = "",
+    ) -> None:
+        self._exec(
+            [
+                "python", "scripts/factory_protocol.py", "contract",
+                "--input", str(paths.artifacts / "task-contract.raw.json"),
+                "--output", str(paths.artifacts / "task-contract.json"),
+                "--hash-output", str(paths.artifacts / "task-contract.sha256"),
+                "--issue", str(issue_number),
+            ],
+            cwd=cwd,
+            env=env,
+            credential_scope="none",
+            timeout=120,
+            transcript=paths.transcripts / f"{prefix}contract-gate.log",
+        )
+
+    def _contract_hash(self, paths: RunPaths) -> str:
+        return (paths.artifacts / "task-contract.sha256").read_text(encoding="utf-8").strip()
+
+    def _gate_context(
+        self, paths: RunPaths, cwd: Path, env: Mapping[str, str], *, prefix: str = ""
+    ) -> None:
+        """The context/design compiler, which also compiles the ticket and the frontier from the
+        kernel's fresh `issue-frontier.json` snapshot."""
+        self._exec(
+            [
+                "python", "scripts/factory_protocol.py", "context",
+                "--input", str(paths.artifacts / "context.raw.json"),
+                "--contract", str(paths.artifacts / "task-contract.json"),
+                "--output", str(paths.artifacts / "context.json"),
+            ],
+            cwd=cwd,
+            env=env,
+            credential_scope="none",
+            timeout=180,
+            transcript=paths.transcripts / f"{prefix}context-gate.log",
+        )
+
+    def _gate_architecture(
+        self, paths: RunPaths, cwd: Path, env: Mapping[str, str], *, prefix: str = ""
+    ) -> None:
+        self._exec(
+            [
+                "python", "scripts/factory_architecture.py", "compile",
+                "--policy", ".factory/architecture.json",
+                "--input", str(paths.artifacts / "architecture-governor.raw.json"),
+                "--contract", str(paths.artifacts / "task-contract.json"),
+                "--context", str(paths.artifacts / "context.json"),
+                "--design", str(paths.artifacts / "design.json"),
+                "--output", str(paths.artifacts / "architecture-governor.json"),
+            ],
+            cwd=cwd,
+            env=env,
+            timeout=120,
+            transcript=paths.transcripts / f"{prefix}architecture-gate.log",
+        )
+
+    def _require_governor_proceed(self, paths: RunPaths) -> None:
+        governor = self._read_json(paths.artifacts / "architecture-governor.json")
+        if governor.get("decision") != "proceed":
+            required = governor.get("required_changes")
+            details = "; ".join(required) if isinstance(required, list) else ""
+            raise NeedsHuman(
+                f"architecture governor returned {governor.get('decision')}: {details}"
+            )
+
+    def _gate_architecture_scope(
+        self, paths: RunPaths, cwd: Path, env: Mapping[str, str]
+    ) -> None:
+        self._exec(
+            [
+                "python", "scripts/factory_architecture.py", "scope",
+                "--governor", str(paths.artifacts / "architecture-governor.json"),
+                "--action", "implement",
+            ],
+            cwd=cwd,
+            env=env,
+            timeout=60,
+        )
+
+    def _carry_kernel_commit(self) -> str:
+        """The commit of the kernel running this build: its own checkout's HEAD."""
+        return self._git("rev-parse", "HEAD")
+
+    def _carry_policy_sha256(self, commit: str) -> str:
+        """A digest of everything in the trust root that shapes the carried artifacts.
+
+        `git ls-tree -r <commit>` names a mode, a type, an object id and a path per file, so any
+        edit to any prompt, gate, policy or kernel module moves the digest and the carry is
+        refused. This is deliberately broader than it needs to be: a carry that is wrongly
+        missed costs one build's upstream, a carry that is wrongly hit costs correctness.
+        """
+        return policy_digest(self._git("ls-tree", "-r", commit, "--", *CARRY_POLICY_PATHS))
+
+    def _carry_load(
+        self, paths: RunPaths, cwd: Path, env: Mapping[str, str], *, issue_number: int
+    ) -> Mapping[str, Any]:
+        """Read this issue's carry note. Absence is the ordinary first-build case, not an error."""
+        note = paths.root / self.CARRY_NOTE_FILE
+        note.unlink(missing_ok=True)
+        try:
+            self._exec(
+                [
+                    "python", "scripts/factory_provenance.py", "carry-read",
+                    "--issue", str(issue_number),
+                    "--output", str(note),
+                ],
+                cwd=cwd,
+                env=env,
+                credential_scope="github",
+                timeout=240,
+                transcript=paths.transcripts / "carry-read.log",
+            )
+        except Exception as exc:
+            raise CarryMiss("read_failed", f"{type(exc).__name__}: {exc}") from exc
+        if not note.is_file():
+            raise CarryMiss("absent", f"no carry is stored for issue #{issue_number}")
+        try:
+            return self._read_json(note)
+        except RuntimeError as exc:
+            raise CarryMiss("malformed", str(exc)) from exc
+
+    @staticmethod
+    def _carry_discard(paths: RunPaths, restored: tuple[str, ...]) -> None:
+        """Leave the artifacts directory as a fresh build would find it."""
+        for rel in restored:
+            (paths.artifacts / rel).unlink(missing_ok=True)
+        (paths.artifacts / CARRY_IDENTITY_ARTIFACT).unlink(missing_ok=True)
+
+    def _carry_reuse(
+        self,
+        paths: RunPaths,
+        cwd: Path,
+        env: Mapping[str, str],
+        *,
+        issue: Mapping[str, Any],
+        issue_number: int,
+        base_sha: str,
+        skipped_roles: tuple[str, ...],
+    ) -> bool:
+        """Reuse a previous build's certified upstream, or say in one line why it was not.
+
+        Only the four model stages are ever skipped. On a hit the carried artifacts are written
+        into this run's artifacts directory and every deterministic authority is re-run over
+        them, in the order a fresh build runs them; a refusal from any of them, or a compiled
+        artifact the gates do not reproduce byte for byte, discards the carry and returns False
+        so the caller runs the full build. Nothing here can fail a build: every failure path
+        ends in a miss.
+        """
+        started = time.time()
+        restored: tuple[str, ...] = ()
+        carry: Mapping[str, Any] | None = None
+        reason = ""
+        detail = ""
+        try:
+            carry = self._carry_load(paths, cwd, env, issue_number=issue_number)
+            kernel_commit = self._carry_kernel_commit()
+            verify_carry(
+                carry,
+                expected_issue=issue_number,
+                expected_base_sha=base_sha,
+                expected_issue_sha256=issue_digest(issue),
+                kernel_commit=kernel_commit,
+                expected_policy_sha256=self._carry_policy_sha256(kernel_commit),
+                is_ancestor=self._is_ancestor,
+            )
+            try:
+                restored = restore_carry(carry, paths.artifacts)
+            except (OSError, ValueError) as exc:
+                raise CarryMiss("restore_failed", str(exc)) from exc
+            try:
+                self._gate_contract(paths, cwd, env, issue_number, prefix="carry-")
+                self._lease_heartbeat("start", issue_number, "contract", paths, cwd=cwd)
+                self._gate_context(paths, cwd, env, prefix="carry-")
+                self._lease_heartbeat("touch", issue_number, "design-context", paths, cwd=cwd)
+                self._gate_architecture(paths, cwd, env, prefix="carry-")
+                self._require_governor_proceed(paths)
+                self._gate_architecture_scope(paths, cwd, env)
+            except (ToolRefused, NeedsHuman) as exc:
+                raise CarryMiss("gate_refused", str(exc)) from exc
+            drift = recompiled_mismatches(carry, paths.artifacts)
+            if drift:
+                raise CarryMiss(
+                    "recompiled_mismatch",
+                    "the gates did not reproduce " + ", ".join(drift),
+                )
+        except CarryMiss as exc:
+            reason, detail = exc.reason, exc.detail
+        except FactoryStopped:
+            raise
+        except Exception as exc:
+            reason, detail = "read_failed", f"{type(exc).__name__}: {exc}"
+        if reason:
+            self._carry_discard(paths, restored)
+            print(carry_miss_line(issue=issue_number, reason=reason), flush=True)
+            if detail and detail != reason:
+                print(
+                    f"FACTORY_CARRY_MISS_DETAIL issue=#{issue_number} {scrub(detail)[:800]}",
+                    flush=True,
+                )
+            record_stage_timing(
+                paths.transcripts, kind="exec", name="carry",
+                started=started, ended=time.time(), rc=0, carry="miss", carry_reason=reason,
+            )
+            return False
+        assert carry is not None
+        age = carry_age_minutes(str(carry.get("written_at") or ""), _utc_now())
+        self._write_json(
+            paths.artifacts / CARRY_IDENTITY_ARTIFACT,
+            carry_identity_record(
+                carry, reused_at=_utc_now(), age_minutes=age, skipped_roles=skipped_roles
+            ),
+        )
+        print(
+            carry_hit_line(
+                issue=issue_number, base_sha=base_sha,
+                skipped_roles=skipped_roles, age_minutes=age,
+            ),
+            flush=True,
+        )
+        record_stage_timing(
+            paths.transcripts, kind="exec", name="carry",
+            started=started, ended=time.time(), rc=0, carry="hit",
+            carry_skipped=",".join(skipped_roles), carry_age_minutes=age,
+        )
+        return True
+
+    def _carry_write(
+        self,
+        paths: RunPaths,
+        cwd: Path,
+        env: Mapping[str, str],
+        *,
+        issue: Mapping[str, Any],
+        issue_number: int,
+        base_sha: str,
+        run_id: str,
+    ) -> None:
+        """Store this build's certified upstream for the next build of the same issue.
+
+        Called from exactly one place: after the architecture gate has returned `proceed` and
+        before the test author exists. A carry that cannot be written is not a build failure --
+        the next build simply misses and derives its own upstream.
+        """
+        try:
+            kernel_commit = self._carry_kernel_commit()
+            self._exec(
+                [
+                    "python", "scripts/factory_provenance.py", "carry-write",
+                    "--issue", str(issue_number),
+                    "--artifacts", str(paths.artifacts),
+                    "--base", base_sha,
+                    "--issue-sha256", issue_digest(issue),
+                    "--kernel-commit", kernel_commit,
+                    "--policy-sha256", self._carry_policy_sha256(kernel_commit),
+                    "--run-id", run_id,
+                ],
+                cwd=cwd,
+                env=env,
+                credential_scope="github",
+                timeout=300,
+                transcript=paths.transcripts / "carry-write.log",
+            )
+        except FactoryStopped:
+            raise
+        except Exception as exc:
+            print(
+                f"FACTORY_CARRY_WRITE_FAILED issue=#{issue_number} "
+                f"reason={type(exc).__name__}",
+                flush=True,
+            )
+
+    def _carry_drop(
+        self, paths: RunPaths, cwd: Path, env: Mapping[str, str], *, issue_number: int
+    ) -> None:
+        """Forget an issue's carry. The merge that closes the issue is the event that calls it."""
+        try:
+            self._exec(
+                [
+                    "python", "scripts/factory_provenance.py", "carry-drop",
+                    "--issue", str(issue_number),
+                ],
+                cwd=cwd,
+                env=env,
+                credential_scope="github",
+                timeout=240,
+                transcript=paths.transcripts / "carry-drop.log",
+            )
+        except Exception as exc:
+            print(
+                f"FACTORY_CARRY_DROP_FAILED issue=#{issue_number} reason={type(exc).__name__}",
+                flush=True,
+            )
 
     def _release_stopped_build(
         self,
@@ -1557,6 +1850,10 @@ class KernelRuntime:
                 raise PostMergeUnverified(
                     f"post-merge verification failed for #{pr_number}: {exc}"
                 ) from exc
+            # The merge closes the issue, so its carry can never be reused again: a build of a
+            # closed issue is not a build (D-071).
+            if isinstance(linked_issue, int):
+                self._carry_drop(paths, worktree.path, env, issue_number=linked_issue)
             print(f"FACTORY_MERGED_VERIFIED pr=#{pr_number} evidenced_head={head}")
             return paths.artifacts / "merge-verification.json"
         except PostMergeUnverified as exc:

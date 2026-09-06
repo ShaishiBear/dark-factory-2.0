@@ -3292,3 +3292,124 @@ Mutations `route-probe-made-conditional`, `answered-probes-still-unconditional-o
 `regression-workflow-missing-the-probes` in `harness/factory_mutations/defects.json`, each
 verified by direct injection on the maintainer's Windows host (the copy built by `run.py`, one
 defect injected, the detector run: green baseline, red after each).
+
+---
+
+## D-071 · A retry reuses the upstream work it already certified, because fourteen builds of one issue re-derived it for $64
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Evidence:** the archived trajectory corpus
+(44 runs, `stage-timings.jsonl` per run): $106.16 of model spend across 161 stages in two days,
+of which **investigate $21.63 + context $21.26 + contract $10.73 + architecture $10.10 ≈ $64**
+was spent re-deriving the same upstream across fourteen builds of issue #103.
+
+Every one of those fourteen builds ran `investigate`, `contract`, `context` and `architecture`
+from nothing after a *downstream* stage failed, on an **unchanged issue at an unchanged base**,
+with an unchanged kernel. The upstream those stages produce had already been written and had
+already passed its deterministic gate each time. Sixty percent of the factory's two-day spend
+bought the same four artifacts fourteen times.
+
+**Decision.** The kernel keeps a **carry**: the certified upstream of a build, bound to the exact
+conditions that make it valid, reused by the next build of the same issue.
+
+**Where it lives.** `refs/notes/dark-factory-carry`, a sibling of the provenance ref, keyed by a
+per-issue blob (`dark-factory-carry:issue:<N>`) that `git hash-object -w` writes on demand. This
+was chosen over a new ref namespace because it needs *no new machinery*: `git notes add -f`,
+`show`, `remove`, `fetch` and `push` are already how the factory attaches a JSON payload to a Git
+object, and `scripts/factory_provenance.py` already holds the authenticated fetch, the
+kernel-identity `notes add` (D-037) and the push. The three new subcommands (`carry-write`,
+`carry-read`, `carry-drop`) live in that program and reuse every one of them; a second program
+would have duplicated all of it. `git notes add -f` also gives replace-in-place for free, so an
+issue has exactly one carry, always the newest.
+
+**What it records.** The issue number; the `base_sha` the build was cut from; `issue_sha256`, a
+canonical hash of the issue's **number, title and body** — not of the whole `issue.json`, because
+every retry comments on its issue and claims it, which moves `updatedAt` and `labels`, and a
+whole-snapshot hash would mean no carry ever matched its own issue; the kernel commit that wrote
+it; `policy_sha256`, a digest of `git ls-tree -r` over the whole trust root (`.factory`,
+`.github`, `factory_kernel`, `harness`, `scripts`, `tests/factory` and the three governance
+files); the run id; and the text and sha256 of each carried artifact — `issue.json`,
+`issue-frontier.json`, `ticket.json`, `frontier.json`, `task-contract{.raw,}.json`,
+`context{.raw,.enriched,}.json`, `design{.raw,}.json`, `architecture-governor{.raw,}.json`, plus
+`repro-observed.json` and `repro-deferred.json` for a bug. `factory-lease.json` is run state and
+is never carried.
+
+**When it is written.** In exactly one place: after the architecture gate has returned `proceed`
+and its `scope` has run, and before the `test_author` stage exists. Everything in it has passed
+its deterministic authority by then; nothing uncertified can enter it. A build that dies at the
+context gate writes nothing.
+
+**When it is reused.** At the start of `build_issue`, and only when **every** condition holds,
+each checked separately and each with its own refusal reason printed: `absent`, `read_failed`,
+`malformed`, `different_issue`, `base_moved`, `issue_changed`, `kernel_not_ancestor`,
+`policy_changed`, `artifact_hash_mismatch`, `restore_failed`, `gate_refused`,
+`recompiled_mismatch`. The kernel-commit rule is ancestry — a carry from a kernel that is not an
+ancestor of the kernel running now is refused — and it is backed by the far stricter
+`policy_sha256` equality, so a kernel that changed a prompt, a gate or any `.factory` policy at
+all re-derives. When in doubt, miss: a wrongly missed carry costs one build's upstream, a wrongly
+hit one costs correctness.
+
+**Not one deterministic authority is skipped.** On a hit the artifacts are restored into the run's
+artifacts directory and `factory_protocol.py contract`, `factory_protocol.py context` (which
+compiles the ticket, the frontier and the design), `factory_architecture.py compile`, the governor
+decision check and `factory_architecture.py scope` all run over them, in the order and with the
+arguments a fresh build uses — `build_issue` and `_carry_reuse` call the same five helper methods,
+and the tests hold both paths to that. They are seconds of CPU and they are the reason a restored
+artifact can be trusted. Two further rules follow from it: `issue.json` and `issue-frontier.json`
+are **never** restored, because the kernel has just snapshotted the issue and every `Blocked by:`
+issue with its own GitHub authority and the ticket compiler must judge the frontier GitHub reports
+*now*; and every compiled artifact the gates rewrite is compared byte for byte against the carried
+copy afterwards (`recompiled_mismatch`), because at an identical base with an identical policy the
+compilers are functions of their inputs and a difference means something moved that nothing else
+caught. Any refusal, any drift, discards the carry, wipes the restored files and runs the full
+build. Nothing in the carry path can fail a build: every failure is a miss.
+
+**What is reused, exactly.** The four model stages `investigate`/`plan`, `contract`, `context`,
+`architecture`, and nothing else. **Nothing downstream of the architecture gate is ever carried**:
+the test author, RED, the implementer, GREEN, both review axes, conformance, the final proof and
+the quick gate run in full on every build, from the tree, as they always have.
+
+**Nothing about validation changes.** The certifiers and the holdouts run at validation, judge the
+artifacts in the PR, and are shown exactly what they were shown before; the evidence spine's
+required claims are still satisfied by real artifacts with real hashes. The one visible difference
+is a record: a build that reused a carry writes `carry.json` into its artifacts, `build_pack`
+carries it as the pack's optional `carry` block naming the run the upstream came from, `verify_pack`
+holds that block to the pack's own issue and base, and the spine binds the pack's sha256 into the
+final evidence. RED/GREEN, the guard rules (D-064) and the commit file union are untouched.
+
+**Invalidation.** The issue is edited (`issue_sha256`), the base moves (`base_sha`), the kernel or
+any prompt or `.factory` policy changes (`policy_sha256`, kernel ancestry), an artifact fails its
+hash, a restored gate refuses, or a gate does not reproduce its artifact. And the merge that closes
+an issue drops its carry (`carry-drop` from `validate_pr`, after post-merge verification and before
+`FACTORY_MERGED_VERIFIED`): a build of a closed issue is not a build.
+
+**Out of a worker's reach.** The carry is written and read by the kernel alone, through a
+trust-root program run with GitHub scope. A worker has neither Bash nor Git, so it could never run
+`git notes`; and because the read boundary is the deny list and `.git` sits inside the working
+directory, `.git` and `.git/**` are now denied to every tool-bearing role
+(`worker_policy.TRUST_ROOT_DENY_PATHS`), which closes the object database — and with it both notes
+refs — to Read, Grep and Glob as well.
+
+**Visibility.** `FACTORY_CARRY_HIT issue=#N base=<sha7> stages=<roles> age=<minutes>` or
+`FACTORY_CARRY_MISS issue=#N reason=<reason>` on every build, a `FACTORY_STAGE kind=exec
+name=carry seconds=… outcome=ok` row carrying `carry=hit|miss` in `stage-timings.jsonl`, so the
+saving is read in the same telemetry as the spend, and `carry.json` in the run's artifacts.
+
+**Expected saving.** One retry of an issue at an unchanged base, from the measured corpus:
+investigate/plan + contract + context + architecture. Over the fourteen builds of #103 those four
+roles cost $63.72 of $106.16; thirteen of the fourteen were retries, so roughly **$4.55 of model
+spend and four model stages per retry**, plus their wall time (the four stages measured 888.6 s,
+280.3 s, 697.0 s and 262.4 s in run 33987381035 — about 35 minutes).
+
+**Consequences.** Pinned by `tests/factory/test_factory_carry.py`: the carry is written after the
+architecture gate and never before and from one place only; a hit skips exactly the model stages
+and still runs every deterministic gate; each invalidation condition misses by its own reason; a
+tampered artifact refuses at verify and again at restore; a refused restored gate, a vetoing
+governor and an unreproduced artifact each fall back to a full build with the artifacts wiped; the
+marker lines and the telemetry row; the kernel's fresh issue snapshot survives a hit; the pack
+records the carry and may not claim another issue's or another base's upstream; the notes ref
+round-trips through a real repository under the kernel identity and is keyed by issue number; and
+no tool-bearing role can reach `.git`. Mutations `carry-ignores-a-moved-base`,
+`carry-ignores-an-edited-issue`, `carry-skips-the-architecture-gate`,
+`carry-artifact-hashes-unverified` and `carry-readable-by-a-worker` in
+`harness/factory_mutations/defects.json`, each verified by direct injection on the maintainer's
+Windows host.

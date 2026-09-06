@@ -12,6 +12,7 @@ import re
 from typing import Callable, Mapping
 
 from .canonical import canonical_bytes, sha256_value
+from .carry import CARRY_IDENTITY_ARTIFACT
 
 NOTE_REF = "refs/notes/dark-factory-provenance"
 GIT_OID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -100,7 +101,7 @@ def build_pack(
     if design.get("contract_sha256") != contract_hash or design.get("context_sha256") != records["context"]["sha256"]:
         raise ValueError("builder provenance design is not bound to contract/context")
 
-    return {
+    pack: dict = {
         "version": "1.0",
         "issue": issue,
         "base_sha": base,
@@ -108,6 +109,14 @@ def build_pack(
         "note_ref": NOTE_REF,
         "artifacts": records,
     }
+    # A build that reused a previous build's certified upstream says so here, and names the run
+    # it came from. The pack's own sha256 therefore covers it, and the evidence spine binds that
+    # sha256 into the final evidence, so "these artifacts came from a carry" is a recorded fact
+    # rather than a line in a log. Absent for a build that derived its own upstream (D-071).
+    carry = artifacts / CARRY_IDENTITY_ARTIFACT
+    if carry.is_file():
+        pack["carry"] = _json_object(carry)
+    return pack
 
 
 def pack_identity(value: object) -> dict:
@@ -190,6 +199,16 @@ def verify_pack(
     design = artifacts["design"]["content"]
     if design.get("contract_sha256") != contract_hash or design.get("context_sha256") != artifacts["context"]["sha256"]:
         raise ValueError("builder provenance design binding mismatch")
+    # A carry record, when the build reused one, is held to the pack's own issue and base: a
+    # pack may not claim its upstream came from another issue's or another base's work (D-071).
+    carry = value.get("carry")
+    if carry is not None:
+        if not isinstance(carry, dict):
+            raise ValueError("builder provenance carry record is invalid")
+        if carry.get("issue") != issue:
+            raise ValueError("builder provenance carry belongs to a different issue")
+        if carry.get("base_sha") != base:
+            raise ValueError("builder provenance carry was built from a different base")
     return value
 
 

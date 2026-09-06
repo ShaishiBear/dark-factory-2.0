@@ -86,8 +86,11 @@ class NoteIdentityTests(unittest.TestCase):
         expected = f"{KERNEL_COMMIT_NAME} <{KERNEL_COMMIT_EMAIL}>"
         self.assertEqual(author, f"{expected}|{expected}")
 
-    def test_the_provenance_script_spells_the_notes_write_with_the_identity(self) -> None:
-        """The script's notes write is the exact argv the test above proves; reads stay bare."""
+    def test_the_provenance_script_spells_every_notes_write_with_the_identity(self) -> None:
+        """Every notes write the script makes is the exact argv the test above proves; reads
+        stay bare. The script carries two payloads on two refs -- the builder provenance pack
+        and the per-issue carry (D-071) -- and `notes remove` creates a commit exactly as
+        `notes add` does, so all three writes are held to the same rule."""
         tree = ast.parse(PROVENANCE.read_text(encoding="utf-8"))
         writes, reads = [], []
         for node in ast.walk(tree):
@@ -98,12 +101,17 @@ class NoteIdentityTests(unittest.TestCase):
                 continue
             literals = [e.value for e in node.elts if isinstance(e, ast.Constant)]
             starred = [e.value.id for e in node.elts if isinstance(e, ast.Starred) and isinstance(e.value, ast.Name)]
-            if "notes" in literals and "add" in literals:
+            if "notes" in literals and ("add" in literals or "remove" in literals):
                 writes.append(starred)
             elif "notes" in literals and "show" in literals:
                 reads.append(starred)
-        self.assertEqual(writes, [["KERNEL_COMMIT_ARGS"]], "the notes write must splice KERNEL_COMMIT_ARGS")
-        self.assertEqual(reads, [[]], "notes reads must not carry an identity")
+        self.assertEqual(len(writes), 3, "provenance publish, carry write, carry drop")
+        for starred in writes:
+            self.assertEqual(starred, ["KERNEL_COMMIT_ARGS"],
+                             "every notes write must splice KERNEL_COMMIT_ARGS")
+        self.assertEqual(len(reads), 2, "provenance show, carry show")
+        for starred in reads:
+            self.assertEqual(starred, [], "notes reads must not carry an identity")
 
 
 class ObjectCreatingCallsCarryIdentityTests(unittest.TestCase):

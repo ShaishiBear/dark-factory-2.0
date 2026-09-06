@@ -1782,6 +1782,41 @@
       "find": "        second = paths.artifacts / RED_FAILURE_ARTIFACT\n        if second.is_file():\n            second.replace(paths.artifacts / RED_FAILURE_ARTIFACT_2)\n        KernelRuntime._write_json(paths.artifacts / RED_FAILURE_ARTIFACT, dict(first))\n",
       "replace": "        second = paths.artifacts / RED_FAILURE_ARTIFACT\n        if not second.is_file():\n            KernelRuntime._write_json(second, dict(first))\n",
       "why": "The hand-back would destroy the evidence it was given: the gate writes red-proof-failure.json on every attempt, so without the rename only the second attempt's record survives and the needs-human comment could not show what the author was actually told the first time - the same class of loss as the overwritten agent-test_author.json of run 34008561672, which left a 2687-second stage with no record (D-058); caught by tests/factory/test_factory_red_handback.py (both attempts survive as red-proof-failure.json and red-proof-failure.2.json with their own reasons and exit codes, and the comment names both) (D-069)."
+    },
+    {
+      "id": "carry-ignores-a-moved-base",
+      "file": "factory_kernel/carry.py",
+      "find": "    if identity[\"base_sha\"] != expected_base_sha:\n",
+      "replace": "    if False:\n",
+      "why": "A carry whose upstream was certified against another commit of main would be restored onto this build's tree, so the compiled context's file hashes, the design's planned files and the governor's decision would all describe a tree that no longer exists; caught by tests/factory/test_factory_carry.py (a moved base is refused by verify_carry, and _carry_reuse misses with reason=base_moved and restores nothing) (D-071)."
+    },
+    {
+      "id": "carry-ignores-an-edited-issue",
+      "file": "factory_kernel/carry.py",
+      "find": "                \"body\": issue.get(\"body\"),\n",
+      "replace": "                \"body\": \"\",\n",
+      "why": "The issue digest is what notices an edit; hashing the title alone means a rewritten body reuses a contract drawn from the old one, and the build implements the issue as it used to read; caught by tests/factory/test_factory_carry.py (the digest moves with the body, and an edited issue misses with reason=issue_changed) (D-071)."
+    },
+    {
+      "id": "carry-skips-the-architecture-gate",
+      "file": "factory_kernel/runtime.py",
+      "find": "                self._gate_architecture(paths, cwd, env, prefix=\"carry-\")\n",
+      "replace": "                pass\n",
+      "why": "A reused build would take the restored architecture-governor.json on trust instead of recompiling it against .factory/architecture.json, the contract, the context and the design, which is the whole reason a restored artifact can be believed; caught by tests/factory/test_factory_carry.py (a hit runs carry-read, contract-gate, context-gate, architecture-gate and architecture-scope in that order) (D-071)."
+    },
+    {
+      "id": "carry-artifact-hashes-unverified",
+      "file": "factory_kernel/carry.py",
+      "find": "        if sha256_bytes(text.encode(\"utf-8\")) != expected:\n",
+      "replace": "        if False:\n",
+      "why": "Anything that could reach the notes ref could then widen the design's planned_files or rewrite the contract, and the build would carry it as certified upstream; caught by tests/factory/test_factory_carry.py (a tampered artifact and a tampered hash are both refused as artifact_hash_mismatch, before anything is restored) (D-071)."
+    },
+    {
+      "id": "carry-readable-by-a-worker",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "    \".git\",\n    \".git/**\",\n",
+      "replace": "",
+      "why": "The read boundary is the deny list and .git sits inside the worktree, so without these patterns a worker's Read, Grep and Glob reach the object database and with it both notes refs -- the carry it must never see or shape, and the provenance pack; caught by tests/factory/test_factory_carry.py (every tool-bearing role denies .git and .git/**, and the CLI receives Read(./.git/**)) (D-071)."
     }
   ]
 }

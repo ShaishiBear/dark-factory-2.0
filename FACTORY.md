@@ -72,8 +72,8 @@ For an accepted issue the kernel creates a dedicated exact-SHA Git worktree and 
 
 ```text
 issue
- ↓
-plan OR investigate
+ ↓ carry lookup: this issue's certified upstream from a previous build at this base, if every binding still holds
+plan OR investigate                     ← skipped on a carry hit
  ↓ bugs: kernel executes the proposed repro (test-runner shape, allowlisted env, unchanged tree); must fail with the named symptom
 raw execution contract
  ↓ deterministic factory_protocol.py
@@ -101,6 +101,8 @@ factory:needs-review
 ```
 
 The acceptance tests recorded in RED are immutable during implementation and repair. The deterministic GREEN authority re-hashes and replays them.
+
+**The carry.** A build that reaches the architecture gate stores its certified upstream — the issue and frontier snapshots, ticket, frontier, contract, context, design and governor artifacts, each with its sha256 — as a Git note on `refs/notes/dark-factory-carry`, keyed by issue number. The next build of the same issue reuses it only if the base has not moved, the issue's title and body have not been edited, the kernel commit that wrote it is an ancestor of the one running now, the trust root still digests identically, and every artifact verifies; otherwise it misses, prints the reason and derives its own. A hit skips the four model stages above and re-runs **every** deterministic authority over the restored artifacts, comparing what the gates recompile byte for byte; any refusal falls back to a full build. Nothing downstream of the architecture gate is carried, a merge drops the carry, and the notes ref is out of a worker's reach. The kernel prints `FACTORY_CARRY_HIT`/`FACTORY_CARRY_MISS` and a `FACTORY_STAGE ... name=carry` row. Fourteen builds of issue #103 re-derived that upstream for about $64 of the corpus's $106.16 (D-071).
 
 ## Validation and merge path
 
