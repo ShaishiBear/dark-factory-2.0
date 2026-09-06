@@ -163,6 +163,8 @@ COPY_FILES = (
     "tests/factory/test_factory_thinking_cap.py",
     "tests/factory/fixtures/contracts/run-34015187797-issue-49-guard-ids.json",
     "tests/factory/test_factory_guard_behavior_ids.py",
+    "scripts/factory_models.py",
+    "tests/factory/test_factory_model_overrides.py",
     "FACTORY_RULES.md",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))

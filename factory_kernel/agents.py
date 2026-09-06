@@ -61,6 +61,10 @@ class AgentRequest:
     role: str
     prompt: str
     cwd: str
+    # An explicit per-request model. The kernel's own requests leave it unset and the provider
+    # resolves the role's model (`provider.model_overrides[role]`, else the architecture
+    # holdout's own model, else the worker model); the preflight probes set it to name the
+    # model under test (D-061).
     model: str | None = None
     # The file boundary of a tool-bearing worker (`worker_policy.path_scope(role)`): what its
     # Read/Glob/Grep may see and its Write/Edit may touch inside `cwd`, rendered by the provider

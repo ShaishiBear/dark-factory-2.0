@@ -112,7 +112,7 @@ class TriageEngine:
         result = self.runtime.provider.run(
             AgentRequest(
                 role="triage", prompt=prompt, cwd=str(self.repo_root),
-                model=self.config.provider.model, environment={},
+                environment={},
                 structured_schema={"type": "object"},
                 allowed_tools=allowed_tools("triage"),
                 max_turns=max_turns("triage"),

@@ -474,6 +474,37 @@ def validate_thinking_cap_overrides(
     return overrides
 
 
+# The model per role, the one lever left on a route that bounds nothing else. Six builds of
+# issue #103 died in `test_author` on z-ai/glm-5.3-flash over OpenRouter's Anthropic-compatible
+# route, which honours neither `--effort` (D-055) nor `MAX_THINKING_TOKENS` (D-059) for it,
+# and that one role reasons 5-10x more per turn there than any other stage does. The kernel
+# had exactly one per-role model (`provider.architecture_model`, for the architecture
+# holdout); `provider.model_overrides` in kernel.json is the general `{role: model_slug}`
+# table, validated here against this policy's roles and applied by the provider as the
+# second step of its resolution: the request's own model, else this table's row, else the
+# architecture holdout's own model, else the worker model. The worker workflow's route probe
+# runs every distinct model the table names (`scripts/factory_models.py --list`) before any
+# stage does (D-061).
+def validate_model_overrides(raw: object, name: str = "provider.model_overrides") -> dict[str, str]:
+    """`{role: model_slug}` from kernel.json, refused unless every role is one this policy
+    knows (`ROLE_MAX_TURNS`) and every slug is a non-empty string. Absent (`None`) is no
+    override."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"kernel {name} must be an object of role to model slug")
+    overrides: dict[str, str] = {}
+    for role, model in raw.items():
+        if not isinstance(role, str) or role not in ROLE_MAX_TURNS:
+            raise ValueError(
+                f"kernel {name} names a role the worker policy does not know: {role!r}"
+            )
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError(f"kernel {name}.{role} must be a non-empty model slug; got {model!r}")
+        overrides[role] = model.strip()
+    return overrides
+
+
 def stage_budget_seconds(role: str) -> int | None:
     """The wall clock a stage is expected to fit in: its turn cap at the per-turn ceiling.
 
