@@ -205,7 +205,7 @@ class CheckpointEnvironmentTests(unittest.TestCase):
         probe = ["python", "-c",
                  "import os; print(sorted(k for k in os.environ if k in ('GH_TOKEN','GITHUB_TOKEN','KEEP_ME')))"]
         with mock.patch.dict(os.environ, {"GH_TOKEN": "a", "GITHUB_TOKEN": "b", "KEEP_ME": "c"}):
-            rc, out = proof.run(probe, ".")
+            rc, out, _seconds, _fault = proof.run(probe, ".")
         self.assertEqual(rc, 0, out)
         self.assertEqual(out.strip(), "['KEEP_ME']")
 

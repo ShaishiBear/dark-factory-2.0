@@ -2048,3 +2048,119 @@ stream's estimate are both recorded and not yet reconciled.
 not. Every stage line now ends `thinking=<n> effort=<level>`, so over-reasoning is visible
 per stage as it happens rather than reconstructed from an event count. The preflight costs
 two one-turn calls more per run.
+
+---
+
+## D-056 · A refused RED names its output, and an operator stop is not a failure, because run 33997386843 kept a verdict and run 33989911383 escalated a button press
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 33997386843 (build of issue #103, the first `test_author` at `medium` after D-055) and 33989911383 (build of issue #49)
+
+Two build endings from the same day, each recorded wrongly in its own way.
+
+**(a) The RED gate refused without saying why.** Run 33997386843's `test_author` returned
+after 1375 s and 33 turns (`over_budget=true`, a separate matter), and then:
+
+```
+FACTORY_STAGE kind=exec name=red-gate seconds=0.448 outcome=refused
+red-gate.log: PROOF_FAIL: AC-1 RED failed for the wrong reason
+```
+
+Four vitest checkpoints, 0.448 s for all of them, so something failed before any test
+executed, and nothing says what. `scripts/factory_proof.py red` ran the checkpoint's argv,
+compared its output with `expected_failure`, and on a mismatch called `die` with the
+verdict alone: the argv, the exit code, the seconds and the output were local variables of
+a loop that had just ended. No artifact was written. The kernel's failure comment carried
+the first 1500 characters of the tool's message, which was that one line. The build ended
+at `factory:needs-human` with nothing a human could diagnose from; whether `bun` was
+missing, `vitest` was not installed in the worktree, the test file did not parse, or the
+author's `expected_failure` was simply not the string vitest prints, could only be found by
+re-running the build. A command that could not be launched at all, or that ran past the
+300-second timeout, was worse: `subprocess.run` raised, the traceback was the log, and the
+argv that produced it was not in the traceback.
+
+**(b) An operator stop was recorded as a build failure.** Run 33989911383 was building #49
+when a stop issue was opened. The kernel re-read the stop between `investigate` and
+`contract`, correctly:
+
+```
+KERNEL_STOP_CHECK_OK
+FACTORY_STAGE kind=agent name=investigate seconds=417.004 turns=6 cost_usd=0.764 outcome=ok
+KERNEL_STOPPED STOPPED: an open issue carries factory:stop
+```
+
+`FactoryStopped` is a `RuntimeError`, `build_issue`'s last handler is `except Exception`,
+and that handler is `_mark_issue_human`: #49 lost `factory:accepted`, gained
+`factory:needs-human`, and was told "Dark Factory stopped this run without merging.
+builder failed closed: STOPPED: an open issue carries factory:stop". The operator who
+pressed the button then had to un-escalate the issue by hand before the factory would look
+at it again. A stop is an operator's action on the whole factory; the issue did nothing.
+
+**Decision.** A proof refusal carries its evidence, and a stop hands the issue back.
+
+- **Every RED and GREEN refusal of a checkpoint says what ran and what it printed.**
+  `factory_proof.run` returns `(rc, output, seconds, fault)`; a command that cannot be
+  started reports `fault='launch'` and one killed at `CHECKPOINT_TIMEOUT_SECONDS` reports
+  `fault='timeout'` (both `rc=None`), and both are refused whatever the output says, as the
+  traceback used to refuse them. `refuse` writes `$ARTIFACTS_DIR/red-proof-failure.json`
+  or `green-proof-failure.json` (`acceptance_id`, `argv`, `cwd`, `rc`, `fault`, `seconds`,
+  `expected_failure`, `reason`, `stage`, `output_tail`) and then dies with the same on
+  stderr: the reason line as before, then argv, cwd, rc, seconds, `expected_failure`, and
+  the last `OUTPUT_TAIL_LINES = 80` lines of combined output capped at
+  `OUTPUT_TAIL_CHARS = 6000`. The verdicts are unchanged: an unexpected pass, a wrong
+  reason, a GREEN exit other than zero refuse exactly as they did. A proved checkpoint
+  records `red_seconds` (RED) or `seconds` (GREEN) beside its exit code and hash, prints
+  `RED_CHECKPOINT`/`GREEN_CHECKPOINT` lines as it goes, and the `RED_PROVED`/`GREEN_PROVED`
+  line ends `seconds=<sum>`.
+- **The kernel quotes the record.** `build_issue`'s two failure handlers pass
+  `_proof_failure_evidence(paths, exc)` to `_mark_issue_human`: for a `ToolRefused` from
+  `factory_proof.py red` or `green` whose record exists, the needs-human comment gains the
+  stage, the checkpoint's argv, cwd, rc, seconds and `expected_failure`, and the record's
+  output tail scrubbed of every secret shape the guard knows and capped at
+  `PROOF_FAILURE_COMMENT_CHARS = 3000`. Any other refusal, and a proof refusal raised before
+  any checkpoint ran (`worktree must be clean`, an invalid spec), adds nothing.
+- **A stop between stages returns the issue to `factory:accepted`.** `build_issue` catches
+  `FactoryStopped` before `NeedsHuman` and `Exception` and calls `_release_stopped_build`:
+  `factory:in-progress` is removed, `factory:accepted` is left (and re-added, so the
+  invariant holds whatever else happened), the lease is finished with stage `stopped` when
+  the build got as far as taking one, and the issue is commented with the stop issue
+  numbers parsed from the stop check's output (`  #120 <title>` lines), the output itself
+  quoted, and, if a PR had been opened, that PR's number with the statement that it is left
+  as it is. No `factory:needs-human`, and no validation-failed marker, so
+  `_next_build_attempt` does not count it. The stop propagates unchanged to the CLI, which
+  still prints `KERNEL_STOPPED` and exits 0. Every stop check in the build path runs inside
+  `_agent`, before the push, so a stopped build leaves no PR today; the docstring says what
+  happens if one ever fires later. Validation, re-head and resume are untouched: a stop
+  during validation still refuses the PR as before.
+
+Pinned by `tests/factory/test_factory_red_evidence_and_stop.py`: a wrong-reason refusal
+carries argv, cwd, rc, seconds and the checkpoint's output on stderr and writes the record;
+a missing command is refused with the launch error as evidence, and is never RED even when
+the error text matches the symptom; an unexpected pass carries the same evidence; a GREEN
+refusal writes `green-proof-failure.json` with its stage; the tail is the last 80 lines
+capped at 6000 characters; a proved checkpoint records its seconds and writes no record;
+`red` and `green` run every checkpoint through the evidence path; the kernel's evidence
+carries rc, argv, cwd, seconds and the tail, lands in the needs-human comment, reads the
+green record for a green refusal, is capped and scrubbed, and is empty for a missing record
+or another tool; both failure handlers hand it over. For the stop: `build_issue` driven to
+its first model stage against a fake GitHub, with the stage raising `FactoryStopped` --
+the issue returns to accepted, gains no needs-human, is commented once naming stop issue
+#120 and quoting the check output, has no validation-failed marker and is still attempt 1,
+pushes nothing, opens no PR, finishes a lease it took and touches none it did not; a
+kill-file stop with no issue number is still not a failure; a `NeedsHuman` and a generic
+exception still escalate exactly as before; the stop handler precedes the failure
+handlers. Updated: `test_factory_lease_authority.py` and
+`test_factory_attached_round_trip.py` unpack `run`'s four values. Mutations
+`proof-refusal-without-output-tail`, `proof-failure-json-not-written`,
+`stop-still-labels-needs-human` and `stop-comment-missing-the-stop-issue` are registered
+in `harness/factory_mutations/defects.json`, the detector file is in the runner's copy
+list, and each was verified by direct injection on the maintainer's Windows host (the copy
+built by `run.py`, one defect injected, the detector file run).
+
+**Observed and left alone.** What actually failed in run 33997386843's RED gate is still
+unknown; the next refusal will say. The 1375-second, 33-turn `test_author` of that run is
+the D-055 question, not this one. A stop during validation, re-head or resume keeps its
+current handling.
+
+**Consequences.** The next refused RED or GREEN gate leaves a record a human can act on
+without re-running the build, and the needs-human comment quotes it. Pressing the stop
+button no longer costs the stopped issue its place in the queue.

@@ -68,6 +68,11 @@ from .worktree import Worktree, create_detached, remove
 
 STAGE_TIMINGS = "stage-timings.jsonl"
 STAGE_LINE_PREFIX = "FACTORY_STAGE"
+# The issue lines of scripts/factory-stop.sh's output ("  #120 <title>"), which is what a
+# FactoryStopped carries; the stop comment names them so the humans know which stop this was.
+STOP_ISSUE_RE = re.compile(r"(?m)^\s*#(\d+)\b")
+# How much of a refused checkpoint's output the needs-human comment quotes (D-056).
+PROOF_FAILURE_COMMENT_CHARS = 3000
 
 
 def record_stage_timing(
@@ -330,6 +335,20 @@ class KernelRuntime:
         )
 
     def build_issue(self, issue_number: int) -> int:
+        """Build one accepted issue through to a PR handed to validation.
+
+        Two ways this ends short of a PR are told apart at the bottom. A build failure (a
+        governor refusal, a RED or GREEN refusal, a failed review, a dirty tree, an exception)
+        escalates the issue through `_mark_issue_human`: `factory:needs-human`, `accepted` and
+        `in-progress` removed, a comment with the reason and, for a refused proof gate, the
+        checkpoint's exit code and output tail. An operator stop (`FactoryStopped`, raised by
+        the stop check every `_agent` stage re-reads) is not a failure: `_release_stopped_build`
+        leaves the issue `factory:accepted`, removes `in-progress`, finishes any lease, posts a
+        comment naming the stop issue, and adds no `needs-human`; the next dispatch after the
+        stop clears rebuilds it from current main (D-056). Every stop check in this path runs
+        before the branch is pushed, so a stopped build leaves no PR; if one ever fires after
+        `create_pr`, the PR is left exactly as it is and the comment says which PR that was.
+        """
         self.check_stop()
         issue = self.github.issue(issue_number)
         labels = self.github.labels(issue)
@@ -359,6 +378,7 @@ class KernelRuntime:
         )
         branch = f"factory/issue-{issue_number}-a{attempt}-{run_id.rsplit('-', 1)[-1]}"
         handed_off = False
+        pr_number: int | None = None
         self.github.add_issue_label(issue_number, self.config.labels["in_progress"])
         try:
             self._git("checkout", "-b", branch, cwd=worktree.path)
@@ -605,16 +625,114 @@ class KernelRuntime:
                 f"pr=#{pr_number} head={current_head}"
             )
             return pr_number
+        except FactoryStopped as exc:
+            self._release_stopped_build(
+                issue_number, exc, paths=paths, cwd=worktree.path, pr_number=pr_number
+            )
+            raise
         except NeedsHuman as exc:
-            self._mark_issue_human(issue_number, str(exc))
+            self._mark_issue_human(
+                issue_number, str(exc), evidence=self._proof_failure_evidence(paths, exc)
+            )
             raise
         except Exception as exc:
-            self._mark_issue_human(issue_number, f"builder failed closed: {exc}")
+            self._mark_issue_human(
+                issue_number,
+                f"builder failed closed: {exc}",
+                evidence=self._proof_failure_evidence(paths, exc),
+            )
             raise
         finally:
             self.github.cwd = str(self.repo_root)
             if handed_off:
                 remove(self.repo_root, worktree)
+
+    def _release_stopped_build(
+        self,
+        issue: int,
+        exc: FactoryStopped,
+        *,
+        paths: RunPaths,
+        cwd: Path,
+        pr_number: int | None = None,
+    ) -> None:
+        """Hand a stopped build's issue back untouched: an operator stop is not a failure.
+
+        Run 33989911383 re-read the stop between `investigate` and `contract`, correctly, and
+        then labelled #49 `factory:needs-human` with "builder failed closed: STOPPED", so the
+        operator who pressed the button also had to un-escalate the issue by hand. The issue
+        keeps `factory:accepted`, loses `factory:in-progress`, its lease (if the build got as
+        far as taking one) is finished, and the comment names the stop issue and carries no
+        validation-failed marker, so no attempt is charged. Nothing here is `needs-human`.
+        """
+        detail = scrub(str(exc)).strip()
+        stop_issues = sorted({int(n) for n in STOP_ISSUE_RE.findall(detail)})
+        named = (
+            "stop issue " + ", ".join(f"#{n}" for n in stop_issues)
+            if stop_issues
+            else "the stop check (no stop issue number was reported; see below)"
+        )
+        left = (
+            f"PR #{pr_number} was already opened and is left exactly as it is."
+            if pr_number is not None
+            else "No PR was opened; this run's branch and worktree are discarded."
+        )
+        try:
+            self.github.cwd = str(self.repo_root)
+            if (paths.artifacts / "factory-lease.json").is_file():
+                try:
+                    self._lease_heartbeat("finish", issue, "stopped", paths, cwd=cwd)
+                except Exception:
+                    pass
+            self.github.remove_issue_label(issue, self.config.labels["in_progress"])
+            self.github.add_issue_label(issue, self.config.labels["accepted"])
+            self.github.comment_issue(
+                issue,
+                f"Dark Factory stopped this build between stages on an operator stop: {named}. "
+                "This is not a build failure and no attempt is charged: the issue stays "
+                f"`{self.config.labels['accepted']}`, its claim is released, and the next "
+                f"dispatch after the stop clears rebuilds it from current main. {left}\n\n"
+                "Stop check output:\n```\n" + detail[:1500] + "\n```",
+            )
+        except Exception:
+            pass
+        stop_text = ",".join(str(n) for n in stop_issues) or "-"
+        print(f"FACTORY_BUILD_STOPPED issue=#{issue} stop={stop_text}")
+
+    @staticmethod
+    def _proof_failure_evidence(paths: RunPaths, exc: BaseException) -> str:
+        """What a refused RED or GREEN gate printed, for the needs-human comment.
+
+        `scripts/factory_proof.py` writes `<red|green>-proof-failure.json` beside the artifacts
+        when a checkpoint refuses; the build's failure comment used to carry only the first
+        1500 characters of the tool's message, which for run 33997386843 was the verdict and
+        nothing else (D-056). The record's exit code and output tail are quoted here, scrubbed
+        and capped; a refusal from any other tool, or a proof refusal raised before any
+        checkpoint ran (no record), adds nothing.
+        """
+        if not isinstance(exc, ToolRefused) or exc.tool != "factory_proof.py":
+            return ""
+        if exc.phase not in ("red", "green"):
+            return ""
+        path = paths.artifacts / f"{exc.phase}-proof-failure.json"
+        if not path.is_file():
+            return ""
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return ""
+        if not isinstance(record, Mapping):
+            return ""
+        tail = scrub(str(record.get("output_tail") or ""))[-PROOF_FAILURE_COMMENT_CHARS:]
+        argv = record.get("argv")
+        argv_text = " ".join(str(a) for a in argv) if isinstance(argv, list) else "?"
+        return (
+            f"\n\n{str(record.get('stage') or exc.phase).upper()} gate evidence "
+            f"(`{path.name}` in the run's uploaded artifacts): {record.get('acceptance_id')} "
+            f"ran `{argv_text}` in `{record.get('cwd')}`, rc={record.get('rc')}, "
+            f"seconds={record.get('seconds')}, expected_failure={record.get('expected_failure')!r}."
+            f"\nOutput tail:\n```\n{tail}\n```"
+        )
 
     def _attach_and_publish(
         self, paths: RunPaths, cwd: Path, env: Mapping[str, str], pr_number: int
@@ -2450,7 +2568,7 @@ class KernelRuntime:
             pass
         print(f"FACTORY_POST_MERGE_INCIDENT pr=#{pr_number} stopped={'remote' if stopped else 'local-only'}")
 
-    def _mark_issue_human(self, issue: int, reason: str) -> None:
+    def _mark_issue_human(self, issue: int, reason: str, *, evidence: str = "") -> None:
         try:
             self.github.cwd = str(self.repo_root)
             self.github.remove_issue_label(issue, self.config.labels["in_progress"])
@@ -2458,7 +2576,7 @@ class KernelRuntime:
             self.github.add_issue_label(issue, self.config.labels["needs_human"])
             self.github.comment_issue(
                 issue,
-                "Dark Factory stopped this run without merging. " + reason[:1500],
+                "Dark Factory stopped this run without merging. " + reason[:1500] + evidence,
             )
         except Exception:
             pass

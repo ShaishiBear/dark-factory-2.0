@@ -1460,6 +1460,34 @@
       "find": "        if not isinstance(level, str) or level not in EFFORT_LEVELS:\n            raise ValueError(\n                f\"kernel {name}.{role} must be one of {', '.join(EFFORT_LEVELS)}; got {level!r}\"\n            )\n",
       "replace": "        if not isinstance(level, str):\n            raise ValueError(\n                f\"kernel {name}.{role} must be one of {', '.join(EFFORT_LEVELS)}; got {level!r}\"\n            )\n",
       "why": "A misspelt level in kernel.json would load, and every stage of that role would be refused at launch by the provider instead of at configuration by the loader, one dispatch per hour; caught by tests/factory/test_factory_effort_and_stream_logs.py (a level the CLI does not accept is refused at load) (D-055)."
+    },
+    {
+      "id": "proof-refusal-without-output-tail",
+      "file": "scripts/factory_proof.py",
+      "find": "        f\"  output tail (last {OUTPUT_TAIL_LINES} lines, at most {OUTPUT_TAIL_CHARS} chars):\\n{tail}\")\n",
+      "replace": "        f\"  output tail: (discarded)\")\n",
+      "why": "A refused RED or GREEN checkpoint would again say only its verdict on stderr, which is the whole of red-gate.log for build run 33997386843 (`PROOF_FAIL: AC-1 RED failed for the wrong reason`, 0.448 s, nothing else); caught by tests/factory/test_factory_red_evidence_and_stop.py (a wrong-reason refusal carries argv, cwd, rc, seconds and the output; a refusal quotes the tail) (D-056)."
+    },
+    {
+      "id": "proof-failure-json-not-written",
+      "file": "scripts/factory_proof.py",
+      "find": "        try: write(Path(root)/failure_artifact(kind),evidence)\n",
+      "replace": "        try: pass\n",
+      "why": "No <red|green>-proof-failure.json would reach the run's artifacts, so the kernel's needs-human comment could quote no exit code and no output tail and the uploaded bundle would hold only the gate's stderr; caught by tests/factory/test_factory_red_evidence_and_stop.py (a wrong-reason refusal writes red-proof-failure.json; a missing command's record; a GREEN refusal's record) (D-056)."
+    },
+    {
+      "id": "stop-still-labels-needs-human",
+      "file": "factory_kernel/runtime.py",
+      "find": "        except FactoryStopped as exc:\n            self._release_stopped_build(\n                issue_number, exc, paths=paths, cwd=worktree.path, pr_number=pr_number\n            )\n            raise\n",
+      "replace": "        except FactoryStopped as exc:\n            self._mark_issue_human(issue_number, f\"builder failed closed: {exc}\")\n            raise\n",
+      "why": "An operator stop read between stages would again escalate the issue to factory:needs-human with `builder failed closed: STOPPED`, taking factory:accepted away, as run 33989911383 did to #49, so every press of the stop button would need a human to un-escalate by hand; caught by tests/factory/test_factory_red_evidence_and_stop.py (a stop returns the issue to accepted; a stop is not needs-human; the stop handler precedes the failure handlers) (D-056)."
+    },
+    {
+      "id": "stop-comment-missing-the-stop-issue",
+      "file": "factory_kernel/runtime.py",
+      "find": "        detail = scrub(str(exc)).strip()\n        stop_issues = sorted({int(n) for n in STOP_ISSUE_RE.findall(detail)})\n",
+      "replace": "        detail = \"\"\n        stop_issues = sorted({int(n) for n in STOP_ISSUE_RE.findall(detail)})\n",
+      "why": "The stop comment would say a stop happened and not which one: no stop issue number, no stop-check output, and the stdout line would read stop=-, so an operator reading the issue could not tell whose stop released it; caught by tests/factory/test_factory_red_evidence_and_stop.py (the stop comment names the stop issue; a kill-file stop quotes the check output) (D-056)."
     }
   ]
 }
