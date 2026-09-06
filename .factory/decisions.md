@@ -3064,3 +3064,146 @@ formatted; no lint-fix flag anywhere). Mutations `cap-envelope-refused-as-malfor
 `result-required-before-the-cap-is-classified`, `static-gate-formatter-not-applied` and
 `static-gate-applies-a-lint-fix` in `harness/factory_mutations/defects.json`, each verified by
 direct injection on the maintainer's Windows host.
+
+---
+
+## D-070 · The answered probes run daily, not on every dispatch, because six effort readings and five thinking-cap readings had already answered their questions
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34017959979, 34024234313, 34027157595, 34028620229, 34031504603, 34033360798, 34042566216, 34047586142, 34054922788 (every worker run whose preflight printed all four probe lines)
+
+Four probes ran on every hourly worker dispatch. Three of them asked a question that nine
+runs have now answered the same way, and the archived job logs say what asking again costs.
+Per run, measured from the marker lines' own timestamps:
+
+```
+run           effort    cap     scope    total
+34017959979   149.0s   117.5s   24.8s   291.3s
+34024234313   196.9s   104.9s   30.0s   331.8s
+34027157595    70.7s   186.8s   30.6s   288.1s
+34028620229   119.3s   289.8s   29.4s   438.4s
+34031504603   214.5s   268.1s   27.4s   509.9s
+34033360798   163.3s   155.3s   20.8s   339.4s
+34042566216   146.0s   256.6s   44.6s   447.2s
+34047586142   126.5s   256.4s   39.7s   422.6s
+34054922788    92.7s   148.1s   34.1s   274.8s
+```
+
+Nine runs, 275-510 s each, mean 371.5 s: six minutes of every hourly dispatch and eight model
+calls, spent before the first stage starts.
+
+**The effort probe's question is answered.** `FACTORY_PREFLIGHT_EFFORT_PROBE`, same route
+(OpenRouter's Anthropic-compatible endpoint), same model (`z-ai/glm-5.3-flash`), same prompt,
+the six most recent readings:
+
+```
+34028620229  low_thinking=2478  high_thinking=2527  honoured=false
+34031504603  low_thinking=2552  high_thinking=3264  honoured=false  error=high:timeout_after_180s
+34033360798  low_thinking=2295  high_thinking=6758  honoured=true
+34042566216  low_thinking=2435  high_thinking=3668  honoured=true
+34047586142  low_thinking=3014  high_thinking=4363  honoured=false
+34054922788  low_thinking=2843  high_thinking=2485  honoured=false
+```
+
+`honoured` flips run to run with nothing changed between runs, and the two `true` readings sit
+between four `false` ones; the three readings before these (34017959979, 34024234313,
+34027157595) and D-059's four are the same picture. The route does not honour `--effort` for
+the worker model, and a tenth reading of a flipping bit is not evidence, it is noise with a
+price. `ROLE_EFFORT` still names a level on every request, because the CLI takes one and a
+request without one is refused by the funnel (D-055); what is settled is that the level is not
+a **bound** here, and that was the only thing this probe was measuring for.
+
+**The thinking-cap probe's question is answered.** `FACTORY_PREFLIGHT_THINKING_CAP_PROBE`, the
+five most recent readings:
+
+```
+34031504603  uncapped=6089  cap1024=2561  cap0=1234  honoured=false
+34033360798  uncapped=2682  cap1024=3298  cap0=1947  honoured=false
+34042566216  uncapped=8612  cap1024=2527  cap0=3264  honoured=false  error=uncapped:timeout_after_180s
+34047586142  uncapped=8660  cap1024=2134  cap0=2800  honoured=false
+34054922788  uncapped=1688  cap1024=3647  cap0=4493  honoured=false
+```
+
+`honoured=false` on every reading, and on the four earlier ones too: `cap1024` regularly
+out-thinks the uncapped run, and `MAX_THINKING_TOKENS=0` — a request the CLI sends as
+`thinking: {type: "disabled"}` — twice produced *more* thinking than no cap at all. The route
+drops the budget. This is also the most expensive of the three, 105-290 s, because it is three
+one-turn calls and the uncapped leg has hit the 180-second per-leg timeout. `ROLE_THINKING_CAP`
+stays every-row-`None`, which is exactly what D-059 said would happen if the line read false.
+
+**The read-scope probe's question is answered too, but the property is not.**
+`FACTORY_PREFLIGHT_READ_SCOPE_PROBE` has read `denied_outside_scope=true
+attempted_outside_scope=true read_inside_scope=true read_artifacts=true` on all nine runs, and
+`grep_denied_outside_scope=true glob_outside_scope=false tools=Edit,Glob,Grep,Read,Write
+tools_missing=none` on every run since the tool-surface fix (D-065). It is a genuine safety
+property and it must not simply stop being checked — but a per-run live probe is not what keeps
+it honest, and never was. What keeps it honest is the argv: the boundary is `ROLE_PATH_SCOPE`
+rendered by `providers.path_rules` into `--allowedTools` / `--disallowedTools`, and a scope that
+regresses regresses **there**, in repository code, where a deterministic test reads it. That
+test runs in every gate on every PR, needs no model call and no network, and now asserts a
+`Read` and an `Edit` deny rule for every one of the thirteen `TRUST_ROOT_DENY_PATHS` (not the
+five the brief happens to name), that the deny list contains nothing else, that
+`.factory/architecture.json` is the documented exception, and that a mutation role is told
+exactly the five tools. The live probe answers a different and narrower question — does the
+pinned CLI on this runner still enforce rules it documents — which changes when the CLI, the
+route or the model changes, not when a dispatch happens.
+
+**Decision.** The model **route** probe stays on every worker dispatch, unchanged. The other
+three move off the per-dispatch path.
+
+- **The worker's switch.** `dark-factory-worker.yml` gains a `workflow_dispatch` boolean input
+  `run_answered_probes`, `default: false`. The effort probe becomes its own step (it had been a
+  tail on the route step), and it, the thinking-cap probe and the read-scope probe carry
+  `if: ${{ inputs.run_answered_probes == true || inputs.run_answered_probes == 'true' }}` — both
+  forms, because a dispatch input reaches the expression as a boolean or as a string depending
+  on how the run was started, and a bare truthiness test would treat the string `'false'` as
+  true. On the hourly schedule `inputs` is null and none of the three runs. Nothing else in the
+  workflow is on that switch, and the route probe carries no `if:` at all: an unreachable slug,
+  or a new `provider.model_overrides` value nobody proved, must refuse in the preflight rather
+  than close mid-build after the earlier stages have spent their budgets (D-061).
+- **The daily measurement.** `dark-factory-main-regression.yml` runs all four probes against
+  current `main`, ahead of the full gate, every day. Each step's shell body is the worker's
+  **byte for byte** — a test asserts the equality — so the archived marker corpus stays one
+  corpus and no line's format can drift between the two files. Every marker string is pinned
+  literally in `tests/factory/test_factory_workflow_hygiene.py`, including the
+  `error=probe-did-not-run` fallbacks, and the two measurements keep their exit-0-always
+  behaviour: data, never a gate. The regression job gains the worker's `ANTHROPIC_BASE_URL`, the
+  pinned Claude Code CLI at the worker's exact version, and thirty minutes of timeout headroom;
+  every probe step there is `continue-on-error: true`, so a probe never decides whether the
+  harness runs or whether the regression issue is filed. That job's verdict is the harness on
+  `main`; the probes are evidence riding along with it.
+- **Where the lines are read.** The archived corpus is already assembled from the runs' job
+  logs (`gh run view --log`), which is how the tables above were built; the daily regression is
+  a run whose artifacts are uploaded and whose log is kept, so the series continues without a
+  new mechanism.
+
+**What reopens these questions.** Named explicitly, because the whole decision rests on nothing
+having changed: **a change to `provider.model`, to any value in `provider.model_overrides`, to
+`provider.architecture_model`, to `ANTHROPIC_BASE_URL`, or to the pinned
+`@anthropic-ai/claude-code` version.** Each of those is precisely the variable the three probes
+hold fixed. Any of them changing means dispatching once with `run_answered_probes: true` before
+trusting `ROLE_EFFORT`, `ROLE_THINKING_CAP` or the scope on the new configuration — and the
+daily line will disagree with the old series within a day either way.
+
+**Not chosen.** Deleting the three probes and their scripts. The questions are answered *for
+this route and this model*, which is a fact with an expiry date, not a permanent one; a probe
+kept and run daily costs one job six minutes a day instead of every job six minutes an hour,
+and keeps the series comparable when the answer moves. Nor was the read-scope probe kept
+per-run "because it is a safety property": a property enforced only by a probe that runs after
+the trust root has already been checked out is a property with a per-run cost and no per-run
+information, and the argv test is both cheaper and stricter.
+
+**Consequences.** An hourly dispatch is 275-510 s shorter and makes eight fewer model calls
+before its first stage. The three answers keep arriving, once a day, against current `main`.
+Pinned by `tests/factory/test_factory_workflow_hygiene.py` (the input exists, is boolean and
+defaults to false; the route probe carries no condition and still refuses an unreachable model;
+each of the three carries the gate and nothing else does; their order is unchanged and still
+ahead of dispatch; all four probes are in the daily regression, ahead of the gate,
+unconditional, each with the route and the credential and `continue-on-error`; every regression
+probe body equals the worker's; every marker format appears in both files; the two measurements
+never refuse and the read-scope probe still refuses a leak; the argv assertion the scope now
+leans on exists) and by
+`tests/factory/test_factory_read_scope_and_draft_deadline.py::test_the_deny_rules_cover_every_protected_root`.
+Mutations `route-probe-made-conditional`, `answered-probes-still-unconditional-on-dispatch` and
+`regression-workflow-missing-the-probes` in `harness/factory_mutations/defects.json`, each
+verified by direct injection on the maintainer's Windows host (the copy built by `run.py`, one
+defect injected, the detector run: green baseline, red after each).

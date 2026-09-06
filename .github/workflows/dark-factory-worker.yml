@@ -15,6 +15,20 @@ on:
         description: Worker run id whose uploaded artifacts hold the build (requires resume_pr)
         required: false
         default: ''
+      # The three answered probes (D-070). The effort, thinking-cap and read-scope probes cost
+      # model calls and minutes on every dispatch, and their questions are answered: the route
+      # does not honour `--effort` (six readings, no stable signal), does not honour a thinking
+      # budget (five readings, honoured=false every one), and has denied every out-of-scope read
+      # since the tool-surface fix. They are measured once a day against current main by
+      # dark-factory-main-regression.yml instead. Set this true to re-measure them on a dispatch,
+      # which is what a change to `provider.model`, `provider.model_overrides`, the route or the
+      # pinned CLI version calls for. The model ROUTE probe is not on this switch: an unreachable
+      # slug must refuse before a stage burns budget.
+      run_answered_probes:
+        description: Also run the effort, thinking-cap and read-scope probes (daily otherwise)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -207,7 +221,10 @@ jobs:
           # itself reports a non-error result. A factory that cannot reason at all must stop
           # here rather than burn a validation ladder discovering it. Every request the kernel
           # makes names an effort level (`--effort`, D-055); the probe names a judge's.
-          worker_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
+          # The route probe is not on the worker's `run_answered_probes` switch: it runs on
+          # every dispatch, because reachability is the one preflight question a new run can
+          # answer differently from the last, and an unreachable slug must refuse before a
+          # stage burns its budget (D-070).
           # Every distinct model a stage can run on: the worker model, the architecture
           # holdout's, and every per-role override in provider.model_overrides, listed by
           # scripts/factory_models.py from the same policy the kernel loads. A model the
@@ -249,15 +266,29 @@ jobs:
             }
             echo "FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=$model ${verdict#* }"
           done
+
+      - name: Probe whether the route honours an effort level
+        # Answered, so measured daily rather than per dispatch (D-070): six readings on this
+        # route flipped false/true/false/true/false/false with no stable signal, so the level is
+        # not a bound here and a seventh reading of the same question costs a run its minutes.
+        if: ${{ inputs.run_answered_probes == true || inputs.run_answered_probes == 'true' }}
+        shell: bash
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
           # Whether the route honours the level is measured, not assumed: the worker model
           # twice on one fixed reasoning prompt, one turn each, at the lowest and the highest
           # level the policy uses (scripts/factory_effort_probe.py), counting the thinking each
           # stream showed. The line is data for tuning `worker_policy.ROLE_EFFORT`; a
           # `honoured=false` is printed, never a refusal (D-055).
+          worker_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
           timeout 400 python3 scripts/factory_effort_probe.py --model "$worker_model" \
             || echo "FACTORY_PREFLIGHT_EFFORT_PROBE model=$worker_model low_thinking=0 high_thinking=0 honoured=false error=probe-did-not-run"
 
       - name: Probe whether the route honours a thinking budget
+        # Answered, so measured daily rather than per dispatch (D-070): five readings on this
+        # route, honoured=false every one, and the uncapped leg twice timed out at 180 s.
+        if: ${{ inputs.run_answered_probes == true || inputs.run_answered_probes == 'true' }}
         shell: bash
         env:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
@@ -276,6 +307,13 @@ jobs:
             || echo "FACTORY_PREFLIGHT_THINKING_CAP_PROBE model=$worker_model uncapped=0 cap1024=0 cap0=0 honoured=false error=probe-did-not-run"
 
       - name: Prove the worker's read scope with the pinned CLI
+        # Answered, so measured daily rather than per dispatch (D-070): denied_outside_scope=true
+        # and tools_missing=none on every reading since the tool-surface fix. What keeps the scope
+        # honest is not this probe but the argv the kernel renders, asserted file-by-file and
+        # tool-by-tool in tests/factory/test_factory_read_scope_and_draft_deadline.py, which runs
+        # in every gate; this probe is the live-route evidence behind that argv, and once a day
+        # against current main is when it says something a run did not already know.
+        if: ${{ inputs.run_answered_probes == true || inputs.run_answered_probes == 'true' }}
         shell: bash
         env:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}

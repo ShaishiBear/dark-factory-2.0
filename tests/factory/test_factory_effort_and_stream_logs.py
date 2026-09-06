@@ -786,15 +786,24 @@ class ProbeScriptTests(unittest.TestCase):
         self.assertIn("honoured=false", out.getvalue())
 
     def test_the_workflow_runs_the_probe_after_the_route_probe_and_names_a_judges_level(self):
+        """D-070 split them: the route probe runs every dispatch, this one on request.
+
+        The route probe still comes first, and its own request still names a judge's level.
+        """
         text = WORKER_WORKFLOW.read_text(encoding="utf-8")
-        step = text.split("Prove the worker's model route with the pinned CLI", 1)[1].split(
+        route = text.split("Prove the worker's model route with the pinned CLI", 1)[1].split(
+            "- name:", 1
+        )[0]
+        self.assertIn("--effort high", route, "the route probe makes a judge's request")
+        self.assertIn("FACTORY_PREFLIGHT_MODEL_ROUTE_OK", route)
+        self.assertNotIn("factory_effort_probe.py", route, "the effort probe is its own step")
+        step = text.split("Probe whether the route honours an effort level", 1)[1].split(
             "- name:", 1
         )[0]
         self.assertIn("scripts/factory_effort_probe.py", step)
         self.assertIn("FACTORY_PREFLIGHT_EFFORT_PROBE", step)
-        self.assertIn("--effort high", step, "the route probe makes a judge's request")
         self.assertLess(
-            step.index("FACTORY_PREFLIGHT_MODEL_ROUTE_OK"), step.index("factory_effort_probe.py")
+            text.index("FACTORY_PREFLIGHT_MODEL_ROUTE_OK"), text.index("factory_effort_probe.py")
         )
         self.assertIn(
             "honoured=false", step, "a probe that cannot run prints the line, never fails"
