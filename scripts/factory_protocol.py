@@ -15,6 +15,8 @@ from factory_kernel.attached import round_trip_ok  # noqa: E402
 from factory_shapes import normalise_lists  # noqa: E402
 
 AC = re.compile(r"^AC-[1-9][0-9]*$")
+# The one id scheme, named in every id refusal so the needs-human comment teaches it (D-060).
+AC_ID_RULE = "behavior ids must be AC-1..AC-N in order"
 BEHAVIOR_KINDS = ("behaviour", "guard")
 DEPENDENCY_ECOSYSTEMS = ("python", "javascript")
 DEPENDENCY_FIELDS = ("name", "purpose", "why_existing_insufficient", "maintenance_evidence")
@@ -75,13 +77,34 @@ def normalise_behaviors(behaviors: object) -> object:
     if not isinstance(behaviors, dict):
         return behaviors
     for key, value in behaviors.items():
-        if not AC.match(str(key)): die(f"behaviors keyed form has a non-AC key {key!r}")
+        if not AC.match(str(key)): die(f"{AC_ID_RULE}; got {key!r} as a behaviors key")
         if not isinstance(value, dict): die(f"behavior {key} must be an object")
         if "id" in value and value["id"] != key: die(f"behavior {key} carries a conflicting id {value['id']!r}")
     return [
         {"id": key, **{k: v for k, v in behaviors[key].items() if k != "id"}}
         for key in sorted(behaviors, key=ac_number)
     ]
+
+
+def behavior_faults(b: dict) -> list[str]:
+    """The faults of one behaviour other than its id, worded as the refusals word them.
+
+    An id refusal consults them: the first build after D-058 (run 34015187797) wrote a sound
+    guard behaviour under the invented id `AC-G1`, and `invalid/duplicate behavior id` told the
+    reader neither the rule nor that the id was the only thing wrong. `kind` is a field on a
+    behaviour and never changes its id. The compiler still does not renumber: the certifiers
+    hash the contract as the worker wrote it (D-060).
+    """
+    faults: list[str] = []
+    if any(not isinstance(b.get(k), str) or not b[k].strip() for k in ("given", "when", "then", "seam")):
+        faults.append("has an empty field")
+    # A behaviour whose Then pins kept behaviour may say so: `kind: "guard"` tells the test
+    # author (and the RED gate, which holds it to this) that the checkpoint must pass on the
+    # unchanged tree and after the change. Absent means an ordinary behaviour; the key is
+    # never inserted, so a contract that does not use it hashes as it always did (D-058).
+    if "kind" in b and b["kind"] not in BEHAVIOR_KINDS:
+        faults.append(f"kind must be one of {list(BEHAVIOR_KINDS)}")
+    return faults
 
 
 def validate_contract(c: dict, issue: int | None = None) -> str:
@@ -100,16 +123,18 @@ def validate_contract(c: dict, issue: int | None = None) -> str:
     for b in behaviors:
         if not isinstance(b, dict): die("behavior must be an object")
         if set(("id", "given", "when", "then", "seam")) - b.keys(): die("behavior missing Given/When/Then/seam")
-        if not AC.match(str(b["id"])) or b["id"] in ids: die(f"invalid/duplicate behavior id {b.get('id')}")
+        faults = behavior_faults(b)
+        if not AC.match(str(b["id"])):
+            only = ""
+            if not faults:
+                only = "; the behaviour is otherwise valid and the id is its only fault"
+                if b.get("kind") == "guard":
+                    only += ': `kind: "guard"` is a field on a behaviour and never changes its id, so a guard is AC-N like any other'
+            die(f"{AC_ID_RULE}; got {b['id']!r}{only}")
+        if b["id"] in ids: die(f"{AC_ID_RULE}; got {b['id']!r} twice")
         ids.add(b["id"])
-        if any(not isinstance(b[k], str) or not b[k].strip() for k in ("given", "when", "then", "seam")):
-            die(f"behavior {b['id']} has an empty field")
-        # A behaviour whose Then pins kept behaviour may say so: `kind: "guard"` tells the test
-        # author (and the RED gate, which holds it to this) that the checkpoint must pass on the
-        # unchanged tree and after the change. Absent means an ordinary behaviour; the key is
-        # never inserted, so a contract that does not use it hashes as it always did (D-058).
-        if "kind" in b and b["kind"] not in BEHAVIOR_KINDS:
-            die(f"behavior {b['id']} kind must be one of {list(BEHAVIOR_KINDS)}")
+        for fault in faults:
+            die(f"behavior {b['id']} {fault}")
     for key in ("invariants", "out_of_scope", "risks"):
         if not isinstance(c[key], list) or any(not isinstance(x, str) or not x.strip() for x in c[key]): die(f"{key} must be strings")
     validate_dependencies(c.get("dependencies", []))
