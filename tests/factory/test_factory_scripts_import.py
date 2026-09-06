@@ -32,7 +32,8 @@ BOOTSTRAP = re.compile(r"sys\.path\.insert\(0, str\(HERE\.parent\)\)")
 # fails after imports, or through the import-only check below.
 HELP_OK = {"factory_provenance.py", "factory_evidence_spine.py", "factory_security.py",
            "factory_lease.py", "factory_protocol.py", "factory_artifacts.py",
-           "factory_architecture.py", "factory_impact.py", "merge_verify.py", "post_merge.py"}
+           "factory_architecture.py", "factory_impact.py", "factory_models.py", "merge_verify.py",
+           "post_merge.py"}
 
 
 def run_from_outside(script: Path, *args: str) -> subprocess.CompletedProcess:

@@ -1565,6 +1565,27 @@
       "find": "    return within_cap(thinking, cap) and clearly_below(thinking, uncapped)\n",
       "replace": "    return not (within_cap(thinking, cap) and clearly_below(thinking, uncapped))\n",
       "why": "The preflight line would print honoured=true exactly when the route ignored MAX_THINKING_TOKENS, and the table every row of which waits on that line would be filled in on the strength of the opposite of the evidence; caught by tests/factory/test_factory_thinking_cap.py (a cap is honoured only when both hold; the line when the route ignores the variable) (D-059)."
+    },
+    {
+      "id": "model-override-ignored-by-run",
+      "file": "factory_kernel/providers.py",
+      "find": "        override = self.config.model_overrides.get(request.role)\n        if override:\n            return override\n",
+      "replace": "        override = self.config.model_overrides.get(request.role)\n        if False:\n            return override\n",
+      "why": "A provider.model_overrides row would be parsed, validated and listed by the preflight's route probe and then never used: every stage would still launch on provider.model, so the operator who routed test_author off z-ai/glm-5.3-flash after six dead builds of issue #103 would watch a seventh die on it, with a stage line that said model=z-ai/glm-5.3-flash; caught by tests/factory/test_factory_model_overrides.py (an override wins over the default and over the architecture rule; the launched argv names it; the record and the stage line say it) (D-061)."
+    },
+    {
+      "id": "model-override-unknown-role-accepted",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "        if not isinstance(role, str) or role not in ROLE_MAX_TURNS:\n            raise ValueError(\n                f\"kernel {name} names a role the worker policy does not know: {role!r}\"\n            )\n        if not isinstance(model, str) or not model.strip():\n",
+      "replace": "        if not isinstance(role, str):\n            raise ValueError(\n                f\"kernel {name} names a role the worker policy does not know: {role!r}\"\n            )\n        if not isinstance(model, str) or not model.strip():\n",
+      "why": "A row for `tester` or `test-author` would load cleanly and route nothing, so the operator would believe the role had been moved to another model while the builds kept dying on the old one, and the preflight would probe a model no stage uses; caught by tests/factory/test_factory_model_overrides.py (a role the policy does not know is refused at load, by the validator and by the script) (D-061)."
+    },
+    {
+      "id": "model-route-probe-skips-override-models",
+      "file": "scripts/factory_models.py",
+      "find": "    for model in overrides.values():\n        ordered.append(model)\n",
+      "replace": "    for model in ():\n        ordered.append(model)\n",
+      "why": "The preflight would prove the worker and architecture models and never the model a role was routed to, so a build could reach test_author before discovering that its route was closed, which is exactly the mid-build failure the route probe exists to move to preflight; caught by tests/factory/test_factory_model_overrides.py (the list carries every override value, once, after the two; the workflow's loop reads the list) (D-061)."
     }
   ]
 }

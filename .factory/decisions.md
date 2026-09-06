@@ -2604,3 +2604,104 @@ variable predates both by a long way, and the probe's line will show it either w
 lever on this route. If it is, one row in `ROLE_THINKING_CAP` bounds what six builds could
 not; if it is not, the factory knows the CLI's last thinking control is closed to it here
 and the remaining question is the route or the model, not the level.
+
+## D-061 · A role can run on its own model, because six builds of issue #103 died in `test_author` on a route that bounds nothing else
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 33987381035, 33992451400, 33997386843, 34002520477, 34008561672, 34013852733 (the six builds of issue #103)
+
+D-059 tabulated the six `test_author` lines: 1200 to 2687 s, 14 to 41 turns, 63,414 to
+94,909 events and 92,984 to 141,172 thinking tokens, where every other stage of the same
+builds ran at 15-46 s per turn. Three of the six ran at the CLI's default effort and three
+at `medium` (D-055), and the two sets are the same shape; the effort probe read
+honoured=false, true, true, false on the route from run to run. D-059's answer was the CLI's
+last thinking control, `MAX_THINKING_TOKENS`, measured before use, and the thinking-cap
+probe read `honoured=false` on this route as well. `--effort` and the budget are the two
+levers the CLI has for how long one turn thinks, and OpenRouter's Anthropic-compatible route
+to `z-ai/glm-5.3-flash` honours neither for it. Turns, dollars, the wall and the draft
+deadline (D-025, D-054, D-057) each bound something else. What is left is which model the
+role runs on.
+
+The kernel had exactly one per-role model. `provider.architecture_model` sends the
+architecture holdout to a different model family (`deepseek/deepseek-v4-pro-0813`), and
+`ClaudeCliProvider.model_for` chose it by naming the role in code: `architecture_model` if
+the role was `architecture-holdout`, else the request's model, else `provider.model`. Every
+request the kernel built carried `model=self.config.provider.model` (four sites in
+`runtime.py`, the triage worker, the worker runtime), so "the request's model" was never a
+choice, only the default restated, and the architecture rule had to beat it to mean
+anything. Routing `test_author` elsewhere would have meant a second role named in the
+provider, and a third role a third.
+
+**Decision.** The model per role is a configuration line, resolved in one stated order,
+recorded where the stage's telemetry is read, and proved reachable before any stage runs.
+
+- **The table.** `provider.model_overrides` in `kernel.json`, `{role: model_slug}`,
+  validated at load by `worker_policy.validate_model_overrides` against the roles the
+  policy knows (`ROLE_MAX_TURNS`) and a non-empty slug, exactly as `effort_overrides` and
+  `thinking_cap_overrides` are; a typo refuses the configuration. The checked-in value is
+  `{}`. The owner chooses the model; this decision makes the choice one line.
+- **The order.** `model_for` resolves every request the same way: the request's own model
+  if it names one; else `model_overrides[role]`; else `architecture_model` for the
+  architecture holdout; else `model`. The kernel's own requests no longer name a model
+  (`runtime.py`, `triage.py` and `worker_runtime.py` pass none), so for a stage the
+  resolution is the whole story and an override cannot be beaten by a default stamped
+  upstream; the preflight probes, which must make the request a role makes against the
+  model under test, still name theirs. The architecture rule is unchanged in effect: with
+  no override the holdout runs on `architecture_model` as before, and an override for
+  `architecture-holdout` is the one way to move it.
+- **The record.** The stage record (`agent-<role>.json`) and the timing row already carried
+  `model` (D-050); the `FACTORY_STAGE` line did not. It now ends `model=<slug>`, after
+  `effort=`, and a stage that raised before it had a result is recorded with the model the
+  provider had resolved for it (`_resolved_model`, asked of the provider before the launch)
+  rather than the request's `None`. A rehearsal provider without a resolver records the
+  request's model, else the configured worker model, which is what every kernel request
+  said before.
+- **The probe.** The worker workflow's route probe listed two models with an inline
+  one-liner (`provider.model`, `provider.architecture_model`); a role routed to a third
+  would have found its route closed mid-build, after the stages before it had spent their
+  budgets. `scripts/factory_models.py --list` prints every distinct model a run can use, the
+  worker model, the architecture holdout's and every override value, each once, validated
+  as the kernel validates them; the step reads the list, refuses an empty one, runs the
+  pinned CLI once against each model, prints `FACTORY_PREFLIGHT_MODEL_ROUTE_OK model=<slug>`
+  per model and refuses the run if any is unreachable, exactly as it did for the two.
+  `--role <role>` prints the one model a role resolves to, for the effort and thinking-cap
+  probes to reuse when they are pointed at a role rather than at the worker model.
+
+Pinned by `tests/factory/test_factory_model_overrides.py`: the checked-in table is empty and
+absent means none; a table is parsed and its slugs stripped; every role the policy knows is
+accepted; an unknown role, an empty slug, a non-string slug and a non-object table are
+refused and the message names the key; the dataclass default; the default is the worker
+model, an override wins over it for its role only, the architecture holdout keeps its own
+model without an override and an override wins over that rule, the request's own model wins
+over everything, the launched argv and the result name the resolved model, and the kernel's
+own requests name none; a returned stage and a timed-out one record and print the resolved
+model, a provider without a resolver records the request's model or the worker model, and
+the line shape; the script
+lists the two checked-in models, every override value once after them, nothing for an
+override equal to the worker model, the worker alone without an architecture model, refuses
+a table the kernel would refuse (and its exit line), prints one slug per line, agrees with
+`model_for` for every role with and without overrides, bootstraps from beside itself and
+runs from outside the repository; and the workflow step reads the list before the loop,
+refuses an empty list, keeps its refusal, and no longer carries the inline two-model list.
+`tests/factory/test_factory_runtime.py`'s architecture-holdout test now makes the request
+the kernel makes (no model named) and still expects the holdout's own model. Mutations
+`model-override-ignored-by-run`, `model-override-unknown-role-accepted` and
+`model-route-probe-skips-override-models` are registered in
+`harness/factory_mutations/defects.json`, the script and the detector are in the runner's
+copy list, and each was verified by direct injection on the maintainer's Windows host (the
+copy built by `run.py`, one defect injected, the detector run).
+
+**Observed and left alone.** Which model `test_author` should run on is the owner's call and
+is not made here; the checked-in table is empty and the next build runs exactly as the last
+did. The probe costs one one-word CLI call per distinct model, so a table that names three
+models costs three: the price of proving a route before a build rather than during one. A
+role's effort and thinking-cap rows are keyed by role, not by model, so a role moved to a
+model with a different scale carries the same level name; the effort and thinking-cap probes
+still measure the worker model, and pointing them at an overridden role (`--role`) is the
+next step once a row is set. The `model=` field is appended after `effort=` so every
+existing reader of the line, which anchors on the fields before it, reads as before.
+
+**Consequences.** The owner can route `test_author`, or any role, to another model with one
+line in `kernel.json`; the next run's preflight proves that model reachable before any stage
+runs, the stage line says which model each stage ran on, and the question D-059 left open,
+whether it is the route or the model that cannot be bounded, is answered by changing one and
+reading the line.

@@ -208,7 +208,14 @@ jobs:
           # here rather than burn a validation ladder discovering it. Every request the kernel
           # makes names an effort level (`--effort`, D-055); the probe names a judge's.
           worker_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
-          for model in $(python3 -c 'import json;p=json.load(open(".factory/kernel.json"))["provider"];print(p["model"]);print(p.get("architecture_model") or "")'); do
+          # Every distinct model a stage can run on: the worker model, the architecture
+          # holdout's, and every per-role override in provider.model_overrides, listed by
+          # scripts/factory_models.py from the same policy the kernel loads. A model the
+          # list omits is a route no preflight proved; a list the script cannot produce
+          # (a typo in the table) refuses the run here, before any stage (D-061).
+          route_models="$(python3 scripts/factory_models.py --list)"
+          test -n "$route_models" || { echo "FACTORY_PREFLIGHT_REFUSED scripts/factory_models.py listed no model"; exit 1; }
+          for model in $route_models; do
             set +e
             timeout 180 claude --bare -p "Reply with exactly the word OK and nothing else." \
               --model "$model" --permission-mode dontAsk --tools "" \

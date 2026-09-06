@@ -215,7 +215,6 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 role=role,
                 prompt=prompt,
                 cwd=str(cwd),
-                model=self.config.provider.model,
                 environment=dict(env),
                 allowed_tools=allowed_tools(role),
                 # A bounded loop: the CLI stops the worker at the role's cap and the provider

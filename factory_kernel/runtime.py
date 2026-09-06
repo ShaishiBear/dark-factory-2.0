@@ -109,15 +109,19 @@ def record_stage_timing(
 def stage_line(row: Mapping[str, Any]) -> str:
     """`FACTORY_STAGE kind=... name=... seconds=... [turns=...] [cost_usd=...] outcome=...
     [events=...] [timed_out=true] [hang=true] [over_budget=true] [draft_deadline_missed=true
-    reads=...] [thinking=...] [effort=...]`: the row as one log line, with the fields that do
-    not apply left out. `events` is how many stream events the provider read; a timed-out or
-    hung stage still says what it had shown by then (D-054). `thinking` is the thinking those
-    events showed, in the CLI's estimate, and `effort` the level the CLI was asked for (D-055).
+    reads=...] [thinking=...] [effort=...] [model=...]`: the row as one log line, with the
+    fields that do not apply left out. `events` is how many stream events the provider read;
+    a timed-out or hung stage still says what it had shown by then (D-054). `thinking` is the
+    thinking those events showed, in the CLI's estimate, and `effort` the level the CLI was
+    asked for (D-055).
     `draft_deadline_missed` marks a mutation worker killed for writing nothing by its draft
     deadline, with the `Read` calls it made by then (D-057). `stage_run=N` (after the name,
     only when N > 1) marks the Nth time the kernel ran this stage in the run, and `attempts=N`
     (after the seconds, only when N > 1) how many CLI processes that stage took; the 2687 s
-    `test_author` of run 34008561672 was two processes and its row said neither (D-058)."""
+    `test_author` of run 34008561672 was two processes and its row said neither (D-058).
+    `model` is the slug the provider resolved for the stage (the request's own, else the
+    per-role override, else the architecture holdout's own, else the worker model), so a role
+    routed to another model says so where its telemetry is read (D-061)."""
     fields = [f"kind={row['kind']}", f"name={row['name']}"]
     if row.get("stage_run") is not None and row["stage_run"] > 1:
         fields.append(f"stage_run={row['stage_run']}")
@@ -145,6 +149,8 @@ def stage_line(row: Mapping[str, Any]) -> str:
         fields.append(f"thinking={row['thinking_tokens']}")
     if row.get("effort"):
         fields.append(f"effort={row['effort']}")
+    if row.get("model"):
+        fields.append(f"model={row['model']}")
     return STAGE_LINE_PREFIX + " " + " ".join(fields)
 
 
@@ -1815,7 +1821,6 @@ class KernelRuntime:
                     role="holdout",
                     prompt=prompt,
                     cwd=tmp,
-                    model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
                     allowed_tools=allowed_tools("holdout"),
@@ -2037,7 +2042,6 @@ class KernelRuntime:
                     role=role,
                     prompt=prompt,
                     cwd=tmp,
-                    model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
                     allowed_tools=allowed_tools(role),
@@ -2106,7 +2110,6 @@ class KernelRuntime:
                     role="architecture-holdout",
                     prompt=prompt,
                     cwd=tmp,
-                    model=self.config.provider.model,
                     environment={},
                     structured_schema={"type": "object"},
                     allowed_tools=allowed_tools("architecture-holdout"),
@@ -2164,7 +2167,6 @@ class KernelRuntime:
                 role=role,
                 prompt=prompt,
                 cwd=str(cwd),
-                model=self.config.provider.model,
                 environment=dict(env),
                 allowed_tools=allowed_tools(role),
                 max_turns=max_turns(role),
@@ -2227,11 +2229,15 @@ class KernelRuntime:
         # (`agent-<role>.2.*`), never the first run's files (D-058).
         record, stage_run = stage_record_name(paths.transcripts, request.role)
         transcript = paths.transcripts / f"{record}.log"
+        # The model the provider will launch, resolved before the launch so the record of a
+        # stage that raises names it too: a role routed off the worker model by
+        # `provider.model_overrides` says so whether it returned or died (D-061).
+        model = self._resolved_model(request)
         try:
             result = self.provider.run(request, transcript=transcript, **run_kwargs)
         except BaseException as exc:
             self._record_failed_agent(
-                paths, request.role, exc, started=started, model=request.model,
+                paths, request.role, exc, started=started, model=model,
                 effort=request.effort, record=record, stage_run=stage_run,
             )
             raise
@@ -2240,6 +2246,18 @@ class KernelRuntime:
             record=record, stage_run=stage_run,
         )
         return result
+
+    def _resolved_model(self, request: AgentRequest) -> str | None:
+        """The model the provider runs `request` on: its own resolution (the request's
+        explicit model, else `provider.model_overrides[role]`, else the architecture
+        holdout's own model, else the worker model; D-061) when it exposes one, else the
+        request's model, else the configured worker model. The kernel's own requests name no
+        model, so for the CLI provider this is the override table's answer; a rehearsal
+        provider without a resolver records what every kernel request said before D-061."""
+        resolve = getattr(self.provider, "model_for", None)
+        if callable(resolve):
+            return str(resolve(request))
+        return request.model or self.config.provider.model
 
     def _record_agent(
         self,
