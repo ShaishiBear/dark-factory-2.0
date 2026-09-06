@@ -4,14 +4,16 @@ Four builds of issue #103 died in `test_author`. The last (run 34002520477) made
 and no Write or Edit in 31 turns: it read kernel source, the harness, biome and tsconfig, and
 set out to "verify the kernel's deferred-repro check", then hit its 30-turn cap
 (`error_max_turns`, 1925 s, $4.54). Issue #49's test author (run 33999901008) wrote its first
-file at turn ~5 of 15. Two bounds, pinned here.
+file at turn ~5 of 15. Issue #103's seventh build (34024234313), the first on MiniMax M3,
+was killed by the 0.6 deadline at turn 18 after 17 in-scope Reads at one per turn, before its
+first write; the fraction is 0.8 since (D-063). Two bounds, pinned here.
 
 The read scope: every tool-bearing role carries a `PathScope` from `worker_policy.ROLE_PATH_SCOPE`
 (the product tree under `app/`, `docs/`, the root docs, and the run's artifacts; the trust root
 denied), the provider renders it as the CLI's `Read(...)`/`Edit(...)` allow and deny rules
 instead of bare tool names, and the `_agent_stage` funnel refuses a repository-mutation request
 that carries no scope. The draft deadline: for `test_author`, `implement` and `repair`, the
-provider's stream reader kills the process when a turn past `ceil(cap * 0.6)` begins with no
+provider's stream reader kills the process when a turn past `ceil(cap * 0.8)` begins with no
 Write/Edit tool_use seen, and the stage is refused as `no_draft_by_turn` with the reads it made,
 never retried; the prompts state both bounds, the deadline rendered from the policy.
 
@@ -441,7 +443,7 @@ class BuildSideRequestTests(unittest.TestCase):
 
     def test_the_deadline_is_rendered_into_a_mutation_roles_prompt(self):
         req = self._agent("test_author", "draft by turn $DRAFT_DEADLINE_TURN of $ARTIFACTS_DIR\n")
-        self.assertIn("draft by turn 18 of", req.prompt)
+        self.assertIn("draft by turn 24 of", req.prompt)
         self.assertNotIn("$DRAFT_DEADLINE_TURN", req.prompt)
 
     def test_a_non_mutation_prompt_may_not_name_the_deadline(self):
@@ -503,9 +505,9 @@ class PromptTextTests(unittest.TestCase):
 
 class DeadlinePolicyTests(unittest.TestCase):
     def test_the_fraction_and_the_turn(self):
-        self.assertEqual(DRAFT_DEADLINE_FRACTION, 0.6)
-        self.assertEqual(draft_deadline_turn("test_author"), 18)
-        self.assertEqual(draft_deadline_turn("test_author"), math.ceil(30 * 0.6))
+        self.assertEqual(DRAFT_DEADLINE_FRACTION, 0.8)
+        self.assertEqual(draft_deadline_turn("test_author"), 24)
+        self.assertEqual(draft_deadline_turn("test_author"), math.ceil(30 * 0.8))
         for role in sorted(REPO_MUTATION_ROLES):
             with self.subTest(role):
                 cap = ROLE_MAX_TURNS[role]
@@ -513,6 +515,7 @@ class DeadlinePolicyTests(unittest.TestCase):
                 self.assertEqual(turn, math.ceil(cap * DRAFT_DEADLINE_FRACTION))
                 self.assertLess(turn, cap, "a deadline at the cap would never fire first")
                 self.assertGreater(turn, 5, "issue #49's author wrote at turn ~5")
+                self.assertGreater(turn, 18, "#103's seventh build read 17 files at one a turn")
 
     def test_only_mutation_roles_have_one(self):
         for role in ROLE_TOOLS:
@@ -525,7 +528,7 @@ class DeadlinePolicyTests(unittest.TestCase):
             draft_deadline_turn("nobody")
 
     def test_the_requests_own_cap_is_honoured(self):
-        self.assertEqual(draft_deadline_turn("implement", 10), 6)
+        self.assertEqual(draft_deadline_turn("implement", 10), 8)
         with self.assertRaises(ValueError):
             draft_deadline_turn("implement", 0)
 
@@ -566,7 +569,7 @@ class DraftWatchTests(unittest.TestCase):
 
 class DeadlineFakeCliTests(_FakeCliCase):
     def test_a_worker_that_only_reads_is_killed_at_the_deadline_and_not_retried(self):
-        self.scenario(reading_steps(25))
+        self.scenario(reading_steps(30))
         restores: list[int] = []
         with self.assertRaises(ProviderStageError) as ctx:
             provider_for(self.binary, retries=2, timeout=60, idle=5).run(
@@ -581,14 +584,14 @@ class DeadlineFakeCliTests(_FakeCliCase):
         self.assertNotIn("hang", exc.telemetry)
         self.assertIs(exc.telemetry["draft_deadline_missed"], True)
         self.assertEqual(exc.telemetry["subtype"], "no_draft_by_turn")
-        self.assertEqual(exc.telemetry["draft_deadline_turn"], 18)
-        self.assertEqual(exc.telemetry["num_turns"], 19, "turn 19 began; that is the kill")
-        self.assertEqual(exc.telemetry["reads"], 18)
-        self.assertEqual(len(exc.telemetry["files_read"]), 18)
+        self.assertEqual(exc.telemetry["draft_deadline_turn"], 24)
+        self.assertEqual(exc.telemetry["num_turns"], 25, "turn 25 began; that is the kill")
+        self.assertEqual(exc.telemetry["reads"], 24)
+        self.assertEqual(len(exc.telemetry["files_read"]), 24)
         self.assertEqual(exc.telemetry["files_read"][0], "factory_kernel/f1_0.py")
         self.assertIsNone(exc.telemetry["total_cost_usd"], "no result event: cost unknown")
-        self.assertIn("wrote nothing by turn 18 of 30", str(exc))
-        self.assertIn("reads=18", str(exc))
+        self.assertIn("wrote nothing by turn 24 of 30", str(exc))
+        self.assertIn("reads=24", str(exc))
         self.assertIn("factory_kernel/f1_0.py", str(exc))
         self.assertIn("not retried", str(exc))
 
@@ -610,19 +613,19 @@ class DeadlineFakeCliTests(_FakeCliCase):
         self.scenario(reading_steps(25))
         with self.assertRaises(DraftDeadlineMissed) as ctx:
             provider_for(self.binary, retries=0, timeout=60, idle=5).run(request(max_turns=10))
-        self.assertEqual(ctx.exception.telemetry["draft_deadline_turn"], 6)
-        self.assertEqual(ctx.exception.telemetry["num_turns"], 7)
+        self.assertEqual(ctx.exception.telemetry["draft_deadline_turn"], 8)
+        self.assertEqual(ctx.exception.telemetry["num_turns"], 9)
 
     def test_the_paths_read_are_capped_in_the_record_and_the_count_is_not(self):
-        self.scenario(reading_steps(25, reads_per_turn=3))
+        self.scenario(reading_steps(30, reads_per_turn=3))
         with self.assertRaises(DraftDeadlineMissed) as ctx:
             provider_for(self.binary, retries=0, timeout=60, idle=5).run(request())
-        self.assertEqual(ctx.exception.telemetry["reads"], 54)
+        self.assertEqual(ctx.exception.telemetry["reads"], 72)
         self.assertEqual(len(ctx.exception.telemetry["files_read"]), FILES_READ_CAP)
         self.assertEqual(FILES_READ_CAP, 40)
 
     def test_the_stage_record_row_and_line_say_so(self):
-        self.scenario(reading_steps(25))
+        self.scenario(reading_steps(30))
         with tempfile.TemporaryDirectory() as tmp:
             paths = RunPaths.create(Path(tmp), "run")
             rt = _runtime(Path(tmp), provider_for(self.binary, retries=2, timeout=60, idle=5))
@@ -644,20 +647,20 @@ class DeadlineFakeCliTests(_FakeCliCase):
         self.assertEqual(record["error_class"], "DraftDeadlineMissed")
         self.assertEqual(record["subtype"], "no_draft_by_turn")
         self.assertIs(record["draft_deadline_missed"], True)
-        self.assertEqual(record["draft_deadline_turn"], 18)
-        self.assertEqual(record["reads"], 18)
-        self.assertEqual(record["num_turns"], 19)
-        self.assertEqual(len(record["files_read"]), 18)
+        self.assertEqual(record["draft_deadline_turn"], 24)
+        self.assertEqual(record["reads"], 24)
+        self.assertEqual(record["num_turns"], 25)
+        self.assertEqual(len(record["files_read"]), 24)
         self.assertEqual(record["attempts"], 1)
         self.assertFalse(record["timed_out"])
         self.assertIs(row["draft_deadline_missed"], True)
-        self.assertEqual(row["reads"], 18)
-        self.assertIn(" turns=19 ", line)
+        self.assertEqual(row["reads"], 24)
+        self.assertIn(" turns=25 ", line)
         self.assertIn(" outcome=failed events=", line)
-        self.assertIn(" draft_deadline_missed=true reads=18", line)
+        self.assertIn(" draft_deadline_missed=true reads=24", line)
         self.assertNotIn("timed_out=true", line)
-        self.assertIn("msg_19", log, "the stream is kept up to the kill")
-        self.assertNotIn("msg_25", log)
+        self.assertIn("msg_25", log, "the stream is kept up to the kill")
+        self.assertNotIn("msg_30", log)
 
     def test_a_healthy_session_records_no_deadline_fields(self):
         self.scenario(healthy_steps())
@@ -705,11 +708,11 @@ class StageLineTests(unittest.TestCase):
 
 def _missed(files: list[str] | None = None) -> DraftDeadlineMissed:
     return DraftDeadlineMissed(
-        "agent worker role='test_author' wrote nothing by turn 18 of 30",
+        "agent worker role='test_author' wrote nothing by turn 24 of 30",
         telemetry={
             "subtype": "no_draft_by_turn",
             "draft_deadline_missed": True,
-            "draft_deadline_turn": 18,
+            "draft_deadline_turn": 24,
             "reads": 46,
             "num_turns": 19,
             "files_read": files
@@ -724,7 +727,7 @@ class CommentEvidenceTests(unittest.TestCase):
         text = KernelRuntime._draft_deadline_evidence(_missed())
         self.assertIn("no_draft_by_turn", text)
         self.assertIn("46 Read call(s)", text)
-        self.assertIn("by turn 18", text)
+        self.assertIn("by turn 24", text)
         self.assertIn("turns seen: 19", text)
         self.assertIn("not retried", text)
         self.assertIn("factory_kernel/runtime.py", text)
@@ -806,7 +809,7 @@ class BuildCommentTests(unittest.TestCase):
         ((number, body),) = gh.comments
         self.assertEqual(number, 49)
         self.assertIn(
-            "builder failed closed: agent worker role='test_author' wrote nothing by turn 18", body
+            "builder failed closed: agent worker role='test_author' wrote nothing by turn 24", body
         )
         self.assertIn("no_draft_by_turn", body)
         self.assertIn("46 Read call(s)", body)
