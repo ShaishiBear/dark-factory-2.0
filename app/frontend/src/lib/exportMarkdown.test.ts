@@ -270,6 +270,44 @@ describe('formatCitation', () => {
     expect(result).toContain('0:10–0:20');
     expect(result).toContain('> "Test snippet text"');
   });
+
+  // Issue #49 acceptance checkpoints: every formatCitation fallback path must
+  // render like the healthy paths, a leading `- ` list marker plus the
+  // two-space-indented `> "<snippet>"` blockquote line. Unicode is
+  // load-bearing: the range separator is en dash U+2013 and the separator
+  // before the range is em dash U+2014; the range literals below copy the
+  // existing suite exactly.
+  it('AC-1: unparseable video_url keeps the quoted snippet on its own line', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toContain('> "Relevant text"');
+    expect(result.split('\n').some((line) => line.trim() === '> "Relevant text"')).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  it('AC-2: unparseable video_url still emits the leading list marker', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'not-a-url', snippet: 'Relevant text' };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).toContain('(timestamp link unavailable)');
+    expect(result).toContain('0:10–0:20');
+    warnSpy.mockRestore();
+  });
+
+  it('AC-3: Dynamous fallback without lesson_url emits the leading list marker', () => {
+    const citation = {
+      ...baseCitation,
+      source_type: 'dynamous' as const,
+      video_url: '',
+      lesson_url: '',
+    };
+    const result = formatCitation(citation);
+    expect(result).toMatch(/^- /);
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Test snippet text"');
+  });
 });
 
 describe('formatSources', () => {
