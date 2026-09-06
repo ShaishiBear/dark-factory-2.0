@@ -18,7 +18,13 @@ from typing import IO, Any, Callable, Mapping
 
 from .agents import AgentRequest, AgentResult, PathScope, ProviderCapabilities
 from .config import ProviderConfig
-from .worker_policy import EFFORT_LEVELS, REPO_MUTATION_ROLES, draft_deadline_turn
+from .worker_policy import (
+    EFFORT_LEVELS,
+    REPO_MUTATION_ROLES,
+    ROLE_THINKING_CAP,
+    THINKING_CAP_ENV,
+    draft_deadline_turn,
+)
 
 
 class ClaudeCliProvider:
@@ -69,6 +75,26 @@ class ClaudeCliProvider:
                 if key in cls.REQUEST_ENV
             }
         )
+        return env
+
+    def thinking_cap(self, request: AgentRequest) -> int | None:
+        """The thinking budget this request's CLI carries as `MAX_THINKING_TOKENS`: the
+        configured per-role override, else the policy's row (`worker_policy.ROLE_THINKING_CAP`,
+        every row `None` today). `None` sets nothing (D-059)."""
+        if request.role in self.config.thinking_cap_overrides:
+            return self.config.thinking_cap_overrides[request.role]
+        return ROLE_THINKING_CAP.get(request.role)
+
+    def environment_for(self, request: AgentRequest) -> dict[str, str]:
+        """The environment one CLI process of `request` runs in: the filtered worker
+        environment (`_worker_env`), plus `MAX_THINKING_TOKENS` only when the role's cap is
+        set. The runner's own value of that variable, if any, is never inherited: it is not a
+        provider credential and not on the exact list, so the only way it reaches a worker is
+        through the policy table or the configured override (D-059)."""
+        env = self._worker_env(request.environment)
+        cap = self.thinking_cap(request)
+        if cap is not None:
+            env[THINKING_CAP_ENV] = str(cap)
         return env
 
     def wall_seconds(self, request: AgentRequest) -> int:
@@ -187,7 +213,6 @@ class ClaudeCliProvider:
         model = self.model_for(request)
         effort = self.effort_level(request)
         argv = self.argv_for(request)
-        env = self._worker_env(request.environment)
 
         # A dropped stream is not a verdict. The tenth canary defect (D-031) was a `test_author`
         # worker that returned `API Error: stream closed before completion` after 12 seconds of
@@ -311,7 +336,7 @@ class ClaudeCliProvider:
         log at all, so what the `test_author` of run 33992451400 wrote in 34 minutes is
         unknown; a killed process now leaves its whole stream (D-055).
         """
-        env = self._worker_env(request.environment)
+        env = self.environment_for(request)
         wall = self.wall_seconds(request)
         with contextlib.ExitStack() as stack:
             tee: IO[str] | None = None

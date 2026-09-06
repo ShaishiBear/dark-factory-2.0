@@ -202,6 +202,51 @@ ROLE_EFFORT: dict[str, str] = {
     "governor-certifier": JUDGE_EFFORT,
 }
 
+# The CLI's thinking budget, the one lever `--effort` is not. The installed CLI (2.1.259; the
+# variable is far older) reads `MAX_THINKING_TOKENS` from its environment as an integer: above
+# zero it sends every request with `thinking: {type: "enabled", budget_tokens: N}`, raising N
+# to 1024 if it was lower and holding it under the response's max_tokens; exactly zero sends
+# `thinking: {type: "disabled"}`; unset leaves thinking adaptive, which is what `--effort`
+# steers. There is no flag for it (`claude --help` lists only `--effort`). Six builds of
+# issue #103 died or overran in `test_author` at `--effort medium` (the sixth: 2025 s, 15
+# turns, 121,065 thinking tokens, ~22,500 of them in the last turn alone), and the effort
+# probe read honoured=true and honoured=false on the same route from run to run, so the level
+# is not a bound on this route; a stated budget may be, and is measured before it is used.
+THINKING_CAP_ENV = "MAX_THINKING_TOKENS"
+# The smallest budget the CLI sends as given; a positive value below it is raised to it, so
+# a configured cap below it would be a lie the loader refuses (D-059).
+THINKING_CAP_MIN_BUDGET = 1024
+# The value that turns thinking off altogether.
+THINKING_CAP_DISABLED = 0
+
+# Per-role cap, exported by the provider as `MAX_THINKING_TOKENS` in the CLI's environment
+# only when the row is not `None`; a `None` row sets nothing and the CLI behaves exactly as it
+# did. Every row is `None` until the worker workflow's preflight
+# (`scripts/factory_thinking_cap_probe.py`, `FACTORY_PREFLIGHT_THINKING_CAP_PROBE ...
+# honoured=true|false`) says the route honours the budget: the worker model three times on
+# the effort probe's prompt, uncapped, at a 1024-token budget and with thinking disabled.
+# Setting a row is a trust-root change; `provider.thinking_cap_overrides` in kernel.json is
+# the per-deployment `{role: cap}` override, validated at load like the effort table (D-059).
+ROLE_THINKING_CAP: dict[str, int | None] = {
+    "triage": None,
+    "plan": None,
+    "investigate": None,
+    "contract": None,
+    "context": None,
+    "architecture": None,
+    "test_author": None,
+    "implement": None,
+    "review-spec": None,
+    "review-standards": None,
+    "repair": None,
+    "conformance": None,
+    "holdout": None,
+    "architecture-holdout": None,
+    "contract-certifier": None,
+    "design-certifier": None,
+    "governor-certifier": None,
+}
+
 # The identity every kernel-made commit carries. It is the GitHub Actions bot's own noreply
 # address, which GitHub attributes to the `github-actions[bot]` account (type Bot). An earlier
 # invented noreply address mapped to no account at all, so kernel commits resolved to null:
@@ -378,6 +423,54 @@ def validate_effort_overrides(raw: object, name: str = "provider.effort_override
                 f"kernel {name}.{role} must be one of {', '.join(EFFORT_LEVELS)}; got {level!r}"
             )
         overrides[role] = level
+    return overrides
+
+
+def thinking_cap(role: str) -> int | None:
+    """The thinking budget the role's CLI environment carries as `MAX_THINKING_TOKENS`, or
+    `None` for no cap (nothing set, the CLI as it was). The provider applies
+    `provider.thinking_cap_overrides` on top (D-059)."""
+    try:
+        cap = ROLE_THINKING_CAP[role]
+    except KeyError as exc:
+        raise ValueError(f"no thinking cap row for role {role!r}") from exc
+    if cap is None:
+        return None
+    return check_thinking_cap(cap, f"thinking cap for role {role!r}")
+
+
+def check_thinking_cap(value: object, what: str) -> int:
+    """An integer the CLI would honour as given: `THINKING_CAP_DISABLED` (0), or a budget of
+    at least `THINKING_CAP_MIN_BUDGET` tokens. A bool, a string, a negative number or a
+    positive budget below the minimum (which the CLI would silently raise) is refused."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(
+            f"{what} must be an integer: {THINKING_CAP_DISABLED} to disable thinking, or a "
+            f"budget of at least {THINKING_CAP_MIN_BUDGET} tokens; got {value!r}"
+        )
+    if value != THINKING_CAP_DISABLED and value < THINKING_CAP_MIN_BUDGET:
+        raise ValueError(
+            f"{what} must be {THINKING_CAP_DISABLED} (thinking disabled) or at least "
+            f"{THINKING_CAP_MIN_BUDGET} (the smallest budget the CLI sends as given); got {value!r}"
+        )
+    return value
+
+
+def validate_thinking_cap_overrides(
+    raw: object, name: str = "provider.thinking_cap_overrides"
+) -> dict[str, int]:
+    """`{role: cap}` from kernel.json, refused unless every role is one this policy knows and
+    every cap is one the CLI would honour as given (`check_thinking_cap`). Absent (`None`) is
+    no override."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"kernel {name} must be an object of role to thinking cap")
+    overrides: dict[str, int] = {}
+    for role, cap in raw.items():
+        if not isinstance(role, str) or role not in ROLE_THINKING_CAP:
+            raise ValueError(f"kernel {name} names a role the worker policy does not know: {role!r}")
+        overrides[role] = check_thinking_cap(cap, f"kernel {name}.{role}")
     return overrides
 
 

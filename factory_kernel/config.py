@@ -7,7 +7,7 @@ import os
 from pathlib import Path, PurePosixPath
 from typing import Mapping
 
-from .worker_policy import validate_effort_overrides
+from .worker_policy import validate_effort_overrides, validate_thinking_cap_overrides
 
 IDLE_TIMEOUT_SECONDS_DEFAULT = 420
 
@@ -35,6 +35,12 @@ class ProviderConfig:
     # the levels the CLI accepts, so a typo is a refused configuration, not a silent default
     # (D-055).
     effort_overrides: Mapping[str, str] = field(default_factory=dict)
+    # Per-deployment `{role: cap}` on top of `worker_policy.ROLE_THINKING_CAP` (every row
+    # `None` today); the provider exports it as `MAX_THINKING_TOKENS` in the CLI's environment
+    # only for a role whose cap is set. Validated at load: a known role, and 0 (thinking
+    # disabled) or a budget of at least 1024 tokens, the smallest the CLI sends as given
+    # (D-059).
+    thinking_cap_overrides: Mapping[str, int] = field(default_factory=dict)
 
 
 TRANSIENT_RETRIES_MAX = 3
@@ -194,6 +200,9 @@ def load_config(path: str | Path) -> KernelConfig:
             ),
             idle_timeout_seconds=idle_timeout_seconds,
             effort_overrides=validate_effort_overrides(provider.get("effort_overrides")),
+            thinking_cap_overrides=validate_thinking_cap_overrides(
+                provider.get("thinking_cap_overrides")
+            ),
         ),
         runtime=RuntimeConfig(
             max_attempts=_positive_int(runtime.get("max_attempts"), "runtime.max_attempts"),

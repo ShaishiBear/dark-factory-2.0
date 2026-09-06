@@ -250,6 +250,24 @@ jobs:
           timeout 400 python3 scripts/factory_effort_probe.py --model "$worker_model" \
             || echo "FACTORY_PREFLIGHT_EFFORT_PROBE model=$worker_model low_thinking=0 high_thinking=0 honoured=false error=probe-did-not-run"
 
+      - name: Probe whether the route honours a thinking budget
+        shell: bash
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          # `--effort` is not a bound on this route: the effort probe read honoured=false,
+          # true, true, false across the last four builds of issue #103, and all six died or
+          # overran in `test_author` (the sixth: 2025 s, 15 turns, 121,065 thinking tokens).
+          # The CLI's thinking budget, `MAX_THINKING_TOKENS` in its environment, is the lever
+          # not yet tried. The worker model three times on the effort probe's prompt, one
+          # turn each: uncapped, at a 1024-token budget, and with thinking disabled (0),
+          # counting the thinking each stream showed (scripts/factory_thinking_cap_probe.py).
+          # The line is data for `worker_policy.ROLE_THINKING_CAP`, every row of which is
+          # None until it says the budget is honoured; never a refusal (D-059).
+          worker_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
+          timeout 600 python3 scripts/factory_thinking_cap_probe.py --model "$worker_model" \
+            || echo "FACTORY_PREFLIGHT_THINKING_CAP_PROBE model=$worker_model uncapped=0 cap1024=0 cap0=0 honoured=false error=probe-did-not-run"
+
       - name: Prove the worker's read scope with the pinned CLI
         shell: bash
         env:

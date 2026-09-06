@@ -2485,3 +2485,122 @@ change. The local factory suite runs green on the maintainer's Windows host once
 contract can say so, the test author can guard it, and RED proves the guard green instead of
 refusing the build for a test that did what it should. A stage the kernel runs twice leaves
 two records, and a record that outlived its wall says why.
+
+---
+
+## D-059 · The route is probed for a thinking budget, and a worker can carry one per role, because six builds of issue #103 died in `test_author` at an effort the route does not honour
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 33987381035, 33992451400, 33997386843, 34002520477, 34008561672, 34013852733 (the six builds of issue #103)
+
+Six builds of the same three-criterion design, on `z-ai/glm-5.3-flash` over OpenRouter's
+Anthropic-compatible route (`ANTHROPIC_BASE_URL=https://openrouter.ai/api`), and the
+`test_author` line of each:
+
+```
+33987381035  seconds=1200.121 turns=0  outcome=failed                                        (no telemetry, D-054)
+33992451400  seconds=2025.084 turns=14 outcome=failed events=76248 timed_out=true            (D-055)
+33997386843  seconds=1375.701 turns=33 outcome=ok     events=63414 thinking=92984  effort=medium  (RED refused, D-057)
+34002520477  seconds=1925.537 turns=31 outcome=failed events=69124 thinking=102959 effort=medium  (no draft, D-057)
+34008561672  seconds=2687.134 turns=41 outcome=ok     events=94909 thinking=141172 effort=medium  (two processes, D-058)
+34013852733  seconds=2025.142 turns=15 outcome=failed events=81231 thinking=121065 effort=medium timed_out=true
+```
+
+The sixth is 135 s per turn, 5,415 events per turn, and its last turn alone thought about
+22,500 tokens, while the four stages before it in the same run took 15-46 s per turn
+(`investigate` 847 s / 27, `contract` 194 s / 6, `context` 576 s / 35, `architecture`
+332 s / 14). D-055 put every worker at `--effort medium` from the third build on, and the
+numbers did not move: the three builds at the CLI's default and the three at `medium` are
+the same shape. The preflight measured why. `FACTORY_PREFLIGHT_EFFORT_PROBE` on the same
+route, same prompt, same model, run to run:
+
+```
+33997386843  low_thinking=4256 high_thinking=3352 honoured=false
+34002520477  low_thinking=2883 high_thinking=6360 honoured=true
+34008561672  low_thinking=2051 high_thinking=3550 honoured=true
+34013852733  low_thinking=4401 high_thinking=2460 honoured=false
+```
+
+`medium` out-thought `high` twice in four. The CLI documents effort as adaptive and
+calibrated per model; on this route to this model it is not a bound, and a level the route
+does not honour cannot be tuned into one. Turns, dollars, the wall and the draft deadline
+(D-025, D-054, D-057) each bound something else; none bounds how long one turn thinks.
+
+**The lever not yet tried.** The installed CLI (2.1.259) reads `MAX_THINKING_TOKENS` from
+its environment as an integer. Above zero it sends every request with `thinking: {type:
+"enabled", budget_tokens: N}`, raising N to 1024 if it was lower and holding it below the
+response's max_tokens; exactly zero sends `thinking: {type: "disabled"}`; unset leaves
+thinking adaptive, which is what `--effort` steers. There is no flag for it (`claude --help`
+lists only `--effort`), and the CLI's own error text for a level that needs thinking says
+`unset MAX_THINKING_TOKENS=0`. It is a stated budget rather than a calibrated level, so
+whether the route passes it through is a different question from whether it honours a
+level, and it is asked the same way D-055 asked its question: measured before it is used.
+
+**Decision.** The preflight probes the budget, and the worker environment can carry one per
+role; no row carries one until the probe says the route honours it.
+
+- **The probe.** `scripts/factory_thinking_cap_probe.py`, run by the worker workflow right
+  after the effort probe: the worker model three times on the effort probe's fixed
+  reasoning prompt, one turn and one dollar each, at the mutation roles' level (`medium`),
+  uncapped, with `MAX_THINKING_TOKENS=1024` (the smallest budget the CLI sends as given) and
+  with `MAX_THINKING_TOKENS=0` (thinking disabled), counting the thinking each stream showed
+  with the estimator the stage records use. It prints `FACTORY_PREFLIGHT_THINKING_CAP_PROBE
+  model=<slug> uncapped=<n> cap1024=<m> cap0=<k> honoured=true|false
+  cap1024_honoured=true|false cap0_honoured=true|false effort=<level> uncapped_events=<n>
+  cap1024_events=<n> cap0_events=<n> [error=<what>]` and exits 0 whatever it found. A cap is
+  honoured when its run returned, thought no more than 1.5× the cap (at most 1536 for the
+  budget, nothing at all with thinking disabled) and clearly less than the uncapped run, by
+  the effort probe's own margins (at least 1.5× less and at least 100 tokens fewer);
+  `honoured` is both caps at once, and the two are printed separately because a route may
+  respect a budget and refuse a disabled-thinking request (the CLI's error path above says
+  some models do). The uncapped run gets the runner's environment with the variable removed,
+  never inherited. The workflow prints a `honoured=false error=probe-did-not-run` line if the
+  script does not run; nothing here refuses a run.
+- **The policy row.** `worker_policy.THINKING_CAP_ENV = "MAX_THINKING_TOKENS"`,
+  `THINKING_CAP_MIN_BUDGET = 1024`, `THINKING_CAP_DISABLED = 0`, and `ROLE_THINKING_CAP`, a
+  table beside `ROLE_EFFORT` with a row for every role, every row `None`. `thinking_cap(role)`
+  reads it; `check_thinking_cap` refuses a bool, a string, a negative number and a positive
+  budget below 1024, which the CLI would silently raise. The provider's `environment_for`
+  (the environment counterpart of `argv_for`) is what every process is launched with: the
+  filtered worker environment, plus the variable only when the role's cap is not `None`. The
+  runner's own value of the variable never reaches a worker: it is neither a provider
+  credential nor on the exact list, and the request-local environment is whitelisted, so
+  the policy table and the configured override are the only two ways in.
+  `credential_env.scoped_environment` passes it through unchanged; it is not a credential.
+- **The override.** `provider.thinking_cap_overrides` in `kernel.json`, `{role: cap}`,
+  validated at load against the policy's roles and `check_thinking_cap`, applied by the
+  provider over the table exactly as `effort_overrides` is. The checked-in table is empty.
+  Setting a row in either place is the next decision, taken from this probe's line and
+  not before; the table's comment says so.
+
+Pinned by `tests/factory/test_factory_thinking_cap.py`: the variable's name and the two
+values; a cap the CLI would honour as given and the refused shapes; a row for every role,
+every row `None`, an unknown role refused, a set row checked when read; no cap exports
+nothing, the runner's own value never reaches a worker, a configured override is exported
+as the variable (1024, 0, 8192), an override for another role changes nothing, a set policy
+row is exported and the override wins over it, the request environment cannot smuggle it,
+the launched process gets exactly `environment_for`'s result; the checked-in override table
+is empty, absent means none, a table is parsed, a cap below 1024 or of the wrong type is
+refused, an unknown role and a non-object are refused, the message names the key;
+`scoped_environment` passes the variable through; the probe's three runs and their fields,
+the uncapped run inherits nothing, the argv is the effort probe's at the builders' level,
+`within_cap`, `clearly_below`, `cap_honoured` and `honoured` case by case, the line when the
+route honours both caps, ignores the variable, honours the budget but not disabling, when a
+process did not start and when one timed out, one run per cap; and the workflow step's
+place, script, credential, fallback line and absence of any refusal. Mutations
+`thinking-cap-set-but-not-exported` and `thinking-cap-honoured-rule-inverted` are registered
+in `harness/factory_mutations/defects.json`, the script and the detector are in the runner's
+copy list, and each was verified by direct injection on the maintainer's Windows host (the
+copy built by `run.py`, one defect injected, the detector run).
+
+**Observed and left alone.** `budget_tokens` is a request field on Anthropic's API; whether
+OpenRouter maps it onto GLM's own reasoning control, drops it, or errors, is exactly what the
+line will say, and the decision to set a row waits on it. The stage record does not yet say
+what cap a stage ran under; when a row is set, `thinking_cap=<n>` belongs beside `effort=`
+on the stage line and in the record, and that change goes with the row. The workflow's pin
+(2.1.245) is fourteen patch releases behind the binary the variable was read from; the
+variable predates both by a long way, and the probe's line will show it either way.
+
+**Consequences.** The next worker run prints one line saying whether a thinking budget is a
+lever on this route. If it is, one row in `ROLE_THINKING_CAP` bounds what six builds could
+not; if it is not, the factory knows the CLI's last thinking control is closed to it here
+and the remaining question is the route or the model, not the level.
