@@ -74,10 +74,20 @@ class DeferredSymptomBriefTests(unittest.TestCase):
         self.assertEqual(self._brief(None), "")
 
     def test_test_author_call_site_appends_the_brief(self):
+        """One context, built with the brief, reaching the author AND its RED hand-back (D-069).
+
+        The brief used to be appended inline at the single `_agent("test_author", ...)` call.
+        Since the RED gate can hand one refusal back to that same role, the context is built
+        once into `test_author_context` and handed to both, so both consumers are pinned here.
+        """
         self.assertIn(
-            ") + self._deferred_symptom_brief(paths.artifacts),",
+            "test_author_context = self._worker_brief(\n"
+            "                paths, contract_hash=contract_hash, issue_context=issue_context\n"
+            "            ) + self._deferred_symptom_brief(paths.artifacts)\n",
             RUNTIME_SOURCE,
         )
+        self.assertIn("context=test_author_context,", RUNTIME_SOURCE)
+        self.assertIn("author_context=test_author_context,", RUNTIME_SOURCE)
 
     def test_test_author_prompt_names_the_symptom_contract(self):
         text = (PROMPTS / "test-author.md").read_text(encoding="utf-8")
