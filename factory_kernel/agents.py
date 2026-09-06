@@ -26,11 +26,48 @@ class ProviderCapabilities:
 
 
 @dataclass(frozen=True)
+class PathScope:
+    """The files a tool-bearing worker may reach, as gitignore-style patterns relative to the
+    request's `cwd`: `read` and `write` are allow patterns, `deny` are deny patterns. The
+    policy states them (`worker_policy.ROLE_PATH_SCOPE`); the provider renders them as the
+    CLI's `Read(...)`/`Edit(...)` permission rules and adds the run's artifacts directory
+    itself. A scope with no patterns is a judge's: nothing to reach (D-057)."""
+
+    read: tuple[str, ...] = ()
+    write: tuple[str, ...] = ()
+    deny: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for name in ("read", "write", "deny"):
+            patterns = getattr(self, name)
+            if not isinstance(patterns, tuple):
+                raise ValueError(f"path scope {name} must be a tuple of patterns")
+            for pattern in patterns:
+                if not isinstance(pattern, str) or not pattern.strip():
+                    raise ValueError(f"path scope {name} carries an empty pattern")
+                if pattern.startswith(("/", "~", "\\")) or ":" in pattern:
+                    raise ValueError(
+                        f"path scope {name} pattern must be relative to the request cwd: "
+                        f"{pattern!r}"
+                    )
+
+    @property
+    def empty(self) -> bool:
+        return not (self.read or self.write or self.deny)
+
+
+@dataclass(frozen=True)
 class AgentRequest:
     role: str
     prompt: str
     cwd: str
     model: str | None = None
+    # The file boundary of a tool-bearing worker (`worker_policy.path_scope(role)`): what its
+    # Read/Glob/Grep may see and its Write/Edit may touch inside `cwd`, rendered by the provider
+    # as permission rules. Required by the kernel's funnel for every repository-mutation role;
+    # the `test_author` of run 34002520477 read the kernel's own source for 46 Read calls with
+    # nothing stopping it (D-057).
+    path_scope: PathScope | None = None
     # The effort level the CLI is asked for (`--effort`), from `worker_policy.effort(role)`; the
     # provider validates it against the levels the CLI accepts and applies the configured
     # per-role override. Required by the kernel's `_agent_stage` funnel like the bounds below:
@@ -72,6 +109,8 @@ class AgentRequest:
             or self.timeout_seconds <= 0
         ):
             raise ValueError("agent timeout_seconds must be a positive integer when set")
+        if self.path_scope is not None and not isinstance(self.path_scope, PathScope):
+            raise ValueError("agent path_scope must be a PathScope when set")
 
 
 @dataclass(frozen=True)

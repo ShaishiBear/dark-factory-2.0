@@ -80,6 +80,7 @@ from factory_kernel.worker_policy import (  # noqa: E402
     effort,
     effort_rank,
     max_turns,
+    path_scope,
     stage_timeout_seconds,
     validate_effort_overrides,
 )
@@ -127,6 +128,7 @@ def bounded(role: str = "test_author", **overrides) -> AgentRequest:
         max_budget_usd=12.0,
         timeout_seconds=stage_timeout_seconds(role),
         effort=effort(role),
+        path_scope=path_scope(role),
     )
     fields.update(overrides)
     return AgentRequest(**fields)

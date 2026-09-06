@@ -577,8 +577,9 @@ class ProofEvidenceInTheCommentTests(unittest.TestCase):
         human = source.index("except NeedsHuman as exc:")
         generic = source.index("except Exception as exc:")
         finally_ = source.index("finally:", generic)
-        self.assertIn("evidence=self._proof_failure_evidence(paths, exc)", source[human:generic])
-        self.assertIn("evidence=self._proof_failure_evidence(paths, exc)", source[generic:finally_])
+        # `_failure_evidence` is the proof record (D-056) plus the draft-deadline reads (D-057).
+        self.assertIn("evidence=self._failure_evidence(paths, exc)", source[human:generic])
+        self.assertIn("evidence=self._failure_evidence(paths, exc)", source[generic:finally_])
 
 
 if __name__ == "__main__":

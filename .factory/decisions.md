@@ -2164,3 +2164,162 @@ current handling.
 **Consequences.** The next refused RED or GREEN gate leaves a record a human can act on
 without re-running the build, and the needs-human comment quotes it. Pressing the stop
 button no longer costs the stopped issue its place in the queue.
+
+---
+
+## D-057 · A builder reads only its product tree, and must draft before its turns run out, because four builds of issue #103 died in `test_author` and the last read the kernel for 31 turns
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34002520477 (the fourth build of issue #103), 33997386843 (its third), 33999901008 (the build of issue #49, for contrast)
+
+The fourth build's stage line, printed live:
+
+```
+FACTORY_STAGE kind=agent name=test_author seconds=1925.537 turns=31 cost_usd=4.535674 outcome=failed events=69124 over_budget=true thinking=102959 effort=medium
+```
+
+Subtype `error_max_turns`. D-055's full transcript says what the 31 turns were: **46 Read tool
+calls and zero Write or Edit calls.** The worker read far outside its task (kernel source, the
+harness, biome and tsconfig, `authApi`) and at one point set out to "verify the kernel's
+deferred-repro check", because the prompt had told it "the kernel refuses the build after RED
+otherwise" and it went to read how. The previous build (33997386843) wrote its test file at
+turn ~30 of 33 and its RED was refused. Issue #49's test author (33999901008), the healthy
+case, made 11 Reads and 3 Edits in 15 turns, 618 s, $1.28, RED proved, first write at turn ~5.
+Two facts follow.
+
+**(a) Nothing bounded what a worker could read.** The prompt said "relevant source/tests and
+repository guidance", which is unbounded, and the tool policy said `Read, Glob, Grep, Write,
+Edit` with no path. The builder's worktree is a sparse checkout without the holdout scenarios
+(`BUILDER_BLIND_PATHS`, D-048), and everything else in the trust root was on disk and readable:
+the kernel, the harness, the workflows, the prompts of every other role. A worker that can read
+its judge will, given 30 turns, read its judge.
+
+**(b) Nothing ended a worker that was not drafting.** Turns (D-020), dollars (D-025), the wall
+and the idle clock (D-054) and effort (D-055) each bound a different axis, and a worker that
+reads one file per turn sits inside all five until its cap. The stage that most needed
+stopping at turn 15 was stopped at turn 31 by the cap, and the cap is a clean failed stage,
+not a diagnosis: the record said `error_max_turns`, not "read 46 files and wrote none".
+
+**Decision.** Every tool-bearing worker runs inside a stated file boundary, and a mutation
+worker that has not drafted by six tenths of its turns is stopped and refused by name.
+
+- **The read scope is policy data.** `worker_policy.ROLE_PATH_SCOPE` gives every role a
+  `PathScope` (`agents.PathScope`: `read`, `write`, `deny`, gitignore-style patterns relative
+  to the worktree root). The mutation roles (`test_author`, `implement`, `repair`) read
+  `app/**`, `docs/**`, `README.md`, `CLAUDE.md`, `MISSION.md`, `FACTORY_RULES.md` and write
+  `app/**`, `docs/**`, `README.md`; the drafting roles (`plan`, `investigate`, `contract`,
+  `context`, `review-spec`) read the same and write nothing in the tree; `architecture`,
+  `conformance` and `review-standards` additionally read `.factory/architecture.json`, the
+  one documented exception, because each of their prompts opens with it; every one of them
+  is denied `factory_kernel/**`, `harness/**`, `scripts/**`, `tests/factory/**`, `.github/**`
+  and the protected `.factory/` files (`kernel.json`, `evidence-spine.json`, `decisions.md`,
+  `locks/**`, `prompts/**`, `methods/**`, `holdout/**`, `benchmark/**`); the judges and triage
+  have no tools and an empty scope. Every `_agent` path (the base runtime's and the worker
+  runtime's) passes `path_scope(role)` on the request, and the `_agent_stage` funnel refuses
+  a repository-mutation request that arrives without one, before any process starts.
+- **The provider renders it as permission rules, and the rules are stated from the CLI's
+  documentation.** `ClaudeCliProvider.argv_for` (the argv rendering, factored out of `run` so
+  the preflight can prove the same command line) renders a scoped request's `--allowedTools`
+  as `Read(./<pattern>)` for each read pattern, `Edit(./<pattern>)` for each write pattern, and
+  `Read(//<artifacts>/**)`/`Edit(//<artifacts>/**)` for the run's artifacts directory; and
+  `--disallowedTools` as `Read(./<pattern>)` and `Edit(./<pattern>)` for each deny pattern. No
+  bare tool name goes into the allow list: a bare `Read` would match every call and make the
+  paths moot. Only `Read` and `Edit` rules are rendered because those are the two the CLI
+  consults for file permissions (its documentation: `Edit` rules apply to every built-in tool
+  that edits files, `Read` rules to Grep and Glob, and a `Write(...)`, `Glob(...)` or
+  `MultiEdit(...)` path rule is accepted and never consulted). The same documentation says
+  what each list is for: a file inside the working directory or an `--add-dir` directory is
+  readable without any rule, so the **deny list is the read boundary** (and a `Read` deny also
+  blocks Edit/Write on the path, v2.1.228+; the workflow pins 2.1.245); a write inside the
+  working directory needs an allow rule under `dontAsk`, so the **`Edit` allow list is the
+  write boundary**; the `Read` allow rules grant nothing the working directory did not
+  already, and are rendered for completeness. Deny is evaluated before allow, which is why
+  `.factory/architecture.json` is absent from the deny list rather than allowed over it. A
+  `./` prefix is the "relative to the current directory" form; the first rendering stripped
+  leading dots with `lstrip("./")` and would have denied `github/**` and `factory/**`, which
+  the detector caught before the change was ever run.
+- **The enforcement is proved on the runner, not assumed.** The local probe the change asked
+  for could not run: the maintainer's shell has no `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`
+  and `--bare` skips keychain reads, so the installed 2.1.259 answered `Not logged in`. The
+  worker workflow's preflight therefore runs `scripts/factory_read_scope_probe.py` after the
+  effort probe: a throwaway tree with `app/probe.txt`, `factory_kernel/probe.txt` and an
+  artifacts `note.txt`, each holding a sentinel, and the exact argv the kernel renders for a
+  `test_author` (its tools, scope and effort; six turns, one dollar), asking the worker to
+  read all three. It prints `FACTORY_PREFLIGHT_READ_SCOPE_PROBE model=<slug>
+  denied_outside_scope=true|false attempted_outside_scope=... read_inside_scope=...
+  read_artifacts=... events=<n> [error=<what>]`, exits 0 for a denial and for an inconclusive
+  run (the worker never tried, the route failed), and exits 2 only when the trust-root
+  sentinel came back through the stream; the workflow refuses the run on that code alone,
+  because a worker that can read its judge is the defect the scope removes, and prints the
+  line on any other outcome.
+- **The draft deadline.** `worker_policy.DRAFT_DEADLINE_FRACTION = 0.6` and
+  `draft_deadline_turn(role, cap) = ceil(cap × 0.6)`, turn 18 of 30, for the three mutation
+  roles and `None` for every other. The data it is stated from: #49 wrote at turn ~5 of 15;
+  #103's third run wrote at ~30 of 33 and its fourth never; 18 is three times the healthy
+  draft turn and well before the cap the two dead builds spent. The provider hands
+  `_stream_cli` a `DraftWatch` beside the wall and idle clocks; the reader shows it every
+  parsed event; it counts turns as distinct `assistant` `message.id`s, exactly as
+  `ResultEnvelope.from_events` counts a killed process's `num_turns` (D-054), notes the first
+  Write/Edit/MultiEdit/NotebookEdit tool_use as the draft, and counts `Read` tool_use calls
+  with their `file_path`s. The moment a turn past the deadline begins with no draft seen, the
+  reader kills the process and `_launch` raises `DraftDeadlineMissed` (a `ProviderStageError`,
+  so the retry loop refuses it as terminal: not transient, not retried, no worktree restore)
+  with telemetry `subtype=no_draft_by_turn`, `draft_deadline_missed`, `draft_deadline_turn`,
+  `reads`, `files_read` (capped at `FILES_READ_CAP = 40`) beside the partial envelope. The
+  record carries them, the timing row and the stage line say `draft_deadline_missed=true
+  reads=N`, and `build_issue`'s failure handlers now pass `_failure_evidence` (the D-056 proof
+  record plus `_draft_deadline_evidence`) to the needs-human comment, which names the reads,
+  the deadline and the paths.
+- **The prompts state both bounds.** `test-author.md`, `implement.md` and `repair.md` each say
+  "You can read only the product tree under app/ and your run's artifacts; the kernel's own
+  code, harness and workflows are not readable and not your concern" and "Write your first
+  draft ... by turn $DRAFT_DEADLINE_TURN; the kernel ends the stage if nothing is written by
+  then". `$DRAFT_DEADLINE_TURN` is a kernel placeholder (`prompt_render.KERNEL_PLACEHOLDERS`),
+  rendered by the worker runtime from `draft_deadline_turn(role)` the way `$ARTIFACTS_DIR` is
+  rendered from the environment, and refused in any other role's prompt. The test author's
+  "relevant source/tests" became "the source and test files under `app/` that they name", and
+  "the kernel refuses the build after RED otherwise" became "that is a requirement of the RED
+  gate, so put the symptom in the assertion text the runner prints"; every other constraint
+  is verbatim. No method file repeats the reading guidance (`tdd.md` is about the loop).
+
+Pinned by `tests/factory/test_factory_read_scope_and_draft_deadline.py`: the table is complete
+for every role, mutation roles write the product tree and never governance, every tool-bearing
+role is denied every trust root, drafting roles write nothing in the tree, judges are empty,
+the architecture policy is readable to exactly the three roles and matched by no deny pattern,
+a pattern must be relative; a mutation role's argv carries `Read(./app/**)`, `Edit(./app/**)`,
+the absolute artifacts rules and no bare tool, its deny list every root, a drafting role no
+`Edit(./app/**)`, only `Read`/`Edit` rules are rendered, an unscoped request renders bare names
+as before, a judge renders nothing, and `run` launches exactly `argv_for`; the funnel refuses a
+scopeless request for each mutation role (no provider call, no record) and runs a scoped one;
+both `_agent` paths carry the scope, the worker path renders `$DRAFT_DEADLINE_TURN` as 18 and
+refuses it for a drafting role; the checked-in prompts carry the sentences and no other prompt
+names the deadline; the fraction, the turn per role, the roles without one, the request's own
+cap; the watch counts distinct ids, disarms on a write, only counts without a deadline; through
+the fake CLI a worker that only reads is killed at turn 19 in one launch with no restore and
+the telemetry above, a worker that wrote at turn two is untouched, a drafting role has no
+deadline, the deadline follows the request's cap, the paths are capped and the count is not, the
+record, row, line and log say so, a healthy session records no deadline fields; the stage-line
+shape; the comment evidence, its cap and scrub, the combined evidence, and `build_issue` driven
+to the miss against the fake GitHub; the probe's argv, tree, measurements, line, exit codes,
+`main`, and its place in the workflow. Updated: `test_factory_stream_timeouts.py` and
+`test_factory_effort_and_stream_logs.py` (a scoped mutation request through the funnel),
+`test_factory_prompt_paths.py` (the kernel placeholder), `test_factory_red_evidence_and_stop.py`
+(`_failure_evidence`). Mutations `read-scope-dropped-for-test-author`,
+`read-scope-lets-factory-kernel-through`, `draft-deadline-never-fires`,
+`draft-deadline-fires-on-a-run-that-wrote` and `draft-deadline-counted-as-transient` are
+registered in `harness/factory_mutations/defects.json`; the detector, the probe and
+`implement.md` are in the runner's copy list; each was verified by direct injection on the
+maintainer's Windows host (the copy built by `run.py`, one defect injected, the detector run).
+
+**Observed and left alone.** `deploy/` is neither allowed nor denied: not writable by a scoped
+worker, so a deployment issue (CLAUDE.md's `deploy/Caddyfile` exception) needs a scope change
+through the human lane; that is the right lane for it. The absolute-pattern form for a Windows
+path (`//C:/...`) is unverified; the runner is Linux and the probe proves the runner. A
+returned stage does not yet record its reads; the deadline miss does. The reader leaves a
+killed process's pipes to the garbage collector as it did for a hang. The first scoped build
+is the evidence for tuning the fraction.
+
+**Consequences.** A builder can no longer read the machinery that judges it, and a builder
+that is not drafting by turn 18 costs at most eighteen turns before the stage is refused with
+the list of what it read, instead of thirty-one turns and $4.54 before a cap that says
+nothing. The preflight makes one more bounded model call per run, and refuses the run if the
+CLI ever stops honouring the rules the boundary is made of.
