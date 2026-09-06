@@ -40,7 +40,17 @@ appproc = _load("factory_appproc_stream", HARNESS / "appproc.py")
 
 CONFIG = json.loads((HARNESS / "harness.config.json").read_text(encoding="utf-8"))
 VIDEO_ID = str(CONFIG["browser"]["fixture_video_id"])
-QUESTION = str(CONFIG["browser"]["question"])
+TEMPLATE = str(CONFIG["browser"]["question_template"])
+# The title as GET /api/videos would list the fixture; the journey's question is the
+# checked-in template rendered with it (D-062).
+TITLE = "Locked Fixture: Building a Dark Factory"
+DESCRIPTION = "A walkthrough of the factory floor."
+QUESTION = TEMPLATE.replace("{title}", TITLE)
+# How agent-browser prints the question back in a snapshot node: the quotes around the
+# title are escaped inside the node's own quotes.
+QUESTION_NODE = QUESTION.replace("\\", "\\\\").replace('"', '\\"')
+FIXTURE_URL = f"https://www.youtube.com/watch?v={VIDEO_ID}"
+FIXTURE_ROW = {"id": "v1", "title": TITLE, "description": DESCRIPTION, "url": FIXTURE_URL}
 EMAIL = "dark-factory-e2e@example.com"
 PASSWORD = "fake-probe-pw-Xy7"
 COOKIE = "session=tok.abc.def"
@@ -52,12 +62,32 @@ DSN_PASSWORD = "pg-pass-word"
 # the shape `scheme://user:password@` in any added line, fixture or not.
 FAKE_DSN = "postgresql://dynachat:" + DSN_PASSWORD + "@127.0.0.1:5433/dark_factory_validation"
 
+FIXTURE_SOURCE = {
+    "chunk_id": "c1",
+    "video_id": "v1",
+    "video_url": FIXTURE_URL,
+    "start_seconds": 754,
+    "is_cited": True,
+}
 HEALTHY_BODY = (
     'data: "The video"\n\n'
     ": keepalive\n\n"
     'event: status\ndata: {"type": "tool_call_start", "tool": "search_videos"}\n\n'
+    'event: status\ndata: {"type": "tool_call_done", "tool": "search_videos"}\n\n'
     'data: " is about factories"\n\n'
-    'event: sources\ndata: [{"chunk_id": "c1", "start_seconds": 754}]\n\n'
+    f"event: sources\ndata: {json.dumps([FIXTURE_SOURCE])}\n\n"
+    "data: [DONE]\n\n"
+)
+# What run 34020965800 streamed: one round, no tool call, no sources event, [DONE].
+NO_SOURCES_BODY = (
+    'data: "I don\'t have visibility into which video you just added"\n\ndata: [DONE]\n\n'
+)
+EMPTY_SOURCES_BODY = 'data: "Nothing"\n\nevent: sources\ndata: []\n\ndata: [DONE]\n\n'
+OTHER_VIDEO_BODY = (
+    'data: "Another"\n\n'
+    'event: status\ndata: {"type": "tool_call_start", "tool": "search_videos"}\n\n'
+    'event: sources\ndata: [{"chunk_id": "c9", "video_id": "v9", '
+    '"video_url": "https://www.youtube.com/watch?v=other", "start_seconds": 3}]\n\n'
     "data: [DONE]\n\n"
 )
 ERROR_BODY = 'data: "Partial"\n\ndata: {"error": "OpenRouter said no: key sk-secret-value-1"}\n\n'
@@ -104,7 +134,7 @@ CHAT_BASELINE = (
 CHAT_STREAMING = (
     "- generic\n"
     '  - button "New chat" [ref=e7]\n'
-    f'  - StaticText "{QUESTION}"\n'
+    f'  - StaticText "{QUESTION_NODE}"\n'
     '  - StaticText "Searching videos for factory"\n'
     '  - textbox "Ask anything about the video library…" [ref=e14]\n'
     '  - button "Stop response" [ref=e16]\n'
@@ -112,14 +142,14 @@ CHAT_STREAMING = (
 CHAT_SENT_ONLY = (
     "- generic\n"
     '  - button "New chat" [ref=e7]\n'
-    f'  - StaticText "{QUESTION}"\n'
+    f'  - StaticText "{QUESTION_NODE}"\n'
     '  - textbox "Ask anything about the video library…" [ref=e14]\n'
     '  - button "Send message" [ref=e15]\n'
 )
 CHAT_ERROR = (
     "- generic\n"
     '  - button "New chat" [ref=e7]\n'
-    f'  - StaticText "{QUESTION}"\n'
+    f'  - StaticText "{QUESTION_NODE}"\n'
     "  - paragraph\n"
     '    - StaticText "Failed to get a response. Please try again."\n'
     '  - button "Retry" [ref=e20]\n'
@@ -129,7 +159,7 @@ CHAT_ERROR = (
 CHAT_ANSWERED = (
     "- generic\n"
     '  - button "New chat" [ref=e7]\n'
-    f'  - StaticText "{QUESTION}"\n'
+    f'  - StaticText "{QUESTION_NODE}"\n'
     "  - paragraph\n"
     '    - StaticText "The video is about building a dark factory."\n'
     '  - button "12:34 — Locked Fixture" [ref=e42]\n'
@@ -153,11 +183,7 @@ class _App:
 
     def __init__(self, app_log: Path | None = None, videos: list[dict] | None = None):
         self.app_log = app_log
-        self.videos = (
-            videos
-            if videos is not None
-            else [{"id": "v1", "url": f"https://www.youtube.com/watch?v={VIDEO_ID}"}]
-        )
+        self.videos = videos if videos is not None else [dict(FIXTURE_ROW)]
         self.gets: list[tuple[str, dict[str, str] | None]] = []
 
     def get(self, path: str, headers: dict[str, str] | None = None):
@@ -193,6 +219,7 @@ class _Harness(unittest.TestCase):
                 "_post_json",
                 "_http_json",
                 "_stream_request",
+                "CONFIG",
             )
         }
         e2e._load_validation_env = lambda: (EMAIL, PASSWORD)
@@ -255,8 +282,62 @@ class StreamProbeParserTests(unittest.TestCase):
     def test_counts_tokens_sources_done_and_ignores_comments_and_status(self) -> None:
         parsed = e2e._parse_sse(HEALTHY_BODY)
         self.assertEqual(
-            parsed, {"events": 5, "tokens": 2, "sources": True, "done": True, "error": "-"}
+            parsed,
+            {
+                "events": 6,
+                "tokens": 2,
+                "sources": True,
+                "done": True,
+                "error": "-",
+                "sources_event": True,
+                "sources_count": 1,
+                "sources_list": [FIXTURE_SOURCE],
+                "tool_calls": 1,
+            },
         )
+
+    def test_a_stream_that_never_searched_carries_no_sources_and_no_tool_calls(self) -> None:
+        parsed = e2e._parse_sse(NO_SOURCES_BODY)
+        self.assertEqual((parsed["tokens"], parsed["done"]), (1, True))
+        self.assertFalse(parsed["sources"])
+        self.assertFalse(parsed["sources_event"])
+        self.assertEqual((parsed["sources_count"], parsed["tool_calls"]), (0, 0))
+
+    def test_an_empty_sources_array_is_an_event_but_not_sources(self) -> None:
+        parsed = e2e._parse_sse(EMPTY_SOURCES_BODY)
+        self.assertTrue(parsed["sources_event"])
+        self.assertFalse(parsed["sources"])
+        self.assertEqual(parsed["sources_list"], [])
+
+    def test_a_malformed_sources_payload_is_not_sources(self) -> None:
+        parsed = e2e._parse_sse("event: sources\ndata: not json\n\ndata: [DONE]\n\n")
+        self.assertTrue(parsed["sources_event"])
+        self.assertFalse(parsed["sources"])
+        parsed = e2e._parse_sse('event: sources\ndata: {"a": 1}\n\n')
+        self.assertFalse(parsed["sources"])
+
+    def test_only_tool_call_start_status_frames_count_as_tool_calls(self) -> None:
+        body = (
+            'event: status\ndata: {"type": "tool_call_start", "tool": "a"}\n\n'
+            'event: status\ndata: {"type": "tool_call_done", "tool": "a"}\n\n'
+            'event: status\ndata: {"type": "tool_call_start", "tool": "b"}\n\n'
+            "event: status\ndata: garbage\n\n"
+        )
+        self.assertEqual(e2e._parse_sse(body)["tool_calls"], 2)
+
+    def test_sources_name_the_fixture_by_url_or_by_catalog_row_id(self) -> None:
+        fixture = {"id": "row-7", "title": TITLE}
+        by_url = [{"video_id": "x", "video_url": FIXTURE_URL}]
+        by_row = [{"video_id": "row-7", "video_url": ""}]
+        other = [{"video_id": "row-8", "video_url": "https://www.youtube.com/watch?v=other"}]
+        self.assertTrue(e2e._sources_name_fixture(by_url, VIDEO_ID, fixture))
+        self.assertTrue(e2e._sources_name_fixture(by_row, VIDEO_ID, fixture))
+        self.assertFalse(e2e._sources_name_fixture(other, VIDEO_ID, fixture))
+        self.assertFalse(e2e._sources_name_fixture(other + by_url, VIDEO_ID, fixture))
+        self.assertFalse(e2e._sources_name_fixture([], VIDEO_ID, fixture))
+        self.assertFalse(e2e._sources_name_fixture(["c1"], VIDEO_ID, fixture))
+        # A fixture row without an id cannot match an empty video_id.
+        self.assertFalse(e2e._sources_name_fixture([{"video_id": ""}], VIDEO_ID, {}))
 
     def test_reports_an_explicit_error_payload(self) -> None:
         parsed = e2e._parse_sse(ERROR_BODY)
@@ -274,24 +355,77 @@ class StreamProbeParserTests(unittest.TestCase):
 
 
 class StreamProbeRequirementTests(_Harness):
-    def _probe(self) -> tuple[bool, str, str]:
+    def _probe(self, fixture: dict | None = None) -> tuple[bool, str, str]:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             ok, detail = e2e._probe_stream(
-                "http://localhost:5173", COOKIE, QUESTION, 90, (PASSWORD, "sk-secret-value-1")
+                "http://localhost:5173",
+                COOKIE,
+                QUESTION,
+                VIDEO_ID,
+                dict(FIXTURE_ROW) if fixture is None else fixture,
+                90,
+                (PASSWORD, "sk-secret-value-1"),
             )
         return ok, detail, out.getvalue()
 
     def test_healthy_stream_passes_and_prints_the_marker(self) -> None:
-        ok, _, output = self._probe()
-        self.assertTrue(ok)
+        ok, detail, output = self._probe()
+        self.assertTrue(ok, detail)
         self.assertIn(
             "E2E_STREAM_PROBE status=200 content_type=text/event-stream first_byte_ms=1200 "
-            "events=5 tokens=2 sources=true done=true error=-",
+            "events=6 tokens=2 sources=true reason=- sources_count=1 fixture_in_sources=true "
+            "tool_calls=1 done=true error=-",
             output,
         )
         self.assertIn('E2E_STREAM_BODY data: "The video" : keepalive event: status', output)
         self.assertIn("E2E_STREAM_CLEANUP conversation=conv-probe status=204", output)
+
+    def test_probe_requires_a_sources_event_and_names_the_missing_tool_call(self) -> None:
+        """Mutation `e2e-stream-probe-passes-without-sources`: run 34020965800 streamed a
+        200 with tokens and `[DONE]` and no sources event (`tool_calls_made=0`); the browser
+        then failed with no citation and no cause. The probe must refuse first."""
+        self.stream_result = _stream(body=NO_SOURCES_BODY)
+        ok, detail, output = self._probe()
+        self.assertFalse(ok)
+        self.assertIn("no sources event arrived: the model answered without a retrieval", detail)
+        self.assertIn("tool_calls=0", detail)
+        self.assertIn(
+            "tokens=1 sources=false reason=no-sources-event sources_count=0 "
+            "fixture_in_sources=false tool_calls=0 done=true error=-",
+            output,
+        )
+        self.assertIn("E2E_STREAM_CLEANUP conversation=conv-probe status=204", output)
+
+    def test_probe_refuses_an_empty_sources_array(self) -> None:
+        self.stream_result = _stream(body=EMPTY_SOURCES_BODY)
+        ok, detail, output = self._probe()
+        self.assertFalse(ok)
+        self.assertIn("the sources event carried no citation", detail)
+        self.assertIn("sources=false reason=empty-sources sources_count=0", output)
+
+    def test_probe_requires_the_first_source_to_be_the_locked_fixture(self) -> None:
+        self.stream_result = _stream(body=OTHER_VIDEO_BODY)
+        ok, detail, output = self._probe()
+        self.assertFalse(ok)
+        self.assertIn(f"the first source is not the locked fixture {VIDEO_ID}", detail)
+        self.assertIn("video_url='https://www.youtube.com/watch?v=other'", detail)
+        self.assertIn(
+            "sources=true reason=sources-name-another-video sources_count=1 "
+            "fixture_in_sources=false tool_calls=1",
+            output,
+        )
+
+    def test_probe_accepts_a_source_that_names_the_fixture_by_catalog_row_id(self) -> None:
+        body = (
+            'data: "tok"\n\n'
+            'event: sources\ndata: [{"chunk_id": "c1", "video_id": "row-7", "video_url": ""}]'
+            "\n\ndata: [DONE]\n\n"
+        )
+        self.stream_result = _stream(body=body)
+        ok, detail, output = self._probe(fixture={"id": "row-7", "title": TITLE})
+        self.assertTrue(ok, detail)
+        self.assertIn("fixture_in_sources=true", output)
 
     def test_probe_posts_the_locked_question_with_the_cookie_through_the_frontend(self) -> None:
         self._probe()
@@ -332,7 +466,9 @@ class StreamProbeRequirementTests(_Harness):
         self.assertIn("no token arrived", detail)
         self.assertIn("transport=IncompleteRead: 0 bytes read", detail)
         self.assertIn(
-            "tokens=0 sources=false done=false error=IncompleteRead: 0 bytes read", output
+            "tokens=0 sources=false reason=no-token sources_count=0 fixture_in_sources=false "
+            "tool_calls=0 done=false error=IncompleteRead: 0 bytes read",
+            output,
         )
 
     def test_an_error_payload_is_the_named_cause_and_is_scrubbed(self) -> None:
@@ -340,6 +476,7 @@ class StreamProbeRequirementTests(_Harness):
         ok, detail, output = self._probe()
         self.assertFalse(ok)
         self.assertIn("the stream carried an error payload: OpenRouter said no: key ***", detail)
+        self.assertIn("reason=error-payload", output)
         self.assertIn("error=OpenRouter said no: key ***", output)
         self.assertNotIn("sk-secret-value-1", output)
         self.assertNotIn("sk-secret-value-1", detail)
@@ -350,6 +487,7 @@ class StreamProbeRequirementTests(_Harness):
         self.assertFalse(ok)
         self.assertEqual(self.stream_calls, [])
         self.assertIn("POST /api/conversations answered 401", detail)
+        self.assertIn("reason=conversation-not-created", output)
         self.assertIn("error=conversation not created:", output)
 
     def test_the_probe_conversation_must_be_deleted(self) -> None:
@@ -361,8 +499,21 @@ class StreamProbeRequirementTests(_Harness):
         e2e._http_json = http_json
         ok, detail, output = self._probe()
         self.assertFalse(ok)
-        self.assertIn("DELETE of the probe conversation answered 500", detail)
+        self.assertEqual(detail, "DELETE of the probe conversation answered 500")
         self.assertIn("E2E_STREAM_CLEANUP conversation=conv-probe status=500", output)
+
+    def test_a_failed_delete_is_appended_to_the_stream_failure(self) -> None:
+        def http_json(method, url, body, cookie):
+            if method == "DELETE":
+                return 500, "boom", {}
+            return 201, '{"id":"conv-probe"}', {}
+
+        e2e._http_json = http_json
+        self.stream_result = _stream(body=NO_SOURCES_BODY)
+        ok, detail, _ = self._probe()
+        self.assertFalse(ok)
+        self.assertIn("no sources event arrived", detail)
+        self.assertIn("; DELETE of the probe conversation answered 500", detail)
 
     def test_journey_refuses_before_the_browser_when_the_stream_probe_fails(self) -> None:
         self.stream_result = _stream(body="", transport="RemoteDisconnected: closed")
@@ -373,21 +524,51 @@ class StreamProbeRequirementTests(_Harness):
         self.assertNotIn("browser launched", output)
         self.assertLess(output.index("E2E_STREAM_PROBE"), output.index("E2E_FAIL"))
 
+    def test_journey_refuses_before_the_browser_when_the_stream_had_no_citation(self) -> None:
+        """Run 34020965800 in miniature: the fixture is present, the route answers 200 with
+        tokens and no sources event. The journey must stop here and say why."""
+        self.stream_result = _stream(body=NO_SOURCES_BODY)
+        steps, output = self.run_journey(_App())
+        self.assertIsNone(steps)
+        self.assertIn(f'E2E_QUESTION title="{TITLE}" question="{QUESTION}"', output)
+        self.assertIn("sources=false reason=no-sources-event", output)
+        self.assertIn(
+            "E2E_FAIL  streaming route answers the locked question: no sources event arrived",
+            output,
+        )
+        self.assertNotIn("browser launched", output)
+        self.assertNotIn("E2E_STREAM_UI", output)
+
     def test_probe_runs_after_the_login_probes_and_before_the_browser(self) -> None:
         source = (HARNESS / "e2e.py").read_text(encoding="utf-8")
         proxy = source.index("_probe_proxy_login(frontend_url, email, password)")
         bootstrap = source.index("_check_bootstrap(app, video_id, secrets)")
         videos = source.index("_probe_videos(app, cookie, video_id)")
+        question = source.index("_journey_question(browser_cfg, fixture)")
         stream = source.index("_probe_stream(frontend_url, cookie, question,")
         browser = source.index('_browser(session, "open", frontend_url')
         self.assertLess(proxy, bootstrap)
         self.assertLess(bootstrap, videos)
-        self.assertLess(videos, stream)
+        self.assertLess(videos, question)
+        self.assertLess(question, stream)
         self.assertLess(stream, browser)
         self.assertIn("spends one of the synthetic account's 25 daily messages", source)
 
 
 class StreamWindowRecorderTests(_Harness):
+    def test_snapshot_text_is_read_unescaped_so_a_quoted_question_is_not_fresh_text(self) -> None:
+        """The rendered question quotes the title; the page echoes it with the quotes
+        escaped inside the node. Read raw, the echo would count as assistant text."""
+        self.assertIn('\\"', QUESTION_NODE)
+        self.assertEqual(e2e._static_text(CHAT_SENT_ONLY), [QUESTION])
+        self.assertEqual(
+            e2e._nodes('  - button "Say \\"hi\\" \\\\ now" [ref=e3]'),
+            [("button", 'Say "hi" \\ now', "e3")],
+        )
+        self.assertEqual(e2e._ref('  - button "Say \\"hi\\"" [ref=e3]', "button", 'Say "hi"'), "e3")
+        baseline = frozenset(e2e._static_text(CHAT_BASELINE))
+        self.assertFalse(e2e._ui_state(CHAT_SENT_ONLY, baseline, QUESTION)["assistant_text"])
+
     def test_ui_state_names_each_of_the_page_states(self) -> None:
         baseline = frozenset(e2e._static_text(CHAT_BASELINE))
         label = lambda snap: e2e._state_label(e2e._ui_state(snap, baseline, QUESTION))  # noqa: E731
@@ -549,7 +730,7 @@ class FullJourneyTests(_Harness):
 
     def test_fast_answer_passes_without_ever_showing_the_stop_button(self) -> None:
         steps, output, browser = self._journey([CHAT_ANSWERED])
-        self.assertEqual(steps, 20, output)
+        self.assertEqual(steps, 21, output)
         self.assertIn("E2E_STREAM_UI states=[send-button+assistant-text+citation] polls=1", output)
         self.assertIn(
             f"E2E_EVIDENCE dir={self.evidence()} video_id={VIDEO_ID} timestamp=754", output
@@ -566,12 +747,30 @@ class FullJourneyTests(_Harness):
 
     def test_streamed_answer_records_the_stop_state_then_the_citation(self) -> None:
         steps, output, _ = self._journey([CHAT_SENT_ONLY, CHAT_STREAMING, CHAT_ANSWERED])
-        self.assertEqual(steps, 20, output)
+        self.assertEqual(steps, 21, output)
         self.assertIn(
             "E2E_STREAM_UI states=[send-button,stop-button+assistant-text,"
             "send-button+assistant-text+citation] polls=3",
             output,
         )
+
+    def test_the_browser_asks_the_same_rendered_question_as_the_probe(self) -> None:
+        """Mutation `e2e-question-template-ignored`: the question typed into the page and
+        the one posted by the probe are both the template rendered with the catalog's
+        title, never the template text itself."""
+        steps, output, browser = self._journey([CHAT_ANSWERED])
+        self.assertEqual(steps, 21, output)
+        self.assertIn(TITLE, QUESTION)
+        self.assertNotIn("{title}", QUESTION)
+        self.assertIn(
+            f'E2E_QUESTION title="{TITLE}" question="{QUESTION}" source=question_template',
+            output,
+        )
+        self.assertIn(("fill", "@e14", QUESTION), browser.calls)
+        self.assertEqual(
+            [json.loads(body)["content"] for _, body, _, _ in self.stream_calls], [QUESTION]
+        )
+        self.assertNotIn(("fill", "@e14", TEMPLATE), browser.calls)
 
     def test_answer_that_never_streamed_fails_with_the_timeline_and_the_app_log(self) -> None:
         app_log = self.app_log("INFO: Application startup complete.", UVICORN_ERROR)
@@ -677,10 +876,140 @@ class BootstrapVisibilityTests(_Harness):
         )
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            ok, detail = e2e._probe_videos(app, COOKIE, VIDEO_ID)
+            ok, detail, fixture = e2e._probe_videos(app, COOKIE, VIDEO_ID)
         self.assertFalse(ok)
+        self.assertEqual(fixture, {})
         self.assertIn("E2E_VIDEOS_PROBE count=-1 fixture_present=false status=502", out.getvalue())
         self.assertIn("Bad Gateway", detail)
+
+    def test_videos_probe_returns_the_fixture_row_as_the_catalog_lists_it(self) -> None:
+        other = {"id": "v0", "title": "Other", "url": "https://www.youtube.com/watch?v=other"}
+        app = _App(videos=[other, dict(FIXTURE_ROW)])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ok, _, fixture = e2e._probe_videos(app, COOKIE, VIDEO_ID)
+        self.assertTrue(ok)
+        self.assertEqual(fixture, FIXTURE_ROW)
+        self.assertIn("E2E_VIDEOS_PROBE count=2 fixture_present=true status=200", out.getvalue())
+
+
+class GroundedQuestionTests(_Harness):
+    """D-062: the journey's question names the locked video by the title the catalog lists,
+    so the model is asked about something it can search for. Run 34020965800 asked about
+    "the video I just added"; the model answered in one round with no retrieval call, no
+    sources event and no citation for the browser to find."""
+
+    def _question(self, cfg: dict, fixture: dict) -> tuple[bool, str, str, str]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ok, detail, question = e2e._journey_question(cfg, fixture)
+        return ok, detail, question, out.getvalue()
+
+    def test_checked_in_config_uses_the_template_and_no_literal_question(self) -> None:
+        browser = CONFIG["browser"]
+        self.assertIn("{title}", browser["question_template"])
+        self.assertNotIn("question", browser)
+        self.assertNotIn("I just added", json.dumps(browser["question_template"]))
+
+    def test_template_is_rendered_with_the_fixture_title_and_printed(self) -> None:
+        ok, _, question, output = self._question({"question_template": TEMPLATE}, dict(FIXTURE_ROW))
+        self.assertTrue(ok)
+        self.assertEqual(question, QUESTION)
+        self.assertIn(f'"{TITLE}"', question)
+        self.assertIn(
+            f'E2E_QUESTION title="{TITLE}" question="{QUESTION}" source=question_template',
+            output,
+        )
+        self.assertNotIn("E2E_FIXTURE_TITLE_MISSING", output)
+
+    def test_template_may_name_the_description_and_titles_are_used_verbatim(self) -> None:
+        cfg = {"question_template": 'About "{title}" ({description}): what is {title} on?'}
+        fixture = {"id": "v1", "title": '  Braces {and} 100% "quotes"  ', "description": "D"}
+        ok, _, question, _ = self._question(cfg, fixture)
+        self.assertTrue(ok)
+        self.assertEqual(
+            question,
+            'About "Braces {and} 100% "quotes"" (D): what is Braces {and} 100% "quotes" on?',
+        )
+
+    def test_missing_title_fails_closed_and_names_the_row(self) -> None:
+        for fixture in (
+            {"id": "v1", "url": FIXTURE_URL},
+            {"id": "v1", "title": "   "},
+            {"id": "v1", "title": None},
+            {},
+        ):
+            ok, detail, question, output = self._question({"question_template": TEMPLATE}, fixture)
+            self.assertFalse(ok, fixture)
+            self.assertEqual(question, "")
+            self.assertIn("has no title to ground the question in", detail)
+            self.assertIn("E2E_FIXTURE_TITLE_MISSING fixture=", output)
+            self.assertNotIn("E2E_QUESTION", output)
+
+    def test_journey_refuses_before_the_stream_probe_when_the_title_is_missing(self) -> None:
+        """Mutation `e2e-fixture-title-missing-non-fatal`: an untitled row would render
+        `the video titled ""`, the very ungrounded question this decision removes, and
+        the run would reach the browser with the cause unnamed."""
+        app = _App(videos=[{"id": "v1", "url": FIXTURE_URL, "title": ""}])
+        steps, output = self.run_journey(app)
+        self.assertIsNone(steps)
+        self.assertIn("E2E_VIDEOS_PROBE count=1 fixture_present=true status=200", output)
+        self.assertIn("E2E_FIXTURE_TITLE_MISSING", output)
+        self.assertIn("E2E_FAIL  journey question is grounded in the fixture title:", output)
+        self.assertNotIn("E2E_STREAM_PROBE", output)
+        self.assertNotIn("browser launched", output)
+        self.assertEqual(self.stream_calls, [])
+
+    def test_legacy_literal_question_is_used_only_without_a_template(self) -> None:
+        ok, _, question, output = self._question({"question": "  What is it about?  "}, {})
+        self.assertTrue(ok)
+        self.assertEqual(question, "What is it about?")
+        self.assertIn('E2E_QUESTION title=- question="What is it about?" source=question', output)
+        # With a template present the literal is ignored, even when the title is missing.
+        ok, _, question, output = self._question(
+            {"question": "What is it about?", "question_template": TEMPLATE}, {"id": "v1"}
+        )
+        self.assertFalse(ok)
+        self.assertEqual(question, "")
+        self.assertIn("E2E_FIXTURE_TITLE_MISSING", output)
+        ok, _, question, _ = self._question({"question": ""}, dict(FIXTURE_ROW))
+        self.assertFalse(ok)
+
+    def test_a_pre_d062_config_still_runs_the_journey_on_its_literal_question(self) -> None:
+        literal = "Based on the video I just added, summarize its main topic."
+        e2e.CONFIG = {
+            "browser": {
+                "fixture_video_id": VIDEO_ID,
+                "question": literal,
+                "response_timeout_s": 90,
+            },
+        }
+        self.no_browser("stop at the browser")
+        steps, output = self.run_journey(_App(videos=[{"id": "v1", "url": FIXTURE_URL}]))
+        self.assertIsNone(steps)
+        self.assertIn(f'E2E_QUESTION title=- question="{literal}" source=question', output)
+        self.assertEqual(
+            [json.loads(body)["content"] for _, body, _, _ in self.stream_calls], [literal]
+        )
+        self.assertIn("E2E_FAIL  stop at the browser", output)
+
+    def test_a_template_without_the_title_placeholder_is_refused_at_configuration(self) -> None:
+        for browser in (
+            {"fixture_video_id": VIDEO_ID, "question_template": "Summarize the video."},
+            {"fixture_video_id": VIDEO_ID, "question_template": ""},
+            {"fixture_video_id": VIDEO_ID},
+            {"fixture_video_id": "", "question_template": TEMPLATE},
+        ):
+            e2e.CONFIG = {"browser": browser}
+            steps, output = self.run_journey(_App())
+            self.assertIsNone(steps, browser)
+            self.assertIn("E2E_FAIL  locked browser fixture configured:", output)
+            self.assertNotIn("E2E_LOGIN_PROBE", output)
+
+    def test_bootstrap_titles_the_fixture_from_supadata(self) -> None:
+        """The title the question is rendered from is the one the bootstrap stored."""
+        source = (HARNESS / "bootstrap_e2e.py").read_text(encoding="utf-8")
+        self.assertIn('title=str(fetched.get("title") or f"Video {FIXTURE_VIDEO_ID}")', source)
 
 
 class ScrubberTests(unittest.TestCase):

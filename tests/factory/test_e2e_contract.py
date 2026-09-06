@@ -169,9 +169,12 @@ LOGIN_FORM = REAL_LOGIN_SNAPSHOT
 
 FIXTURE_VIDEO_ID = json.loads(
     (HARNESS / "harness.config.json").read_text(encoding="utf-8"))["browser"]["fixture_video_id"]
+FIXTURE_URL = f"https://www.youtube.com/watch?v={FIXTURE_VIDEO_ID}"
+# The stream probe requires a sources event whose first entry is the locked fixture (D-062).
 HEALTHY_STREAM = {
     "status": 200, "content_type": "text/event-stream", "first_byte_ms": 1200,
-    "body": 'data: "The video"\n\ndata: " is about"\n\nevent: sources\ndata: [{"chunk_id":"c1"}]'
+    "body": 'data: "The video"\n\ndata: " is about"\n\nevent: sources\ndata: '
+            f'[{{"chunk_id":"c1","video_id":"v1","video_url":"{FIXTURE_URL}"}}]'
             '\n\ndata: [DONE]\n\n',
     "transport": "",
 }
@@ -196,7 +199,7 @@ class _App:
             return 200, "{}", {}
         if path == "/api/videos":
             return 200, json.dumps([
-                {"id": "v1", "url": f"https://www.youtube.com/watch?v={FIXTURE_VIDEO_ID}"}]), {}
+                {"id": "v1", "title": "Locked Fixture", "url": FIXTURE_URL}]), {}
         return 401, "{}", {}
 
     def post(self, path: str, body: str, headers: dict[str, str] | None = None):
