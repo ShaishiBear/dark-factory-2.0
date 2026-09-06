@@ -553,12 +553,13 @@ class ProofEvidenceInTheCommentTests(unittest.TestCase):
         self.assertIn("FAIL src/components/ChatArea.test.tsx > renders", text)
 
     def test_the_tail_in_the_comment_is_capped_and_scrubbed(self):
-        self.record(
-            output_tail="x" * 10_000
-            + "\nOPENROUTER_API_KEY = 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789'"
-        )
+        # Assembled at runtime so no added line of this file is shaped like a real key; the
+        # security guard refuses a high-confidence key pattern wherever it appears (PR #102).
+        fake_key = "sk-" + "notakey0" * 5
+        self.record(output_tail="x" * 10_000 + f"\nOPENROUTER_API_KEY = '{fake_key}'")
         text = self.rt._proof_failure_evidence(self.paths, self.refused())
-        self.assertNotIn("sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789", text)
+        self.assertNotIn(fake_key, text)
+        self.assertIn("[REDACTED]", text)
         self.assertLessEqual(len(text), 3000 + 600)
 
     def test_no_record_means_no_evidence(self):
