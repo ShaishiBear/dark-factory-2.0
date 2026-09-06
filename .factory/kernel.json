@@ -13,7 +13,9 @@
     "idle_timeout_seconds": 420,
     "_idle_timeout_seconds": "A process that prints no stream-json event for this long is killed as hung, recorded, and retried once (D-054).",
     "effort_overrides": {},
-    "_effort_overrides": "Per-role {role: level} on top of worker_policy.ROLE_EFFORT (workers medium, judges high), rendered as --effort on every request. Levels are the CLI's: low, medium, high, xhigh, max; roles are the policy's. A typo refuses the configuration. Empty means the policy as written (D-055)."
+    "_effort_overrides": "Per-role {role: level} on top of worker_policy.ROLE_EFFORT (workers medium, judges high), rendered as --effort on every request. Levels are the CLI's: low, medium, high, xhigh, max; roles are the policy's. A typo refuses the configuration. Empty means the policy as written (D-055).",
+    "thinking_cap_overrides": {},
+    "_thinking_cap_overrides": "Per-role {role: cap} on top of worker_policy.ROLE_THINKING_CAP (every row None today), exported to the CLI as MAX_THINKING_TOKENS only for a role whose cap is set: 0 disables thinking, a value of at least 1024 is the thinking budget in tokens (the CLI raises a smaller budget to 1024, so a smaller one is refused). Roles are the policy's. A typo refuses the configuration. Empty means no cap; set a row only after FACTORY_PREFLIGHT_THINKING_CAP_PROBE says the route honours it (D-059)."
   },
   "runtime": {
     "max_attempts": 2,

@@ -1551,6 +1551,20 @@
       "find": "    while (transcripts / f\"{stem}.json\").exists() or (transcripts / f\"{stem}.log\").exists():\n        run += 1\n        stem = f\"{base}.{run}\"\n    return stem, run\n",
       "replace": "    return stem, run\n",
       "why": "Every run of a stage would write `agent-<role>.json` and stream into `agent-<role>.log`, so the static-gate hand-back's second `test_author` would again overwrite the first run's record (the 2687 s, 41-turn, two-process first run of 34008561672 survived only as headers in the appended log) and every row would say stage_run=1; caught by tests/factory/test_factory_stage_runs.py (the second run writes its own json and log and the first survives; the hand-back re-run keeps the first run's record; each run leaves its own row and line) (D-058)."
+    },
+    {
+      "id": "thinking-cap-set-but-not-exported",
+      "file": "factory_kernel/providers.py",
+      "find": "        cap = self.thinking_cap(request)\n        if cap is not None:\n            env[THINKING_CAP_ENV] = str(cap)\n",
+      "replace": "        cap = self.thinking_cap(request)\n        if False:\n            env[THINKING_CAP_ENV] = str(cap)\n",
+      "why": "A cap set in worker_policy.ROLE_THINKING_CAP or provider.thinking_cap_overrides would be read and exported to no CLI process: the operator would believe test_author's thinking was bounded while the worker still thought as the sixth build of issue #103 did (121,065 tokens in 15 turns, run 34013852733); caught by tests/factory/test_factory_thinking_cap.py (a configured override is exported as the variable; the launched process gets exactly that environment) (D-059)."
+    },
+    {
+      "id": "thinking-cap-honoured-rule-inverted",
+      "file": "scripts/factory_thinking_cap_probe.py",
+      "find": "    return within_cap(thinking, cap) and clearly_below(thinking, uncapped)\n",
+      "replace": "    return not (within_cap(thinking, cap) and clearly_below(thinking, uncapped))\n",
+      "why": "The preflight line would print honoured=true exactly when the route ignored MAX_THINKING_TOKENS, and the table every row of which waits on that line would be filled in on the strength of the opposite of the evidence; caught by tests/factory/test_factory_thinking_cap.py (a cap is honoured only when both hold; the line when the route ignores the variable) (D-059)."
     }
   ]
 }
