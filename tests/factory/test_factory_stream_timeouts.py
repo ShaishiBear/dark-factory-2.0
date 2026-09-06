@@ -162,6 +162,57 @@ def result_event(**overrides) -> dict:
     return raw
 
 
+# The keys a REAL `error_max_turns` result event carries, measured from run 34047586142's own
+# transcript, and the keys a success event carries on top of exactly that set. The one that
+# matters is `result`: an error envelope has none. The fake CLI used to put `result` on its
+# error envelopes, which is why D-065's cap branch passed every test and was unreachable for
+# the payload it was written for (D-068).
+_ERROR_KEYS = (
+    "duration_api_ms duration_ms errors fast_mode_disabled_reason fast_mode_state is_error "
+    "modelUsage num_turns permission_denials queued_turn_count session_id stop_reason "
+    "subagent_stats subtype terminal_reason total_cost_usd type usage uuid"
+)
+_SUCCESS_ONLY_KEYS = "result api_error_status ttft_ms ttft_stream_ms time_to_request_ms"
+ERROR_ENVELOPE_KEYS = frozenset(_ERROR_KEYS.split())
+SUCCESS_ONLY_ENVELOPE_KEYS = frozenset(_SUCCESS_ONLY_KEYS.split())
+
+
+def error_result_event(**overrides) -> dict:
+    """An error result event exactly as the CLI prints one: `ERROR_ENVELOPE_KEYS`, no `result`.
+
+    `overrides` may add or replace values (the callers that want the success shape use
+    `result_event`); the default is the `error_max_turns` envelope of run 34047586142.
+    """
+    raw = {
+        "type": "result",
+        "subtype": "error_max_turns",
+        "is_error": True,
+        "num_turns": 31,
+        "duration_ms": 288939,
+        "duration_api_ms": 254118,
+        "total_cost_usd": 2.63,
+        "session_id": "s-1",
+        "stop_reason": None,
+        "terminal_reason": "max_turns",
+        "errors": [],
+        "permission_denials": [],
+        "queued_turn_count": 0,
+        "subagent_stats": {},
+        "modelUsage": {},
+        "fast_mode_state": "off",
+        "fast_mode_disabled_reason": "sdk_opt_in_required",
+        "uuid": "1f2e3d4c-5b6a-7980-9a0b-1c2d3e4f5a6b",
+        "usage": {
+            "input_tokens": 50,
+            "output_tokens": 7,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 5,
+        },
+    }
+    raw.update(overrides)
+    return raw
+
+
 def lines(*events: dict) -> str:
     return "".join(json.dumps(event) + "\n" for event in events)
 

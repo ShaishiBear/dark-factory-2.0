@@ -379,12 +379,23 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         """
         files = dirty_paths(cwd)
         result = self._scoped_static(cwd, files)
+        formatted = list(getattr(result, "formatted", ()) or ())
         record = {
             "role": role, "attempt": static_retry + 1, "files": files,
             "checks": list(result.checks), "ok": result.ok, "skipped": list(result.skipped),
+            # What the gate's own formatter rewrote before it re-checked (D-068). A reformat is
+            # a change the kernel made to the worker's uncommitted files, so it is recorded and
+            # printed; a silent one would be a change to the draft no artifact accounts for.
+            "formatted": formatted,
             "output": result.output,
         }
         self._write_json(paths.artifacts / f"static-gate-{role}-{static_retry + 1}.json", record)
+        if formatted:
+            print(
+                f"FACTORY_STATIC_FORMATTED role={role} attempt={static_retry + 1} "
+                f"files={','.join(formatted)}",
+                flush=True,
+            )
         if result.ok:
             return False
         if static_retry >= STATIC_RETRIES:

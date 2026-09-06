@@ -2988,3 +2988,79 @@ living order of work; this file records that the programme exists and is protect
 **Consequences.** A phase may not start before its blockers close, and phase B (the single-path
 floor) is the definition of qualified; it is not to be redefined to unblock later phases. Changing
 the programme takes a maintainer PR and a decision entry.
+
+---
+
+## D-068 · The real cap envelope reaches the gates, and whitespace never costs a stage — because a build spent a model stage on a formatting difference and then died on the cap it was driven into
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34047586142 (issue #103), 34033360798 (D-065's point)
+
+The `test_author` of run 34047586142 drafted correctly on its first run: `outcome=ok`, the test
+file written, a valid `test-spec.json` v2.1 with two red and two guard checkpoints. The scoped
+static gate then failed on ONE biome finding — `Formatter would have printed the following
+content:` on a multi-line call — the kernel handed the work back, and the second `test_author` run
+spent thirty turns and its whole budget and ended `error_max_turns`. D-065 exists precisely for
+that ending: mark the envelope `cap_reached` and let the gates judge the draft. Instead the kernel
+raised `RuntimeError: agent worker role='test_author' did not return a JSON result envelope` and
+failed the build. Two defects, both measured from the run's own transcripts.
+
+**The envelope.** A real `error_max_turns` result event carries `is_error` and **no `result` key**:
+
+```
+error   keys: duration_api_ms duration_ms errors fast_mode_disabled_reason fast_mode_state
+              is_error modelUsage num_turns permission_denials queued_turn_count session_id
+              stop_reason subagent_stats subtype terminal_reason total_cost_usd type usage uuid
+success keys: the same, PLUS result, api_error_status, ttft_ms, ttft_stream_ms, time_to_request_ms
+```
+
+`unwrap_result_envelope`'s shape guard was `if not isinstance(raw, Mapping) or "is_error" not in
+raw or "result" not in raw: raise`, and it ran BEFORE the `subtype == CAP_SUBTYPE and role in
+REPO_MUTATION_ROLES` branch, so the real cap envelope was rejected as malformed and D-065's path
+was unreachable for the only payload it exists for. The D-065 tests passed because the fake CLI
+emitted `result` on its error envelopes; the fixture, not the rule, is why this shipped.
+**Decision.** An envelope is well-formed when it is a Mapping carrying `is_error`. `result` is
+required only of a **non-error** envelope, where its absence means a stage returned no text; the
+cap branch is classified before that requirement, and `ResultEnvelope.content` for an error or cap
+envelope is the empty string, not a crash. The fake CLI now builds error envelopes from
+`error_result_event`, the measured payload key for key, and
+`tests/factory/test_factory_cap_ends_the_loop.py` pins both key sets literally, so the fixture
+cannot drift away from the CLI again. Nothing else about the cap changed: every non-mutation
+role's cap, every budget stop and every API error is the failed stage it was, and the transient
+classifier is untouched (a real `error_during_execution` envelope does carry `result` — the
+committed `run-33933101233-test-author-stream-closed.json` fixture is one).
+
+**The formatter.** The finding that cost the stage was whitespace, and the repository's own
+formatter removes whitespace deterministically in the same checkout. **Decision.** When the scoped
+static checks fail, `static_gate.check_files` applies the FORMATTER — `uv run ruff format <files>`
+for backend files, `bun x biome format --write <files>` for frontend files, on the worker's
+declared files only — and re-runs the checks. Only a finding that survives the formatter is handed
+back to a worker. What the formatter rewrote is measured by file **content** before and after, not
+by a tool's summary line; it rides on `StaticResult.formatted`, is written to the static-gate
+artifact as `formatted: [files]`, and is printed as `FACTORY_STATIC_FORMATTED role=<role>
+attempt=<n> files=<paths>`, so an edit the kernel made to a worker's draft is always visible
+evidence. A formatter that is missing, times out, exits non-zero or changes nothing leaves the
+first pass's verdict exactly as it was — today's behaviour, unchanged. The hand-back stays bounded
+at one, and the commit authority's file-union rule (D-064) still governs what may be committed.
+
+**Not chosen.** Lint fixes. `ruff check --fix`, `--unsafe-fixes` and `biome check --write` would
+close more findings, and each of them can change behaviour — in files that are about to be
+RED-hashed and immutable. Formatting is whitespace and cannot; that is the whole line, and
+`test_the_source_applies_no_fix_flag_anywhere` holds it. Nor was the static gate weakened to warn
+instead of hand back: a real lint or type finding in an acceptance test is exactly what D-043
+exists to catch while it is still repairable.
+
+**Consequences.** A capped mutation stage now reaches the gates for the payload the CLI actually
+prints, which is what D-065 was written to do and had never once done. A failing static gate costs
+one extra formatter invocation and one extra check pass — seconds — and saves a whole model stage
+whenever the finding was whitespace, which in the one build measured was 100% of them. Pinned by
+`tests/factory/test_factory_cap_ends_the_loop.py` (the measured key sets, the cap fixture matching
+them, a cap envelope with no `result` reaching the branch for every mutation role, a non-error
+envelope still required to carry its text, and the guard order read off the source) and
+`tests/factory/test_factory_static_gate.py` (a formatting-only finding is fixed and never becomes
+a finding and never reaches a hand-back; the reformatted file is what is committed; a finding that
+survives the formatter still costs its hand-back and records the reformat; a formatter that is
+missing, times out or changes nothing behaves exactly as before; only the declared files are
+formatted; no lint-fix flag anywhere). Mutations `cap-envelope-refused-as-malformed`,
+`result-required-before-the-cap-is-classified`, `static-gate-formatter-not-applied` and
+`static-gate-applies-a-lint-fix` in `harness/factory_mutations/defects.json`, each verified by
+direct injection on the maintainer's Windows host.

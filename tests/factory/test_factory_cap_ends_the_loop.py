@@ -53,8 +53,11 @@ from test_factory_static_gate import (  # noqa: E402
 from test_factory_static_gate import runtime as gate_runtime  # noqa: E402
 from test_factory_static_gate import spec as write_spec  # noqa: E402
 from test_factory_stream_timeouts import (  # noqa: E402
+    ERROR_ENVELOPE_KEYS,
+    SUCCESS_ONLY_ENVELOPE_KEYS,
     _FakeCliCase,
     assistant_event,
+    error_result_event,
     init_event,
     lines,
     provider_for,
@@ -109,18 +112,18 @@ TOOL_SENTENCE = (
     "runs every check after you return."
 )
 CAP_TURNS = 31
-CAP_TEXT = "Reached max turns (30)"
 
 
 def cap_result(**overrides) -> dict:
-    raw = result_event(
-        subtype=CAP_SUBTYPE,
-        is_error=True,
-        result=CAP_TEXT,
-        num_turns=CAP_TURNS,
-        duration_ms=288939,
-        total_cost_usd=2.63,
-    )
+    """The `result` event the real CLI prints at `--max-turns`, key for key.
+
+    `error_result_event` is measured from run 34047586142: an error envelope carries no
+    `result` key at all, so a capped stage's `content` is the empty string. The fixture used to
+    be built from the SUCCESS event with `is_error` flipped, which gave it a `result` the real
+    payload never has - and that one difference is why the shape guard rejected the real cap
+    envelope as malformed before D-065's branch could see it (D-068).
+    """
+    raw = error_result_event(subtype=CAP_SUBTYPE, num_turns=CAP_TURNS)
     raw.update(overrides)
     return raw
 
@@ -222,7 +225,7 @@ class UnwrapTests(unittest.TestCase):
                 self.assertTrue(envelope.cap_reached)
                 self.assertEqual(envelope.num_turns, CAP_TURNS)
                 self.assertEqual(envelope.subtype, CAP_SUBTYPE)
-                self.assertEqual(envelope.content, CAP_TEXT)
+                self.assertEqual(envelope.content, "")
                 self.assertEqual(envelope.events_seen, 184)
                 self.assertTrue(envelope.telemetry()["cap_reached"])
         for role in (
@@ -250,6 +253,103 @@ class UnwrapTests(unittest.TestCase):
         ok = unwrap_result_envelope(json.dumps(result_event()), role="test_author")
         self.assertFalse(ok.cap_reached)
         self.assertEqual(CAP_SUBTYPE, "error_max_turns")
+
+
+# --- the real envelope: the shape guard, and the fixture that must match it (D-068) ------------
+
+# The keys measured off run 34047586142's own transcript, restated here rather than imported, so
+# that a change to the fake CLI's builder has to be made twice and in agreement.
+_MEASURED_ERROR = (
+    "duration_api_ms duration_ms errors fast_mode_disabled_reason fast_mode_state is_error "
+    "modelUsage num_turns permission_denials queued_turn_count session_id stop_reason "
+    "subagent_stats subtype terminal_reason total_cost_usd type usage uuid"
+)
+_MEASURED_SUCCESS_ONLY = "result api_error_status ttft_ms ttft_stream_ms time_to_request_ms"
+MEASURED_ERROR_KEYS = set(_MEASURED_ERROR.split())
+MEASURED_SUCCESS_ONLY_KEYS = set(_MEASURED_SUCCESS_ONLY.split())
+
+
+class RealCapEnvelopeTests(unittest.TestCase):
+    """The payload the CLI actually prints, and the guard that has to let it through.
+
+    Build run 34047586142 died on `did not return a JSON result envelope` with the draft on
+    disk. The reason was a fixture, not a rule: the shape guard required `result`, the real
+    `error_max_turns` envelope has no such key, and the fake CLI's error envelopes did have
+    one, so every D-065 test passed against a payload the CLI never emits. These cases pin the
+    measured key set itself, so the fixture cannot drift away from it again.
+    """
+
+    def test_the_measured_key_sets_are_what_the_fake_cli_builds_from(self):
+        self.assertEqual(set(ERROR_ENVELOPE_KEYS), MEASURED_ERROR_KEYS)
+        self.assertEqual(set(SUCCESS_ONLY_ENVELOPE_KEYS), MEASURED_SUCCESS_ONLY_KEYS)
+        self.assertNotIn("result", ERROR_ENVELOPE_KEYS)
+        self.assertIn("is_error", ERROR_ENVELOPE_KEYS)
+
+    def test_the_cap_fixture_is_the_real_payload_key_for_key(self):
+        self.assertEqual(set(cap_result()), MEASURED_ERROR_KEYS)
+        self.assertNotIn("result", cap_result())
+        self.assertEqual(set(error_result_event()), MEASURED_ERROR_KEYS)
+
+    def test_a_cap_envelope_with_no_result_key_reaches_the_cap_branch(self):
+        raw = cap_result()
+        self.assertNotIn("result", raw)
+        for role in sorted(REPO_MUTATION_ROLES):
+            with self.subTest(role=role):
+                envelope = unwrap_result_envelope(json.dumps(raw), role=role, events_seen=184)
+                self.assertTrue(envelope.cap_reached)
+                self.assertEqual(envelope.subtype, CAP_SUBTYPE)
+                self.assertEqual(envelope.num_turns, CAP_TURNS)
+                self.assertEqual(envelope.cost_usd, 2.63)
+
+    def test_the_content_of_a_capped_envelope_is_empty_not_a_crash(self):
+        envelope = unwrap_result_envelope(json.dumps(cap_result()), role="test_author")
+        self.assertEqual(envelope.content, "")
+        self.assertEqual(envelope.telemetry()["subtype"], CAP_SUBTYPE)
+
+    def test_every_other_role_still_refuses_the_real_payload_by_name(self):
+        for role in ("plan", "contract", "review-spec", "holdout"):
+            with self.subTest(role=role), self.assertRaises(RuntimeError) as ctx:
+                unwrap_result_envelope(json.dumps(cap_result()), role=role)
+            self.assertIn(CAP_SUBTYPE, str(ctx.exception))
+
+    def test_a_non_cap_error_without_result_is_still_a_failed_stage_for_every_role(self):
+        raw = cap_result(subtype="error_during_execution")
+        for role in ("test_author", "implement", "repair", "plan"):
+            with self.subTest(role=role), self.assertRaises(RuntimeError) as ctx:
+                unwrap_result_envelope(json.dumps(raw), role=role)
+            self.assertIn("error_during_execution", str(ctx.exception))
+
+    def test_a_successful_envelope_still_has_to_carry_its_text(self):
+        """`result` is required of a non-error envelope: its text IS the stage's output."""
+        success = dict(result_event())
+        success.pop("result")
+        for role in ("test_author", "plan"):
+            with self.subTest(role=role), self.assertRaises(RuntimeError) as ctx:
+                unwrap_result_envelope(json.dumps(success), role=role)
+            self.assertIn("did not return a JSON result envelope", str(ctx.exception))
+        keep = unwrap_result_envelope(json.dumps(result_event(result="drafted")), role="plan")
+        self.assertEqual(keep.content, "drafted")
+
+    def test_an_envelope_without_is_error_is_refused_as_before(self):
+        for raw in ({"type": "result", "result": "x"}, {"result": "x"}, []):
+            with self.subTest(raw=raw), self.assertRaises(RuntimeError) as ctx:
+                unwrap_result_envelope(json.dumps(raw), role="test_author")
+            self.assertIn("did not return a JSON result envelope", str(ctx.exception))
+        with self.assertRaises(RuntimeError):
+            unwrap_result_envelope("not json at all", role="test_author")
+
+    def test_the_guard_names_is_error_and_not_result(self):
+        """Shape, read off the source: the cap is classified before `result` is required."""
+        import inspect
+
+        from factory_kernel import providers
+
+        source = inspect.getsource(providers.unwrap_result_envelope)
+        guard = source.index('"is_error" not in raw')
+        cap = source.index("subtype == CAP_SUBTYPE and role in REPO_MUTATION_ROLES")
+        required = source.index('"result" not in raw')
+        self.assertLess(guard, cap, "the shape guard runs first")
+        self.assertLess(cap, required, "the cap branch must be reached before result is required")
 
 
 def capped_steps(*, rc: int, subtype: str = CAP_SUBTYPE) -> list[dict]:
@@ -284,7 +384,7 @@ class CapFakeCliTests(_FakeCliCase):
                 result = provider_for(self.binary, retries=2).run(request("test_author"))
                 self.assertTrue(result.cap_reached)
                 self.assertEqual(result.num_turns, CAP_TURNS)
-                self.assertEqual(result.content, CAP_TEXT)
+                self.assertEqual(result.content, "")
                 self.assertEqual(result.cost_usd, 2.63)
                 self.assertEqual(result.attempts, 1)
                 self.assertEqual(result.transient_errors, ())
@@ -336,7 +436,7 @@ class CappedProvider:
         return AgentResult(
             provider_id="fake",
             model="fake",
-            content=CAP_TEXT if self.capped else "done",
+            content="" if self.capped else "done",
             num_turns=CAP_TURNS if self.capped else 9,
             duration_ms=1,
             cap_reached=self.capped,
@@ -572,7 +672,7 @@ class RecordTests(unittest.TestCase):
             result = AgentResult(
                 provider_id="fake",
                 model="minimax/minimax-m3",
-                content=CAP_TEXT,
+                content="",
                 num_turns=CAP_TURNS,
                 duration_ms=288939,
                 cost_usd=2.63,
