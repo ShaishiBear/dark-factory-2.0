@@ -34,7 +34,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -142,6 +142,7 @@ class Trace:
 def builder_pack(
     issue: int = ISSUE_NUMBER, head: str = HEAD, base: str = BASE,
     red_files: Mapping[str, str] | None = None,
+    checkpoints: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict:
     """A provenance pack that satisfies the real verify_pack, bindings included.
 
@@ -164,9 +165,13 @@ def builder_pack(
     artifacts = {
         "contract": contract, "tickets": tickets, "frontier": frontier,
         "context": context, "design": design,
+        # `checkpoints` overrides the default single red checkpoint: a build with guards
+        # declares a `files` map wider than the set its test-author commit changes, and reading
+        # the two as one is exactly the defect D-072 fixed.
         "red-proof": rec({"version": "2.0", "claim": "red-proof", "test_commit": TEST_COMMIT,
                           "files": files,
-                          "checkpoints": [{"acceptance_id": "AC-1", "cwd": ".",
+                          "checkpoints": [dict(cp) for cp in checkpoints] if checkpoints is not None else
+                                         [{"acceptance_id": "AC-1", "cwd": ".",
                                            "argv": ["pytest", "tests/red_test.py"],
                                            "files": sorted(files),
                                            "expected_failure": "AssertionError"}]}),
@@ -364,7 +369,9 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
                   red_files: Mapping[str, str] | None = None,
                   pack_base: str = BASE,
                   git_state: dict[str, str] | None = None,
-                  red_passes_after_rebase: bool = False) -> Callable[..., str]:
+                  red_passes_after_rebase: bool = False,
+                  pack_checkpoints: Sequence[Mapping[str, Any]] | None = None,
+                  ) -> Callable[..., str]:
     """Stand in for the deterministic tools, materializing what each is contracted to write.
 
     A rehearsed failure raises the same typed refusal the real `_exec` raises, carrying
@@ -398,7 +405,10 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
                 Path(out).write_text(json.dumps({
                     "version": "2.0", "test_commit": at,
                     "files": DEFAULT_RED_FILES if red_files is None else dict(red_files),
-                    "checkpoints": [{"acceptance_id": "AC-1"}],
+                    "checkpoints": [{"acceptance_id": cp["acceptance_id"]}
+                                    for cp in pack_checkpoints]
+                                   if pack_checkpoints is not None
+                                   else [{"acceptance_id": "AC-1"}],
                 }), encoding="utf-8")
         if tool == "factory_evidence.py":
             # Stand in for the evidence authority by running its real architecture-holdout rule.
@@ -428,7 +438,8 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
             pack_dir = Path(argv[idx + 1])
             pack_dir.mkdir(parents=True, exist_ok=True)
             (pack_dir / "builder-provenance.json").write_text(
-                json.dumps(builder_pack(base=pack_base, red_files=red_files)), encoding="utf-8")
+                json.dumps(builder_pack(base=pack_base, red_files=red_files,
+                                        checkpoints=pack_checkpoints)), encoding="utf-8")
         return ""
 
     return _exec
@@ -462,6 +473,14 @@ class Scenario:
     artifacts: Mapping[str, dict] | None = None  # resume: builder artifacts by relative name
     rebased_log: tuple[tuple[str, str], ...] | None = None  # (sha, subject) after a rebase
     red_passes_after_rebase: bool = False  # a RED checkpoint no longer fails after the rebase
+    # The pack's RED checkpoints, when the default single red checkpoint is not the shape under
+    # test: a build with guards hashes more files than its test-author commit changes.
+    pack_checkpoints: tuple[Mapping[str, Any], ...] | None = None
+    # What the rebased test-author commit's parent diff names; the RED-hashed files by default.
+    test_commit_changed: tuple[str, ...] | None = None
+    # sha256 of a path's content at the rebased test commit, `None` for a path absent there;
+    # anything unnamed hashes to what the pack recorded.
+    blob_hashes: Mapping[str, str | None] | None = None
     # What `git show <commit>:<path>` returns for a path, as (text at BASE, text at any other
     # commit); None on either side means the file is absent there.
     file_history: Mapping[str, tuple[str | None, str | None]] | None = None
@@ -519,7 +538,8 @@ def rehearse(scenario: Scenario) -> Trace:
         runtime._exec = exec_recorder(  # type: ignore[method-assign]
             trace, fail=scenario.fail, fail_detail=scenario.fail_detail,
             red_files=scenario.red_files, pack_base=scenario.pack_base,
-            git_state=git_state, red_passes_after_rebase=scenario.red_passes_after_rebase)
+            git_state=git_state, red_passes_after_rebase=scenario.red_passes_after_rebase,
+            pack_checkpoints=scenario.pack_checkpoints)
         runtime._prepare_worktree = lambda cwd, paths: trace.record("control", "prepare_worktree")  # type: ignore[method-assign]
         runtime.check_stop = lambda: trace.record("control", "check_stop")  # type: ignore[method-assign]
 
@@ -538,6 +558,8 @@ def rehearse(scenario: Scenario) -> Trace:
                 # RED-hashed files; any other commit changes production files.
                 commit = args[-1]
                 if commit == NEW_TEST_COMMIT:
+                    if scenario.test_commit_changed is not None:
+                        return "".join(f"{path}\n" for path in scenario.test_commit_changed)
                     return "".join(f"{path}\n" for path in sorted(scenario.red_files or {}))
                 return "".join(f"{path}\n" for path in CHANGED_FILES)
             if args[:1] == ("diff",) and "--name-only" in args:
@@ -598,6 +620,19 @@ def rehearse(scenario: Scenario) -> Trace:
             return ""
 
         runtime._git = fake_git  # type: ignore[method-assign]
+
+        pack_files = DEFAULT_RED_FILES if scenario.red_files is None else dict(scenario.red_files)
+
+        def fake_blob_sha256(cwd: Path, commit: str, rel: str) -> str | None:
+            """What a path hashes to at a commit: the pack's own hash, unless the scenario says
+            the guard file moved or is not there."""
+            trace.record("control", f"git:blob:{commit}:{rel}")
+            overrides = scenario.blob_hashes or {}
+            if rel in overrides:
+                return overrides[rel]
+            return pack_files.get(rel)
+
+        runtime._blob_sha256 = fake_blob_sha256  # type: ignore[method-assign]
 
         worktree = mock.Mock(path=worktree_dir)
 

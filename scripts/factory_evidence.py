@@ -493,19 +493,57 @@ def share_runtime(red_root: Path) -> None:
                 pass
 
 
+def checkpoint_file_sets(checkpoints: list) -> tuple[set[str], set[str]]:
+    """The red-checkpoint files and the guard-checkpoint files a proof declares.
+
+    A proof's `files` map is their union, hashed so every one of them is immutable from RED on
+    (D-058); only the red half is what the test-author commit changed, because a guard pins an
+    existing test the author must leave alone (D-064, D-072).
+    """
+    red = {f for cp in checkpoints if checkpoint_kind(cp) != "guard" for f in cp["files"]}
+    guard = {f for cp in checkpoints if checkpoint_kind(cp) == "guard" for f in cp["files"]}
+    return red, guard
+
+
+def verify_test_commit_diff(changed: list[str], checkpoints: list) -> None:
+    """The test-author commit changed exactly the red-checkpoint files.
+
+    The commit authority's three rules (D-064), read from a commit's parent diff: a guard file
+    no red checkpoint declares was not changed; every changed file is declared; every red file
+    is changed. Comparing the diff to the whole `files` map instead -- what this did before
+    D-072 -- refuses every honest build that declares a guard.
+    """
+    changed_set = set(changed)
+    red_files, guard_files = checkpoint_file_sets(checkpoints)
+    rewritten = sorted((guard_files & changed_set) - red_files)
+    if rewritten:
+        die(f"test-author commit changed guard checkpoint files {rewritten} that no red "
+            "checkpoint declares; a guard pins an existing test the author must not rewrite")
+    stray = sorted(changed_set - red_files - guard_files)
+    if stray:
+        die(f"test-author commit changed undeclared files {stray}; every changed file must be "
+            f"declared by a checkpoint (red checkpoint files are {sorted(red_files)})")
+    unchanged_red = sorted(red_files - changed_set)
+    if unchanged_red:
+        die(f"red checkpoint files {unchanged_red} are unchanged at the test-author commit; a "
+            f"red checkpoint's file must be new or modified (the commit changed {sorted(changed_set)})")
+
+
 def replay_red(proof: dict) -> list[dict]:
     test_commit = str(proof["test_commit"])
     if not ancestor(test_commit, str(proof["green_commit"])):
         die("test-author commit is not an ancestor of current GREEN head")
     diff = run(["git", "diff", "--name-only", f"{test_commit}^", test_commit]).stdout
     files = proof["files"]
-    if sorted(x for x in diff.splitlines() if x) != sorted(files):
-        die("test-author commit does not change exactly the declared acceptance tests")
+    verify_test_commit_diff([x for x in diff.splitlines() if x], proof["checkpoints"])
     with tempfile.TemporaryDirectory(prefix="dark-factory-red-") as tmp:
         red_root = Path(tmp) / "worktree"
         run(["git", "worktree", "add", "--detach", str(red_root), test_commit], timeout=120)
         try:
             share_runtime(red_root)
+            # Every file the proof hashed -- red and guard alike -- is verified byte-identical
+            # at the test-author commit, which is where a guard's immutability is actually
+            # established (D-058, D-072).
             for rel, expected in files.items():
                 path = red_root / rel
                 if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
