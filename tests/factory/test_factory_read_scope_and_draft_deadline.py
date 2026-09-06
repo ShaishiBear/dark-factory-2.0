@@ -56,6 +56,7 @@ from test_factory_stream_timeouts import (  # noqa: E402
     _FakeCliCase,
     _runtime,
     assistant_event,
+    error_result_event,
     healthy_steps,
     init_event,
     lines,
@@ -158,9 +159,9 @@ def tool_result(text: str, *, is_error: bool = False) -> dict:
     return event
 
 
-# What the CLI prints when `--max-turns` ended the session, and the number of turns its
-# envelope reports: one more than the turns the stream showed, as run 34033360798 did.
-CAP_TEXT = "Reached max turns (30)"
+# What the CLI prints when `--max-turns` ended the session: `error_result_event`, the real
+# payload key for key (run 34047586142), which carries no `result` key at all. Its `num_turns`
+# is one more than the turns the stream showed, as run 34033360798's was.
 
 
 def reading_steps(
@@ -194,13 +195,7 @@ def reading_steps(
                 )
         steps.append({"emit": tool_result("ok")})
     if cap:
-        steps.append(
-            {
-                "emit": result_event(
-                    subtype=CAP_SUBTYPE, is_error=True, result=CAP_TEXT, num_turns=count + 1
-                )
-            }
-        )
+        steps.append({"emit": error_result_event(subtype=CAP_SUBTYPE, num_turns=count + 1)})
         steps.append({"exit": 1})
     else:
         steps.append({"emit": result_event(num_turns=count)})

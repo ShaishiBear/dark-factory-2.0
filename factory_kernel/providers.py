@@ -1068,6 +1068,8 @@ class ResultEnvelope:
         cap_reached: bool = False,
     ) -> None:
         usage = raw.get("usage") if isinstance(raw.get("usage"), Mapping) else {}
+        # An error envelope may carry no `result` at all - the real `error_max_turns` payload
+        # does not - so a capped stage's content is the empty string, never a crash (D-068).
         self.content = str(raw.get("result") or "").strip()
         self.session_id = _optional_str(raw.get("session_id"))
         self.num_turns = _optional_int(raw.get("num_turns"))
@@ -1165,6 +1167,17 @@ def unwrap_result_envelope(
     an envelope at all means the CLI was not launched the way the kernel launches it, and is
     refused for the same reason. `events_seen` is stamped on the envelope so a stage's record
     says how much stream preceded it.
+
+    What makes an envelope well-formed is `is_error`, and nothing else. The real CLI omits
+    `result` entirely from an error envelope - measured on the `error_max_turns` envelope of
+    run 34047586142, whose keys were `duration_api_ms duration_ms errors fast_mode_* is_error
+    modelUsage num_turns permission_denials queued_turn_count session_id stop_reason
+    subagent_stats subtype terminal_reason total_cost_usd type usage uuid`, with `result`,
+    `api_error_status` and the `ttft_*` timings appearing only on a success envelope. Requiring
+    `result` here made D-065's cap branch unreachable for the payload it was written for, and
+    the build died with `did not return a JSON result envelope` on a draft that was on disk.
+    `result` is therefore required only of a NON-error envelope, where its absence means a
+    stage returned no text; the cap is classified before that (D-068).
     """
     try:
         raw = json.loads(stdout)
@@ -1172,7 +1185,7 @@ def unwrap_result_envelope(
         raise RuntimeError(
             f"agent worker role={role!r} did not return a JSON result envelope: {stdout[-600:]}"
         ) from exc
-    if not isinstance(raw, Mapping) or "is_error" not in raw or "result" not in raw:
+    if not isinstance(raw, Mapping) or "is_error" not in raw:
         raise RuntimeError(f"agent worker role={role!r} did not return a JSON result envelope")
     subtype = str(raw.get("subtype") or "")
     if subtype == CAP_SUBTYPE and role in REPO_MUTATION_ROLES:
@@ -1191,6 +1204,11 @@ def unwrap_result_envelope(
                 ResultEnvelope(raw, events_seen=events_seen, thinking_tokens=thinking_tokens),
             )
         raise RuntimeError(message)
+    if "result" not in raw:
+        # A stage that succeeded must carry its text: every non-mutation role's output IS the
+        # `result` string, and a success envelope without one is not an envelope the kernel
+        # knows how to read.
+        raise RuntimeError(f"agent worker role={role!r} did not return a JSON result envelope")
     return ResultEnvelope(raw, events_seen=events_seen, thinking_tokens=thinking_tokens)
 
 

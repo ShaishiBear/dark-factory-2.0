@@ -1705,6 +1705,34 @@
       "find": "        if not capped:\n            return \"\"\n",
       "replace": "        if True:\n            return \"\"\n",
       "why": "A gate refusing a capped draft would post its verdict with no word that the worker's loop had been ended by the cap, which is the one fact the human needs to read the verdict correctly; caught by tests/factory/test_factory_cap_ends_the_loop.py (the evidence names the capped stage, and build_issue's comment carries it when the commit authority refuses) (D-065)."
+    },
+    {
+      "id": "cap-envelope-refused-as-malformed",
+      "file": "factory_kernel/providers.py",
+      "find": "    if not isinstance(raw, Mapping) or \"is_error\" not in raw:\n        raise RuntimeError(f\"agent worker role={role!r} did not return a JSON result envelope\")\n    subtype = str(raw.get(\"subtype\") or \"\")\n",
+      "replace": "    if not isinstance(raw, Mapping) or \"is_error\" not in raw or \"result\" not in raw:\n        raise RuntimeError(f\"agent worker role={role!r} did not return a JSON result envelope\")\n    subtype = str(raw.get(\"subtype\") or \"\")\n",
+      "why": "The shape guard would require a key the real error envelope does not have: measured on run 34047586142, an error_max_turns result event carries duration_api_ms duration_ms errors fast_mode_* is_error modelUsage num_turns permission_denials queued_turn_count session_id stop_reason subagent_stats subtype terminal_reason total_cost_usd type usage uuid and no result at all, so D-065's cap branch would be unreachable for the only payload it exists for and the build would die on 'did not return a JSON result envelope' with the draft on disk, exactly as that run did; caught by tests/factory/test_factory_cap_ends_the_loop.py (the cap fixture is the real payload key for key, and a cap envelope with no result key reaches the cap branch for every mutation role) (D-068)."
+    },
+    {
+      "id": "result-required-before-the-cap-is-classified",
+      "file": "factory_kernel/providers.py",
+      "find": "    subtype = str(raw.get(\"subtype\") or \"\")\n    if subtype == CAP_SUBTYPE and role in REPO_MUTATION_ROLES:\n",
+      "replace": "    subtype = str(raw.get(\"subtype\") or \"\")\n    if \"result\" not in raw:\n        raise RuntimeError(f\"agent worker role={role!r} did not return a JSON result envelope\")\n    if subtype == CAP_SUBTYPE and role in REPO_MUTATION_ROLES:\n",
+      "why": "The order is the fix: result is required only of a NON-error envelope, and requiring it of an error envelope before the cap is classified refuses the real error_max_turns payload as malformed again, whatever the shape guard says - the same lost build as run 34047586142, reached by a different line; caught by tests/factory/test_factory_cap_ends_the_loop.py (the cap branch is reached before result is required; a capped envelope's content is the empty string, not a refusal) (D-068)."
+    },
+    {
+      "id": "static-gate-formatter-not-applied",
+      "file": "factory_kernel/static_gate.py",
+      "find": "    formatted = _apply_formatter(worktree, files, env, runner=runner, timeout=timeout)\n",
+      "replace": "    formatted: tuple[str, ...] = ()\n",
+      "why": "A whitespace difference would cost a model stage again: build run 34047586142's only static-gate finding was biome's 'Formatter would have printed the following content:' on a multi-line call, and the kernel spent a second test_author process, thirty turns and the whole budget on it and produced nothing, while the formatter that removes it deterministically runs in the same tree; caught by tests/factory/test_factory_static_gate.py (a formatting-only finding is fixed and never becomes a finding; through the real _agent it never reaches a hand-back and the reformatted file is what is committed) (D-068)."
+    },
+    {
+      "id": "static-gate-applies-a-lint-fix",
+      "file": "factory_kernel/static_gate.py",
+      "find": "             [\"bun\", \"x\", \"biome\", \"format\", \"--write\", *frontend])\n",
+      "replace": "             [\"bun\", \"x\", \"biome\", \"check\", \"--write\", \"--unsafe\", *frontend])\n",
+      "why": "The gate would rewrite the worker's code, not its whitespace: 'biome check --write' applies lint fixes, which can change behaviour, to files the worker is about to have committed and RED-hashed, so a machine edit no worker and no reviewer ever saw would enter the acceptance tests; only formatting is safe to apply unasked; caught by tests/factory/test_factory_static_gate.py (the formatter commands are the repository's own formatters, and no lint-fix flag appears anywhere in the module) (D-068)."
     }
   ]
 }
