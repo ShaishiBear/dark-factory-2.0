@@ -1817,6 +1817,34 @@
       "find": "    \".git\",\n    \".git/**\",\n",
       "replace": "",
       "why": "The read boundary is the deny list and .git sits inside the worktree, so without these patterns a worker's Read, Grep and Glob reach the object database and with it both notes refs -- the carry it must never see or shape, and the provenance pack; caught by tests/factory/test_factory_carry.py (every tool-bearing role denies .git and .git/**, and the CLI receives Read(./.git/**)) (D-071)."
+    },
+    {
+      "id": "rehead-compares-the-whole-file-map",
+      "file": "factory_kernel/runtime.py",
+      "find": "        self._verify_test_commit_files(cwd, test_commit, changed, red_files, guard_files, files)\n",
+      "replace": "        if changed != sorted(files):\n            raise NeedsHuman(\"rebased test-author commit does not change exactly the RED-hashed files; re-head refused\")\n",
+      "why": "The RED proof's `files` map is the union of red and guard files, hashed for immutability, so comparing it to the test-author commit's diff refuses every certified build that declares a guard and leaves it with no way back onto a moved main -- exactly what happened to PR #134; caught by tests/factory/test_factory_rehead_guard_files.py (the measured PR #134 shape re-heads, and the kernel never compares the diff to the whole map) (D-072)."
+    },
+    {
+      "id": "rehead-guard-hashes-unverified",
+      "file": "factory_kernel/runtime.py",
+      "find": "            if actual != expected:\n                raise NeedsHuman(\n                    f\"guard checkpoint file {rel!r} differs at the rebased test-author commit: \"\n",
+      "replace": "            if False:\n                raise NeedsHuman(\n                    f\"guard checkpoint file {rel!r} differs at the rebased test-author commit: \"\n",
+      "why": "A guard file's immutability was a side effect of the equality check the re-head used to do; once the diff is read as the red half alone, nothing but this hash keeps a rebase from carrying a rewritten kept test into the replayed RED, which is the property D-058 intended; caught by tests/factory/test_factory_rehead_guard_files.py (a guard whose hash moved is refused with both hashes) (D-072)."
+    },
+    {
+      "id": "rehead-changed-guard-file-accepted",
+      "file": "factory_kernel/runtime.py",
+      "find": "        rewritten = sorted((set(guard_files) & changed_set) - set(red_files))\n",
+      "replace": "        rewritten: list[str] = []\n",
+      "why": "A guard pins an existing test the author must not rewrite (D-064); without this rule a test-author commit that quietly edits the kept test it guards is accepted at re-head, because the file is declared and so is never stray; caught by tests/factory/test_factory_rehead_guard_files.py (a commit that also changed the guard file is refused by name) (D-072)."
+    },
+    {
+      "id": "evidence-replay-compares-the-whole-file-map",
+      "file": "scripts/factory_evidence.py",
+      "find": "    red_files, guard_files = checkpoint_file_sets(checkpoints)\n",
+      "replace": "    red_files, guard_files = checkpoint_file_sets(checkpoints)\n    red_files = red_files | guard_files\n",
+      "why": "The evidence bundle held the same conflation as the re-head, one stage later: replaying RED against the whole `files` map refuses any proof whose guard checkpoints pin a file the commit correctly left alone, so a re-headed guarded build would die at validation instead; caught by tests/factory/test_factory_rehead_guard_files.py (a commit changing only the red file is accepted, and replay_red asks the checkpoints) (D-072)."
     }
   ]
 }

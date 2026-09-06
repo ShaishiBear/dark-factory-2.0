@@ -120,7 +120,10 @@ class ReheadRedRefusalTests(unittest.TestCase):
         t = rehearse(stale("wrong-files", rebased_log=(
             ("7" * 40, RED_SUBJECT), (NEW_HEAD, "fix(factory): satisfy issue #42"))))
         self.assert_refused_before_green_or_push(t)
-        self.assertIn("does not change exactly the RED-hashed files", t.error)
+        # A red-only proof reads exactly as it did; the rule it names is now the one D-064
+        # wrote for the commit authority, applied to the commit's parent diff (D-072).
+        self.assertIn("changed undeclared files ['app/backend/main.py']", t.error)
+        self.assertIn("must be declared by a checkpoint", t.error)
         self.assertEqual(t.execs("factory_proof.py", "red"), [])
 
     def test_an_empty_rebased_history_refuses(self):

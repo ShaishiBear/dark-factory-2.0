@@ -2204,19 +2204,142 @@ class KernelRuntime:
 
     RED_SUBJECT = "test(factory): prove acceptance contract red"
 
+    @staticmethod
+    def _checkpoint_files(proof: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+        """The red-checkpoint files and the guard-checkpoint files a RED proof declares.
+
+        A proof's `files` map is the *union* of the two, hashed so every one of them is
+        immutable from RED on (D-058). It is therefore not the set of files the test-author
+        commit changed: a guard pins an existing test the author must leave alone, which is
+        what D-064 made legal in the commit authority and the RED gate. Anything asking what
+        the commit changed asks the checkpoints, never the map (D-072). `kind` absent means
+        red, as in every 2.0 proof.
+        """
+        checkpoints = proof.get("checkpoints")
+        if not isinstance(checkpoints, list) or not checkpoints:
+            raise NeedsHuman("RED proof in the provenance pack has no checkpoints")
+        red: set[str] = set()
+        guard: set[str] = set()
+        for checkpoint in checkpoints:
+            if not isinstance(checkpoint, Mapping):
+                raise NeedsHuman("RED proof in the provenance pack has a malformed checkpoint")
+            declared = checkpoint.get("files")
+            if (
+                not isinstance(declared, list)
+                or not declared
+                or any(not isinstance(value, str) or not value for value in declared)
+            ):
+                acceptance_id = str(checkpoint.get("acceptance_id") or "?")
+                raise NeedsHuman(
+                    f"RED checkpoint {acceptance_id} in the provenance pack declares no files"
+                )
+            target = guard if str(checkpoint.get("kind") or "red") == "guard" else red
+            target.update(declared)
+        if not red:
+            raise NeedsHuman(
+                "RED proof in the provenance pack declares no red checkpoint; a spec of only "
+                "guards proves no change"
+            )
+        return sorted(red), sorted(guard)
+
+    def _blob_sha256(self, cwd: Path, commit: str, rel: str) -> str | None:
+        """The sha256 of a path's content at a commit, or None when it is absent there.
+
+        Read as bytes, because bytes are what the RED gate hashed: `_exec` decodes and strips
+        text and would not reproduce the digest. The blob's bytes are the checkout's bytes on
+        every host the kernel runs on (Linux runners, no line-ending translation), which is
+        what makes this digest comparable to the one the pack recorded. Nothing but read-only
+        git runs here, and it gets the same credential-free environment every deterministic
+        gate does.
+        """
+        proc = subprocess.run(
+            ["git", "cat-file", "blob", f"{commit}:{rel}"],
+            cwd=cwd,
+            capture_output=True,
+            env=scoped_environment(scope="none"),
+            timeout=180,
+        )
+        if proc.returncode:
+            return None
+        return hashlib.sha256(proc.stdout).hexdigest()
+
+    def _verify_test_commit_files(
+        self,
+        cwd: Path,
+        test_commit: str,
+        changed: list[str],
+        red_files: list[str],
+        guard_files: list[str],
+        hashes: Mapping[str, Any],
+    ) -> None:
+        """The rebased test-author commit changes exactly the red-checkpoint files, and every
+        guard file is at that commit exactly what RED hashed.
+
+        The first three rules are the commit authority's (D-064), read from a commit's parent
+        diff instead of a dirty checkout: a guard file that no red checkpoint declares was not
+        changed; every changed file is declared; every red file is changed. The fourth is the
+        immutability D-058 intended, checked rather than inferred: each guard file exists at
+        this commit and hashes to what the pack recorded. Before this the whole `files` map was
+        compared to the commit's diff, which refused the first re-head of a build with a guard
+        (PR #134, D-072) while never verifying the guard at all.
+        """
+        changed_set = set(changed)
+        rewritten = sorted((set(guard_files) & changed_set) - set(red_files))
+        if rewritten:
+            raise NeedsHuman(
+                f"rebased test-author commit changed guard checkpoint files {rewritten} that no "
+                "red checkpoint declares; a guard pins an existing test the author must not "
+                "rewrite; re-head refused"
+            )
+        stray = sorted(changed_set - set(red_files) - set(guard_files))
+        if stray:
+            raise NeedsHuman(
+                f"rebased test-author commit changed undeclared files {stray}; every changed file "
+                f"must be declared by a checkpoint (red checkpoint files are {red_files}); "
+                "re-head refused"
+            )
+        unchanged_red = sorted(set(red_files) - changed_set)
+        if unchanged_red:
+            raise NeedsHuman(
+                f"red checkpoint files {unchanged_red} are unchanged at the rebased test-author "
+                f"commit; a red checkpoint's file must be new or modified (the commit changed "
+                f"{changed}); re-head refused"
+            )
+        for rel in guard_files:
+            expected = hashes.get(rel)
+            if not isinstance(expected, str) or not expected:
+                raise NeedsHuman(
+                    f"guard checkpoint file {rel!r} is not in the RED proof's immutable file "
+                    "map; re-head refused"
+                )
+            actual = self._blob_sha256(cwd, test_commit, rel)
+            if actual is None:
+                raise NeedsHuman(
+                    f"guard checkpoint file {rel!r} does not exist at the rebased test-author "
+                    f"commit {test_commit}; a guard pins an existing test; re-head refused"
+                )
+            if actual != expected:
+                raise NeedsHuman(
+                    f"guard checkpoint file {rel!r} differs at the rebased test-author commit: "
+                    f"RED hashed {expected}, the commit holds {actual}; re-head refused"
+                )
+
     def _locate_rebased_test_commit(self, pack: Mapping[str, Any], cwd: Path, *,
                                     new_base: str, new_head: str) -> str:
         """Find the rebased test-author commit by shape, not by the hash the pack names.
 
         The rebased branch must carry exactly the commits the build made, in order: the
         test-author commit first (its subject is fixed by git_authority), then the
-        implementation commit(s). The test-author commit must change exactly the RED-hashed
-        acceptance files and nothing else, which is also what the evidence bundle replays.
-        Anything else is not a re-head of this build and is refused.
+        implementation commit(s). The test-author commit must change exactly the files the
+        RED proof's *red* checkpoints declare, and must leave every guard file byte-identical
+        to what RED hashed, which is also what the evidence bundle replays. Anything else is
+        not a re-head of this build and is refused.
         """
-        files = pack["artifacts"]["red-proof"]["content"].get("files")
+        content = pack["artifacts"]["red-proof"]["content"]
+        files = content.get("files")
         if not isinstance(files, Mapping) or not files:
             raise NeedsHuman("RED proof in the provenance pack has no immutable file map")
+        red_files, guard_files = self._checkpoint_files(content)
         listing = self._git("log", "--reverse", "--format=%H%x1f%s", f"{new_base}..{new_head}", cwd=cwd)
         commits = [line.split("\x1f", 1) for line in listing.splitlines() if line.strip()]
         if not commits or len(commits[0]) != 2 or commits[0][1].strip() != self.RED_SUBJECT:
@@ -2229,8 +2352,7 @@ class KernelRuntime:
         changed = sorted(
             x for x in self._git("diff", "--name-only", f"{test_commit}^", test_commit, cwd=cwd).splitlines() if x
         )
-        if changed != sorted(files):
-            raise NeedsHuman("rebased test-author commit does not change exactly the RED-hashed files; re-head refused")
+        self._verify_test_commit_files(cwd, test_commit, changed, red_files, guard_files, files)
         return test_commit
 
     def _reissue_red(self, pack: Mapping[str, Any], paths: RunPaths, cwd: Path,
@@ -2240,7 +2362,7 @@ class KernelRuntime:
         The pack's `red-proof.json` is the spec: the same checkpoints, the same declared files.
         `factory_proof.py red` is run with HEAD detached at the rebased test commit so the
         proof it writes binds `test_commit` to a commit that is an ancestor of the new head and
-        whose parent diff is exactly the declared files, which is what the evidence bundle
+        whose parent diff is exactly the red-checkpoint files, which is what the evidence bundle
         reconstructs. Every checkpoint must still fail for its declared reason; a checkpoint
         that passes after the rebase means main changed the behaviour under test, and that is
         a new build, not a re-head. The worktree is returned to the branch tip afterwards.
@@ -2313,7 +2435,13 @@ class KernelRuntime:
 
     @staticmethod
     def _verify_red_unchanged(pack: Mapping[str, Any], worktree: Path) -> None:
-        """The RED-hashed acceptance tests must be byte-identical at the re-headed tip."""
+        """The RED-hashed acceptance tests must be byte-identical at the re-headed tip.
+
+        The whole `files` map is the right question here: red files and guard files alike are
+        immutable from RED on (D-058). What the map is not is the set of files the test-author
+        commit changed -- that is `_verify_test_commit_files`, and conflating the two is what
+        D-072 fixed.
+        """
         files = pack["artifacts"]["red-proof"]["content"].get("files")
         if not isinstance(files, Mapping) or not files:
             raise NeedsHuman("RED proof in the provenance pack has no immutable file map")

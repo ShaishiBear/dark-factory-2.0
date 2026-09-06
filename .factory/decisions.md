@@ -3413,3 +3413,64 @@ no tool-bearing role can reach `.git`. Mutations `carry-ignores-a-moved-base`,
 `carry-artifact-hashes-unverified` and `carry-readable-by-a-worker` in
 `harness/factory_mutations/defects.json`, each verified by direct injection on the maintainer's
 Windows host.
+## D-072 · The re-head knows a guard file is not a changed file, because it refused the first certified build that declared one
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Evidence:** PR #134 (issue #103), the factory's
+first successful build of that issue, and its three re-head attempts between 22:30 and 22:35Z.
+
+Main moved under the PR, validation refused `stale_base`, and the model-free re-head ran and
+refused, three times in a row, with:
+
+```
+NeedsHuman: rebased test-author commit does not change exactly the RED-hashed files; re-head refused
+```
+
+Measured from the PR and its provenance note: the test-author commit `c15e61e` changes **exactly
+one** file, `app/frontend/src/__tests__/ChatArea-strictmode-first-send.test.tsx`. The RED proof's
+`files` map holds **two** — that file and `app/frontend/src/hooks/useStreamingResponse.test.ts`.
+The proof's checkpoints are `AC-1 red` on the new test file and `AC-2`, `AC-3`, `AC-4` **guard**,
+all three naming the existing hook test. So the guard's file is hashed for immutability (D-058,
+correctly) and is never changed by the test-author commit (D-064, also correctly), and
+`_locate_rebased_test_commit` compared the commit's changed files against the whole `files` map
+with `changed != sorted(files)` and refused. This is the same class of defect D-064 fixed in the
+commit authority: a rule written before guards existed, applied to a spec that now has them. It
+left a correct, fully certified build with no way back onto a moved main.
+
+**Decision.** The proof's `files` map answers "what is immutable"; the proof's **checkpoints**
+answer "what did the commit change". Nothing in the re-head path may use the first to answer the
+second.
+
+- `_locate_rebased_test_commit` derives the red-checkpoint files and the guard-checkpoint files
+  from the checkpoints (`kind` absent means red, per the 2.1 spec) and matches the rebased
+  commit's parent diff against the **red** files exactly, by the three rules D-064 wrote for the
+  commit authority: a guard file no red checkpoint declares was not changed (`rebased test-author
+  commit changed guard checkpoint files [...] that no red checkpoint declares; a guard pins an
+  existing test the author must not rewrite`), every changed file is declared (`rebased
+  test-author commit changed undeclared files [...]`), every red file is changed (`red checkpoint
+  files [...] are unchanged at the rebased test-author commit`).
+- **Guard immutability becomes a check rather than a side effect.** The old equality happened to
+  cover a guard file only because the map contained it; with the diff read as the red half alone,
+  nothing would. So each guard file must now exist at the rebased commit and hash there to what
+  the pack recorded, read as bytes (`git cat-file blob <commit>:<path>`, since `_exec` decodes and
+  strips text and would not reproduce the digest). A missing one refuses naming the file and the
+  commit; a moved one refuses naming the file and **both** hashes. That is strictly stronger than
+  what the equality gave, and it is the property D-058 intended.
+- The same conflation was one stage further down the same path: `scripts/factory_evidence.py`
+  `replay_red`, which validation runs on the head the re-head produces, compared the test commit's
+  diff to `proof["files"]` with the identical `!= sorted(files)`. A re-headed guarded build would
+  have died there instead. It now calls `verify_test_commit_diff`, the same three rules; its
+  existing hash loop over the whole `files` map inside the RED worktree already establishes both
+  halves' immutability at the test commit and is unchanged. `_verify_red_unchanged` (re-head and
+  resume) is also unchanged and correct: the whole map is the right question at the tip.
+
+**Consequences.** Pinned by `tests/factory/test_factory_rehead_guard_files.py`, whose fixture is
+PR #134's measured shape (one red checkpoint on the new test, three guards on the hook test, a
+two-entry `files` map): it re-heads; a commit that also changed the guard file, one missing the
+red file, one touching an undeclared file, a guard absent at the rebased commit and a guard whose
+hash moved are each refused by name; a red-only proof behaves exactly as before and asks for no
+guard hash. `harness/rehearsal.py` grew `pack_checkpoints`, `test_commit_changed` and
+`blob_hashes` so a guarded pack can be rehearsed at all. Mutations
+`rehead-compares-the-whole-file-map`, `rehead-guard-hashes-unverified`,
+`rehead-changed-guard-file-accepted` and `evidence-replay-compares-the-whole-file-map` in
+`harness/factory_mutations/defects.json`, each verified by direct injection on the maintainer's
+Windows host.
