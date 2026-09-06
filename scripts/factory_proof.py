@@ -286,10 +286,27 @@ def plan_from(proof_or_spec,test_commit):
         cps.append({k:cp[k] for k in PLAN_KEYS if k in cp})
     return {'version':'1.0','contract_sha256':proof_or_spec['contract_sha256'],
             'design_sha256':proof_or_spec['design_sha256'],'test_commit':test_commit,'checkpoints':cps}
+def declared_files(checkpoints, actual):
+    # What the test commit may change, judged against what the spec declares; the same three
+    # rules git_authority.commit_acceptance_tests applied to the dirty checkout. Every changed
+    # file is declared; every red checkpoint's file is changed (a red test is new or modified);
+    # a guard's file exists at the head (`checkpoint` refused a missing one) and may be
+    # untouched, because a guard pins an existing test the author must not rewrite, so a changed
+    # guard file is accepted only when a red checkpoint declares it too. Before D-064 the commit
+    # had to equal the declared union, which refused the first correct guard (run 34027157595).
+    red_files={f for cp in checkpoints if checkpoint_kind(cp)=='red' for f in cp['files']}
+    guard_files={f for cp in checkpoints if checkpoint_kind(cp)=='guard' for f in cp['files']}
+    declared=sorted(red_files|guard_files); changed_set=set(actual)
+    stray=sorted(changed_set-set(declared))
+    if stray: die(f'test commit changed undeclared files {stray}; every changed file must be declared by a checkpoint (declared test files are {declared})')
+    unchanged_red=sorted(red_files-changed_set)
+    if unchanged_red: die(f"red checkpoint files {unchanged_red} are unchanged; a red checkpoint's file must be new or modified (test commit changed {actual})")
+    rewritten=sorted((guard_files&changed_set)-red_files)
+    if rewritten: die(f'guard checkpoint files {rewritten} were changed and no red checkpoint declares them; a guard alone must not rewrite the test it guards')
+    return declared
 def red(a):
     clean(); s=spec(a.spec)
-    declared=sorted({f for cp in s['checkpoints'] for f in cp['files']}); actual=changed()
-    if actual!=declared: die(f'test checkpoint changed {actual}; declared test files are {declared}')
+    declared=declared_files(s['checkpoints'],changed())
     before=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     results=[prove_red(cp) for cp in s['checkpoints']]
     after=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(); clean()

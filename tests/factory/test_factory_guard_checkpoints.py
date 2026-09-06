@@ -351,20 +351,21 @@ class RedGreenEndToEndTests(_RootCase):
         git(self.root, "config", "core.autocrlf", "false")
         (self.root / "app").mkdir()
         (self.root / "app" / "x.py").write_text("x = 1\n", encoding="utf-8")
-        for rel in (RED_FILE, GUARD_FILE):
-            (self.root / rel).unlink()
+        (self.root / RED_FILE).unlink()
+        # The guard pins an existing test: it is at the base, passes throughout, and the test
+        # commit leaves it untouched (D-064; before it the old equality made the author write it).
+        (self.root / GUARD_FILE).write_text(
+            "print('AC-2 conversation switch still aborts: 3 passed')\n", encoding="utf-8"
+        )
         git(self.root, "add", "-A")
         git(self.root, "commit", "-q", "-m", "base")
-        # The red test fails until app/fixed.txt exists; the guard passes throughout.
+        # The red test fails until app/fixed.txt exists.
         (self.root / RED_FILE).write_text(
             "import pathlib, sys\n"
             "if pathlib.Path('app/fixed.txt').exists():\n"
             "    print('AC-1 satisfied'); sys.exit(0)\n"
             "print('AssertionError: AC-1 the stream was aborted'); sys.exit(1)\n",
             encoding="utf-8",
-        )
-        (self.root / GUARD_FILE).write_text(
-            "print('AC-2 conversation switch still aborts: 3 passed')\n", encoding="utf-8"
         )
         git(self.root, "add", "-A")
         git(self.root, "commit", "-q", "-m", "test(factory): acceptance tests")
