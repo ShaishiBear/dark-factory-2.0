@@ -145,7 +145,18 @@ class ClaudeCliProvider:
         tool_names = ",".join(tools)
         argv = [
             self.config.binary,
-            "--bare",
+            # Isolation without simple mode. `--bare` also sets CLAUDE_CODE_SIMPLE=1, and in
+            # that mode the pinned CLI (2.1.245; 2.1.259 the same) registers only `Read` and
+            # `Edit` (and `Bash` if named) whatever `--tools` says, so the `test_author` of run
+            # 34033360798 was granted Read, Glob, Grep, Write and Edit by the policy and got
+            # `No such tool available: Glob` from the CLI. `--safe-mode` disables the same
+            # customisations (CLAUDE.md, skills, plugins, hooks, MCP servers, commands,
+            # agents) and leaves the built-in tools and the permission rules working as
+            # documented; `--setting-sources ""` loads no user, project or local settings
+            # file, which `--safe-mode` alone still honours (a project `.claude/settings.json`
+            # deny rule was applied under it). Both measured on 2.1.245, and the read-scope
+            # preflight proves this exact argv on the runner every run (D-065).
+            *ISOLATION_FLAGS,
             "-p", request.prompt,
             "--model", model,
             "--permission-mode", "dontAsk",
@@ -169,7 +180,10 @@ class ClaudeCliProvider:
         ]
         # A worker is a bounded loop, never an open-ended one. Without this cap the only backstop
         # was the subprocess timeout; the CLI stops the session at the cap and reports it in the
-        # envelope, which the unwrap below turns into a failed stage.
+        # envelope. For a drafting role or a judge the unwrap below turns that into a failed
+        # stage; for a repository-mutation role the cap ends the loop and the result is returned
+        # marked `cap_reached`, because the deterministic gates, not the CLI's exit code, are the
+        # authority on the draft it left (D-065).
         if request.max_turns is not None:
             argv.extend(["--max-turns", str(request.max_turns)])
         # A turn cap bounds iterations; the cost is in the conversation resent every turn, which
@@ -228,8 +242,10 @@ class ClaudeCliProvider:
         # worker that returned `API Error: stream closed before completion` after 12 seconds of
         # API time, refused as a failed stage, and cost the whole 50-minute build. Only the
         # explicit TRANSIENT patterns below are retried, each attempt a fresh CLI process with
-        # the same prompt; a cap, a budget stop, a missing model or any other error stays
-        # terminal and is refused exactly as before. The dollar budget is a per-process CLI flag,
+        # the same prompt; a budget stop, a missing model or any other error stays terminal
+        # and is refused exactly as before, and so does a turn cap for every role but the
+        # three repository-mutation ones, whose cap returns the envelope marked `cap_reached`
+        # for the kernel's gates to judge (D-065). The dollar budget is a per-process CLI flag,
         # so the effective ceiling for a stage is max_budget_usd * (1 + transient_retries).
         # Before a retry the kernel calls `before_retry` (the worker runtime restores the
         # worktree for mutation roles); this provider never touches Git itself.
@@ -321,6 +337,7 @@ class ClaudeCliProvider:
             events_seen=spent.events_seen,
             thinking_tokens=spent.thinking_tokens,
             effort=effort,
+            cap_reached=envelope.cap_reached,
         )
 
     def _launch(
@@ -450,8 +467,16 @@ class ClaudeCliProvider:
             )
             if transient is not None:
                 raise transient
-            detail = (stdout + "\n" + stderr)[-4000:]
             envelope, telemetry = _terminal_envelope(stdout, run, partial)
+            if envelope.subtype == CAP_SUBTYPE and request.role in REPO_MUTATION_ROLES:
+                # The CLI exits 1 at `--max-turns` (run 34033360798: rc=1, `error_max_turns`,
+                # a test file written and edited over 31 turns). For a repository-mutation
+                # role that is the loop ending, not the build: the run is returned and the
+                # unwrap marks its envelope `cap_reached`; the kernel judges what is on disk
+                # with the same gates a returned worker gets, and refuses by name when
+                # nothing is (D-065). Every other role's cap is refused below as before.
+                return run
+            detail = (stdout + "\n" + stderr)[-4000:]
             raise ProviderStageError(
                 f"agent worker failed role={request.role!r} rc={run.returncode}: {detail}",
                 telemetry=telemetry,
@@ -460,6 +485,13 @@ class ClaudeCliProvider:
         return run
 
 
+# How every worker process is isolated from the runner's own configuration: `--safe-mode`
+# (no CLAUDE.md, skills, plugins, hooks, MCP servers, commands or agents; built-in tools and
+# permission rules work as documented) and no settings file at all. `--bare` did the same
+# and also put the CLI in simple mode, which registers only Read and Edit (D-065).
+ISOLATION_FLAGS: tuple[str, ...] = ("--safe-mode", "--setting-sources", "")
+# The result subtype the CLI prints when `--max-turns` ended the session.
+CAP_SUBTYPE = "error_max_turns"
 # Retried only when the CLI's error text matches one of these. The list is deliberately short
 # and literal: anything not on it is a verdict about the worker, not the network, and is refused.
 TRANSIENT_ERROR_PATTERNS: tuple[str, ...] = (
@@ -1014,7 +1046,7 @@ class ResultEnvelope:
         "content", "session_id", "num_turns", "duration_ms", "cost_usd",
         "input_tokens", "output_tokens", "cache_creation_input_tokens",
         "cache_read_input_tokens", "subtype", "events_seen", "thinking_tokens",
-        "thinking_tokens_reported",
+        "thinking_tokens_reported", "cap_reached",
     )
 
     def __init__(
@@ -1023,6 +1055,7 @@ class ResultEnvelope:
         *,
         events_seen: int | None = None,
         thinking_tokens: int | None = None,
+        cap_reached: bool = False,
     ) -> None:
         usage = raw.get("usage") if isinstance(raw.get("usage"), Mapping) else {}
         self.content = str(raw.get("result") or "").strip()
@@ -1050,6 +1083,9 @@ class ResultEnvelope:
             else {}
         )
         self.thinking_tokens_reported = _optional_int(details.get("thinking_tokens"))
+        # The CLI ended the session at its turn cap and the unwrap returned rather than
+        # raised: a repository-mutation role's draft is judged by the kernel's gates (D-065).
+        self.cap_reached = cap_reached
 
     @classmethod
     def from_events(cls, run: CliRun) -> ResultEnvelope:
@@ -1098,6 +1134,7 @@ class ResultEnvelope:
             "events_seen": self.events_seen,
             "thinking_tokens": self.thinking_tokens,
             "thinking_tokens_reported": self.thinking_tokens_reported,
+            "cap_reached": self.cap_reached,
         }
 
 
@@ -1110,11 +1147,14 @@ def unwrap_result_envelope(
 ) -> ResultEnvelope:
     """Refuse anything that is not a non-error CLI result envelope.
 
-    A worker that hit its turn cap, ran out of budget or died on an API error still exits 0 with
-    an envelope whose `is_error` is true or whose `subtype` starts with `error`; that is a failed
-    stage, not a result to parse. Output that is not an envelope at all means the CLI was not
-    launched the way the kernel launches it, and is refused for the same reason. `events_seen`
-    is stamped on the envelope so a stage's record says how much stream preceded it.
+    A worker that ran out of budget or died on an API error still prints an envelope whose
+    `is_error` is true or whose `subtype` starts with `error`; that is a failed stage, not a
+    result to parse, and so is a turn cap (`error_max_turns`) for every role but the three
+    repository-mutation ones. For those the cap ends the loop: the envelope is returned marked
+    `cap_reached`, and the kernel's gates judge the draft on disk (D-065). Output that is not
+    an envelope at all means the CLI was not launched the way the kernel launches it, and is
+    refused for the same reason. `events_seen` is stamped on the envelope so a stage's record
+    says how much stream preceded it.
     """
     try:
         raw = json.loads(stdout)
@@ -1125,6 +1165,10 @@ def unwrap_result_envelope(
     if not isinstance(raw, Mapping) or "is_error" not in raw or "result" not in raw:
         raise RuntimeError(f"agent worker role={role!r} did not return a JSON result envelope")
     subtype = str(raw.get("subtype") or "")
+    if subtype == CAP_SUBTYPE and role in REPO_MUTATION_ROLES:
+        return ResultEnvelope(
+            raw, events_seen=events_seen, thinking_tokens=thinking_tokens, cap_reached=True
+        )
     if raw.get("is_error") is True or subtype.startswith("error"):
         detail = str(raw.get("result") or "")[-1500:]
         message = (

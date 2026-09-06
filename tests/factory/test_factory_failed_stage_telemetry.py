@@ -130,9 +130,12 @@ class ProviderErrorTelemetryTests(unittest.TestCase):
     def test_terminal_nonzero_exit_carries_its_envelope_counts(self):
         prov = _provider(retries=2)
         terminal = envelope(is_error=True, subtype="error_max_turns", result="max turns", num_turns=30)
+        # `review`, not `implement`: since D-065 a repository-mutation role's cap is returned
+        # marked `cap_reached` for the gates to judge instead of refused, and the telemetry a
+        # capped mutation stage records is tests/factory/test_factory_cap_ends_the_loop.py.
         with mock.patch.object(providers_module, "_stream_cli", _Runs((1, terminal))):
             with self.assertRaises(ProviderStageError) as ctx:
-                prov.run(AgentRequest(role="implement", prompt="p", cwd="/tmp", max_turns=30))
+                prov.run(AgentRequest(role="review", prompt="p", cwd="/tmp", max_turns=30))
         self.assertEqual(ctx.exception.telemetry["num_turns"], 30)
         self.assertEqual(ctx.exception.telemetry["subtype"], "error_max_turns")
         self.assertEqual(ctx.exception.attempts, 1)

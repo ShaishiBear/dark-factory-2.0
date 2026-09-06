@@ -372,8 +372,12 @@ class NormalCompletionTests(_FakeCliCase):
                 {"exit": 1},
             ]
         )
+        # `review`: since D-065 the three repository-mutation roles return a cap marked
+        # `cap_reached` so the kernel's gates can judge the draft on disk, and a role with no
+        # draft keeps the old refusal. The mutation side is
+        # tests/factory/test_factory_cap_ends_the_loop.py.
         with self.assertRaises(ProviderStageError) as ctx:
-            provider_for(self.binary).run(request())
+            provider_for(self.binary).run(request("review"))
         self.assertIn("error_max_turns", str(ctx.exception))
         self.assertEqual(ctx.exception.telemetry["num_turns"], 30)
         self.assertEqual(ctx.exception.telemetry["events_seen"], 3)

@@ -149,16 +149,24 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(self.sleeps, list(TRANSIENT_BACKOFF_SECONDS[:2]))
 
     def test_a_terminal_envelope_is_never_retried(self):
-        for stdout in (
-            envelope(is_error=True, subtype="error_max_turns", result="Reached max turns"),
-            envelope(is_error=True, subtype="error_max_budget", result="Reached max budget"),
-            envelope(is_error=True, result="There's an issue with the selected model"),
+        # The role matters only for a cap: since D-065 `error_max_turns` is returned marked
+        # `cap_reached` for the three repository-mutation roles, so the terminal case is a
+        # role without a draft on disk (`review`). A budget stop and a model error stay
+        # terminal for every role. That a mutation role's cap returns without a retry is
+        # tests/factory/test_factory_cap_ends_the_loop.py.
+        for stdout, role in (
+            (envelope(is_error=True, subtype="error_max_turns", result="Reached max turns"),
+             "review"),
+            (envelope(is_error=True, subtype="error_max_budget", result="Reached max budget"),
+             "test_author"),
+            (envelope(is_error=True, result="There's an issue with the selected model"),
+             "test_author"),
         ):
-            with self.subTest(stdout=stdout[:60]):
+            with self.subTest(stdout=stdout[:60], role=role):
                 runs = Runs(stdout, envelope())
                 with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
                     with self.assertRaises(RuntimeError):
-                        provider().run(request())
+                        provider().run(request(role))
                 self.assertEqual(runs.calls, 1)
         self.assertEqual(self.sleeps, [])
 
@@ -219,10 +227,12 @@ class NonZeroExitTests(unittest.TestCase):
         self.assertEqual(result.num_turns, 6 + 3)
 
     def test_a_nonzero_exit_with_a_terminal_envelope_is_not_retried(self):
+        # `review` because a mutation role's cap is returned marked `cap_reached` since D-065;
+        # the exit code is still not a retry either way.
         runs = Runs((1, envelope(is_error=True, subtype="error_max_turns", result="Reached max turns")), envelope())
         with mock.patch("factory_kernel.providers._stream_cli", side_effect=runs):
             with self.assertRaises(RuntimeError) as ctx:
-                provider().run(request())
+                provider().run(request("review"))
         self.assertNotIsInstance(ctx.exception, TransientProviderError)
         self.assertEqual(runs.calls, 1)
         self.assertIn("rc=1", str(ctx.exception))

@@ -167,6 +167,7 @@ COPY_FILES = (
     "tests/factory/test_factory_model_overrides.py",
     "tests/factory/test_factory_guard_files_untouched.py",
     "FACTORY_RULES.md",
+    "tests/factory/test_factory_cap_ends_the_loop.py",
 )
 TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
 

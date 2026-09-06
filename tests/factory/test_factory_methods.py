@@ -146,7 +146,7 @@ class ProtectionAndDocsTests(unittest.TestCase):
         text = MATT_DOC.read_text(encoding="utf-8")
         self.assertNotIn("uses the real", text)
         self.assertNotIn("preflight fails closed if the plugin", text)
-        self.assertIn("--bare", text)
+        self.assertIn("--safe-mode", text)
         self.assertIn(".factory/methods/manifest.json", text)
 
     @unittest.skipUnless(DOMAIN_DOC.exists(), "repo-shaped copy without docs (mutation runner)")

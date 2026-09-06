@@ -118,6 +118,8 @@ PROBE_LINE = re.compile(
     r"denied_outside_scope=(?P<denied>true|false) "
     r"attempted_outside_scope=(?P<attempted>true|false) "
     r"read_inside_scope=(?P<inside>true|false) read_artifacts=(?P<artifacts>true|false) "
+    r"grep_denied_outside_scope=(?P<grep>true|false) glob_outside_scope=(?P<glob>true|false) "
+    r"tools=(?P<tools>\S+) tools_missing=(?P<missing>\S+) "
     r"events=\d+(?: error=(?P<error>\S+))?$"
 )
 
@@ -873,7 +875,8 @@ class ProbeScriptTests(unittest.TestCase):
                 )
             ).argv_for(req)
             self.assertEqual(argv, expected)
-        self.assertEqual(argv[argv.index("--max-turns") + 1], "6")
+        self.assertEqual(argv[argv.index("--max-turns") + 1], str(probe.PROBE_TURNS))
+        self.assertEqual(probe.PROBE_TURNS, 8)
         self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "1")
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         self.assertIn("Read(./factory_kernel/**)", _flag(argv, "--disallowedTools"))

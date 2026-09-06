@@ -117,7 +117,8 @@ class ProviderBoundaryTests(unittest.TestCase):
                 )
         argv = run.call_args.args[0]
         env = run.call_args.kwargs["env"]
-        self.assertIn("--bare", argv)
+        self.assertIn("--safe-mode", argv)
+        self.assertNotIn("--bare", argv)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         self.assertEqual(argv[argv.index("--tools") + 1], "Read,Edit,Write")
         self.assertEqual(argv[argv.index("--allowedTools") + 1], "Read,Edit,Write")
@@ -147,7 +148,8 @@ class ProviderBoundaryTests(unittest.TestCase):
             )
         )
         argv = run.call_args.args[0]
-        self.assertIn("--bare", argv)
+        self.assertIn("--safe-mode", argv)
+        self.assertNotIn("--bare", argv)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         self.assertEqual(argv[argv.index("--tools") + 1], "")
         self.assertNotIn("--allowedTools", argv)

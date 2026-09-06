@@ -160,9 +160,12 @@ class ProviderArgvTests(unittest.TestCase):
         # Read as it runs (D-054); print mode refuses stream-json without --verbose.
         self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
         self.assertIn("--verbose", argv)
-        # Isolation flags are untouched.
-        for flag in ("--bare", "--strict-mcp-config", "--disable-slash-commands"):
+        # Isolation flags are untouched (`--safe-mode` and no settings file since D-065;
+        # `--bare` put the CLI in simple mode, which dropped Glob, Grep and Write).
+        for flag in ("--safe-mode", "--setting-sources", "--strict-mcp-config", "--disable-slash-commands"):
             self.assertIn(flag, argv)
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "")
+        self.assertNotIn("--bare", argv)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         self.assertEqual(result.content, "done")
         self.assertEqual(result.num_turns, 3)
@@ -200,10 +203,14 @@ class ResultEnvelopeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "ended in error"):
             unwrap_result_envelope(envelope(is_error=True, result="boom"), role="implement")
 
-    def test_turn_cap_exceeded_fails_the_stage(self):
+    def test_turn_cap_exceeded_fails_a_non_mutation_stage(self):
+        # A drafting role or a judge has no draft on disk for a gate to judge, so its cap is
+        # the failed stage it always was. The three repository-mutation roles return marked
+        # `cap_reached` instead, which is D-065's own file
+        # (tests/factory/test_factory_cap_ends_the_loop.py).
         with self.assertRaisesRegex(RuntimeError, "error_max_turns"):
             unwrap_result_envelope(
-                envelope(subtype="error_max_turns", result=""), role="implement",
+                envelope(subtype="error_max_turns", result=""), role="review",
             )
 
     def test_non_envelope_output_is_refused(self):
