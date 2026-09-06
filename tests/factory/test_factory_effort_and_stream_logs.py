@@ -434,7 +434,9 @@ class StreamLogTests(_FakeCliCase):
     def test_the_kernel_record_keeps_the_streamed_log_and_the_capped_tail(self):
         """Through the funnel with the real provider: the log is the stream, not the 1500
         characters the record keeps as `partial_output`."""
-        self.scenario(slow_steps(count=40, pace=0.05))
+        # Ten turns fit in the 1 s wall; the draft deadline (turn 18, D-057) must not fire
+        # first, as it did on the Linux runner at 0.05 s per turn (PR #113).
+        self.scenario(slow_steps(count=40, pace=0.1))
         with tempfile.TemporaryDirectory() as tmp:
             paths = RunPaths.create(Path(tmp), "run")
             rt = _runtime(Path(tmp), provider_with(self.binary, timeout=60, idle=5))
