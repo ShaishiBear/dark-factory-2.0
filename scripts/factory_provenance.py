@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Publish/fetch exact-head builder provenance through a dedicated Git notes ref."""
+"""Publish/fetch exact-head builder provenance, and write/read/drop an issue's carry.
+
+Two payloads, one mechanism. The builder provenance pack hangs on the exact PR head; the
+carry (D-071) hangs on a deterministic per-issue key blob. Both are Git notes on a ref of
+their own, so both want the same authenticated fetch, the same kernel-identity `notes add`
+and the same push, and they live here rather than in a second program that would duplicate
+every one of them. Neither is reachable by a worker: a worker has no shell and no Git, and
+its read scope denies `.git` (`worker_policy.TRUST_ROOT_DENY_PATHS`).
+"""
 from __future__ import annotations
 
 import argparse
@@ -21,6 +29,10 @@ sys.path.insert(0, str(HERE.parent))
 ROOT = Path.cwd().resolve()
 
 from factory_kernel.canonical import canonical_bytes
+from factory_kernel.carry import (
+    CARRY_NOTE_REF, build_carry, carry_bytes, carry_identity, carry_key_content, carry_sha256,
+    utc_now,
+)
 from factory_kernel.provenance import (
     GIT_OID, NOTE_REF, build_pack, materialize, pack_identity, pack_sha256, verify_pack,
 )
@@ -100,13 +112,17 @@ def _git_auth(args: list[str], *, check: bool = True) -> subprocess.CompletedPro
     return proc
 
 
-def _fetch_note_ref() -> None:
+def _fetch_note_ref(ref: str = NOTE_REF, *, force: bool = False) -> None:
+    """Bring a notes ref down from the remote. A missing remote ref is not an error: the first
+    build of a repository publishes one. `force` is for the carry ref, whose local copy may
+    hold a note a later run has already removed upstream; the provenance ref is fetched exactly
+    as it always was."""
     repo = _repo()
     proc = _git_auth(
         [
             "fetch",
             f"https://github.com/{repo}.git",
-            f"{NOTE_REF}:{NOTE_REF}",
+            f"{'+' if force else ''}{ref}:{ref}",
         ],
         check=False,
     )
@@ -115,7 +131,12 @@ def _fetch_note_ref() -> None:
     detail = ((proc.stdout or "") + (proc.stderr or "")).lower()
     if "couldn't find remote ref" in detail or "could not find remote ref" in detail:
         return
-    fail("could not fetch provenance notes: " + detail[-1600:])
+    fail(f"could not fetch notes ref {ref}: " + detail[-1600:])
+
+
+def _push_note_ref(ref: str = NOTE_REF) -> None:
+    repo = _repo()
+    _git_auth(["push", f"https://github.com/{repo}.git", f"{ref}:{ref}"])
 
 
 def _is_ancestor(base: str, head: str) -> bool:
@@ -190,14 +211,7 @@ def publish(args: argparse.Namespace) -> None:
         )
         if note.returncode:
             fail("could not create exact-head provenance note: " + ((note.stderr or note.stdout)[-1600:]))
-        repo = _repo()
-        _git_auth(
-            [
-                "push",
-                f"https://github.com/{repo}.git",
-                f"{NOTE_REF}:{NOTE_REF}",
-            ]
-        )
+        _push_note_ref()
     finally:
         note_file.unlink(missing_ok=True)
     print(
@@ -267,6 +281,132 @@ def fetch(args: argparse.Namespace) -> None:
     )
 
 
+# ---------- the per-issue carry (D-071) ----------
+
+
+def _carry_key(issue: int) -> str:
+    """The object a carry note hangs on, written into the object database so `notes` can name it.
+
+    Deterministic in the issue number alone, so every run of every build of the same issue
+    addresses the same note. `git hash-object -w` is a pure object write: it touches no ref and
+    no working tree.
+    """
+    proc = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=ROOT, input=carry_key_content(issue), capture_output=True, timeout=30,
+    )
+    if proc.returncode:
+        fail("could not write the carry key object: " + proc.stderr.decode("utf-8", "replace")[-800:])
+    key = proc.stdout.decode("ascii", "replace").strip()
+    if not GIT_OID.fullmatch(key):
+        fail(f"carry key object id is not a Git object id: {key!r}")
+    return key
+
+
+def _carry_note(issue: int, *, fetch_remote: bool) -> dict | None:
+    if fetch_remote:
+        _fetch_note_ref(CARRY_NOTE_REF, force=True)
+    key = _carry_key(issue)
+    proc = subprocess.run(
+        ["git", "notes", f"--ref={CARRY_NOTE_REF}", "show", key],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+    if proc.returncode:
+        return None
+    try:
+        value = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def carry_write(args: argparse.Namespace) -> None:
+    """Write this build's certified upstream to the carry ref, replacing any earlier one.
+
+    Only ever called by the kernel, and only after the architecture gate has returned
+    `proceed`: everything in the pack has already passed its deterministic authority.
+    """
+    try:
+        carry = build_carry(
+            artifact_root=args.artifacts,
+            issue=args.issue,
+            base_sha=args.base,
+            issue_sha256=args.issue_sha256,
+            kernel_commit=args.kernel_commit,
+            policy_sha256=args.policy_sha256,
+            run_id=args.run_id,
+            written_at=utc_now(),
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        fail(f"cannot build the carry: {exc}")
+    key = _carry_key(args.issue)
+    if not args.local_notes:
+        _fetch_note_ref(CARRY_NOTE_REF, force=True)
+    with tempfile.NamedTemporaryFile("wb", delete=False, prefix="dark-factory-carry-", suffix=".json") as tmp:
+        tmp.write(carry_bytes(carry))
+        note_file = Path(tmp.name)
+    try:
+        # A notes commit needs an author exactly as a worker commit does; every kernel-made
+        # object carries the kernel identity (D-037).
+        note = subprocess.run(
+            ["git", *KERNEL_COMMIT_ARGS, "notes", f"--ref={CARRY_NOTE_REF}", "add", "-f",
+             "-F", str(note_file), key],
+            cwd=ROOT, capture_output=True, text=True, timeout=60,
+        )
+        if note.returncode:
+            fail("could not write the carry note: " + ((note.stderr or note.stdout)[-1600:]))
+        if not args.local_notes:
+            _push_note_ref(CARRY_NOTE_REF)
+    finally:
+        note_file.unlink(missing_ok=True)
+    print(
+        f"CARRY_WRITTEN issue=#{args.issue} base={args.base[:7]} key={key[:7]} "
+        f"artifacts={len(carry['artifacts'])} sha256={carry_sha256(carry)}"
+    )
+
+
+def carry_read(args: argparse.Namespace) -> None:
+    """Fetch this issue's carry to a file, or say it is absent. Never fails a build.
+
+    Absence is the ordinary case (the first build of an issue), so it exits 0 and writes
+    nothing; the kernel treats a missing output file as a miss. Only a broken repository or a
+    refused fetch is a non-zero exit, which the kernel also turns into a miss.
+    """
+    note = _carry_note(args.issue, fetch_remote=not args.local_notes)
+    if not note:
+        print(f"CARRY_ABSENT issue=#{args.issue}")
+        return
+    Path(args.output).write_bytes(canonical_bytes(note))
+    try:
+        identity = carry_identity(note)
+    except ValueError as exc:
+        # The kernel is the judge of a carry, not this reader: hand it the bytes and let
+        # `verify_carry` name the fault, so the miss line says `malformed` and not `absent`.
+        print(f"CARRY_READ issue=#{args.issue} unbound={exc}")
+        return
+    print(
+        f"CARRY_READ issue=#{args.issue} base={identity['base_sha'][:7]} "
+        f"run={identity['run_id']} sha256={carry_sha256(note)}"
+    )
+
+
+def carry_drop(args: argparse.Namespace) -> None:
+    """Remove this issue's carry. The merge that closes an issue is the event that calls it."""
+    key = _carry_key(args.issue)
+    if not args.local_notes:
+        _fetch_note_ref(CARRY_NOTE_REF, force=True)
+    removed = subprocess.run(
+        ["git", *KERNEL_COMMIT_ARGS, "notes", f"--ref={CARRY_NOTE_REF}", "remove",
+         "--ignore-missing", key],
+        cwd=ROOT, capture_output=True, text=True, timeout=60,
+    )
+    if removed.returncode:
+        fail("could not remove the carry note: " + ((removed.stderr or removed.stdout)[-1600:]))
+    if not args.local_notes:
+        _push_note_ref(CARRY_NOTE_REF)
+    print(f"CARRY_DROPPED issue=#{args.issue} key={key[:7]}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -289,6 +429,25 @@ def main() -> None:
     p.add_argument("--output-dir", required=True)
     p.add_argument("--local-notes", action="store_true")
     p.set_defaults(fn=fetch)
+    p = sub.add_parser("carry-write")
+    p.add_argument("--issue", type=int, required=True)
+    p.add_argument("--artifacts", required=True)
+    p.add_argument("--base", required=True, help="the exact commit the branch was cut from")
+    p.add_argument("--issue-sha256", required=True)
+    p.add_argument("--kernel-commit", required=True)
+    p.add_argument("--policy-sha256", required=True)
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--local-notes", action="store_true")
+    p.set_defaults(fn=carry_write)
+    p = sub.add_parser("carry-read")
+    p.add_argument("--issue", type=int, required=True)
+    p.add_argument("--output", required=True)
+    p.add_argument("--local-notes", action="store_true")
+    p.set_defaults(fn=carry_read)
+    p = sub.add_parser("carry-drop")
+    p.add_argument("--issue", type=int, required=True)
+    p.add_argument("--local-notes", action="store_true")
+    p.set_defaults(fn=carry_drop)
     args = parser.parse_args()
     args.fn(args)
 

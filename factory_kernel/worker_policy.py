@@ -299,6 +299,13 @@ PRODUCT_WRITE_PATHS: tuple[str, ...] = ("app/**", "docs/**", "README.md")
 # absent: the architecture governor, the conformance authority and the standards reviewer are
 # told to read it (their prompts open with it) and a deny rule would override their allow.
 TRUST_ROOT_DENY_PATHS: tuple[str, ...] = (
+    # Git's own state. A worker has no Bash and no Git, so it could never run `git notes`, but
+    # the read boundary is the deny list and `.git` is inside the working directory: without
+    # these two patterns a Read/Grep/Glob could reach the object database, and the carry ref
+    # (`refs/notes/dark-factory-carry`, D-071) and the provenance ref both live there. The
+    # carry is written and read by the kernel alone.
+    ".git",
+    ".git/**",
     "factory_kernel/**",
     "harness/**",
     "scripts/**",

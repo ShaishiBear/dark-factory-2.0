@@ -164,8 +164,15 @@ class KernelWiringTests(unittest.TestCase):
         guards = [n for n in ast.walk(fn) if isinstance(n, ast.If)
                   and any(isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
                           and c.func.attr == "_observe_repro" for c in ast.walk(n))]
-        self.assertEqual(len(guards), 1)
-        test = guards[0].test
+        # Two now: the outer `if not self._carry_reuse(...)`, which is what a build that reused
+        # a certified upstream skips, and inside it the bug/plan decision that has always
+        # guarded the observation. The innermost is still the one that decides (D-071).
+        self.assertEqual(len(guards), 2)
+        outer = min(guards, key=lambda n: n.lineno).test
+        self.assertIsInstance(outer, ast.UnaryOp)
+        self.assertIsInstance(outer.op, ast.Not)
+        self.assertEqual(outer.operand.func.attr, "_carry_reuse")
+        test = max(guards, key=lambda n: n.lineno).test
         self.assertIsInstance(test, ast.Compare)
         self.assertIsInstance(test.left, ast.Name)
         self.assertEqual(test.left.id, "role")

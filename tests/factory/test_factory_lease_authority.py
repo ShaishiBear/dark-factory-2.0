@@ -54,14 +54,25 @@ def _function(tree: ast.Module, class_name: str, name: str) -> ast.FunctionDef:
 
 
 def _method_calls(func: ast.FunctionDef, method: str) -> list[ast.Call]:
-    return [
-        node for node in ast.walk(func)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == method
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "self"
-    ]
+    """Every `self.<method>(...)` in `func`, in source order.
+
+    `ast.walk` is breadth-first, so a call nested one level deeper than its neighbours came back
+    last whatever the source said. That was invisible while the build sequence was flat; the
+    carry (D-071) puts the four model stages and their gates inside `if not self._carry_reuse(
+    ...)`, and the order these tests assert is an order of execution, so it is read off the
+    source position.
+    """
+    return sorted(
+        (
+            node for node in ast.walk(func)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == method
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "self"
+        ),
+        key=lambda node: (node.lineno, node.col_offset),
+    )
 
 
 def _kw(call: ast.Call, name: str):
@@ -134,6 +145,12 @@ class BuilderCallSiteTests(unittest.TestCase):
         # handed back to `test_author` once and the whole gate re-run; the credential scope of
         # the command it runs is judged here exactly as when build_issue ran it inline.
         cls.red_gate = _function(cls.tree, "KernelRuntime", "_red_gate")
+        # The contract and context compilers are invoked from one helper each, because a build
+        # that reuses a certified upstream must run exactly the same authority over the restored
+        # artifact as a build whose worker just wrote it (D-071).
+        cls.contract_gate = _function(cls.tree, "KernelRuntime", "_gate_contract")
+        cls.context_gate = _function(cls.tree, "KernelRuntime", "_gate_context")
+        cls.carry_reuse = _function(cls.tree, "KernelRuntime", "_carry_reuse")
 
     def _protocol_and_proof_execs(self, func):
         found = []
@@ -150,6 +167,8 @@ class BuilderCallSiteTests(unittest.TestCase):
         calls = (
             self._protocol_and_proof_execs(self.build)
             + self._protocol_and_proof_execs(self.red_gate)
+            + self._protocol_and_proof_execs(self.contract_gate)
+            + self._protocol_and_proof_execs(self.context_gate)
             + self._protocol_and_proof_execs(self.repair)
             + self._protocol_and_proof_execs(self.handoff)
             + self._protocol_and_proof_execs(self.rehead)
@@ -186,6 +205,16 @@ class BuilderCallSiteTests(unittest.TestCase):
         handoff = calls[-1]
         self.assertIsNotNone(_kw(handoff, "pr"), "pr-handoff must carry the PR number")
         for call in calls[:-1]:
+            self.assertIsNone(_kw(call, "pr"))
+
+    def test_a_reused_upstream_heartbeats_the_same_two_stages(self):
+        """A carry hit skips the model stages, never the lease: the claim must stay alive across
+        the two gates that replace them, in the same order and with no PR number (D-071)."""
+        calls = _method_calls(self.carry_reuse, "_lease_heartbeat")
+        self.assertEqual(
+            [(_str(c.args[0]), _str(c.args[2])) for c in calls], EXPECTED_HEARTBEATS[:2]
+        )
+        for call in calls:
             self.assertIsNone(_kw(call, "pr"))
 
     def test_heartbeat_method_uses_github_scope(self):
