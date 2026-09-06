@@ -12,9 +12,11 @@ state, not an AI interpretation of pixels.
 Every boundary the browser will cross is asked from the harness side first, and each
 answer is printed as a marker line: the backend login (`E2E_LOGIN_PROBE`), the frontend
 proxy (`E2E_PROXY_PROBE`), the provisioned fixture (`E2E_BOOTSTRAP_SEEN`,
-`E2E_VIDEOS_PROBE`) and the streaming route itself (`E2E_STREAM_PROBE`). A browser that
-stalls cannot say why; the route can. On any failure the app process log is copied into the
-evidence dump and its tail is printed (`E2E_APP_LOG_TAIL`), scrubbed of every secret.
+`E2E_VIDEOS_PROBE`), the question rendered from the fixture's title (`E2E_QUESTION`) and
+the streaming route itself, which must answer that question with a citation of the fixture
+(`E2E_STREAM_PROBE`). A browser that stalls cannot say why; the route can. On any failure
+the app process log is copied into the evidence dump and its tail is printed
+(`E2E_APP_LOG_TAIL`), scrubbed of every secret.
 
 The normal full harness owns process startup and calls ``run_e2e(app)`` in-process. The
 standalone CLI exists only so the independent PR validator can run this SAME journey
@@ -130,13 +132,25 @@ class ExistingApp:
         return self._request("POST", path, body, headers=headers)
 
 
+def _unescape(text: str) -> str:
+    """The text of a snapshot node as the page shows it.
+
+    agent-browser prints a name or text node between double quotes and escapes the quotes
+    (and backslashes) inside it. The journey's question quotes the fixture's title
+    (D-062), so the node that echoes it must be compared unescaped or the question would
+    count as fresh assistant text.
+    """
+    return re.sub(r"\\(.)", r"\1", text)
+
+
 def _nodes(snapshot: str) -> list[tuple[str, str, str]]:
     """(role, accessible name, ref) for every node line of an interactive snapshot."""
     found: list[tuple[str, str, str]] = []
     for line in snapshot.splitlines():
         match = NODE.match(line)
         if match:
-            found.append((match.group("role"), match.group("name"), match.group("ref")))
+            found.append((match.group("role"), _unescape(match.group("name")),
+                          match.group("ref")))
     return found
 
 
@@ -445,33 +459,88 @@ def _check_bootstrap(app, video_id: str, secrets: tuple[str, ...],
     return False, detail
 
 
-def _probe_videos(app, cookie: str, video_id: str) -> tuple[bool, str]:
+def _probe_videos(app, cookie: str, video_id: str) -> tuple[bool, str, dict]:
     """GET /api/videos as the signed-in account; the locked fixture must be listed.
 
     The bootstrap marker proves the ingestion ran; this proves the row the browser will be
     asked about is in the database the app is serving from. Prints
-    `E2E_VIDEOS_PROBE count=N fixture_present=<bool> status=<n>`.
+    `E2E_VIDEOS_PROBE count=N fixture_present=<bool> status=<n>`. The fixture's catalog
+    row (`id`, `title`, `description`, `url`) is returned so the journey's question can
+    name the video as the catalog does (D-062); it is `{}` when the fixture is absent.
     """
     headers = {"Cookie": cookie} if cookie else None
     status, text, _ = app.get("/api/videos", headers=headers)
-    count, present = -1, False
+    count, fixture = -1, {}
     try:
         videos = json.loads(text)
     except json.JSONDecodeError:
         videos = None
     if isinstance(videos, list):
         count = len(videos)
-        present = any(
-            isinstance(video, dict)
-            and (video_id in str(video.get("url", ""))
-                 or video.get("youtube_video_id") == video_id)
-            for video in videos
+        fixture = next(
+            (
+                video for video in videos
+                if isinstance(video, dict)
+                and (video_id in str(video.get("url", ""))
+                     or video.get("youtube_video_id") == video_id)
+            ),
+            {},
         )
+    present = bool(fixture)
     print(f"E2E_VIDEOS_PROBE count={count} fixture_present={str(present).lower()} "
           f"status={status}", flush=True)
     return status == 200 and present, (
         f"status={status} count={count} fixture_present={present} "
-        f"body={' '.join(text.split())[:200]}")
+        f"body={' '.join(text.split())[:200]}"), fixture
+
+
+def _journey_question(browser_cfg: dict, fixture: dict) -> tuple[bool, str, str]:
+    """The one question the stream probe and the browser ask, grounded in the fixture.
+
+    `browser.question_template` is rendered with the fixture's `{title}` (and
+    `{description}`) as `/api/videos` lists them, so the question names the video the run
+    ingested instead of alluding to "the video I just added": on that wording the model
+    could answer that it cannot see uploads and never call a retrieval tool, and whether it
+    searched was luck (run 34020965800 made no tool call; run 33963509318 made three,
+    D-062). An empty or missing title cannot ground anything and is refused before the
+    browser opens (`E2E_FIXTURE_TITLE_MISSING`). Without a `question_template` key the
+    literal `browser.question` is used unchanged, so a configuration from before D-062 still
+    runs. Prints `E2E_QUESTION title="<title>" question="<rendered>"`.
+    """
+    template = browser_cfg.get("question_template")
+    if template is None:
+        question = str(browser_cfg.get("question", "")).strip()
+        print(f'E2E_QUESTION title=- question="{question}" source=question', flush=True)
+        return bool(question), "browser.question is empty", question
+    title = str(fixture.get("title") or "").strip()
+    description = str(fixture.get("description") or "").strip()
+    if not title:
+        print(f"E2E_FIXTURE_TITLE_MISSING fixture={json.dumps(fixture, default=str)[:300]}",
+              flush=True)
+        return False, (
+            "the catalog row of the locked fixture has no title to ground the question in: "
+            f"{json.dumps(fixture, default=str)[:300]}"), ""
+    question = str(template).replace("{title}", title).replace("{description}", description)
+    question = " ".join(question.split())
+    print(f'E2E_QUESTION title="{title}" question="{question}" source=question_template',
+          flush=True)
+    return bool(question), "the rendered question is empty", question
+
+
+def _sources_name_fixture(sources: list, video_id: str, fixture: dict) -> bool:
+    """The first citation is the locked video.
+
+    A `sources` entry (`routes/messages.py`, built by `rag/tools.py`) carries `video_url`,
+    the YouTube URL, and `video_id`, the catalog row's id. The URL holds the locked YouTube
+    id and is the same on every run; the row id is fresh per bootstrap, so it is compared
+    with the row the videos probe returned.
+    """
+    if not sources or not isinstance(sources[0], dict):
+        return False
+    first = sources[0]
+    row_id = str(fixture.get("id") or "")
+    return (video_id in str(first.get("video_url", ""))
+            or (bool(row_id) and str(first.get("video_id", "")) == row_id))
 
 
 def _parse_sse(body: str) -> dict:
@@ -481,9 +550,17 @@ def _parse_sse(body: str) -> dict:
     CLAUDE.md); `event: sources` precedes `data: [DONE]`; a mid-stream failure is an unnamed
     frame holding `{"error": ...}` (llm/openrouter.py). Comment lines (`: keepalive`) and
     `event: status` frames count as events, never as tokens.
+
+    `sources` is true only for a sources event carrying a non-empty JSON array (the
+    citations the frontend renders); `sources_event` says whether any sources frame arrived
+    at all, `sources_count` how many entries it held and `sources_list` the entries
+    themselves. `tool_calls` counts the `event: status` frames of type `tool_call_start`
+    (llm/openrouter.py emits one per executed retrieval tool call), so a stream that never
+    searched says so (D-062).
     """
-    events = tokens = 0
-    sources = done = False
+    events = tokens = tool_calls = 0
+    sources = sources_event = done = False
+    sources_list: list = []
     error = "-"
     for frame in re.split(r"\n\n+", body):
         name = ""
@@ -500,7 +577,22 @@ def _parse_sse(body: str) -> dict:
         events += 1
         payload = "\n".join(data)
         if name == "sources":
-            sources = True
+            sources_event = True
+            try:
+                decoded_sources = json.loads(payload)
+            except json.JSONDecodeError:
+                decoded_sources = None
+            if isinstance(decoded_sources, list) and decoded_sources:
+                sources = True
+                sources_list = decoded_sources
+            continue
+        if name == "status":
+            try:
+                status = json.loads(payload)
+            except json.JSONDecodeError:
+                status = None
+            if isinstance(status, dict) and status.get("type") == "tool_call_start":
+                tool_calls += 1
             continue
         if name:
             continue
@@ -517,7 +609,9 @@ def _parse_sse(body: str) -> dict:
         elif isinstance(decoded, dict) and "error" in decoded:
             error = str(decoded["error"])
     return {"events": events, "tokens": tokens, "sources": sources, "done": done,
-            "error": error}
+            "error": error, "sources_event": sources_event,
+            "sources_count": len(sources_list), "sources_list": sources_list,
+            "tool_calls": tool_calls}
 
 
 def _stream_request(url: str, body: str, cookie: str, timeout_s: int) -> dict:
@@ -569,7 +663,8 @@ def _stream_request(url: str, body: str, cookie: str, timeout_s: int) -> dict:
     return out
 
 
-def _probe_stream(frontend_url: str, cookie: str, question: str, timeout_s: int,
+def _probe_stream(frontend_url: str, cookie: str, question: str, video_id: str,
+                  fixture: dict, timeout_s: int,
                   secrets: tuple[str, ...]) -> tuple[bool, str]:
     """Ask the streaming route the journey's question from the harness side first.
 
@@ -577,15 +672,22 @@ def _probe_stream(frontend_url: str, cookie: str, question: str, timeout_s: int,
     in the network log, no assistant text and no inline error (run 33960088633); the
     page cannot say whether the route refused, the stream broke before its first token,
     or the model answered without a citation. This creates a conversation through the
-    frontend origin with the login cookie, posts the locked question, reads the SSE body
-    as it arrives, prints `E2E_STREAM_PROBE status=<n> content_type=<ct> first_byte_ms=<n>
-    events=<n> tokens=<n> sources=<bool> done=<bool> error=<payload or ->` and the first
-    300 scrubbed characters of the body, then deletes the conversation so the browser
-    journey still starts on an empty landing surface.
+    frontend origin with the login cookie, posts the journey's question, reads the SSE
+    body as it arrives, prints `E2E_STREAM_PROBE status=<n> content_type=<ct>
+    first_byte_ms=<n> events=<n> tokens=<n> sources=<bool> reason=<why or ->
+    sources_count=<n> fixture_in_sources=<bool> tool_calls=<n> done=<bool>
+    error=<payload or ->` and the first 300 scrubbed characters of the body, then deletes
+    the conversation so the browser journey still starts on an empty landing surface.
 
-    The probe passes only when the route answered 200 and streamed at least one token
-    without an error payload; an explicit `{"error": ...}` frame fails the probe with that
-    error as the named cause, and a stream that closed with no token names the transport.
+    The probe passes only when the route answered 200, streamed at least one token
+    without an error payload, and closed with a `sources` event whose non-empty array
+    names the locked fixture first: the citation the browser journey will look for. A
+    stream that answered in one round with no retrieval tool call carries no sources
+    event (run 34020965800, `tool_calls_made=0`), and the browser could only report
+    that no citation appeared; here it is named (`reason=no-sources-event`, with the
+    count of tool calls the stream announced) and the browser never opens (D-062). An
+    explicit `{"error": ...}` frame fails the probe with that error as the named cause,
+    and a stream that closed with no token names the transport.
 
     This spends one of the synthetic account's 25 daily messages (MISSION §10 invariant
     #1); the validation database is disposable, so the counter starts at zero every run.
@@ -600,7 +702,9 @@ def _probe_stream(frontend_url: str, cookie: str, question: str, timeout_s: int,
     if status not in (200, 201) or not conversation_id:
         reason = _scrub(" ".join(text.split())[:300], secrets)
         print(f"E2E_STREAM_PROBE status={status} content_type=- first_byte_ms=-1 events=0 "
-              f"tokens=0 sources=false done=false error=conversation not created: {reason}",
+              f"tokens=0 sources=false reason=conversation-not-created sources_count=0 "
+              f"fixture_in_sources=false tool_calls=0 done=false "
+              f"error=conversation not created: {reason}",
               flush=True)
         return False, f"POST /api/conversations answered {status}: {reason}"
 
@@ -609,15 +713,52 @@ def _probe_stream(frontend_url: str, cookie: str, question: str, timeout_s: int,
         json.dumps({"content": question}), cookie, timeout_s,
     )
     parsed = _parse_sse(raw["body"])
+    cited_fixture = parsed["sources"] and _sources_name_fixture(
+        parsed["sources_list"], video_id, fixture)
     cause = parsed["error"] if parsed["error"] != "-" else (raw["transport"] or "-")
     if cause != "-":
         cause = _scrub(" ".join(cause.split()), secrets)[:300]
     excerpt = _scrub(" ".join(raw["body"].split())[:300], secrets)
+
+    ok = raw["status"] == 200 and parsed["tokens"] >= 1 and parsed["error"] == "-"
+    # An answer without a citation is what the browser journey cannot diagnose: the
+    # model replied in one round and never searched (run 34020965800, D-062).
+    ok = ok and cited_fixture
+    first_source = parsed["sources_list"][0] if parsed["sources_list"] else {}
+    first_named = (f"video_url={first_source.get('video_url', '-')!r} "
+                   f"video_id={first_source.get('video_id', '-')!r}"
+                   if isinstance(first_source, dict) else f"first={first_source!r}")
+    if parsed["error"] != "-":
+        reason, detail = "error-payload", f"the stream carried an error payload: {cause}"
+    elif raw["status"] != 200:
+        reason, detail = f"status-{raw['status']}", f"status={raw['status']} body={excerpt}"
+    elif parsed["tokens"] < 1:
+        reason = "no-token"
+        detail = (f"no token arrived: events={parsed['events']} done={parsed['done']} "
+                  f"first_byte_ms={raw['first_byte_ms']} transport={cause} body={excerpt}")
+    elif not parsed["sources_event"]:
+        reason = "no-sources-event"
+        detail = (f"no sources event arrived: the model answered without a retrieval tool "
+                  f"call, so there is no citation for the browser to find; "
+                  f"tokens={parsed['tokens']} tool_calls={parsed['tool_calls']} "
+                  f"done={parsed['done']} body={excerpt}")
+    elif not parsed["sources"]:
+        reason = "empty-sources"
+        detail = (f"the sources event carried no citation: tool_calls={parsed['tool_calls']} "
+                  f"body={excerpt}")
+    elif not cited_fixture:
+        reason = "sources-name-another-video"
+        detail = (f"the first source is not the locked fixture {video_id} "
+                  f"(catalog id {fixture.get('id', '-')!r}): {first_named}")
+    else:
+        reason, detail = "-", "-"
     print(
         f"E2E_STREAM_PROBE status={raw['status']} content_type={raw['content_type']} "
         f"first_byte_ms={raw['first_byte_ms']} events={parsed['events']} "
         f"tokens={parsed['tokens']} sources={str(parsed['sources']).lower()} "
-        f"done={str(parsed['done']).lower()} error={cause}",
+        f"reason={reason} sources_count={parsed['sources_count']} "
+        f"fixture_in_sources={str(bool(cited_fixture)).lower()} "
+        f"tool_calls={parsed['tool_calls']} done={str(parsed['done']).lower()} error={cause}",
         flush=True,
     )
     print(f"E2E_STREAM_BODY {excerpt}", flush=True)
@@ -627,23 +768,16 @@ def _probe_stream(frontend_url: str, cookie: str, question: str, timeout_s: int,
     print(f"E2E_STREAM_CLEANUP conversation={conversation_id} status={delete_status}",
           flush=True)
 
-    ok = raw["status"] == 200 and parsed["tokens"] >= 1 and parsed["error"] == "-"
-    if parsed["error"] != "-":
-        detail = f"the stream carried an error payload: {cause}"
-    elif raw["status"] != 200:
-        detail = f"status={raw['status']} body={excerpt}"
-    else:
-        detail = (f"no token arrived: events={parsed['events']} done={parsed['done']} "
-                  f"first_byte_ms={raw['first_byte_ms']} transport={cause} body={excerpt}")
     if delete_status != 204:
         ok = False
-        detail += f"; DELETE of the probe conversation answered {delete_status}"
+        detail = (f"{'' if detail == '-' else detail + '; '}DELETE of the probe conversation "
+                  f"answered {delete_status}")
     return ok, detail
 
 
 def _static_text(snapshot: str) -> list[str]:
-    """The text nodes of a full (non-interactive) snapshot."""
-    return [m.group("text") for line in snapshot.splitlines()
+    """The text nodes of a full (non-interactive) snapshot, unescaped."""
+    return [_unescape(m.group("text")) for line in snapshot.splitlines()
             if (m := STATIC_TEXT.match(line))]
 
 
@@ -855,9 +989,19 @@ def run_e2e(app, frontend_url: str | None = None) -> int | None:
 
         browser_cfg = CONFIG.get("browser", {})
         video_id = str(browser_cfg.get("fixture_video_id", "")).strip()
-        question = str(browser_cfg.get("question", "")).strip()
+        template = browser_cfg.get("question_template")
+        legacy_question = str(browser_cfg.get("question", "")).strip()
         response_timeout = int(browser_cfg.get("response_timeout_s", 90))
-        require("locked browser fixture configured", bool(video_id and question))
+        # The question is rendered from the template with the fixture's title once the
+        # catalog has been asked for it; a template that never names the title, or a
+        # configuration with neither key, cannot ground the journey (D-062).
+        require(
+            "locked browser fixture configured",
+            bool(video_id) and (
+                "{title}" in str(template) if template is not None else bool(legacy_question)),
+            f"fixture_video_id={video_id!r} question_template={template!r} "
+            f"question={legacy_question!r}",
+        )
 
         if frontend_url is None:
             from serve import frontend_port_file
@@ -897,14 +1041,22 @@ def run_e2e(app, frontend_url: str | None = None) -> int | None:
         # marker in the app log when this run provisioned it, and the row in the catalog.
         bootstrapped, bootstrap_detail = _check_bootstrap(app, video_id, secrets)
         require("bootstrap ingested the locked fixture", bootstrapped, bootstrap_detail)
-        videos_ok, videos_detail = _probe_videos(app, cookie, video_id)
+        videos_ok, videos_detail, fixture = _probe_videos(app, cookie, video_id)
         require("catalog lists the locked fixture", videos_ok, videos_detail)
 
+        # The question names the video by the title the catalog just listed, so the
+        # model is asked about something it can search for rather than about "the video
+        # I just added" (D-062). The same rendered question goes to the stream probe and
+        # to the browser.
+        question_ok, question_detail, question = _journey_question(browser_cfg, fixture)
+        require("journey question is grounded in the fixture title", question_ok,
+                question_detail)
+
         # The streaming route is asked the same question from the harness side, so a
-        # stream that breaks before its first token names its cause here instead of as
-        # a browser predicate timeout.
+        # stream that breaks before its first token, or answers without a citation,
+        # names its cause here instead of as a browser predicate timeout.
         stream_ok, stream_detail = _probe_stream(frontend_url, cookie, question,
-                                                 response_timeout, secrets)
+                                                 video_id, fixture, response_timeout, secrets)
         require("streaming route answers the locked question", stream_ok, stream_detail)
 
         session = f"df-{os.getpid()}-{app.port}"

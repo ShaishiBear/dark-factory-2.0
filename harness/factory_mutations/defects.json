@@ -1593,6 +1593,27 @@
       "find": "    for model in overrides.values():\n        ordered.append(model)\n",
       "replace": "    for model in ():\n        ordered.append(model)\n",
       "why": "The preflight would prove the worker and architecture models and never the model a role was routed to, so a build could reach test_author before discovering that its route was closed, which is exactly the mid-build failure the route probe exists to move to preflight; caught by tests/factory/test_factory_model_overrides.py (the list carries every override value, once, after the two; the workflow's loop reads the list) (D-061)."
+    },
+    {
+      "id": "e2e-stream-probe-passes-without-sources",
+      "file": "harness/e2e.py",
+      "find": "    ok = ok and cited_fixture\n",
+      "replace": "    ok = ok and True\n",
+      "why": "A stream that answered 200 with tokens and [DONE] and no sources event would pass the harness-side probe, and the browser would then fail on a citation predicate timeout with the missing retrieval tool call unnamed, which is exactly run 34020965800 (stream_chat round=1 finish_reason=stop tool_calls_made=0); caught by tests/factory/test_e2e_stream_evidence.py (the probe requires a sources event naming the fixture; the journey refuses before the browser when the stream had no citation) (D-062)."
+    },
+    {
+      "id": "e2e-fixture-title-missing-non-fatal",
+      "file": "harness/e2e.py",
+      "find": "        require(\"journey question is grounded in the fixture title\", question_ok,\n                question_detail)\n",
+      "replace": "        require(\"journey question is grounded in the fixture title\", True,\n                question_detail)\n",
+      "why": "A catalog row without a title would render the question as `the video titled \"\"`, the ungrounded question this decision removes, and the run would spend a message and open a browser on it with E2E_FIXTURE_TITLE_MISSING printed and ignored; caught by tests/factory/test_e2e_stream_evidence.py (the journey refuses before the stream probe when the title is missing) (D-062)."
+    },
+    {
+      "id": "e2e-question-template-ignored",
+      "file": "harness/e2e.py",
+      "find": "    question = str(template).replace(\"{title}\", title).replace(\"{description}\", description)\n",
+      "replace": "    question = str(template)\n",
+      "why": "The probe and the browser would ask the template's literal text, `the video titled \"{title}\"`, so the question would name no video the model can search for and whether a citation appeared would be luck again; caught by tests/factory/test_e2e_stream_evidence.py (the template is rendered with the fixture title and printed; the browser asks the same rendered question as the probe) (D-062)."
     }
   ]
 }

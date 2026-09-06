@@ -33,7 +33,16 @@
     "install_check": "agent-browser --help",
     "install_hint": "npm i -g agent-browser && agent-browser install",
     "fixture_video_id": "pjF-0dliYhg",
-    "question": "Based on the video I just added, summarize its main topic and cite the source.",
+    "_question_template": [
+      "Rendered by harness/e2e.py with the fixture's `{title}` (and `{description}`) exactly",
+      "as GET /api/videos lists them, after the catalog probe and before the stream probe",
+      "and the browser; the rendered question is printed as E2E_QUESTION. The earlier",
+      "literal question (`Based on the video I just added, ...`) invited the model to answer",
+      "that it cannot see uploads and never search, so whether a citation appeared was luck",
+      "(run 34020965800 made no tool call, D-062). A `question` key without this one is",
+      "still honoured as a literal, for a configuration from before D-062."
+    ],
+    "question_template": "Summarize the main topic of the video titled \"{title}\" and cite the source.",
     "response_timeout_s": 90,
     "_credentials": [
       "DARK_FACTORY_E2E_EMAIL and DARK_FACTORY_E2E_PASSWORD live only in the external",
