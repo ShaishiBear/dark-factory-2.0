@@ -264,11 +264,11 @@ class FakeTools:
             for path in paths:
                 # Byte-preserving apart from the whitespace it removes: line endings are
                 # left exactly as they were, so "reformatted" means here what it means in
-                # the kernel - the file's bytes changed.
-                raw = path.read_text(encoding="utf-8", newline="")
-                path.write_text(
-                    re.sub(r"[ \t]+(\r?\n)", r"\1", raw), encoding="utf-8", newline="",
-                )
+                # the kernel - the file's bytes changed. Bytes rather than
+                # `read_text(newline=...)`, which does not exist before Python 3.13.
+                raw = path.read_bytes().decode("utf-8")
+                fixed = re.sub(r"[ \t]+(\r?\n)", r"\1", raw)
+                path.write_bytes(fixed.encode("utf-8"))
             return subprocess.CompletedProcess(argv, 0, "1 file reformatted", "")
         texts = {path: path.read_text(encoding="utf-8") for path in paths}
         lint = [path for path, text in texts.items() if "BUG" in text]
