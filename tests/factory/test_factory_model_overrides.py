@@ -88,11 +88,16 @@ def _load(mutate=None) -> ProviderConfig:
 
 
 class OverrideConfigTests(unittest.TestCase):
-    def test_the_checked_in_policy_carries_an_empty_table(self):
+    def test_the_checked_in_policy_table_validates_and_loads_as_written(self):
         raw = json.loads(KERNEL_JSON.read_text(encoding="utf-8"))
-        self.assertEqual(raw["provider"]["model_overrides"], {})
+        table = raw["provider"]["model_overrides"]
+        self.assertEqual(validate_model_overrides(table), table)
         self.assertIn("scripts/factory_models.py --list", raw["provider"]["_model_overrides"])
-        self.assertEqual(dict(_load().model_overrides), {})
+        self.assertEqual(dict(_load().model_overrides), table)
+        # The owner's 2026-09-06 decision: the three repository-mutation roles run on one model.
+        self.assertEqual(
+            {table[r] for r in ("test_author", "implement", "repair")}, {"minimax/minimax-m3"}
+        )
 
     def test_absent_means_no_override(self):
         self.assertEqual(dict(_load(lambda p: p.pop("model_overrides")).model_overrides), {})
@@ -303,9 +308,11 @@ class StageRecordTests(unittest.TestCase):
 class ScriptTests(unittest.TestCase):
     def test_the_checked_in_policy_lists_the_worker_and_architecture_models(self):
         raw = json.loads(KERNEL_JSON.read_text(encoding="utf-8"))["provider"]
-        self.assertEqual(
-            models_script.configured_models(KERNEL_JSON), [raw["model"], raw["architecture_model"]]
-        )
+        expected = [raw["model"], raw["architecture_model"]]
+        for slug in raw.get("model_overrides", {}).values():
+            if slug not in expected:
+                expected.append(slug)
+        self.assertEqual(models_script.configured_models(KERNEL_JSON), expected)
 
     def test_every_override_value_is_listed_once_after_the_two(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -336,9 +343,14 @@ class ScriptTests(unittest.TestCase):
 
     def test_no_architecture_model_lists_the_worker_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _policy(tmp, lambda p: p.update(model="w", architecture_model=""))
+            path = _policy(
+                tmp, lambda p: p.update(model="w", architecture_model="", model_overrides={})
+            )
             self.assertEqual(models_script.configured_models(path), ["w"])
-            path = _policy(tmp, lambda p: (p.update(model="w"), p.pop("architecture_model")))
+            path = _policy(
+                tmp,
+                lambda p: (p.update(model="w", model_overrides={}), p.pop("architecture_model")),
+            )
             self.assertEqual(models_script.configured_models(path), ["w"])
 
     def test_a_table_the_kernel_would_refuse_refuses_the_list(self):
