@@ -1642,6 +1642,62 @@
       "find": "    if stray: die(",
       "replace": "    if False and stray: die(",
       "why": "A test commit carrying a file no checkpoint declares would be proved RED and its undeclared change would ride into the implementation as part of the immutable test commit; caught by tests/factory/test_factory_guard_files_untouched.py (a stray file in the test commit is refused and named) (D-064)."
+    },
+    {
+      "id": "cap-treated-as-failure-again",
+      "file": "factory_kernel/providers.py",
+      "find": "            if envelope.subtype == CAP_SUBTYPE and request.role in REPO_MUTATION_ROLES:\n",
+      "replace": "            if False:\n",
+      "why": "The old behaviour: the CLI exits 1 at --max-turns and the provider refused the stage on that exit code, so run 34033360798 lost a written and edited test file without the static gate, the commit authority or RED ever seeing it; caught by tests/factory/test_factory_cap_ends_the_loop.py (through the fake CLI a mutation role stopped at its cap with rc=1 returns marked cap_reached) (D-065)."
+    },
+    {
+      "id": "cap-unwrap-refuses-a-mutation-role",
+      "file": "factory_kernel/providers.py",
+      "find": "    if subtype == CAP_SUBTYPE and role in REPO_MUTATION_ROLES:\n",
+      "replace": "    if False:\n",
+      "why": "The unwrap is the second place a cap envelope is classified (a CLI that exits 0 at its cap reaches it directly); refusing it there fails the build exactly as before D-065; caught by tests/factory/test_factory_cap_ends_the_loop.py (unwrap returns a mutation role's error_max_turns envelope marked cap_reached; through the fake CLI with rc=0) (D-065)."
+    },
+    {
+      "id": "cap-with-clean-worktree-proceeds",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        if not files:\n            raise NeedsHuman(\n                f\"{role} reached its turn cap",
+      "replace": "        if False:\n            raise NeedsHuman(\n                f\"{role} reached its turn cap",
+      "why": "A capped worker that wrote nothing would go on to the static gate and the commit authority, which refuses a clean checkout with a message about the spec or the envelope rather than about the cap, so the human is told the wrong thing; caught by tests/factory/test_factory_cap_ends_the_loop.py (a clean checkout at the cap is refused as no_draft_at_cap before any gate, for test_author, implement and repair) (D-065)."
+    },
+    {
+      "id": "no-spec-at-cap-accepted",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        problem = self._spec_problem(cwd, paths.artifacts / \"test-spec.json\")\n        if problem is not None:\n",
+      "replace": "        problem = self._spec_problem(cwd, paths.artifacts / \"test-spec.json\")\n        if False:\n",
+      "why": "Run 34033360798's test author had written ChatArea.test.tsx and no test-spec.json; without this check the capped draft goes to the static gate (a wasted hand-back process) and then dies in the commit authority's spec loader without naming the files that were written; caught by tests/factory/test_factory_cap_ends_the_loop.py (a dirty checkout without a spec, with an unparsable spec, or with a spec declaring a file not on disk is refused as no_spec_at_cap naming the written files, before the static gate) (D-065)."
+    },
+    {
+      "id": "glob-dropped-from-mutation-roles",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "READ_TOOLS = (\"Read\", \"Glob\", \"Grep\")\n",
+      "replace": "READ_TOOLS = (\"Read\", \"Grep\")\n",
+      "why": "A mutation worker without Glob navigates by guessing file names and burns turns on a tool it does not have, which is half of what run 34033360798 spent its 31 turns on; caught by tests/factory/test_factory_cap_ends_the_loop.py (every tool-bearing role has Read, Glob and Grep; a mutation role asks the CLI for all five tools) (D-065)."
+    },
+    {
+      "id": "bare-mode-collapses-the-tool-surface",
+      "file": "factory_kernel/providers.py",
+      "find": "ISOLATION_FLAGS: tuple[str, ...] = (\"--safe-mode\", \"--setting-sources\", \"\")\n",
+      "replace": "ISOLATION_FLAGS: tuple[str, ...] = (\"--bare\",)\n",
+      "why": "--bare sets CLAUDE_CODE_SIMPLE=1, under which the pinned CLI registers only Read and Edit whatever --tools names (init tools=['Edit','Read'] on 2.1.245), so the policy's Glob, Grep and Write never reach the model however the table reads; caught by tests/factory/test_factory_cap_ends_the_loop.py (the provider launches with --safe-mode --setting-sources '' and never --bare) (D-065)."
+    },
+    {
+      "id": "cap-reached-not-recorded",
+      "file": "factory_kernel/runtime.py",
+      "find": "            \"cap_reached\": bool(getattr(result, \"cap_reached\", False)),\n",
+      "replace": "            \"cap_reached\": False,\n",
+      "why": "A capped stage's record, timing row and FACTORY_STAGE line would read as an ordinary returned stage, and the needs-human comment (which reads the records) would not say the cap was reached when a gate refuses the draft; caught by tests/factory/test_factory_cap_ends_the_loop.py (the record and the row say cap_reached and the line prints cap_reached=true; a capped test_author through the gates leaves the flag in its record) (D-065)."
+    },
+    {
+      "id": "cap-comment-silent",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if not capped:\n            return \"\"\n",
+      "replace": "        if True:\n            return \"\"\n",
+      "why": "A gate refusing a capped draft would post its verdict with no word that the worker's loop had been ended by the cap, which is the one fact the human needs to read the verdict correctly; caught by tests/factory/test_factory_cap_ends_the_loop.py (the evidence names the capped stage, and build_issue's comment carries it when the commit authority refuses) (D-065)."
     }
   ]
 }

@@ -1,6 +1,7 @@
 """Least-privilege worker boundary layered over the core orchestration runtime."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Mapping
 import uuid
@@ -9,7 +10,7 @@ from .agents import AgentRequest
 from .git_authority import commit_acceptance_tests, commit_planned_changes, dirty_paths
 from .methods import method_block
 from .prompt_render import literal_artifacts_dir_entries, render_prompt
-from .providers import prompt_text
+from .providers import CAP_SUBTYPE, prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
 from .static_gate import check_files
 from .worker_policy import (
@@ -23,6 +24,18 @@ from .worktree import create_detached, remove
 # repairable exactly once, by that worker, before the kernel commits the file; after RED the
 # acceptance tests are immutable and no later stage can touch them (D-043).
 STATIC_RETRIES = 1
+
+# What a repository-mutation worker whose turn cap ended its loop must have left behind for
+# the gates to judge, and the refusal when it did not. A cap is the loop ending, not a verdict
+# (D-020): the `test_author` of run 34033360798 had written and edited its test file over 31
+# turns and the build died on the CLI's exit code without the static gate, the commit
+# authority or RED ever seeing the file. The draft is judged by the same gates a returned
+# worker gets; a checkout with no change at all has nothing to judge (`no_draft_at_cap`), and
+# for `test_author` a dirty checkout without a usable `test-spec.json` (absent, malformed, or
+# declaring a file that is not on disk) has nothing the gates can read (`no_spec_at_cap`): the
+# same run had written `ChatArea.test.tsx` and no spec (D-065).
+NO_DRAFT_AT_CAP = "no_draft_at_cap"
+NO_SPEC_AT_CAP = "no_spec_at_cap"
 
 
 class WorkerControlledRuntime(BaseKernelRuntime):
@@ -180,8 +193,9 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         static_retry: int = 0,
     ) -> None:
         self.check_stop()
-        # Workers load no plugins or skills (--bare). Whatever engineering discipline the role is
-        # expected to follow arrives here as pinned, protected text from .factory/methods/.
+        # Workers load no plugins, skills or settings (`providers.ISOLATION_FLAGS`). Whatever
+        # engineering discipline the role is expected to follow arrives here as pinned,
+        # protected text from .factory/methods/.
         # Prompts name outputs as `$ARTIFACTS_DIR/<file>` by contract. Nothing on the worker's
         # side expands that (no shell), so the kernel renders every placeholder to the absolute
         # run path here and refuses any placeholder it cannot render (D-026). Only the text the
@@ -209,7 +223,7 @@ class WorkerControlledRuntime(BaseKernelRuntime):
             prompt = prompt.rstrip("\n") + "\n\n" + context.strip() + "\n"
         # The stage is timed and recorded by the base runtime's single funnel, whether the
         # worker returns or raises: the record is evidence, never a verdict (D-041, D-050).
-        self._agent_stage(
+        result = self._agent_stage(
             paths,
             AgentRequest(
                 role=role,
@@ -236,6 +250,12 @@ class WorkerControlledRuntime(BaseKernelRuntime):
             # the kernel restores the worktree first; the provider itself never touches Git.
             before_retry=lambda attempt: self._restore_worktree_before_retry(role, cwd, attempt),
         )
+
+        # A turn cap ended a mutation worker's loop: the provider returned rather than raised,
+        # and the draft on disk goes through exactly the gates below, once the kernel has
+        # checked there is a draft to judge (D-065).
+        if getattr(result, "cap_reached", False) and may_change_repo(role):
+            self._require_draft_at_cap(role, cwd, paths, result)
 
         if role == "test_author":
             # The files are still uncommitted, so the author that wrote them is the one that can
@@ -278,6 +298,63 @@ class WorkerControlledRuntime(BaseKernelRuntime):
             raise RuntimeError(f"unhandled repository-mutation role: {role}")
         self._refuse_literal_artifacts_dir(cwd)
         self._assert_clean(cwd)
+
+    def _require_draft_at_cap(self, role: str, cwd: Path, paths: RunPaths, result: object) -> None:
+        """Refuse by name a capped mutation stage that left nothing for the gates.
+
+        `no_draft_at_cap`: the checkout holds no change at all, so there is no draft; a
+        returned worker in the same state is refused by the commit authority one step later
+        with a message about the envelope, which would misname a cap. `no_spec_at_cap`
+        (`test_author` only): files were written but `$ARTIFACTS_DIR/test-spec.json` is
+        absent, not a JSON object with a `checkpoints` list, or declares a file that is not on
+        disk; the refusal names the files that were written, and the same evidence reaches
+        the needs-human comment. Anything else is a draft, judged by the static gate, the
+        commit authority and RED/GREEN exactly as a returned worker's is (D-065).
+        """
+        turns = getattr(result, "num_turns", None)
+        files = dirty_paths(cwd)
+        if not files:
+            raise NeedsHuman(
+                f"{role} reached its turn cap ({turns} turns, `{CAP_SUBTYPE}`) and left no "
+                f"change in the checkout (`{NO_DRAFT_AT_CAP}`): there is no draft for the "
+                "gates to judge"
+            )
+        if role != "test_author":
+            return
+        problem = self._spec_problem(cwd, paths.artifacts / "test-spec.json")
+        if problem is not None:
+            raise NeedsHuman(
+                f"test_author reached its turn cap ({turns} turns, `{CAP_SUBTYPE}`) with files "
+                f"written but no usable test-spec.json (`{NO_SPEC_AT_CAP}`): {problem}; "
+                f"files written: {files}"
+            )
+
+    @staticmethod
+    def _spec_problem(cwd: Path, spec_path: Path) -> str | None:
+        """Why the gates could not read this spec, or `None`. Shape beyond this (checkpoint
+        fields, test-shaped paths, the red/guard rules) is the commit authority's to judge."""
+        if not spec_path.is_file():
+            return f"{spec_path.name} was not written"
+        try:
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return f"{spec_path.name} is not valid JSON ({exc})"
+        checkpoints = spec.get("checkpoints") if isinstance(spec, Mapping) else None
+        if not isinstance(checkpoints, list) or not checkpoints:
+            return f"{spec_path.name} has no checkpoints list"
+        declared = [
+            value
+            for checkpoint in checkpoints
+            if isinstance(checkpoint, Mapping) and isinstance(checkpoint.get("files"), list)
+            for value in checkpoint["files"]
+            if isinstance(value, str)
+        ]
+        if not declared:
+            return f"{spec_path.name} declares no files"
+        missing = sorted({path for path in declared if not (cwd / path).is_file()})
+        if missing:
+            return f"declared files not on disk: {missing}"
+        return None
 
     def _static_gate_or_retry(
         self,

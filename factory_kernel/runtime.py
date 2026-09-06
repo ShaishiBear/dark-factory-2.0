@@ -108,14 +108,18 @@ def record_stage_timing(
 
 def stage_line(row: Mapping[str, Any]) -> str:
     """`FACTORY_STAGE kind=... name=... seconds=... [turns=...] [cost_usd=...] outcome=...
-    [events=...] [timed_out=true] [hang=true] [over_budget=true] [draft_deadline_missed=true
-    reads=...] [thinking=...] [effort=...] [model=...]`: the row as one log line, with the
+    [events=...] [timed_out=true] [hang=true] [over_budget=true] [cap_reached=true]
+    [draft_deadline_missed=true reads=...] [thinking=...] [effort=...] [model=...]`: the row
+    as one log line, with the
     fields that do not apply left out. `events` is how many stream events the provider read;
     a timed-out or hung stage still says what it had shown by then (D-054). `thinking` is the
     thinking those events showed, in the CLI's estimate, and `effort` the level the CLI was
     asked for (D-055).
     `draft_deadline_missed` marks a mutation worker killed for writing nothing by its draft
-    deadline, with the `Read` calls it made by then (D-057). `stage_run=N` (after the name,
+    deadline, with the `Read` calls it made by then (D-057). `cap_reached` marks a mutation
+    worker whose loop the turn cap ended with a draft on disk: `outcome=ok` there says the
+    worker returned, and the gate rows that follow say whether the draft was accepted
+    (D-065). `stage_run=N` (after the name,
     only when N > 1) marks the Nth time the kernel ran this stage in the run, and `attempts=N`
     (after the seconds, only when N > 1) how many CLI processes that stage took; the 2687 s
     `test_author` of run 34008561672 was two processes and its row said neither (D-058).
@@ -141,6 +145,8 @@ def stage_line(row: Mapping[str, Any]) -> str:
         fields.append("hang=true")
     if row.get("over_budget"):
         fields.append("over_budget=true")
+    if row.get("cap_reached"):
+        fields.append("cap_reached=true")
     if row.get("draft_deadline_missed"):
         fields.append("draft_deadline_missed=true")
     if row.get("reads") is not None:
@@ -744,8 +750,44 @@ class KernelRuntime:
     @classmethod
     def _failure_evidence(cls, paths: RunPaths, exc: BaseException) -> str:
         """Everything the needs-human comment quotes beside the reason: a refused proof
-        gate's record (D-056) and a draft-deadline refusal's reads (D-057)."""
-        return cls._proof_failure_evidence(paths, exc) + cls._draft_deadline_evidence(exc)
+        gate's record (D-056), a draft-deadline refusal's reads (D-057) and the mutation
+        stages of this run that returned at their turn cap (D-065)."""
+        return (
+            cls._proof_failure_evidence(paths, exc)
+            + cls._draft_deadline_evidence(exc)
+            + cls._cap_reached_evidence(paths)
+        )
+
+    @staticmethod
+    def _cap_reached_evidence(paths: RunPaths) -> str:
+        """The mutation stages of this run whose loop the turn cap ended, for the comment.
+
+        A gate that refuses after such a stage is refusing the draft the worker managed
+        within its turns, so the comment says the cap was reached rather than leaving the
+        reader to find `cap_reached` in an uploaded record. Read from the stage records
+        (`agent-<role>[.N].json`, D-050), which is where the provider's flag lands; a run
+        with no capped stage adds nothing (D-065).
+        """
+        capped: list[str] = []
+        for record in sorted(paths.transcripts.glob("agent-*.json")):
+            try:
+                data = json.loads(record.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, Mapping) or not data.get("cap_reached"):
+                continue
+            capped.append(
+                f"`{scrub(str(data.get('role')))}` ({record.stem}: {data.get('num_turns')} "
+                "turns, `error_max_turns`)"
+            )
+        if not capped:
+            return ""
+        return (
+            "\n\nTurn cap reached (`cap_reached=true`): " + "; ".join(capped) + ". The cap "
+            "ended the worker's loop, not the build: the kernel ran its gates on the draft the "
+            "worker left in the checkout, and the refusal above is a gate's verdict on that "
+            "draft, not the cap's."
+        )[:PROOF_FAILURE_COMMENT_CHARS]
 
     @staticmethod
     def _draft_deadline_evidence(exc: BaseException) -> str:
@@ -2318,6 +2360,9 @@ class KernelRuntime:
             "hang": hangs > 0,
             # How many stream events the provider read across those processes (D-054).
             "events_seen": getattr(result, "events_seen", None),
+            # The turn cap ended a mutation worker's loop and the provider returned its
+            # draft for the gates; `outcome` says only that the worker returned (D-065).
+            "cap_reached": bool(getattr(result, "cap_reached", False)),
         }
         (paths.transcripts / f"{record}.json").write_text(
             json.dumps(telemetry, sort_keys=True, indent=2, default=str) + "\n", encoding="utf-8"
@@ -2330,6 +2375,7 @@ class KernelRuntime:
             attempts=telemetry["attempts"], hang=telemetry["hang"] or None,
             record=record, stage_run=stage_run,
             over_budget=telemetry["over_budget"] or None,
+            cap_reached=telemetry["cap_reached"] or None,
             thinking_tokens=telemetry["thinking_tokens"], effort=telemetry["effort"],
         )
 

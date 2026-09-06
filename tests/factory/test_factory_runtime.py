@@ -51,7 +51,8 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result.content, "done")
         argv = run.call_args.args[0]
         self.assertEqual(argv[0], "claude")
-        self.assertIn("--bare", argv)
+        self.assertIn("--safe-mode", argv)
+        self.assertNotIn("--bare", argv)
         self.assertIn("-p", argv)
         self.assertEqual(argv[argv.index("-p") + 1], "do the task")
         self.assertIn("--model", argv)

@@ -1,8 +1,9 @@
 {
   "_what_this_is": [
     "Engineering method text the kernel injects into isolated model workers, per role.",
-    "Workers run the Claude Code CLI with --bare, an empty strict MCP configuration and slash",
-    "commands disabled. They load no plugins, hooks, skills or project settings. Any discipline a",
+    "Workers run the Claude Code CLI with --safe-mode and no settings file, an empty strict MCP",
+    "configuration and slash commands disabled (--bare until D-065). They load no plugins,",
+    "hooks, skills or project settings. Any discipline a",
     "worker follows must therefore arrive as plain text in its prompt. This manifest is the only",
     "source of that text. Each entry names where the idea came from and how it was adapted.",
     "source_sha256 is null where the upstream text was not fetched at authoring time: what is",

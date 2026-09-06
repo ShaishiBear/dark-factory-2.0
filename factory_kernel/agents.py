@@ -148,6 +148,12 @@ class AgentResult:
     # for a provider that has neither (D-055).
     thinking_tokens: int | None = None
     effort: str | None = None
+    # The CLI ended the session at its turn cap (`error_max_turns`) and the provider returned
+    # instead of raising, because the role is a repository-mutation one whose draft the
+    # kernel's deterministic gates judge; every other role's cap is still a failed stage. The
+    # `test_author` of run 34033360798 had its test file on disk when its cap ended the build
+    # with no gate ever run on it (D-065).
+    cap_reached: bool = False
 
 
 class AgentProvider(Protocol):

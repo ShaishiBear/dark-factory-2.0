@@ -1,6 +1,6 @@
 # Engineering methods for factory workers
 
-Autonomous factory workers do **not** load the `mattpocock-skills` plugin, or any plugin. The kernel launches every model worker with `--bare`, an empty strict MCP configuration and slash commands disabled (`factory_kernel/providers.py`), so no project settings, hooks, plugins or skills reach it. That isolation is deliberate and is part of the trust root.
+Autonomous factory workers do **not** load the `mattpocock-skills` plugin, or any plugin. The kernel launches every model worker with `--safe-mode` and no settings file (`--setting-sources ""`; it used `--bare` until D-065, whose simple mode dropped every tool but Read and Edit), an empty strict MCP configuration and slash commands disabled (`factory_kernel/providers.py`), so no project settings, hooks, plugins or skills reach it. That isolation is deliberate and is part of the trust root.
 
 The engineering disciplines those skills describe reach workers as **plain, pinned instruction text** instead:
 

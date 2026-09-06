@@ -286,7 +286,11 @@ jobs:
           # this runner is proved here, on a throwaway tree, with the exact argv the kernel
           # renders for a test_author (scripts/factory_read_scope_probe.py). The line is data;
           # a read the rules should have denied that returned the file is a refusal, because a
-          # worker that can read its judge is the defect the scope removes (D-057).
+          # worker that can read its judge is the defect the scope removes (D-057). The same
+          # process also greps the tree and globs for the probe files, and reports what the
+          # CLI registered (`tools=`, `tools_missing=`): the test_author of run 34033360798
+          # was granted Glob and Grep and had neither, because --bare put the CLI in simple
+          # mode (D-065). A leak through Grep is the same refusal as one through Read.
           worker_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
           set +e
           timeout 400 python3 scripts/factory_read_scope_probe.py --model "$worker_model"
@@ -296,7 +300,7 @@ jobs:
             echo "FACTORY_PREFLIGHT_REFUSED the pinned CLI let a scoped worker read outside its read scope"
             exit 1
           fi
-          test "$rc" = "0" || echo "FACTORY_PREFLIGHT_READ_SCOPE_PROBE model=$worker_model denied_outside_scope=false attempted_outside_scope=false read_inside_scope=false read_artifacts=false events=0 error=probe-did-not-run"
+          test "$rc" = "0" || echo "FACTORY_PREFLIGHT_READ_SCOPE_PROBE model=$worker_model denied_outside_scope=false attempted_outside_scope=false read_inside_scope=false read_artifacts=false grep_denied_outside_scope=false glob_outside_scope=false tools=none tools_missing=none events=0 error=probe-did-not-run"
 
       - name: Create disposable validation environment
         shell: bash
