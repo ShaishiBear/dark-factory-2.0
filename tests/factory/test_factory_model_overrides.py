@@ -88,11 +88,16 @@ def _load(mutate=None) -> ProviderConfig:
 
 
 class OverrideConfigTests(unittest.TestCase):
-    def test_the_checked_in_policy_carries_an_empty_table(self):
+    def test_the_checked_in_policy_table_validates_and_loads_as_written(self):
         raw = json.loads(KERNEL_JSON.read_text(encoding="utf-8"))
-        self.assertEqual(raw["provider"]["model_overrides"], {})
+        table = raw["provider"]["model_overrides"]
+        self.assertEqual(validate_model_overrides(table), table)
         self.assertIn("scripts/factory_models.py --list", raw["provider"]["_model_overrides"])
-        self.assertEqual(dict(_load().model_overrides), {})
+        self.assertEqual(dict(_load().model_overrides), table)
+        # The owner's 2026-09-06 decision: the three repository-mutation roles run on one model.
+        self.assertEqual(
+            {table[r] for r in ("test_author", "implement", "repair")}, {"minimax/minimax-m3"}
+        )
 
     def test_absent_means_no_override(self):
         self.assertEqual(dict(_load(lambda p: p.pop("model_overrides")).model_overrides), {})
