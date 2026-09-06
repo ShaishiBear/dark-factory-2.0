@@ -71,9 +71,9 @@
     {
       "id": "worker-test-envelope-disabled",
       "file": "factory_kernel/git_authority.py",
-      "find": "    if actual != sorted(declared):",
-      "replace": "    if False and actual != sorted(declared):",
-      "why": "The acceptance-test worker could smuggle product changes into its kernel-created RED commit."
+      "find": "    if stray:\n",
+      "replace": "    if False and stray:\n",
+      "why": "The acceptance-test worker could smuggle product changes into its kernel-created RED commit: a stray write outside every checkpoint's files would be staged and committed as an acceptance test; caught by tests/factory/test_factory_guard_files_untouched.py (a stray write is refused and named) (D-064)."
     },
     {
       "id": "worker-design-envelope-disabled",
@@ -1614,6 +1614,34 @@
       "find": "    question = str(template).replace(\"{title}\", title).replace(\"{description}\", description)\n",
       "replace": "    question = str(template)\n",
       "why": "The probe and the browser would ask the template's literal text, `the video titled \"{title}\"`, so the question would name no video the model can search for and whether a citation appeared would be luck again; caught by tests/factory/test_e2e_stream_evidence.py (the template is rendered with the fixture title and printed; the browser asks the same rendered question as the probe) (D-062)."
+    },
+    {
+      "id": "acceptance-guard-file-required-to-change",
+      "file": "factory_kernel/git_authority.py",
+      "find": "    unchanged_red = sorted(red_files - changed)\n",
+      "replace": "    unchanged_red = sorted(set(declared) - changed)\n",
+      "why": "The old rule: every declared file, a guard's included, must be in the dirty checkout, so a guard on the existing kept test the author correctly left untouched is refused, which is exactly run 34027157595 (`test-author changed [ChatArea.test.tsx]; declared acceptance files are [ChatArea.test.tsx, useStreamingResponse.test.ts]`); caught by tests/factory/test_factory_guard_files_untouched.py (a guard on an untouched existing test passes and the commit holds only the red file) (D-064)."
+    },
+    {
+      "id": "acceptance-guard-on-missing-file-accepted",
+      "file": "factory_kernel/git_authority.py",
+      "find": "        if not (cwd / path).is_file():\n",
+      "replace": "        if False:\n",
+      "why": "A guard on a file that does not exist at the head would be committed as if it pinned something, and the RED gate would refuse `unsafe/missing test file` one stage later with the test-author commit already on the branch; caught by tests/factory/test_factory_guard_files_untouched.py (a guard on a missing file is refused before the commit, naming the file) (D-064)."
+    },
+    {
+      "id": "red-gate-guard-file-required-to-change",
+      "file": "scripts/factory_proof.py",
+      "find": "    unchanged_red=sorted(red_files-changed_set)\n",
+      "replace": "    unchanged_red=sorted(set(declared)-changed_set)\n",
+      "why": "The old equality in the RED gate: a test commit that leaves a guard's file untouched, which is what the commit authority now accepts, would be refused as `unchanged` at RED, so the first correct guard would die one stage later than in run 34027157595; caught by tests/factory/test_factory_guard_files_untouched.py (red proves a guard whose file the test commit left alone; a guard on an untouched file passes the rule) (D-064)."
+    },
+    {
+      "id": "red-gate-stray-file-accepted",
+      "file": "scripts/factory_proof.py",
+      "find": "    if stray: die(",
+      "replace": "    if False and stray: die(",
+      "why": "A test commit carrying a file no checkpoint declares would be proved RED and its undeclared change would ride into the implementation as part of the immutable test commit; caught by tests/factory/test_factory_guard_files_untouched.py (a stray file in the test commit is refused and named) (D-064)."
     }
   ]
 }

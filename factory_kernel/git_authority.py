@@ -161,27 +161,67 @@ def _commit(cwd: Path, paths: list[str], subject: str, body: str | None = None) 
     return _run(cwd, ["git", "rev-parse", "HEAD"])
 
 
+CHECKPOINT_KINDS = ("red", "guard")
+
+
 def commit_acceptance_tests(cwd: Path, spec_path: Path) -> str:
+    """Commit exactly what the test author wrote, judged against what the spec declares.
+
+    Three rules, the same three the RED gate applies to the commit this creates
+    (scripts/factory_proof.declared_files): every changed file is declared; every file of a
+    `red` checkpoint is changed (a red test is new or modified); a `guard` checkpoint's file
+    exists at the head and may be untouched, because a guard pins an existing test the author
+    must not rewrite, so a changed guard file is accepted only when a red checkpoint declares
+    it too. Before D-064 the dirty checkout had to equal the declared union, which refused the
+    first correct guard (run 34027157595: the guard named the kept hook test, unchanged).
+    """
     spec = _load_object(spec_path, "acceptance test spec")
     checkpoints = spec.get("checkpoints")
     if not isinstance(checkpoints, list) or not checkpoints:
         raise GitAuthorityError("acceptance test spec has no checkpoints")
-    declared: set[str] = set()
+    red_files: set[str] = set()
+    guard_files: set[str] = set()
     for checkpoint in checkpoints:
         if not isinstance(checkpoint, Mapping):
             raise GitAuthorityError("acceptance checkpoint must be an object")
+        kind = checkpoint.get("kind", "red")
+        if kind not in CHECKPOINT_KINDS:
+            raise GitAuthorityError(
+                f"acceptance checkpoint kind must be one of {list(CHECKPOINT_KINDS)}; got {kind!r}"
+            )
         files = checkpoint.get("files")
         if not isinstance(files, list) or not files:
             raise GitAuthorityError("acceptance checkpoint has no files")
         for value in files:
             if not isinstance(value, str) or not _safe_rel(value) or not _test_oriented(value):
                 raise GitAuthorityError(f"invalid acceptance-test path: {value!r}")
-            declared.add(value)
+            (guard_files if kind == "guard" else red_files).add(value)
+    declared = sorted(red_files | guard_files)
     actual = dirty_paths(cwd)
-    if actual != sorted(declared):
+    changed = set(actual)
+    stray = sorted(changed - set(declared))
+    if stray:
         raise GitAuthorityError(
-            f"test-author changed {actual}; declared acceptance files are {sorted(declared)}"
+            f"test-author changed undeclared files {stray}; every changed file must be declared "
+            f"by a checkpoint (declared acceptance files are {declared})"
         )
+    unchanged_red = sorted(red_files - changed)
+    if unchanged_red:
+        raise GitAuthorityError(
+            f"red checkpoint files {unchanged_red} are unchanged; a red checkpoint's file must "
+            f"be new or modified (test-author changed {actual})"
+        )
+    for path in sorted(guard_files):
+        if not (cwd / path).is_file():
+            raise GitAuthorityError(
+                f"guard checkpoint file {path!r} does not exist at the head; a guard pins an "
+                "existing test"
+            )
+        if path in changed and path not in red_files:
+            raise GitAuthorityError(
+                f"guard checkpoint file {path!r} was changed and no red checkpoint declares it; "
+                "a guard alone must not rewrite the test it guards"
+            )
     return _commit(cwd, actual, "test(factory): prove acceptance contract red")
 
 
