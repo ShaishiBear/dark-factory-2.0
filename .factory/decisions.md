@@ -2872,3 +2872,95 @@ The test author wrote `app/frontend/src/components/ChatArea.test.tsx`, declared 
 **Not chosen.** The caps themselves do not move. Raising `ROLE_MAX_TURNS` would be tuning a judge's bound on evidence from one build, and the observation here is that the cap was never the problem: the draft existed and was discarded unexamined. Nothing is retried on a cap either — a fresh process would start from an empty checkout and pay the same turns again.
 
 **Consequences.** A capped mutation stage now costs a static-gate run and a commit-authority verdict it did not before, and can end a build green on a draft the worker did not consider finished — which is the point, since the gates, not the worker's own sense of completion, are the authority. Pinned by `tests/factory/test_factory_cap_ends_the_loop.py`; mutations `cap-treated-as-failure-again`, `cap-unwrap-refuses-a-mutation-role`, `cap-with-clean-worktree-proceeds`, `no-spec-at-cap-accepted`, `glob-dropped-from-mutation-roles`, `bare-mode-collapses-the-tool-surface`, `cap-reached-not-recorded` and `cap-comment-silent` in `harness/factory_mutations/defects.json`.
+
+---
+
+## D-066 · The draft deadline records, and the turn cap decides, because the kill retired a worker that was reading its way to a draft
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34042566216 (issue #103, the eleventh build), 34024234313 (D-063's point), 34027157595 and 34033360798 (the same model drafting), 34002520477 (D-057's point)
+
+```
+FACTORY_STAGE kind=agent name=test_author seconds=956.017 turns=25 outcome=failed events=148490 draft_deadline_missed=true reads=22 thinking=217204 effort=medium model=minimax/minimax-m3
+```
+
+The draft deadline killed a `test_author` at turn 25 of 30 after 22 in-scope reads. It is the
+second time on this model: D-063 raised the fraction from 0.6 to 0.8 precisely because run
+34024234313 had been killed at turn 18 after 17 reads, and the same model wrote a complete
+8.2 KB test file in runs 34027157595 and 34033360798. The model converges; it front-loads
+reading, and the deadline lands in the middle of that.
+
+The deadline was invented (D-057) to solve one problem: *a worker reads forever and the build
+then dies with nothing to judge*. **D-065 solves that problem strictly better.** A turn cap
+now ends the worker's loop rather than the build, and the static gate, the commit authority
+and RED judge whatever draft is on disk, with `no_draft_at_cap` and `no_spec_at_cap` as the
+named refusals when there is nothing. Everything D-057's kill was for is covered, and covered
+later, by evidence about the draft rather than about the clock. What the kill adds on top is
+the failure mode above: it truncates a worker that would have drafted at turn 25-28 inside a
+budget the kernel had already granted it.
+
+**Decision.** The draft deadline stops killing and stops refusing. It is telemetry.
+
+- **`DraftWatch` observes and never terminates.** It still counts turns as distinct
+  `assistant` message ids, still notes the first Write/Edit as the draft and still counts
+  `Read` calls with their paths. `observe` returns nothing; the watch carries a sticky
+  `deadline_missed`, set the moment a turn past `deadline_turn` begins with no write seen and
+  never cleared, so a run that read past its deadline and then drafted says both. `_stream_cli`
+  reads the flag off the watch after its loop instead of breaking out of it, and the two clocks
+  that do kill (the wall and the idle timeout) are untouched.
+- **`_launch` records instead of raising.** `DraftDeadlineMissed` and the `no_draft_by_turn`
+  refusal are gone. `providers.draft_deadline_telemetry(run)` returns the same four fields the
+  refusal carried - `draft_deadline_missed`, `draft_deadline_turn`, `reads`, `files_read`
+  (capped at `FILES_READ_CAP` = 40) - and they ride on every way out of the process: on the
+  `AgentResult` of one that returned (new fields on `agents.AgentResult`), and in the
+  `observed` telemetry of one killed at its wall, hung, or refused on an error envelope.
+- **The record, the row and the line are unchanged in shape.** `runtime.draft_deadline_fields`
+  puts the four fields in the stage record of a stage that returned, `record_stage_timing`
+  carries `draft_deadline_missed` and `reads` onto the timing row, and `FACTORY_STAGE` still
+  prints `draft_deadline_missed=true reads=N`. What changed is what it means: `outcome` beside
+  it now says how the stage actually ended, and the flag is a WARNING-level signal for the
+  cost and latency analysis, not a verdict. A stage that drafted in time still records no
+  deadline fields at all.
+- **The needs-human comment reads the records, not an exception.**
+  `KernelRuntime._draft_deadline_evidence(paths)` now scans `agent-<role>[.N].json` the way
+  `_cap_reached_evidence` does, so a build refused as `no_draft_at_cap` tells the human what
+  the worker spent its turns reading - which is exactly the case the evidence was written for.
+- **The prompts advise.** The `$DRAFT_DEADLINE_TURN` sentence in `test-author.md`,
+  `implement.md` and `repair.md` becomes "draft ... by turn N; the kernel records a stage that
+  has written nothing by then, and your turn cap ends the loop". The worker is still steered to
+  draft early; it is no longer told it will be killed. Everything else in the three prompts is
+  verbatim.
+- **`DRAFT_DEADLINE_FRACTION` stays 0.8 and `draft_deadline_turn` stays as it is.** The
+  fraction is now the observation point rather than the limit. The caps (`ROLE_MAX_TURNS`) and
+  the walls (`stage_timeout_seconds`) do not move: they are what bounds the loop, and D-065
+  already made a cap a productive ending.
+
+**Not chosen.** Deleting the deadline outright. The number the analysis needs is *how far into
+its budget a worker reads before it drafts*, per model and per role, and the only place the
+kernel measures it is this watch; a returned stage still does not record its reads unless it
+passed the deadline (D-057's "observed and left alone", still true). Nor was the fraction
+raised again: 0.6 then 0.8 were both guesses at a limit, and the lesson of the third data point
+is that no fraction is a safe limit, not that this one is too low.
+
+Pinned by `tests/factory/test_factory_read_scope_and_draft_deadline.py`: the watch notes and
+decides nothing (`observe` returns `None`), a write in time disarms it, a write past the
+deadline leaves the observation standing, no deadline only counts; through the fake CLI a
+reading-only worker runs all thirty turns to the CLI's own `error_max_turns`, returns marked
+`cap_reached` with `reads=30` and `draft_deadline_turn=24`, and is refused by D-065's
+`no_draft_at_cap` and not by any deadline; a worker that drafts at turn 26 completes with
+`outcome=ok`, `draft_deadline_missed=true` and `reads=29` in its record, its row and its line;
+a stage killed at its wall after its deadline still carries what it read; the paths are capped
+at 40 and the count is not; the deadline follows the request's own cap without ending it; the
+three prompts carry the advisory sentence and no other prompt names the deadline. The read
+scope's own cases are untouched. Mutations `draft-deadline-kills-again`,
+`draft-deadline-refuses-the-stage`, `draft-deadline-not-recorded` and (reworded, its anchor
+unchanged) `draft-deadline-fires-on-a-run-that-wrote` in
+`harness/factory_mutations/defects.json`, each verified by direct injection on the
+maintainer's Windows host; `draft-deadline-never-fires` and
+`draft-deadline-counted-as-transient` are retired with the code they targeted.
+
+**Consequences.** A mutation worker now spends its whole turn budget or its whole wall, and
+the build's verdict comes from the gates rather than from a clock reading. A stage that reads
+for twenty-four turns and drafts nothing costs the full thirty turns instead of twenty-five -
+roughly a fifth more on the worst case - and the run then ends on `no_draft_at_cap` with the
+same list of files the old refusal printed. That is the trade: pay for the last six turns of
+the rare bad run, keep the drafts of the common good one.

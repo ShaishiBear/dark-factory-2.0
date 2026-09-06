@@ -154,6 +154,16 @@ class AgentResult:
     # `test_author` of run 34033360798 had its test file on disk when its cap ended the build
     # with no gate ever run on it (D-065).
     cap_reached: bool = False
+    # What the provider's draft watch saw of this stage: whether a turn past the role's draft
+    # deadline (`worker_policy.draft_deadline_turn`) began with no Write/Edit seen, the turn
+    # that deadline was, how many `Read` calls the run made and which paths (capped at
+    # `providers.FILES_READ_CAP`). The deadline records and the turn cap decides, so a stage
+    # that passed its deadline and then drafted is an ordinary returned stage that says it
+    # read a lot first; `None`/empty for a provider that does not stream (D-066).
+    draft_deadline_missed: bool = False
+    draft_deadline_turn: int | None = None
+    reads: int | None = None
+    files_read: tuple[str, ...] = ()
 
 
 class AgentProvider(Protocol):
