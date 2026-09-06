@@ -67,6 +67,18 @@ class SecurityGuardTests(unittest.TestCase):
                 self.assertEqual(result["verdict"], "fail")
                 self.assertEqual(result["protected_paths"], [path])
 
+    def test_governance_documents_are_trust_root(self):
+        """The four documents that state what the factory is for and what it does next.
+
+        PROGRAMME.md joined them at D-067: it records the approved engineering programme and its
+        ordering, so an autonomous run must not be able to reorder or delete its own roadmap.
+        """
+        for path in ("MISSION.md", "FACTORY_RULES.md", "CLAUDE.md", "PROGRAMME.md"):
+            with self.subTest(path=path):
+                result = self.evaluate(changed_files=[path])
+                self.assertEqual(result["verdict"], "fail")
+                self.assertEqual(result["protected_paths"], [path])
+
     def test_factory_detector_tests_are_trust_root(self):
         """The tests are what turn an injected trust-root mutation into a red suite."""
         for path in (

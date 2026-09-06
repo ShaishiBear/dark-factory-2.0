@@ -2872,3 +2872,27 @@ The test author wrote `app/frontend/src/components/ChatArea.test.tsx`, declared 
 **Not chosen.** The caps themselves do not move. Raising `ROLE_MAX_TURNS` would be tuning a judge's bound on evidence from one build, and the observation here is that the cap was never the problem: the draft existed and was discarded unexamined. Nothing is retried on a cap either — a fresh process would start from an empty checkout and pay the same turns again.
 
 **Consequences.** A capped mutation stage now costs a static-gate run and a commit-authority verdict it did not before, and can end a build green on a draft the worker did not consider finished — which is the point, since the gates, not the worker's own sense of completion, are the authority. Pinned by `tests/factory/test_factory_cap_ends_the_loop.py`; mutations `cap-treated-as-failure-again`, `cap-unwrap-refuses-a-mutation-role`, `cap-with-clean-worktree-proceeds`, `no-spec-at-cap-accepted`, `glob-dropped-from-mutation-roles`, `bare-mode-collapses-the-tool-surface`, `cap-reached-not-recorded` and `cap-comment-silent` in `harness/factory_mutations/defects.json`.
+
+## D-067 — PROGRAMME.md is the approved engineering programme, and it is protected
+
+**Status:** adopted 2026-09-06.
+
+The repository states what the product is (MISSION.md), how the factory operates
+(FACTORY_RULES.md), how code is written (CLAUDE.md) and what was decided (this file). It did not
+state what is being built next or what must be true first, so the ordering lived only in a
+conversation. `PROGRAMME.md` records it: the end state, the verified gap between that and the
+factory as it stands on `ed16952`, the lettered phases with their dependencies, and the invariants
+the programme may not trade away.
+
+It is governance, not runtime -- no kernel code reads it -- and it joins the other three governance
+documents in `factory_security.protected_path`, because an autonomous run must not be able to
+reorder or delete its own roadmap. `test_governance_documents_are_trust_root` pins all four
+together.
+
+Recorded there rather than here because a decision entry is a point in time and the programme is a
+living order of work; this file records that the programme exists and is protected, and
+`PROGRAMME.md` records what it currently says.
+
+**Consequences.** A phase may not start before its blockers close, and phase B (the single-path
+floor) is the definition of qualified; it is not to be redefined to unblock later phases. Changing
+the programme takes a maintainer PR and a decision entry.
