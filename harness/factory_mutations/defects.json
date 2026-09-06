@@ -1488,6 +1488,41 @@
       "find": "        detail = scrub(str(exc)).strip()\n        stop_issues = sorted({int(n) for n in STOP_ISSUE_RE.findall(detail)})\n",
       "replace": "        detail = \"\"\n        stop_issues = sorted({int(n) for n in STOP_ISSUE_RE.findall(detail)})\n",
       "why": "The stop comment would say a stop happened and not which one: no stop issue number, no stop-check output, and the stdout line would read stop=-, so an operator reading the issue could not tell whose stop released it; caught by tests/factory/test_factory_red_evidence_and_stop.py (the stop comment names the stop issue; a kill-file stop quotes the check output) (D-056)."
+    },
+    {
+      "id": "read-scope-dropped-for-test-author",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "    \"test_author\": MUTATION_SCOPE,\n",
+      "replace": "    \"test_author\": JUDGE_SCOPE,\n",
+      "why": "The acceptance-test author would carry an empty scope: no Edit allow for app/ and no deny for the trust root, so the provider would render no path rules and the worker could read kernel source, the harness and the workflows exactly as the test_author of run 34002520477 did for 46 Read calls; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (mutation roles may write the product tree; every tool-bearing role is denied the trust root; a mutation role is told paths not bare tools) (D-057)."
+    },
+    {
+      "id": "read-scope-lets-factory-kernel-through",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "TRUST_ROOT_DENY_PATHS: tuple[str, ...] = (\n    \"factory_kernel/**\",\n",
+      "replace": "TRUST_ROOT_DENY_PATHS: tuple[str, ...] = (\n",
+      "why": "Every worker's deny list would omit factory_kernel/**, and a file inside the working directory is readable without any rule, so the kernel's own source would be back in every builder's reach while the allow rules looked complete; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (every tool-bearing role is denied the trust root; a mutation role is told paths not bare tools; the probe argv carries the deny) (D-057)."
+    },
+    {
+      "id": "draft-deadline-never-fires",
+      "file": "factory_kernel/providers.py",
+      "find": "            if watch is not None and watch.observe(event, index=len(events) - 1):\n                draft_missed = True\n                break\n",
+      "replace": "            if watch is not None:\n                watch.observe(event, index=len(events) - 1)\n",
+      "why": "The reader would count turns and reads and never kill, so a mutation worker that wrote nothing would again run to its 30-turn cap (1925 s, $4.54 for the test_author of run 34002520477) before anything ended it; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that only reads is killed at the deadline and not retried; the stage record, row and line say so) (D-057)."
+    },
+    {
+      "id": "draft-deadline-fires-on-a-run-that-wrote",
+      "file": "factory_kernel/providers.py",
+      "find": "            if name in WRITE_TOOL_NAMES:\n                if self.wrote_at_turn is None:\n                    self.wrote_at_turn = self.turns\n",
+      "replace": "            if name in WRITE_TOOL_NAMES:\n                pass\n",
+      "why": "A Write or Edit would not disarm the deadline, so every mutation worker that drafted early and then read on, which is what issue #49's healthy author did (Edits at turn ~5, 15 turns), would be killed at turn 19 as if it had never written; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that wrote at turn two is untouched; a write in time disarms the watch) (D-057)."
+    },
+    {
+      "id": "draft-deadline-counted-as-transient",
+      "file": "factory_kernel/providers.py",
+      "find": "class DraftDeadlineMissed(ProviderStageError):\n",
+      "replace": "class DraftDeadlineMissed(WorkerHungError):\n",
+      "why": "A missed deadline would be handled as a hang: the worktree restored and the same prompt relaunched once against the same tree, so a worker that reads for eighteen turns would be paid for twice before the stage was refused; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that only reads is killed at the deadline and not retried: one launch, no restore, attempts=1) (D-057)."
     }
   ]
 }

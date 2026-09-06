@@ -250,6 +250,29 @@ jobs:
           timeout 400 python3 scripts/factory_effort_probe.py --model "$worker_model" \
             || echo "FACTORY_PREFLIGHT_EFFORT_PROBE model=$worker_model low_thinking=0 high_thinking=0 honoured=false error=probe-did-not-run"
 
+      - name: Prove the worker's read scope with the pinned CLI
+        shell: bash
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          # Every tool-bearing worker runs inside a file boundary the kernel renders as CLI
+          # permission rules (worker_policy.ROLE_PATH_SCOPE: the product tree and the run's
+          # artifacts; the trust root denied). Whether the pinned CLI enforces those rules on
+          # this runner is proved here, on a throwaway tree, with the exact argv the kernel
+          # renders for a test_author (scripts/factory_read_scope_probe.py). The line is data;
+          # a read the rules should have denied that returned the file is a refusal, because a
+          # worker that can read its judge is the defect the scope removes (D-057).
+          worker_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
+          set +e
+          timeout 400 python3 scripts/factory_read_scope_probe.py --model "$worker_model"
+          rc=$?
+          set -e
+          if [ "$rc" = "2" ]; then
+            echo "FACTORY_PREFLIGHT_REFUSED the pinned CLI let a scoped worker read outside its read scope"
+            exit 1
+          fi
+          test "$rc" = "0" || echo "FACTORY_PREFLIGHT_READ_SCOPE_PROBE model=$worker_model denied_outside_scope=false attempted_outside_scope=false read_inside_scope=false read_artifacts=false events=0 error=probe-did-not-run"
+
       - name: Create disposable validation environment
         shell: bash
         run: |

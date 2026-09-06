@@ -23,7 +23,7 @@ from .canonical import canonical_bytes
 from .config import KernelConfig
 from .credential_env import scoped_environment
 from .github_cli import GitHubClient
-from .providers import ClaudeCliProvider, prompt_text
+from .providers import ClaudeCliProvider, DraftDeadlineMissed, prompt_text
 from .independence import (
     authority_inputs,
     build_certificate,
@@ -56,11 +56,13 @@ from .worker_policy import (
     BUILDER_BLIND_PATHS,
     KERNEL_COMMIT_NAME,
     KERNEL_COMMIT_ARGS,
+    REPO_MUTATION_ROLES,
     ROLE_MAX_TURNS,
     allowed_tools,
     effort,
     max_budget_usd,
     max_turns,
+    path_scope,
     stage_budget_seconds,
     stage_timeout_seconds,
 )
@@ -106,11 +108,13 @@ def record_stage_timing(
 
 def stage_line(row: Mapping[str, Any]) -> str:
     """`FACTORY_STAGE kind=... name=... seconds=... [turns=...] [cost_usd=...] outcome=...
-    [events=...] [timed_out=true] [hang=true] [over_budget=true] [thinking=...] [effort=...]`:
-    the row as one log line, with the fields that do not apply left out. `events` is how many
-    stream events the provider read; a timed-out or hung stage still says what it had shown by
-    then (D-054). `thinking` is the thinking those events showed, in the CLI's estimate, and
-    `effort` the level the CLI was asked for (D-055)."""
+    [events=...] [timed_out=true] [hang=true] [over_budget=true] [draft_deadline_missed=true
+    reads=...] [thinking=...] [effort=...]`: the row as one log line, with the fields that do
+    not apply left out. `events` is how many stream events the provider read; a timed-out or
+    hung stage still says what it had shown by then (D-054). `thinking` is the thinking those
+    events showed, in the CLI's estimate, and `effort` the level the CLI was asked for (D-055).
+    `draft_deadline_missed` marks a mutation worker killed for writing nothing by its draft
+    deadline, with the `Read` calls it made by then (D-057)."""
     fields = [f"kind={row['kind']}", f"name={row['name']}", f"seconds={row['seconds']}"]
     if row.get("num_turns") is not None:
         fields.append(f"turns={row['num_turns']}")
@@ -125,6 +129,10 @@ def stage_line(row: Mapping[str, Any]) -> str:
         fields.append("hang=true")
     if row.get("over_budget"):
         fields.append("over_budget=true")
+    if row.get("draft_deadline_missed"):
+        fields.append("draft_deadline_missed=true")
+    if row.get("reads") is not None:
+        fields.append(f"reads={row['reads']}")
     if row.get("thinking_tokens") is not None:
         fields.append(f"thinking={row['thinking_tokens']}")
     if row.get("effort"):
@@ -632,14 +640,14 @@ class KernelRuntime:
             raise
         except NeedsHuman as exc:
             self._mark_issue_human(
-                issue_number, str(exc), evidence=self._proof_failure_evidence(paths, exc)
+                issue_number, str(exc), evidence=self._failure_evidence(paths, exc)
             )
             raise
         except Exception as exc:
             self._mark_issue_human(
                 issue_number,
                 f"builder failed closed: {exc}",
-                evidence=self._proof_failure_evidence(paths, exc),
+                evidence=self._failure_evidence(paths, exc),
             )
             raise
         finally:
@@ -698,6 +706,36 @@ class KernelRuntime:
             pass
         stop_text = ",".join(str(n) for n in stop_issues) or "-"
         print(f"FACTORY_BUILD_STOPPED issue=#{issue} stop={stop_text}")
+
+    @classmethod
+    def _failure_evidence(cls, paths: RunPaths, exc: BaseException) -> str:
+        """Everything the needs-human comment quotes beside the reason: a refused proof
+        gate's record (D-056) and a draft-deadline refusal's reads (D-057)."""
+        return cls._proof_failure_evidence(paths, exc) + cls._draft_deadline_evidence(exc)
+
+    @staticmethod
+    def _draft_deadline_evidence(exc: BaseException) -> str:
+        """What a mutation worker killed at its draft deadline had read, for the comment.
+
+        The provider's refusal carries `draft_deadline_missed`, `draft_deadline_turn`,
+        `reads` and the paths read (capped at FILES_READ_CAP); the comment names them so
+        the next prompt change is made from what the worker actually did rather than from
+        its cost line. Any other failure adds nothing (D-057).
+        """
+        telemetry = getattr(exc, "telemetry", None)
+        if not isinstance(telemetry, Mapping) or not telemetry.get("draft_deadline_missed"):
+            return ""
+        files = telemetry.get("files_read")
+        listed = [scrub(str(f)) for f in files] if isinstance(files, list) else []
+        body = (
+            f"\n\nDraft deadline (`{DraftDeadlineMissed.REASON}`): the worker made "
+            f"{telemetry.get('reads')} Read call(s) and no Write/Edit call by turn "
+            f"{telemetry.get('draft_deadline_turn')} (turns seen: {telemetry.get('num_turns')}), "
+            "so the kernel ended the stage; this is not retried."
+        )
+        if listed:
+            body += f"\n\nFiles read (first {len(listed)}):\n```\n" + "\n".join(listed) + "\n```"
+        return body[:PROOF_FAILURE_COMMENT_CHARS]
 
     @staticmethod
     def _proof_failure_evidence(paths: RunPaths, exc: BaseException) -> str:
@@ -2053,6 +2091,7 @@ class KernelRuntime:
                 max_budget_usd=max_budget_usd(role),
                 timeout_seconds=stage_timeout_seconds(role),
                 effort=effort(role),
+                path_scope=path_scope(role),
             ),
         )
 
@@ -2090,6 +2129,13 @@ class KernelRuntime:
             raise RuntimeError(
                 f"agent request for role {request.role!r} is unbounded: missing "
                 + ", ".join(missing)
+            )
+        # A role that may change the tree must say what part of it: without a scope its
+        # Read/Write reach the whole checkout, trust root included (D-057).
+        if request.role in REPO_MUTATION_ROLES and request.path_scope is None:
+            raise RuntimeError(
+                f"agent request for role {request.role!r} is unscoped: a repository-mutation "
+                "role must carry path_scope"
             )
         started = time.time()
         # The provider appends every stream line of every attempt to the stage's log as it
@@ -2219,6 +2265,8 @@ class KernelRuntime:
             timed_out=telemetry["timed_out"] or None,
             hang=telemetry.get("hang") or None,
             over_budget=telemetry["over_budget"] or None,
+            draft_deadline_missed=telemetry.get("draft_deadline_missed") or None,
+            reads=telemetry.get("reads") if telemetry.get("draft_deadline_missed") else None,
             thinking_tokens=telemetry.get("thinking_tokens"),
             effort=telemetry.get("effort"),
         )

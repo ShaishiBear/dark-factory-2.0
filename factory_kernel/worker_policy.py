@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 
+from .agents import PathScope
+
 READ_TOOLS = ("Read", "Glob", "Grep")
 WRITE_TOOLS = (*READ_TOOLS, "Write", "Edit")
 
@@ -222,6 +224,94 @@ KERNEL_COMMIT_ARGS: tuple[str, ...] = (
 # lessons, not a set of assertions a builder could optimise against.
 BUILDER_BLIND_PATHS: tuple[str, ...] = (".factory/holdout/**/*.py",)
 
+# What a tool-bearing worker may reach on disk, per role, as gitignore-style patterns relative
+# to the worktree root. The provider renders them as the CLI's permission rules and adds the
+# run's artifacts directory itself; the kernel's funnel refuses a repository-mutation request
+# that carries no scope at all.
+#
+# The boundary is stated from the CLI's documented rule semantics, which the read-scope
+# preflight probe (`scripts/factory_read_scope_probe.py`) verifies on the runner every run:
+# a file inside the working directory is readable without any rule, so an allow rule cannot
+# narrow reads and the read boundary is the `deny` list (`Read(<trust root>)` rules, which the
+# CLI also applies to Grep, Glob, and to Edit/Write on the same path); a write inside the
+# working directory needs an allow rule under `--permission-mode dontAsk`, so the write
+# boundary is the `write` list (`Edit(<pattern>)` rules, which the CLI applies to Write too).
+# The `read` list is rendered as allow rules for completeness and for paths a future scope
+# might add outside the tree; it grants nothing the working directory did not already.
+#
+# The fourth build of issue #103 (run 34002520477) died in `test_author` at its 30-turn cap
+# after 46 Read calls and no Write: it read kernel source, the harness, biome and tsconfig,
+# and set out to "verify the kernel's deferred-repro check", none of which is its task. The
+# holdout scenarios were already absent from its worktree (BUILDER_BLIND_PATHS); the rest of
+# the trust root was on disk and readable (D-057).
+PRODUCT_READ_PATHS: tuple[str, ...] = (
+    "app/**", "docs/**", "README.md", "CLAUDE.md", "MISSION.md", "FACTORY_RULES.md",
+)
+# Where a mutation role may write: product code, its tests and its docs. The three governance
+# files are readable and never writable by a worker; the security guard refuses them anyway.
+PRODUCT_WRITE_PATHS: tuple[str, ...] = ("app/**", "docs/**", "README.md")
+# The trust root, denied to every tool-bearing role. `.factory/architecture.json` is deliberately
+# absent: the architecture governor, the conformance authority and the standards reviewer are
+# told to read it (their prompts open with it) and a deny rule would override their allow.
+TRUST_ROOT_DENY_PATHS: tuple[str, ...] = (
+    "factory_kernel/**",
+    "harness/**",
+    "scripts/**",
+    "tests/factory/**",
+    ".github/**",
+    ".factory/kernel.json",
+    ".factory/evidence-spine.json",
+    ".factory/decisions.md",
+    ".factory/locks/**",
+    ".factory/prompts/**",
+    ".factory/methods/**",
+    ".factory/holdout/**",
+    ".factory/benchmark/**",
+)
+ARCHITECTURE_POLICY_PATH = ".factory/architecture.json"
+
+MUTATION_SCOPE = PathScope(
+    read=PRODUCT_READ_PATHS, write=PRODUCT_WRITE_PATHS, deny=TRUST_ROOT_DENY_PATHS,
+)
+# Drafting roles write only run artifacts, which the provider grants separately.
+DRAFTING_SCOPE = PathScope(read=PRODUCT_READ_PATHS, write=(), deny=TRUST_ROOT_DENY_PATHS)
+# The one documented exception: roles whose prompt names `.factory/architecture.json`.
+ARCHITECTURE_SCOPE = PathScope(
+    read=(*PRODUCT_READ_PATHS, ARCHITECTURE_POLICY_PATH), write=(), deny=TRUST_ROOT_DENY_PATHS,
+)
+# A judge has no tools, so nothing to scope.
+JUDGE_SCOPE = PathScope()
+
+ROLE_PATH_SCOPE: dict[str, PathScope] = {
+    "triage": JUDGE_SCOPE,
+    "plan": DRAFTING_SCOPE,
+    "investigate": DRAFTING_SCOPE,
+    "contract": DRAFTING_SCOPE,
+    "context": DRAFTING_SCOPE,
+    "architecture": ARCHITECTURE_SCOPE,
+    "test_author": MUTATION_SCOPE,
+    "implement": MUTATION_SCOPE,
+    "review-spec": DRAFTING_SCOPE,
+    "review-standards": ARCHITECTURE_SCOPE,
+    "repair": MUTATION_SCOPE,
+    "conformance": ARCHITECTURE_SCOPE,
+    "holdout": JUDGE_SCOPE,
+    "architecture-holdout": JUDGE_SCOPE,
+    "contract-certifier": JUDGE_SCOPE,
+    "design-certifier": JUDGE_SCOPE,
+    "governor-certifier": JUDGE_SCOPE,
+}
+
+# A repository-mutation worker that has written nothing by this fraction of its turn cap is
+# not going to: the process is killed and the stage refused as `no_draft_by_turn`, not retried.
+# The data: issue #49's test author (run 33999901008) wrote its first file at turn ~5 of the
+# 15 it used (11 Reads, 3 Edits, 618 s, $1.28, RED proved); issue #103's third build
+# (33997386843) wrote at turn ~30 of 33 and its RED was refused; its fourth (34002520477)
+# never wrote in 31 turns (46 Reads, 1925 s, $4.54, `error_max_turns`). 0.6 of a 30-turn cap
+# is turn 18: three times the healthy draft turn, and well before the cap the two dead builds
+# spent (D-057).
+DRAFT_DEADLINE_FRACTION = 0.6
+
 
 def allowed_tools(role: str) -> tuple[str, ...]:
     try:
@@ -332,3 +422,26 @@ def may_change_repo(role: str) -> bool:
     if role not in ROLE_TOOLS:
         raise ValueError(f"no least-privilege worker policy for role {role!r}")
     return role in REPO_MUTATION_ROLES
+
+
+def path_scope(role: str) -> PathScope:
+    """The file boundary the role's tools run inside; empty for a tool-less judge."""
+    try:
+        return ROLE_PATH_SCOPE[role]
+    except KeyError as exc:
+        raise ValueError(f"no path scope for role {role!r}") from exc
+
+
+def draft_deadline_turn(role: str, cap: int | None = None) -> int | None:
+    """The last turn by which a repository-mutation worker must have written something:
+    `ceil(cap * DRAFT_DEADLINE_FRACTION)`, from the role's cap unless the request's own is
+    given. `None` for every other role: a drafting role writes artifacts outside the tree and
+    a judge writes nothing (D-057)."""
+    if role not in ROLE_TOOLS:
+        raise ValueError(f"no least-privilege worker policy for role {role!r}")
+    if role not in REPO_MUTATION_ROLES:
+        return None
+    turns = max_turns(role) if cap is None else cap
+    if isinstance(turns, bool) or not isinstance(turns, int) or turns <= 0:
+        raise ValueError(f"turn cap for role {role!r} must be a positive integer")
+    return math.ceil(turns * DRAFT_DEADLINE_FRACTION)

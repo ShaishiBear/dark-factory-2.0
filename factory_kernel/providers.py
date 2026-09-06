@@ -16,9 +16,9 @@ import threading
 import time
 from typing import IO, Any, Callable, Mapping
 
-from .agents import AgentRequest, AgentResult, ProviderCapabilities
+from .agents import AgentRequest, AgentResult, PathScope, ProviderCapabilities
 from .config import ProviderConfig
-from .worker_policy import EFFORT_LEVELS
+from .worker_policy import EFFORT_LEVELS, REPO_MUTATION_ROLES, draft_deadline_turn
 
 
 class ClaudeCliProvider:
@@ -90,23 +90,21 @@ class ClaudeCliProvider:
             )
         return level
 
-    def run(
-        self,
-        request: AgentRequest,
-        *,
-        before_retry: Callable[[int], None] | None = None,
-        transcript: Path | str | None = None,
-    ) -> AgentResult:
-        """`transcript`, when given, is the file every stdout line of every attempt is appended
-        to as it arrives, so a process the kernel kills leaves its whole stream (D-055)."""
+    def model_for(self, request: AgentRequest) -> str:
         # The final semantic architecture holdout deliberately uses a different model family
         # from ordinary build/review workers. It is still an untrusted model judgment; the
         # deterministic architecture guard and Evidence Bundle remain authoritative.
-        model = (
+        return (
             self.config.architecture_model
             if request.role == "architecture-holdout" and self.config.architecture_model
             else request.model or self.config.model
         )
+
+    def argv_for(self, request: AgentRequest) -> list[str]:
+        """The CLI command line for one process of `request`: the same rendering `run` uses,
+        exposed so the worker preflight can prove the request the kernel actually makes
+        (`scripts/factory_read_scope_probe.py`, D-057)."""
+        model = self.model_for(request)
         tools = tuple(request.allowed_tools or ())
         tool_names = ",".join(tools)
         argv = [
@@ -156,13 +154,39 @@ class ClaudeCliProvider:
         # write access. Claude's normal working-directory boundary still applies to repository
         # files; kernel Git authority rejects any repo mutation outside the role's exact envelope.
         artifacts = str(request.environment.get("ARTIFACTS_DIR", "")).strip()
+        artifact_path: Path | None = None
         if artifacts:
             artifact_path = Path(artifacts)
             if not artifact_path.is_dir():
                 raise RuntimeError(f"worker artifact directory does not exist: {artifacts}")
             argv.extend(["--add-dir", str(artifact_path)])
-        if tools:
+        if request.path_scope is not None and tools:
+            # A scoped request pre-approves paths, never bare tools: a bare `Read` or `Edit`
+            # in the allow list would match every call and make the path rules moot. The
+            # deny rules are what keep the trust root out of a worker's reach (a file inside
+            # the working directory is readable without any rule) and the `Edit` allow rules
+            # are what let it write product files under `dontAsk` (D-057).
+            allow, deny = path_rules(request.path_scope, tools, artifacts=artifact_path)
+            if allow:
+                argv.extend(["--allowedTools", ",".join(allow)])
+            if deny:
+                argv.extend(["--disallowedTools", ",".join(deny)])
+        elif tools:
             argv.extend(["--allowedTools", tool_names])
+        return argv
+
+    def run(
+        self,
+        request: AgentRequest,
+        *,
+        before_retry: Callable[[int], None] | None = None,
+        transcript: Path | str | None = None,
+    ) -> AgentResult:
+        """`transcript`, when given, is the file every stdout line of every attempt is appended
+        to as it arrives, so a process the kernel kills leaves its whole stream (D-055)."""
+        model = self.model_for(request)
+        effort = self.effort_level(request)
+        argv = self.argv_for(request)
         env = self._worker_env(request.environment)
 
         # A dropped stream is not a verdict. The tenth canary defect (D-031) was a `test_author`
@@ -296,6 +320,14 @@ class ClaudeCliProvider:
                 tee = stack.enter_context(path.open("a", encoding="utf-8", newline="\n"))
                 tee.write(f"--- attempt {attempt} role={request.role} started={_utc_now()} ---\n")
                 tee.flush()
+            # A repository-mutation worker must draft before its turns run out: the reader
+            # kills the process when a turn past the deadline begins with no write seen
+            # (`worker_policy.draft_deadline_turn`, D-057). Every other role has no deadline.
+            deadline = (
+                draft_deadline_turn(request.role, request.max_turns)
+                if request.role in REPO_MUTATION_ROLES
+                else None
+            )
             run = _stream_cli(
                 argv,
                 cwd=request.cwd,
@@ -303,6 +335,7 @@ class ClaudeCliProvider:
                 wall_seconds=wall,
                 idle_seconds=self.config.idle_timeout_seconds,
                 tee=tee,
+                watch=DraftWatch(deadline),
             )
             if tee is not None:
                 tee.write(
@@ -320,6 +353,28 @@ class ClaudeCliProvider:
             "wall_seconds_last_attempt": run.elapsed,
             "partial_output": run.tail(),
         }
+        if run.draft_deadline_missed:
+            # Not transient and not retried: a worker that reads for eighteen turns without
+            # writing is not suffering the network, and a fresh process would read the same
+            # tree the same way. The refusal carries what it read so the prompt, not the
+            # retry budget, is what gets tuned (D-057).
+            files = list(run.files_read[:FILES_READ_CAP])
+            listed = ", ".join(files[:8]) + (", ..." if len(files) > 8 else "")
+            raise DraftDeadlineMissed(
+                f"agent worker role={request.role!r} wrote nothing by turn {run.deadline_turn} "
+                f"of {request.max_turns} (draft deadline, not retried): reads={run.reads} "
+                f"turns_seen={partial.num_turns} events_seen={run.events_seen} after "
+                f"{run.elapsed}s; files read: {listed or 'none'}",
+                telemetry={
+                    "subtype": DraftDeadlineMissed.REASON,
+                    "draft_deadline_missed": True,
+                    "draft_deadline_turn": run.deadline_turn,
+                    "reads": run.reads,
+                    "files_read": files,
+                    **observed,
+                },
+                envelope=partial,
+            )
         if run.hung:
             raise WorkerHungError(
                 f"agent worker hung role={request.role!r}: no event for {run.last_event_age}s "
@@ -390,6 +445,111 @@ HANG_RETRIES = 1
 # How much of the stream's tail a refusal quotes: the last event lines, capped.
 PARTIAL_OUTPUT_CHARS = 1500
 PARTIAL_OUTPUT_LINES = 5
+# The tools whose `tool_use` is a draft, for the deadline; `Read` is what is counted as a read.
+WRITE_TOOL_NAMES = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+READ_TOOL_NAME = "Read"
+# How many of the paths a deadline-killed worker read are kept in its record and comment.
+FILES_READ_CAP = 40
+
+
+def path_rules(
+    scope: PathScope, tools: tuple[str, ...], *, artifacts: Path | None
+) -> tuple[list[str], list[str]]:
+    """The CLI permission rules for a scope: `(allow, deny)`.
+
+    `Read(<pattern>)` allow rules for the read patterns and `Edit(<pattern>)` for the write
+    patterns, each relative to the request's cwd (`./app/**`), plus both for the run's
+    artifacts directory as an absolute pattern (`//<path>/**`); `Read` and `Edit` deny rules
+    for every deny pattern. Only `Read` and `Edit` rules are rendered because those are the
+    two the CLI consults for file permissions: it applies `Read` rules to Grep and Glob and
+    `Edit` rules to Write, and accepts but never consults a `Write(...)`, `Glob(...)` or
+    `MultiEdit(...)` path rule. A rule is rendered only for a family the request's tools
+    include, so a read-only role carries no `Edit` allow (D-057).
+    """
+    reads = any(tool in ("Read", "Glob", "Grep") for tool in tools)
+    writes = any(tool in WRITE_TOOL_NAMES for tool in tools)
+    allow: list[str] = []
+    deny: list[str] = []
+    if reads:
+        allow.extend(f"Read({_relative_pattern(p)})" for p in scope.read)
+        if artifacts is not None:
+            allow.append(f"Read({_absolute_pattern(artifacts)})")
+    if writes:
+        allow.extend(f"Edit({_relative_pattern(p)})" for p in scope.write)
+        if artifacts is not None:
+            allow.append(f"Edit({_absolute_pattern(artifacts)})")
+    for pattern in scope.deny:
+        if reads:
+            deny.append(f"Read({_relative_pattern(pattern)})")
+        if writes:
+            deny.append(f"Edit({_relative_pattern(pattern)})")
+    return allow, deny
+
+
+def _relative_pattern(pattern: str) -> str:
+    """`./<pattern>`: the CLI's "relative to the current directory" form. Only a leading
+    `./` is removed before the prefix is put on: a dot-directory such as `.factory/**` keeps
+    its dot (an `lstrip("./")` would have turned it into `factory/**` and denied nothing)."""
+    return "./" + (pattern[2:] if pattern.startswith("./") else pattern)
+
+
+def _absolute_pattern(directory: Path) -> str:
+    """`//<posix path>/**`: the CLI's "absolute from the filesystem root" form. On POSIX
+    the path already starts with `/`, so one more slash makes the prefix; a Windows path
+    keeps its drive after the prefix (`//C:/...`), which the Linux runner never renders."""
+    posix = Path(directory).resolve().as_posix()
+    return ("/" + posix if posix.startswith("/") else "//" + posix) + "/**"
+
+
+class DraftWatch:
+    """What the stream shows of a worker's drafting, read event by event by `_stream_cli`.
+
+    Turns are distinct `assistant` message ids, exactly as `ResultEnvelope.from_events`
+    counts them for a killed process, so `num_turns` in the record and the deadline agree.
+    `observe` returns True the moment a turn past `deadline_turn` begins with no write
+    tool_use seen in any earlier turn: the reader then kills the process. With no deadline
+    it only counts (D-057).
+    """
+
+    def __init__(self, deadline_turn: int | None = None) -> None:
+        self.deadline_turn = deadline_turn
+        self.turn_ids: list[str] = []
+        self.reads = 0
+        self.files_read: list[str] = []
+        self.wrote_at_turn: int | None = None
+
+    @property
+    def turns(self) -> int:
+        return len(self.turn_ids)
+
+    def observe(self, event: Mapping[str, Any], *, index: int) -> bool:
+        if event.get("type") != "assistant":
+            return False
+        message = event.get("message") if isinstance(event.get("message"), Mapping) else {}
+        key = _optional_str(message.get("id")) or f"event-{index}"
+        if key not in self.turn_ids:
+            self.turn_ids.append(key)
+            if (
+                self.deadline_turn is not None
+                and self.wrote_at_turn is None
+                and self.turns > self.deadline_turn
+            ):
+                return True
+        content = message.get("content") if isinstance(message.get("content"), list) else []
+        for block in content:
+            if not isinstance(block, Mapping) or block.get("type") != "tool_use":
+                continue
+            name = _optional_str(block.get("name")) or ""
+            params = block.get("input") if isinstance(block.get("input"), Mapping) else {}
+            if name in WRITE_TOOL_NAMES:
+                if self.wrote_at_turn is None:
+                    self.wrote_at_turn = self.turns
+            elif name == READ_TOOL_NAME:
+                self.reads += 1
+                path = _optional_str(params.get("file_path"))
+                if path is not None:
+                    self.files_read.append(path)
+        return False
 
 
 def _sleep(seconds: float) -> None:
@@ -421,6 +581,13 @@ class CliRun:
     timed_out: bool = False
     hung: bool = False
     last_event_age: float = 0.0
+    # What the draft watch saw: the process was killed because a turn past `deadline_turn`
+    # began with nothing written, how many `Read` calls it made and which paths (D-057).
+    draft_deadline_missed: bool = False
+    deadline_turn: int | None = None
+    reads: int = 0
+    files_read: tuple[str, ...] = ()
+    wrote_at_turn: int | None = None
 
     def __post_init__(self) -> None:
         if not self.events and self.stdout:
@@ -524,6 +691,7 @@ def _stream_cli(
     wall_seconds: float,
     idle_seconds: float,
     tee: IO[str] | None = None,
+    watch: DraftWatch | None = None,
 ) -> CliRun:
     """Run one CLI process and read its stdout line by line as it runs.
 
@@ -538,6 +706,10 @@ def _stream_cli(
     Every stdout line is also written to `tee` and flushed as it is read, before it is
     parsed, so the file holds exactly what the process had printed at the moment it was
     killed (D-055).
+
+    A third clock counts turns: `watch` sees every parsed event and, for a mutation role,
+    says when a turn past the draft deadline has begun with nothing written; the process is
+    killed and the run says so (`draft_deadline_missed`, D-057).
     """
     started = time.monotonic()
     proc = subprocess.Popen(
@@ -568,7 +740,7 @@ def _stream_cli(
     events: list[dict[str, Any]] = []
     open_streams = 2
     last_event = started
-    timed_out = hung = False
+    timed_out = hung = draft_missed = False
     while open_streams:
         now = time.monotonic()
         wall_left = wall_seconds - (now - started)
@@ -597,8 +769,11 @@ def _stream_cli(
         if event is not None:
             events.append(event)
             last_event = time.monotonic()
+            if watch is not None and watch.observe(event, index=len(events) - 1):
+                draft_missed = True
+                break
     returncode: int | None = None
-    if timed_out or hung:
+    if timed_out or hung or draft_missed:
         _kill(proc)
     else:
         # Both pipes closed. A process that closed them and then lingers is held to the
@@ -618,6 +793,11 @@ def _stream_cli(
         timed_out=timed_out,
         hung=hung,
         last_event_age=round(ended - last_event, 1),
+        draft_deadline_missed=draft_missed,
+        deadline_turn=watch.deadline_turn if watch is not None else None,
+        reads=watch.reads if watch is not None else 0,
+        files_read=tuple(watch.files_read) if watch is not None else (),
+        wrote_at_turn=watch.wrote_at_turn if watch is not None else None,
     )
 
 
@@ -731,6 +911,15 @@ class ProviderStageError(RuntimeError):
         # its events showed when it was killed); the retry loop sums them into the stage's
         # telemetry with every earlier attempt's (D-054).
         self.envelope = envelope
+
+
+class DraftDeadlineMissed(ProviderStageError):
+    """A repository-mutation worker killed because a turn past its draft deadline began with
+    no Write/Edit tool_use seen: refused as `no_draft_by_turn`, terminal, never retried. The
+    telemetry carries `draft_deadline_missed`, `draft_deadline_turn`, `reads` and the paths
+    read (capped at FILES_READ_CAP) beside what a killed process always carries (D-057)."""
+
+    REASON = "no_draft_by_turn"
 
 
 class _Spent:

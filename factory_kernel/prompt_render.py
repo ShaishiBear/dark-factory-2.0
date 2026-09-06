@@ -29,6 +29,12 @@ RENDERABLE_PLACEHOLDERS: tuple[str, ...] = (
     "FACTORY_WORKDIR",
 )
 
+# Placeholders the kernel renders from its own policy rather than from the request environment.
+# `$DRAFT_DEADLINE_TURN` is the turn by which a repository-mutation worker must have written
+# something (`worker_policy.draft_deadline_turn`); the worker runtime supplies it for exactly
+# those roles, so a prompt that names it for any other role is refused as unrenderable (D-057).
+KERNEL_PLACEHOLDERS: tuple[str, ...] = ("DRAFT_DEADLINE_TURN",)
+
 # `$NAME` or `${NAME}` where NAME is upper-case with underscores. `$1`-style and lower-case
 # references are left alone; they are shell syntax inside quoted example commands, not ours.
 _PLACEHOLDER = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)\b")
@@ -52,8 +58,14 @@ def artifacts_dir(env: Mapping[str, str]) -> Path:
     return path
 
 
-def render_prompt(prompt: str, env: Mapping[str, str]) -> str:
-    """Substitute every renderable placeholder; refuse if any other `$UPPER_NAME` remains."""
+def render_prompt(
+    prompt: str, env: Mapping[str, str], kernel_values: Mapping[str, str] | None = None
+) -> str:
+    """Substitute every renderable placeholder; refuse if any other `$UPPER_NAME` remains.
+
+    `kernel_values` carries the `KERNEL_PLACEHOLDERS` the caller can render (only those:
+    any other name is refused before rendering, so a kernel value can never shadow an
+    environment placeholder)."""
     values = {"ARTIFACTS_DIR": str(artifacts_dir(env))}
     for name in RENDERABLE_PLACEHOLDERS:
         if name == "ARTIFACTS_DIR":
@@ -61,6 +73,15 @@ def render_prompt(prompt: str, env: Mapping[str, str]) -> str:
         value = str(env.get(name, "")).strip()
         if value:
             values[name] = value
+    for name, value in (kernel_values or {}).items():
+        if name not in KERNEL_PLACEHOLDERS:
+            raise PromptRenderError(
+                f"kernel value {name!r} is not a placeholder a prompt may carry; only "
+                + ", ".join(f"${n}" for n in KERNEL_PLACEHOLDERS)
+            )
+        if not str(value).strip():
+            raise PromptRenderError(f"kernel placeholder ${name} has no value to render")
+        values[name] = str(value).strip()
 
     unknown: set[str] = set()
 
@@ -76,7 +97,9 @@ def render_prompt(prompt: str, env: Mapping[str, str]) -> str:
         raise PromptRenderError(
             "prompt carries placeholders the kernel cannot render: "
             + ", ".join(sorted(f"${n}" for n in unknown))
-            + "; only " + ", ".join(f"${n}" for n in RENDERABLE_PLACEHOLDERS) + " may appear"
+            + "; only " + ", ".join(f"${n}" for n in RENDERABLE_PLACEHOLDERS)
+            + " may appear, plus " + ", ".join(f"${n}" for n in KERNEL_PLACEHOLDERS)
+            + " where the kernel supplies it"
         )
     return rendered
 

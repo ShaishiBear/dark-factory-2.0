@@ -13,8 +13,8 @@ from .providers import prompt_text
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
 from .static_gate import check_files
 from .worker_policy import (
-    KERNEL_COMMIT_ARGS, allowed_tools, effort, max_budget_usd, max_turns, may_change_repo,
-    stage_timeout_seconds,
+    KERNEL_COMMIT_ARGS, allowed_tools, draft_deadline_turn, effort, max_budget_usd, max_turns,
+    may_change_repo, path_scope, stage_timeout_seconds,
 )
 from .worktree import create_detached, remove
 
@@ -188,6 +188,9 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         # kernel itself wrote (preamble, role prompt, pinned methods) is rendered: the context
         # carries untrusted material (the issue body, repro output, review JSON) that may mention
         # `$PATH` or `$GITHUB_TOKEN` and must reach the worker verbatim, not refuse the run (D-028).
+        # A mutation role's prompt states its draft deadline (`$DRAFT_DEADLINE_TURN`), the
+        # turn the provider's reader enforces; any other role's prompt may not name it (D-057).
+        deadline = draft_deadline_turn(role)
         prompt = render_prompt(
             prompt_text(
                 self.config.prompt_path(role, cwd),
@@ -200,6 +203,7 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 methods=method_block(cwd, role),
             ),
             env,
+            kernel_values={"DRAFT_DEADLINE_TURN": str(deadline)} if deadline is not None else None,
         )
         if context.strip():
             prompt = prompt.rstrip("\n") + "\n\n" + context.strip() + "\n"
@@ -224,6 +228,9 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 # How hard each turn may think: the level the CLI is asked for by name, so no
                 # worker runs at the default that let one stage think for 2025 s (D-055).
                 effort=effort(role),
+                # What the role's tools may reach: the product tree and the run's artifacts,
+                # never the trust root that judges it (D-057).
+                path_scope=path_scope(role),
             ),
             # A transient provider error is retried by the provider with a fresh process. A
             # mutation role may have half-written the checkout before the stream dropped, so

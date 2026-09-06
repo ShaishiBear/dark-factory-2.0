@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 
 from factory_kernel.agents import AgentRequest, AgentResult  # noqa: E402
 from factory_kernel.prompt_render import (  # noqa: E402
+    KERNEL_PLACEHOLDERS,
     RENDERABLE_PLACEHOLDERS,
     PromptRenderError,
     literal_artifacts_dir_entries,
@@ -29,6 +30,7 @@ from factory_kernel.prompt_render import (  # noqa: E402
 )
 from factory_kernel.providers import ClaudeCliProvider, prompt_text  # noqa: E402
 from factory_kernel.runtime import RunPaths  # noqa: E402
+from factory_kernel.worker_policy import draft_deadline_turn  # noqa: E402
 
 PROMPT_DIR = ROOT / ".factory" / "prompts"
 METHOD_DIR = ROOT / ".factory" / "methods"
@@ -42,7 +44,8 @@ class RenderTests(unittest.TestCase):
         for path in list(PROMPT_DIR.glob("*.md")) + list(METHOD_DIR.glob("*.md")):
             seen.update(m.strip("${}") for m in PLACEHOLDER.findall(path.read_text(encoding="utf-8")))
         self.assertTrue(seen, "prompts are expected to name their outputs via a placeholder")
-        self.assertLessEqual(seen, set(RENDERABLE_PLACEHOLDERS), seen)
+        # `$DRAFT_DEADLINE_TURN` is rendered from the policy for the mutation roles (D-057).
+        self.assertLessEqual(seen, set(RENDERABLE_PLACEHOLDERS) | set(KERNEL_PLACEHOLDERS), seen)
 
     def test_renderable_set_equals_the_request_environment_the_provider_forwards(self):
         self.assertEqual(set(RENDERABLE_PLACEHOLDERS), set(ClaudeCliProvider.REQUEST_ENV))
@@ -88,7 +91,15 @@ class RenderTests(unittest.TestCase):
                     continue  # repo-shaped mutation copies carry only some prompts
                 with self.subTest(role=role):
                     assembled = prompt_text(ROOT / rel, preamble="pre", context="ctx")
-                    rendered = render_prompt(assembled, {"ARTIFACTS_DIR": tmp})
+                    # The kernel supplies the draft deadline for the mutation roles (D-057).
+                    deadline = draft_deadline_turn(role) if role != "triage" else None
+                    rendered = render_prompt(
+                        assembled, {"ARTIFACTS_DIR": tmp},
+                        kernel_values=(
+                            {"DRAFT_DEADLINE_TURN": str(deadline)} if deadline else None
+                        ),
+                    )
+                    self.assertNotIn("$DRAFT_DEADLINE_TURN", rendered)
                     self.assertNotIn("$ARTIFACTS_DIR", rendered)
                     self.assertNotIn("${ARTIFACTS_DIR}", rendered)
                     if "ARTIFACTS_DIR" in assembled:
