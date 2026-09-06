@@ -2715,3 +2715,87 @@ line in `kernel.json`; the next run's preflight proves that model reachable befo
 runs, the stage line says which model each stage ran on, and the question D-059 left open,
 whether it is the route or the model that cannot be bounded, is answered by changing one and
 reading the line.
+
+## D-062 · The journey asks about the locked video by its title, and the probe demands a citation, because the model answered "the video I just added" in one round with no search
+
+**Status:** recorded · **Raised:** 2026-09-06 · **Runs:** 34020965800 (main regression, 2026-09-06 08:07Z), 33963509318
+
+With D-053's pgvector database in place, the main regression got the fixture ingested
+(`E2E_BOOTSTRAP_SEEN`, `E2E_VIDEOS_PROBE count=1 fixture_present=true`) and still failed at
+the citation. The app log named the cause twice, once for the harness-side probe and once
+for the browser's own request: `stream_chat round=1 finish_reason=stop tool_calls_made=0`.
+The chat model answered in a single round and never called a retrieval tool, so the route
+emitted tokens and `[DONE]` and no `sources` event (`E2E_STREAM_PROBE ... sources=false`),
+and the browser journey had no citation to find. The locked question was "Based on the
+video I just added, summarize its main topic and cite the source." An earlier run's answer
+to it began "I don't have visibility into which video you just added": the wording invites
+the model to explain that it cannot see uploads, and whether it searches anyway is luck.
+Run 33963509318 called tools for three rounds on the same question; run 34020965800 called
+none. A gate whose pass depends on a model's mood is not a gate. D-051's stream probe saw
+all of this and passed, because it required 200, a token and no error payload, and the
+citation was left to the browser to miss.
+
+**Decision.** The question names the video the run ingested, by the title the catalog
+lists, and the stream probe refuses an answer without a citation of that video before any
+browser opens.
+
+- **The question.** `browser.question_template` in `harness/harness.config.json`, checked
+  in as `Summarize the main topic of the video titled "{title}" and cite the source.`, is
+  rendered by `harness/e2e.py` (`_journey_question`) with the fixture's `{title}` (and
+  `{description}`) exactly as `GET /api/videos` returned them to the videos probe, which
+  now hands back the fixture's catalog row. The one rendered question goes to the stream
+  probe and to the browser. It is printed as `E2E_QUESTION title="<title>"
+  question="<rendered>"`. A row whose title is empty or missing cannot ground anything:
+  `E2E_FIXTURE_TITLE_MISSING` is printed and the journey refuses before the stream probe
+  spends a message. A template that never names `{title}` is refused at configuration.
+  The literal `browser.question` is honoured only when `question_template` is absent, so
+  a configuration from before this decision still runs; the checked-in configuration no
+  longer carries it.
+- **The probe.** `_probe_stream` passes only on 200, at least one token, no error payload
+  and a `sources` event carrying a non-empty array whose first entry is the locked fixture:
+  its `video_url` holds the locked YouTube id (the field that is the same on every run), or
+  its `video_id` is the catalog row's id (fresh per bootstrap, compared with the row the
+  videos probe returned). The line gains `reason=<why or ->` after `sources=`, then
+  `sources_count=<n> fixture_in_sources=<bool> tool_calls=<n>`, where `tool_calls` counts
+  the `event: status` frames of type `tool_call_start` that `llm/openrouter.py` emits per
+  executed tool call; a stream that never searched now says `sources=false
+  reason=no-sources-event ... tool_calls=0` and stops the run there, as the other probes do.
+  Rounds are not on the wire and are not reported.
+- **The page.** agent-browser escapes the quotes inside a node's text; the rendered
+  question quotes the title, so snapshot names and text nodes are read unescaped, or the
+  page's echo of the question would count as fresh assistant text.
+- **The rules.** FACTORY_RULES §4 steps 2, 3 and 5 say the question is rendered from the
+  locked fixture's title and that the stream probe demands the citation. The journey now
+  counts 21 deterministic steps instead of 20.
+
+Pinned by `tests/factory/test_e2e_stream_evidence.py` (the checked-in configuration uses
+the template and no literal; the template is rendered with the title and printed, with
+the title used verbatim and `{description}` honoured; a missing, blank or absent title
+fails closed with the row named, and the journey refuses before the stream probe; the
+literal question is used only without a template, and a pre-D-062 configuration runs the
+journey on it; a template without `{title}` and a configuration with neither key are
+refused before the login probe; the parser's `sources_event`, `sources_count`,
+`sources_list` and `tool_calls`, an empty or malformed sources payload, and which status
+frames count; the fixture is named by URL or by catalog row id and never by a later entry;
+the probe refuses a stream with no sources event, an empty array, or another video first,
+and names each; it accepts the row-id match; a failed DELETE is appended to a stream
+failure; the journey refuses before the browser when the stream had no citation; the
+videos probe returns the fixture's row; the browser asks the same rendered question as the
+probe; snapshot text is read unescaped) and by the updated fakes in
+`tests/factory/test_e2e_contract.py`. Mutations `e2e-stream-probe-passes-without-sources`,
+`e2e-fixture-title-missing-non-fatal` and `e2e-question-template-ignored` are registered
+in `harness/factory_mutations/defects.json` and each was verified by direct injection on
+the maintainer's Windows host (the copy built by `run.py`, one defect injected, the
+detector run).
+
+**Observed and left alone.** Whether the model searches when asked about a titled video
+is still the model's choice; the question now names something it can search for, and the
+probe reports `tool_calls` so the next refusal says how many rounds it took. The
+bootstrap titles the fixture from Supadata (`title` or `Video <id>`); a fallback title is
+a title and is not refused here. The StrictMode step the same run was expected to fail at
+next is untouched.
+
+**Consequences.** The next main regression prints the question it asked and the title it
+was built from, and either `sources=true fixture_in_sources=true` from the probe or
+`reason=no-sources-event` with the tool-call count, before a browser opens. A citation
+the browser cannot find is no longer a browser finding.
