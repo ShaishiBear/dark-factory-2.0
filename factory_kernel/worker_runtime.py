@@ -203,7 +203,8 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         # carries untrusted material (the issue body, repro output, review JSON) that may mention
         # `$PATH` or `$GITHUB_TOKEN` and must reach the worker verbatim, not refuse the run (D-028).
         # A mutation role's prompt states its draft deadline (`$DRAFT_DEADLINE_TURN`), the
-        # turn the provider's reader enforces; any other role's prompt may not name it (D-057).
+        # turn the provider's reader records a stage that has written nothing by (D-066); any
+        # other role's prompt may not name it (D-057).
         deadline = draft_deadline_turn(role)
         prompt = render_prompt(
             prompt_text(

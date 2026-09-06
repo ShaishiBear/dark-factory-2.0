@@ -1504,25 +1504,25 @@
       "why": "Every worker's deny list would omit factory_kernel/**, and a file inside the working directory is readable without any rule, so the kernel's own source would be back in every builder's reach while the allow rules looked complete; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (every tool-bearing role is denied the trust root; a mutation role is told paths not bare tools; the probe argv carries the deny) (D-057)."
     },
     {
-      "id": "draft-deadline-never-fires",
+      "id": "draft-deadline-kills-again",
       "file": "factory_kernel/providers.py",
-      "find": "            if watch is not None and watch.observe(event, index=len(events) - 1):\n                draft_missed = True\n                break\n",
-      "replace": "            if watch is not None:\n                watch.observe(event, index=len(events) - 1)\n",
-      "why": "The reader would count turns and reads and never kill, so a mutation worker that wrote nothing would again run to its 30-turn cap (1925 s, $4.54 for the test_author of run 34002520477) before anything ended it; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that only reads is killed at the deadline and not retried; the stage record, row and line say so) (D-057)."
+      "find": "            if watch is not None:\n                watch.observe(event, index=len(events) - 1)\n    # The deadline is read off the watch after the loop, never acted on inside it: nothing\n    # about it ends the process (D-066).\n    draft_missed = watch.deadline_missed if watch is not None else False\n    returncode: int | None = None\n    if timed_out or hung:\n",
+      "replace": "            if watch is not None:\n                watch.observe(event, index=len(events) - 1)\n                if watch.deadline_missed:\n                    break\n    draft_missed = watch.deadline_missed if watch is not None else False\n    returncode: int | None = None\n    if timed_out or hung or draft_missed:\n",
+      "why": "D-057's kill restored: the stream reader would break out and the process be killed the moment a turn past the draft deadline began with nothing written, so a worker reading its way to a draft would be truncated mid-read exactly as run 34042566216's test_author was at turn 25 of 30 after 22 in-scope reads, on a model that wrote a complete test file in other runs; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that only reads runs to its cap and the cap rule refuses it; a worker that drafts past the deadline completes with it recorded) (D-066)."
     },
     {
       "id": "draft-deadline-fires-on-a-run-that-wrote",
       "file": "factory_kernel/providers.py",
       "find": "            if name in WRITE_TOOL_NAMES:\n                if self.wrote_at_turn is None:\n                    self.wrote_at_turn = self.turns\n",
       "replace": "            if name in WRITE_TOOL_NAMES:\n                pass\n",
-      "why": "A Write or Edit would not disarm the deadline, so every mutation worker that drafted early and then read on, which is what issue #49's healthy author did (Edits at turn ~5, 15 turns), would be killed at turn 19 as if it had never written; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that wrote at turn two is untouched; a write in time disarms the watch) (D-057)."
+      "why": "A Write or Edit would not disarm the deadline, so every mutation worker that drafted early and then read on, which is what issue #49's healthy author did (Edits at turn ~5, 15 turns), would be recorded as having passed its deadline: the one stage shape the signal is meant to distinguish from a reading-only run would read the same in the telemetry; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that wrote at turn two is untouched; a write in time disarms the watch) (D-057, D-066)."
     },
     {
-      "id": "draft-deadline-counted-as-transient",
+      "id": "draft-deadline-refuses-the-stage",
       "file": "factory_kernel/providers.py",
-      "find": "class DraftDeadlineMissed(ProviderStageError):\n",
-      "replace": "class DraftDeadlineMissed(WorkerHungError):\n",
-      "why": "A missed deadline would be handled as a hang: the worktree restored and the same prompt relaunched once against the same tree, so a worker that reads for eighteen turns would be paid for twice before the stage was refused; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that only reads is killed at the deadline and not retried: one launch, no restore, attempts=1) (D-057)."
+      "find": "            observed.update(draft_deadline_telemetry(run))\n        if run.hung:\n",
+      "replace": "            raise ProviderStageError(\n                f\"agent worker role={request.role!r} wrote nothing by turn {run.deadline_turn} \"\n                f\"of {request.max_turns}\",\n                telemetry=draft_deadline_telemetry(run),\n                envelope=partial,\n            )\n        if run.hung:\n",
+      "why": "The observation would become a verdict again: a process that had written nothing when the turn past its deadline began would be refused when it ended, so a worker that read to turn 25 and then drafted at turn 26 inside its own budget would lose the draft it had on disk and the stage would fail rather than reach the gates; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (a worker that drafts past the deadline completes with it recorded, outcome ok; a worker that only reads returns marked cap_reached for D-065's rule to refuse) (D-066)."
     },
     {
       "id": "guard-failure-at-green-ignored",
@@ -1691,6 +1691,13 @@
       "find": "            \"cap_reached\": bool(getattr(result, \"cap_reached\", False)),\n",
       "replace": "            \"cap_reached\": False,\n",
       "why": "A capped stage's record, timing row and FACTORY_STAGE line would read as an ordinary returned stage, and the needs-human comment (which reads the records) would not say the cap was reached when a gate refuses the draft; caught by tests/factory/test_factory_cap_ends_the_loop.py (the record and the row say cap_reached and the line prints cap_reached=true; a capped test_author through the gates leaves the flag in its record) (D-065)."
+    },
+    {
+      "id": "draft-deadline-not-recorded",
+      "file": "factory_kernel/runtime.py",
+      "find": "    if not getattr(result, \"draft_deadline_missed\", False):\n        return {}\n",
+      "replace": "    if True:\n        return {}\n",
+      "why": "A stage that returned after passing its draft deadline would record none of it: no draft_deadline_missed, no draft_deadline_turn, no reads and no files_read in agent-<role>.json, nothing on its timing row or its FACTORY_STAGE line, and nothing in the needs-human comment when a gate refuses the draft - so the one signal the deadline still exists to give, the cost of a reading-heavy stage, would be invisible; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (the stage record, row and line say so; a worker that drafts past the deadline completes with it recorded; the paths read are capped in the record and the count is not) (D-066)."
     },
     {
       "id": "cap-comment-silent",
