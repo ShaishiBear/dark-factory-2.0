@@ -68,7 +68,7 @@ class SanitiserTests(unittest.TestCase):
         proof = load_script("factory_proof")
         fake = subprocess.CompletedProcess(["x"], 1, stdout=f"{ESC}[31mred{ESC}[0m", stderr="\x00tail")
         with mock.patch.object(proof.subprocess, "run", return_value=fake):
-            rc, out = proof.run(["x"], ".")
+            rc, out, _seconds, _fault = proof.run(["x"], ".")
         self.assertEqual((rc, out), (1, "red�tail"))
 
     def test_deferred_symptom_matches_sanitised_tail(self):

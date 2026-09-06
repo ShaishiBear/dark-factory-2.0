@@ -289,7 +289,9 @@ A human triggers it; it is not a dispatch action. On the canonical worker the co
 
 ### Attempt budget exhausted, or any build-time failure
 
-`_mark_issue_human` removes `factory:in-progress` and `factory:accepted`, adds **`factory:needs-human`**, and comments "Dark Factory stopped this run without merging" with the reason. This fires for: a governor decision other than `proceed`, an unsatisfiable contract, RED or GREEN replay failure, a failed second review, a conformance failure, a quick-gate failure, and exceeding `max_attempts`.
+`_mark_issue_human` removes `factory:in-progress` and `factory:accepted`, adds **`factory:needs-human`**, and comments "Dark Factory stopped this run without merging" with the reason. This fires for: a governor decision other than `proceed`, an unsatisfiable contract, RED or GREEN replay failure, a failed second review, a conformance failure, a quick-gate failure, and exceeding `max_attempts`. For a RED or GREEN replay failure the comment also quotes the refused checkpoint's argv, cwd, exit code, seconds and output tail, read from `red-proof-failure.json` / `green-proof-failure.json` in the run's uploaded artifacts (D-056).
+
+**An operator stop is not a build failure.** When `scripts/factory-stop.sh` reports a stop between stages (every model stage re-reads it), `build_issue` removes `factory:in-progress`, leaves the issue **`factory:accepted`**, finishes any lease it took, and comments naming the stop issue; it adds no `factory:needs-human` and writes no validation-failed marker, so no attempt is charged and the next dispatch after the stop clears rebuilds the issue from current `main`. A build stopped before its push leaves no PR; a stop after the PR exists leaves the PR as it is (D-056).
 
 Escalation means: stop all factory activity on that issue until a human removes the label and re-labels it `factory:accepted`.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, hashlib, json, os, re, subprocess, sys
+import argparse, hashlib, json, os, re, subprocess, sys, time
 from pathlib import Path
 
 # Code lives beside this file (HERE); the tree under test is the working directory (ROOT).
@@ -21,11 +21,68 @@ def checkpoint_env():
     # GitHub credentials; scrubbing again here means a caller that forgets the scope still
     # cannot hand a repository token to a command the model wrote.
     return {k:v for k,v in os.environ.items() if k not in CHECKPOINT_SCRUBBED_ENV}
+CHECKPOINT_TIMEOUT_SECONDS=300
+# What a refusal carries: the last lines of the checkpoint's combined output, capped. Build run
+# 33997386843 refused `AC-1 RED failed for the wrong reason` after 0.448 s for four vitest
+# checkpoints and kept nothing else, so what failed before any test ran could not be read (D-056).
+OUTPUT_TAIL_LINES=80
+OUTPUT_TAIL_CHARS=6000
+FAULT_TEXT={'launch':'could not be launched','timeout':f'timed out after {CHECKPOINT_TIMEOUT_SECONDS}s'}
+def _text(v): return v.decode('utf-8','replace') if isinstance(v,bytes) else (v or '')
 def run(argv, cwd):
-    p=subprocess.run(argv,cwd=ROOT/cwd,env=checkpoint_env(),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)
+    # Returns (rc, output, seconds, fault). `fault` is None when the command ran to an exit
+    # code; 'launch' when it could not be started and 'timeout' when it was killed at
+    # CHECKPOINT_TIMEOUT_SECONDS (rc None in both). Both used to escape as tracebacks with no
+    # record of the argv that produced them; both are refusals whatever the output says.
+    started=time.monotonic()
+    try:
+        p=subprocess.run(argv,cwd=ROOT/cwd,env=checkpoint_env(),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=CHECKPOINT_TIMEOUT_SECONDS)
+        rc,out,fault=p.returncode,(p.stdout or '')+(p.stderr or ''),None
+    except subprocess.TimeoutExpired as e:
+        rc,out,fault=None,_text(e.stdout)+_text(e.stderr),'timeout'
+    except OSError as e:
+        rc,out,fault=None,f'{argv[0]}: {e}','launch'
     # Terminal control sequences are not evidence. Sanitising here means the symptom match,
     # the stored tail and the output hash all see the same text (D-038).
-    return p.returncode,sanitise_output((p.stdout or '')+(p.stderr or ''))
+    return rc,sanitise_output(out),round(time.monotonic()-started,3),fault
+def output_tail(out):
+    return '\n'.join(out.splitlines()[-OUTPUT_TAIL_LINES:])[-OUTPUT_TAIL_CHARS:]
+def failure_artifact(kind): return f'{kind}-proof-failure.json'
+def refuse(kind, cp, reason, *, rc, out, seconds, fault=None, stage=None):
+    # Every RED/GREEN refusal of a checkpoint says what ran and what it printed, on stderr
+    # (the gate log the kernel keeps) and in $ARTIFACTS_DIR/<kind>-proof-failure.json (the
+    # record the kernel quotes in its needs-human comment). The verdict is unchanged; only the
+    # evidence travels with it (D-056).
+    tail=output_tail(out)
+    evidence={'version':'1.0','kind':kind,'stage':stage or kind,'acceptance_id':cp['acceptance_id'],
+              'argv':list(cp['argv']),'cwd':cp['cwd'],'rc':rc,'fault':fault,'seconds':seconds,
+              'expected_failure':cp['expected_failure'],'reason':reason,'output_tail':tail}
+    root=os.environ.get('ARTIFACTS_DIR','').strip()
+    if root:
+        try: write(Path(root)/failure_artifact(kind),evidence)
+        except OSError as e: print(f'PROOF_WARN could not write {failure_artifact(kind)}: {e}',file=sys.stderr)
+    rc_text='none (never exited)' if rc is None else str(rc)
+    die(f"{reason}\n  argv: {json.dumps(cp['argv'])}\n  cwd: {cp['cwd']}\n  rc: {rc_text}\n  seconds: {seconds}\n"
+        f"  expected_failure: {cp['expected_failure']!r}\n"
+        f"  output tail (last {OUTPUT_TAIL_LINES} lines, at most {OUTPUT_TAIL_CHARS} chars):\n{tail}")
+def prove_red(cp):
+    # One checkpoint on the unchanged tree: it must fail, and fail for its declared reason.
+    ac=cp['acceptance_id']
+    rc,out,seconds,fault=run(cp['argv'],cp['cwd'])
+    if fault: refuse('red',cp,f"{ac} RED command {FAULT_TEXT[fault]}",rc=rc,out=out,seconds=seconds,fault=fault)
+    if rc==0: refuse('red',cp,f"{ac} RED command unexpectedly passed",rc=rc,out=out,seconds=seconds)
+    if cp['expected_failure'].lower() not in out.lower(): refuse('red',cp,f"{ac} RED failed for the wrong reason",rc=rc,out=out,seconds=seconds)
+    print(f"RED_CHECKPOINT {ac} rc={rc} seconds={seconds}")
+    # A bounded tail of the failing output travels with the proof so a deferred repro can be
+    # closed against it (factory_kernel.repro.verify_deferred_in_red) without re-running.
+    return dict(cp,red_exit=rc,red_seconds=seconds,red_output_sha256=hashlib.sha256(out.encode()).hexdigest(),red_output_tail=out[-RED_TAIL_CHARS:])
+def prove_green(cp, stage='green'):
+    ac=cp['acceptance_id']
+    rc,out,seconds,fault=run(cp['argv'],cp['cwd'])
+    if fault: refuse('green',cp,f"{ac} GREEN command {FAULT_TEXT[fault]}",rc=rc,out=out,seconds=seconds,fault=fault,stage=stage)
+    if rc!=0: refuse('green',cp,f"{ac} GREEN command failed",rc=rc,out=out,seconds=seconds,stage=stage)
+    print(f"GREEN_CHECKPOINT {ac} rc={rc} seconds={seconds}")
+    return {'acceptance_id':ac,'exit':rc,'seconds':seconds,'output_sha256':hashlib.sha256(out.encode()).hexdigest()}
 def sha(p): return hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
 def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False)+'\n'
 def digest(v): return hashlib.sha256(canonical(v).encode()).hexdigest()
@@ -178,14 +235,7 @@ def red(a):
     declared=sorted({f for cp in s['checkpoints'] for f in cp['files']}); actual=changed()
     if actual!=declared: die(f'test checkpoint changed {actual}; declared test files are {declared}')
     before=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-    results=[]
-    for cp in s['checkpoints']:
-        rc,out=run(cp['argv'],cp['cwd'])
-        if rc==0: die(f"{cp['acceptance_id']} RED command unexpectedly passed")
-        if cp['expected_failure'].lower() not in out.lower(): die(f"{cp['acceptance_id']} RED failed for the wrong reason")
-        # A bounded tail of the failing output travels with the proof so a deferred repro can be
-        # closed against it (factory_kernel.repro.verify_deferred_in_red) without re-running.
-        results.append(dict(cp,red_exit=rc,red_output_sha256=hashlib.sha256(out.encode()).hexdigest(),red_output_tail=out[-RED_TAIL_CHARS:]))
+    results=[prove_red(cp) for cp in s['checkpoints']]
     after=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(); clean()
     if before!=after: die('RED commands moved HEAD')
     files={f:sha(f) for f in declared}
@@ -195,29 +245,24 @@ def red(a):
     root=Path(os.environ['ARTIFACTS_DIR']); write(root/'test-plan.json',plan)
     proof=dict(base,test_plan_sha256=digest(plan))
     write(a.output,proof)
-    print(f"RED_PROVED criteria={len(results)} tests={len(files)} commit={before}")
+    print(f"RED_PROVED criteria={len(results)} tests={len(files)} commit={before} seconds={round(sum(r['red_seconds'] for r in results),3)}")
 def green(a):
     clean(); p=load(a.proof)
     if p.get('version')!='2.0' or not isinstance(p.get('checkpoints'),list) or not p['checkpoints']: die('GREEN requires v2 RED proof')
     for f,h in p.get('files',{}).items():
         if not (ROOT/f).is_file() or sha(f)!=h: die(f'immutable acceptance test changed: {f}')
     before=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-    green_results=[]
-    for cp in p['checkpoints']:
-        rc,out=run(cp['argv'],cp['cwd'])
-        if rc!=0: die(f"{cp['acceptance_id']} GREEN command failed: "+out[-1200:])
-        green_results.append({'acceptance_id':cp['acceptance_id'],'exit':rc,
-                              'output_sha256':hashlib.sha256(out.encode()).hexdigest()})
+    stage='final-green' if 'final' in Path(a.output).name else 'green'
+    green_results=[prove_green(cp,stage) for cp in p['checkpoints']]
     after=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(); clean()
     if before!=after: die('GREEN commands moved HEAD')
     impact=impact_check(a.output)
     architecture_guard=architecture_guard_check(a.output)
     result=dict(p,green_commit=before,green_results=green_results,architecture_guard=architecture_guard)
     if impact: result['change_impact']=impact
-    stage='final-green' if 'final' in Path(a.output).name else 'green'
     if stage=='final-green': result=bind_architecture(result,before)
     write(a.output,result)
-    print(f"GREEN_PROVED criteria={len(green_results)} tests={len(p['files'])} commit={before}")
+    print(f"GREEN_PROVED criteria={len(green_results)} tests={len(p['files'])} commit={before} seconds={round(sum(g['seconds'] for g in green_results),3)}")
 def attach(a):
     clean(); p=load(a.proof)
     results=p.get('green_results')
