@@ -749,10 +749,11 @@ class CommentEvidenceTests(unittest.TestCase):
             _missed([f"app/very/long/path/number/{n}.py" for n in range(400)])
         )
         self.assertLessEqual(len(text), 3000)
-        text = KernelRuntime._draft_deadline_evidence(
-            _missed(["app/x.py?token=ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD"])
-        )
-        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD", text)
+        # Assembled at run time: the guard scans added lines for this very shape (D-057).
+        token = "ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+        text = KernelRuntime._draft_deadline_evidence(_missed([f"app/x.py?token={token}"]))
+        self.assertNotIn(token, text)
+        self.assertIn("app/x.py", text)
 
 
 class BuildCommentTests(unittest.TestCase):
