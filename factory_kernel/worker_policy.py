@@ -347,9 +347,15 @@ ROLE_PATH_SCOPE: dict[str, PathScope] = {
     "governor-certifier": JUDGE_SCOPE,
 }
 
-# A repository-mutation worker that has written nothing by this fraction of its turn cap is
-# not going to: the process is killed and the stage refused as `no_draft_by_turn`, not retried.
-# The data, three points. Issue #49's test author (run 33999901008, GLM) wrote its first file
+# The turn by which a repository-mutation worker is asked to have written something, as a
+# fraction of its turn cap. It is an observation point, not a limit: a stage that passes it
+# with nothing on disk is recorded (`draft_deadline_missed`, with the `Read` calls it made and
+# the paths it read) and runs on to its turn cap, where D-065's path judges whatever draft it
+# left - the gates on a draft, `no_draft_at_cap`/`no_spec_at_cap` on nothing. Until D-066 the
+# process was killed here and the stage refused as `no_draft_by_turn`; that refusal truncated
+# a worker which would have drafted inside its own budget (run 34042566216: `test_author` on
+# MiniMax M3 killed at turn 25 of 30 after 22 in-scope reads, the same model having written a
+# complete 8.2 KB test file in runs 34027157595 and 34033360798). The data, three points. Issue #49's test author (run 33999901008, GLM) wrote its first file
 # at turn ~5 of the 15 it used (11 Reads, 3 Edits, 618 s, $1.28, RED proved): healthy. Issue
 # #103's fourth build (34002520477, GLM) never wrote in 31 turns (46 Reads, 1925 s, $4.54,
 # `error_max_turns`): the run the deadline exists for, and 0.6 (turn 18 of 30) was set from
@@ -361,7 +367,8 @@ ROLE_PATH_SCOPE: dict[str, PathScope] = {
 # disciplined model doing a legitimate ~20-read task, ended four minutes in before its first
 # write. 0.8 of a 30-turn cap is turn 24: a run that only reads is still ended as turn 25
 # begins, seven turns short of the 31 the fourth build spent, and a one-read-per-turn model has
-# room to read a component test's neighbourhood before it drafts (D-063).
+# room to read a component test's neighbourhood before it drafts (D-063). The fraction stays
+# where D-063 put it; only its consequence changed (D-066).
 DRAFT_DEADLINE_FRACTION = 0.8
 
 
@@ -564,10 +571,11 @@ def path_scope(role: str) -> PathScope:
 
 
 def draft_deadline_turn(role: str, cap: int | None = None) -> int | None:
-    """The last turn by which a repository-mutation worker must have written something:
+    """The turn by which a repository-mutation worker is asked to have written something:
     `ceil(cap * DRAFT_DEADLINE_FRACTION)`, from the role's cap unless the request's own is
-    given. `None` for every other role: a drafting role writes artifacts outside the tree and
-    a judge writes nothing (D-057)."""
+    given. A run that reaches it with nothing written is recorded and runs on; the turn cap
+    ends the loop and the gates judge the draft (D-066). `None` for every other role: a
+    drafting role writes artifacts outside the tree and a judge writes nothing (D-057)."""
     if role not in ROLE_TOOLS:
         raise ValueError(f"no least-privilege worker policy for role {role!r}")
     if role not in REPO_MUTATION_ROLES:

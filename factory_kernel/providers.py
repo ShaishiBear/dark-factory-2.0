@@ -338,6 +338,13 @@ class ClaudeCliProvider:
             thinking_tokens=spent.thinking_tokens,
             effort=effort,
             cap_reached=envelope.cap_reached,
+            # What the draft watch saw in the process that returned: whether the turn past
+            # the deadline began with nothing written, and what it had read by the end. Data
+            # for the cost and latency analysis, never a verdict (D-066).
+            draft_deadline_missed=launched.draft_deadline_missed,
+            draft_deadline_turn=launched.deadline_turn if launched.draft_deadline_missed else None,
+            reads=launched.reads,
+            files_read=tuple(launched.files_read[:FILES_READ_CAP]),
         )
 
     def _launch(
@@ -373,9 +380,10 @@ class ClaudeCliProvider:
                 tee = stack.enter_context(path.open("a", encoding="utf-8", newline="\n"))
                 tee.write(f"--- attempt {attempt} role={request.role} started={_utc_now()} ---\n")
                 tee.flush()
-            # A repository-mutation worker must draft before its turns run out: the reader
-            # kills the process when a turn past the deadline begins with no write seen
-            # (`worker_policy.draft_deadline_turn`, D-057). Every other role has no deadline.
+            # A repository-mutation worker is steered to draft before its turns run out:
+            # the reader notes a turn past the deadline that begins with no write seen
+            # (`worker_policy.draft_deadline_turn`, D-057) and the run carries the note. It
+            # is an observation, not a kill (D-066). Every other role has no deadline.
             deadline = (
                 draft_deadline_turn(request.role, request.max_turns)
                 if request.role in REPO_MUTATION_ROLES
@@ -407,27 +415,13 @@ class ClaudeCliProvider:
             "partial_output": run.tail(),
         }
         if run.draft_deadline_missed:
-            # Not transient and not retried: a worker that reads for eighteen turns without
-            # writing is not suffering the network, and a fresh process would read the same
-            # tree the same way. The refusal carries what it read so the prompt, not the
-            # retry budget, is what gets tuned (D-057).
-            files = list(run.files_read[:FILES_READ_CAP])
-            listed = ", ".join(files[:8]) + (", ..." if len(files) > 8 else "")
-            raise DraftDeadlineMissed(
-                f"agent worker role={request.role!r} wrote nothing by turn {run.deadline_turn} "
-                f"of {request.max_turns} (draft deadline, not retried): reads={run.reads} "
-                f"turns_seen={partial.num_turns} events_seen={run.events_seen} after "
-                f"{run.elapsed}s; files read: {listed or 'none'}",
-                telemetry={
-                    "subtype": DraftDeadlineMissed.REASON,
-                    "draft_deadline_missed": True,
-                    "draft_deadline_turn": run.deadline_turn,
-                    "reads": run.reads,
-                    "files_read": files,
-                    **observed,
-                },
-                envelope=partial,
-            )
+            # The deadline records; the turn cap decides (D-066). A process that had written
+            # nothing when the turn past its deadline began ran on to its cap or its wall, and
+            # every way out of it from here - the returned result, a timeout, a hang, an error
+            # envelope - carries what it had read, so a reading-only stage is measurable
+            # without the kill that used to end it mid-read (D-057's `no_draft_by_turn`
+            # refusal is retired).
+            observed.update(draft_deadline_telemetry(run))
         if run.hung:
             raise WorkerHungError(
                 f"agent worker hung role={request.role!r}: no event for {run.last_event_age}s "
@@ -574,9 +568,11 @@ class DraftWatch:
 
     Turns are distinct `assistant` message ids, exactly as `ResultEnvelope.from_events`
     counts them for a killed process, so `num_turns` in the record and the deadline agree.
-    `observe` returns True the moment a turn past `deadline_turn` begins with no write
-    tool_use seen in any earlier turn: the reader then kills the process. With no deadline
-    it only counts (D-057).
+    `deadline_missed` is set the moment a turn past `deadline_turn` begins with no write
+    tool_use seen in any earlier turn, and stays set for the rest of the run. That is the
+    whole effect the deadline has: the reader keeps reading, the process runs on to its
+    turn cap or its wall, and the kernel's gates judge whatever draft it leaves (D-066).
+    With no deadline it only counts (D-057).
     """
 
     def __init__(self, deadline_turn: int | None = None) -> None:
@@ -585,14 +581,18 @@ class DraftWatch:
         self.reads = 0
         self.files_read: list[str] = []
         self.wrote_at_turn: int | None = None
+        # Sticky, because it is a fact about the run rather than a state to recover from: a
+        # worker that passed its deadline and then drafted at turn 26 still says it passed
+        # the deadline, and its stage is a normal `ok` one.
+        self.deadline_missed = False
 
     @property
     def turns(self) -> int:
         return len(self.turn_ids)
 
-    def observe(self, event: Mapping[str, Any], *, index: int) -> bool:
+    def observe(self, event: Mapping[str, Any], *, index: int) -> None:
         if event.get("type") != "assistant":
-            return False
+            return
         message = event.get("message") if isinstance(event.get("message"), Mapping) else {}
         key = _optional_str(message.get("id")) or f"event-{index}"
         if key not in self.turn_ids:
@@ -602,7 +602,7 @@ class DraftWatch:
                 and self.wrote_at_turn is None
                 and self.turns > self.deadline_turn
             ):
-                return True
+                self.deadline_missed = True
         content = message.get("content") if isinstance(message.get("content"), list) else []
         for block in content:
             if not isinstance(block, Mapping) or block.get("type") != "tool_use":
@@ -617,7 +617,6 @@ class DraftWatch:
                 path = _optional_str(params.get("file_path"))
                 if path is not None:
                     self.files_read.append(path)
-        return False
 
 
 def _sleep(seconds: float) -> None:
@@ -649,8 +648,9 @@ class CliRun:
     timed_out: bool = False
     hung: bool = False
     last_event_age: float = 0.0
-    # What the draft watch saw: the process was killed because a turn past `deadline_turn`
-    # began with nothing written, how many `Read` calls it made and which paths (D-057).
+    # What the draft watch saw: a turn past `deadline_turn` began with nothing written
+    # (recorded, never a reason to end the process, D-066), how many `Read` calls the run
+    # made and which paths (D-057).
     draft_deadline_missed: bool = False
     deadline_turn: int | None = None
     reads: int = 0
@@ -775,9 +775,10 @@ def _stream_cli(
     parsed, so the file holds exactly what the process had printed at the moment it was
     killed (D-055).
 
-    A third clock counts turns: `watch` sees every parsed event and, for a mutation role,
-    says when a turn past the draft deadline has begun with nothing written; the process is
-    killed and the run says so (`draft_deadline_missed`, D-057).
+    A third clock counts turns, and only counts: `watch` sees every parsed event and, for a
+    mutation role, notes when a turn past the draft deadline has begun with nothing written.
+    The run says so (`draft_deadline_missed`, D-057) and runs on; the turn cap ends the loop
+    and the kernel's gates judge the draft (D-066).
     """
     started = time.monotonic()
     proc = subprocess.Popen(
@@ -808,7 +809,7 @@ def _stream_cli(
     events: list[dict[str, Any]] = []
     open_streams = 2
     last_event = started
-    timed_out = hung = draft_missed = False
+    timed_out = hung = False
     while open_streams:
         now = time.monotonic()
         wall_left = wall_seconds - (now - started)
@@ -837,11 +838,13 @@ def _stream_cli(
         if event is not None:
             events.append(event)
             last_event = time.monotonic()
-            if watch is not None and watch.observe(event, index=len(events) - 1):
-                draft_missed = True
-                break
+            if watch is not None:
+                watch.observe(event, index=len(events) - 1)
+    # The deadline is read off the watch after the loop, never acted on inside it: nothing
+    # about it ends the process (D-066).
+    draft_missed = watch.deadline_missed if watch is not None else False
     returncode: int | None = None
-    if timed_out or hung or draft_missed:
+    if timed_out or hung:
         _kill(proc)
     else:
         # Both pipes closed. A process that closed them and then lingers is held to the
@@ -867,6 +870,22 @@ def _stream_cli(
         files_read=tuple(watch.files_read) if watch is not None else (),
         wrote_at_turn=watch.wrote_at_turn if watch is not None else None,
     )
+
+
+def draft_deadline_telemetry(run: CliRun) -> dict[str, Any]:
+    """The draft watch's observation, for a stage record: the deadline the run passed with
+    nothing written, how many `Read` calls it had made and which paths (capped at
+    `FILES_READ_CAP`). Empty for a run that drafted in time, and for every role without a
+    deadline. The fields are exactly the ones D-057's refusal carried; only their meaning
+    changed, from a verdict to a signal read beside cost and latency (D-066)."""
+    if not run.draft_deadline_missed:
+        return {}
+    return {
+        "draft_deadline_missed": True,
+        "draft_deadline_turn": run.deadline_turn,
+        "reads": run.reads,
+        "files_read": list(run.files_read[:FILES_READ_CAP]),
+    }
 
 
 def _kill(proc: subprocess.Popen[str]) -> None:
@@ -979,15 +998,6 @@ class ProviderStageError(RuntimeError):
         # its events showed when it was killed); the retry loop sums them into the stage's
         # telemetry with every earlier attempt's (D-054).
         self.envelope = envelope
-
-
-class DraftDeadlineMissed(ProviderStageError):
-    """A repository-mutation worker killed because a turn past its draft deadline began with
-    no Write/Edit tool_use seen: refused as `no_draft_by_turn`, terminal, never retried. The
-    telemetry carries `draft_deadline_missed`, `draft_deadline_turn`, `reads` and the paths
-    read (capped at FILES_READ_CAP) beside what a killed process always carries (D-057)."""
-
-    REASON = "no_draft_by_turn"
 
 
 class _Spent:

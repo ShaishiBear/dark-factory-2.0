@@ -23,7 +23,7 @@ from .canonical import canonical_bytes
 from .config import KernelConfig
 from .credential_env import scoped_environment
 from .github_cli import GitHubClient
-from .providers import ClaudeCliProvider, DraftDeadlineMissed, prompt_text
+from .providers import ClaudeCliProvider, prompt_text
 from .independence import (
     authority_inputs,
     build_certificate,
@@ -115,8 +115,11 @@ def stage_line(row: Mapping[str, Any]) -> str:
     a timed-out or hung stage still says what it had shown by then (D-054). `thinking` is the
     thinking those events showed, in the CLI's estimate, and `effort` the level the CLI was
     asked for (D-055).
-    `draft_deadline_missed` marks a mutation worker killed for writing nothing by its draft
-    deadline, with the `Read` calls it made by then (D-057). `cap_reached` marks a mutation
+    `draft_deadline_missed` marks a mutation worker that had written nothing when the turn
+    past its draft deadline began, with the `Read` calls it had made by then (D-057). It is a
+    signal, not a verdict: the stage ran on to its turn cap or its wall and its `outcome` says
+    how it ended, so the field is read beside cost and latency, never as a refusal (D-066).
+    `cap_reached` marks a mutation
     worker whose loop the turn cap ended with a draft on disk: `outcome=ok` there says the
     worker returned, and the gate rows that follow say whether the draft was accepted
     (D-065). `stage_run=N` (after the name,
@@ -158,6 +161,25 @@ def stage_line(row: Mapping[str, Any]) -> str:
     if row.get("model"):
         fields.append(f"model={row['model']}")
     return STAGE_LINE_PREFIX + " " + " ".join(fields)
+
+
+def draft_deadline_fields(result: Any) -> dict[str, Any]:
+    """The draft watch's observation of a stage that returned, for its record.
+
+    Empty unless the worker had written nothing when the turn past its draft deadline began,
+    so a stage that drafted in time records no deadline fields at all and a stage that did
+    not carries the same four the provider's refusal used to carry before D-066 retired it:
+    `draft_deadline_missed`, `draft_deadline_turn`, `reads` and the paths read. Nothing hangs
+    on them; they are what the cost and latency of a reading-heavy stage is read from.
+    """
+    if not getattr(result, "draft_deadline_missed", False):
+        return {}
+    return {
+        "draft_deadline_missed": True,
+        "draft_deadline_turn": getattr(result, "draft_deadline_turn", None),
+        "reads": getattr(result, "reads", None),
+        "files_read": list(getattr(result, "files_read", ()) or ()),
+    }
 
 
 def over_budget(role: str, wall_seconds: float) -> bool:
@@ -750,11 +772,12 @@ class KernelRuntime:
     @classmethod
     def _failure_evidence(cls, paths: RunPaths, exc: BaseException) -> str:
         """Everything the needs-human comment quotes beside the reason: a refused proof
-        gate's record (D-056), a draft-deadline refusal's reads (D-057) and the mutation
-        stages of this run that returned at their turn cap (D-065)."""
+        gate's record (D-056), the reads of a stage that passed its draft deadline with
+        nothing written (D-057, D-066) and the mutation stages of this run that returned at
+        their turn cap (D-065)."""
         return (
             cls._proof_failure_evidence(paths, exc)
-            + cls._draft_deadline_evidence(exc)
+            + cls._draft_deadline_evidence(paths)
             + cls._cap_reached_evidence(paths)
         )
 
@@ -790,28 +813,40 @@ class KernelRuntime:
         )[:PROOF_FAILURE_COMMENT_CHARS]
 
     @staticmethod
-    def _draft_deadline_evidence(exc: BaseException) -> str:
-        """What a mutation worker killed at its draft deadline had read, for the comment.
+    def _draft_deadline_evidence(paths: RunPaths) -> str:
+        """What a stage of this run that passed its draft deadline had read, for the comment.
 
-        The provider's refusal carries `draft_deadline_missed`, `draft_deadline_turn`,
-        `reads` and the paths read (capped at FILES_READ_CAP); the comment names them so
-        the next prompt change is made from what the worker actually did rather than from
-        its cost line. Any other failure adds nothing (D-057).
+        The deadline records; it no longer ends a stage (D-066). A stage whose record says
+        `draft_deadline_missed` had written nothing when the turn past
+        `ceil(cap x DRAFT_DEADLINE_FRACTION)` began, and the comment names the deadline, the
+        `Read` calls and the paths (capped at FILES_READ_CAP) so the next prompt change is
+        made from what the worker actually did rather than from its cost line. Read from the
+        stage records (`agent-<role>[.N].json`, D-050), where the provider's observation
+        lands, like the cap evidence beside it; a run with no such stage adds nothing (D-057).
         """
-        telemetry = getattr(exc, "telemetry", None)
-        if not isinstance(telemetry, Mapping) or not telemetry.get("draft_deadline_missed"):
-            return ""
-        files = telemetry.get("files_read")
-        listed = [scrub(str(f)) for f in files] if isinstance(files, list) else []
-        body = (
-            f"\n\nDraft deadline (`{DraftDeadlineMissed.REASON}`): the worker made "
-            f"{telemetry.get('reads')} Read call(s) and no Write/Edit call by turn "
-            f"{telemetry.get('draft_deadline_turn')} (turns seen: {telemetry.get('num_turns')}), "
-            "so the kernel ended the stage; this is not retried."
-        )
-        if listed:
-            body += f"\n\nFiles read (first {len(listed)}):\n```\n" + "\n".join(listed) + "\n```"
-        return body[:PROOF_FAILURE_COMMENT_CHARS]
+        blocks: list[str] = []
+        for record in sorted(paths.transcripts.glob("agent-*.json")):
+            try:
+                data = json.loads(record.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, Mapping) or not data.get("draft_deadline_missed"):
+                continue
+            files = data.get("files_read")
+            listed = [scrub(str(f)) for f in files] if isinstance(files, list) else []
+            block = (
+                "\n\nDraft deadline passed (`draft_deadline_missed=true`) in "
+                f"`{scrub(str(data.get('role')))}` ({record.stem}): the worker made "
+                f"{data.get('reads')} Read call(s) and no Write/Edit call by turn "
+                f"{data.get('draft_deadline_turn')} (turns seen: {data.get('num_turns')}). "
+                "The deadline is recorded, not enforced: the stage ran on to its turn cap."
+            )
+            if listed:
+                block += (
+                    f"\n\nFiles read (first {len(listed)}):\n```\n" + "\n".join(listed) + "\n```"
+                )
+            blocks.append(block)
+        return "".join(blocks)[:PROOF_FAILURE_COMMENT_CHARS]
 
     @staticmethod
     def _proof_failure_evidence(paths: RunPaths, exc: BaseException) -> str:
@@ -2363,6 +2398,9 @@ class KernelRuntime:
             # The turn cap ended a mutation worker's loop and the provider returned its
             # draft for the gates; `outcome` says only that the worker returned (D-065).
             "cap_reached": bool(getattr(result, "cap_reached", False)),
+            # What the draft watch saw, for a stage that returned: absent unless the worker
+            # had written nothing when the turn past its deadline began (D-066).
+            **draft_deadline_fields(result),
         }
         (paths.transcripts / f"{record}.json").write_text(
             json.dumps(telemetry, sort_keys=True, indent=2, default=str) + "\n", encoding="utf-8"
@@ -2376,6 +2414,8 @@ class KernelRuntime:
             record=record, stage_run=stage_run,
             over_budget=telemetry["over_budget"] or None,
             cap_reached=telemetry["cap_reached"] or None,
+            draft_deadline_missed=telemetry.get("draft_deadline_missed") or None,
+            reads=telemetry.get("reads") if telemetry.get("draft_deadline_missed") else None,
             thinking_tokens=telemetry["thinking_tokens"], effort=telemetry["effort"],
         )
 
