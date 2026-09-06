@@ -303,9 +303,11 @@ class StageRecordTests(unittest.TestCase):
 class ScriptTests(unittest.TestCase):
     def test_the_checked_in_policy_lists_the_worker_and_architecture_models(self):
         raw = json.loads(KERNEL_JSON.read_text(encoding="utf-8"))["provider"]
-        self.assertEqual(
-            models_script.configured_models(KERNEL_JSON), [raw["model"], raw["architecture_model"]]
-        )
+        expected = [raw["model"], raw["architecture_model"]]
+        for slug in raw.get("model_overrides", {}).values():
+            if slug not in expected:
+                expected.append(slug)
+        self.assertEqual(models_script.configured_models(KERNEL_JSON), expected)
 
     def test_every_override_value_is_listed_once_after_the_two(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -336,9 +338,14 @@ class ScriptTests(unittest.TestCase):
 
     def test_no_architecture_model_lists_the_worker_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _policy(tmp, lambda p: p.update(model="w", architecture_model=""))
+            path = _policy(
+                tmp, lambda p: p.update(model="w", architecture_model="", model_overrides={})
+            )
             self.assertEqual(models_script.configured_models(path), ["w"])
-            path = _policy(tmp, lambda p: (p.update(model="w"), p.pop("architecture_model")))
+            path = _policy(
+                tmp,
+                lambda p: (p.update(model="w", model_overrides={}), p.pop("architecture_model")),
+            )
             self.assertEqual(models_script.configured_models(path), ["w"])
 
     def test_a_table_the_kernel_would_refuse_refuses_the_list(self):
