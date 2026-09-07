@@ -277,6 +277,25 @@ class RealCatalogueTests(unittest.TestCase):
     def test_every_detector_the_catalogue_names_is_in_the_suite(self):
         self.assertEqual(anchors.check_named_detectors(anchors._factory_runner()), [])
 
+    def test_the_copy_set_carries_every_manifest_the_runner_requires(self):
+        """A copy that cannot load the runner refuses the rung instead of running it.
+
+        `load_defects()` requires all eight manifests. Run 34125312694 built copies without
+        them, so every test that asked the runner a question died with `required factory
+        mutation manifest missing`, the baseline went red, and the whole factory family was
+        REFUSED rather than run -- 428 defects silently not evaluated (D-081).
+
+        Checked as a static property of the copy set rather than by injection: a copy is built
+        before its defect is injected, so removing an entry from the copy's own `COPY_FILES`
+        cannot remove a file that copy already has. The failure lands on the NEXT build, which
+        nothing inside this copy can observe.
+        """
+        runner = anchors._factory_runner()
+        copyset = set(runner.COPY_FILES)
+        for path in runner.DEFECT_FILES:
+            with self.subTest(manifest=path.name):
+                self.assertIn(f"harness/factory_mutations/{path.name}", copyset)
+
 
 class ApplicationFamilyTests(unittest.TestCase):
     """The application runner mutates the live tree and requires only PRESENCE."""

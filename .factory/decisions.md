@@ -4103,3 +4103,46 @@ blinded judgement to reach the same conclusion.
 `dispatcher-asks-the-budget-without-a-head`, each verified caught by injection into a real
 `build_copy`. Both express the same defect from opposite ends, which is the point: the property
 is that the askers agree, not that any one of them is right.
+
+## D-081 · A copy must be able to read the catalogue, and a non-zero exit is not a catch
+
+**428 defects were not evaluated, and the run said so in one line.** Validation run 34125312694
+of PR #134, the first to get past the currency check (`currency seconds=0.442 outcome=ok`) with
+all five judges green and the application family at 9 of 9:
+
+```
+FACTORY_MUTATIONS_REFUSED focused baseline is red
+RuntimeError: required factory mutation manifest missing: defects.json
+```
+
+The eight defect manifests were never in `COPY_FILES`. Nothing had needed them there, because
+until D-078 no test inside a copy ever asked the runner a question. D-078's
+`test_every_detector_the_catalogue_names_is_in_the_suite` does exactly that, and in a copy
+`load_defects()` raised. The baseline went red, and a red baseline makes the family REFUSE
+rather than run: not one defect was injected.
+
+The manifests are data — never injected, never mutated — and they are now copied with the runner
+that requires them.
+
+**The second defect is in how the first was verified.** Every "CAUGHT" recorded for D-078 in this
+repository was a `RuntimeError`, not a detector. The verification script asked one question —
+"did the detector exit non-zero after injection?" — and a crash answers yes. The family itself
+has never made that mistake: it establishes a GREEN baseline first and only then injects, which
+is the entire reason the baseline exists.
+
+Local verification now does the same. Every `TEST_FILES` entry runs in a clean `build_copy`
+first, the run stops if any is red, and only then are the injections evaluated. Re-run under that
+protocol: **baseline green on 79 files, 23 of 23 mutations caught** — including the four D-078
+re-armed, which had been "verified" by crash.
+
+**A property some defects cannot express.** `copies-cannot-read-the-catalogue` mutates
+`COPY_FILES` itself, and a copy is built *before* its defect is injected, so removing an entry
+from the copy's own `COPY_FILES` cannot remove a file that copy already holds. The failure lands
+on the NEXT build, which nothing inside the copy can observe. The detector is therefore a static
+assertion about the copy set — every manifest in `DEFECT_FILES` appears in `COPY_FILES` — which
+is checkable from inside a copy and goes red exactly when the entry is removed.
+
+**Detection.** `tests/factory/test_factory_mutation_anchors.py` gains
+`test_the_copy_set_carries_every_manifest_the_runner_requires`, one subtest per manifest.
+Mutation `copies-cannot-read-the-catalogue`, verified under the baseline-then-injection protocol
+that this record exists to establish.
