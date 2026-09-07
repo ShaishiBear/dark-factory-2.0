@@ -1930,8 +1930,9 @@ class KernelRuntime:
         test-author commit, so RED is replayed at the rebased commit and re-issued with that
         commit as `test_commit`, never re-bound by editing), GREEN, impact, drift, conformance,
         the quick gate, the attached proof and the provenance note. Validation then runs in full
-        from the new head and reuses nothing. One re-head per PR; a second stale refusal
-        escalates (D-045).
+        from the new head and reuses nothing. The budget counts base moves, not pull requests: a
+        second re-head is allowed only when the head is exactly the one the last re-head produced
+        (D-045, D-077).
         """
         self.check_stop()
         info = self.github.pr(pr_number, holdout_safe=True)
@@ -1941,11 +1942,15 @@ class KernelRuntime:
         if self.config.labels["needs_fix"] not in labels:
             raise NeedsHuman(f"PR #{pr_number} is not marked {self.config.labels['needs_fix']}")
         comments = self.github.pr_comments(pr_number)
-        if not rehead_eligible(comments):
-            raise NeedsHuman(
-                f"PR #{pr_number} is not a first stale-base refusal; re-head is not a repair"
-            )
         head = str(info.get("headRefOid") or "")
+        # The SAME question the dispatcher asked, asked again here with the same head. This
+        # guard used to apply the pre-D-077 rule while the dispatcher applied the new one, so
+        # the dispatcher chose a re-head and this refused it: run 34122778543, `PR #134 is not
+        # a first stale-base refusal`, with no re-head and no way forward (D-080).
+        if not rehead_eligible(comments, head=head):
+            raise NeedsHuman(
+                f"PR #{pr_number} is not an eligible stale-base refusal; re-head is not a repair"
+            )
         branch = str(info.get("headRefName") or "")
         if not re.fullmatch(r"[0-9a-f]{40,64}", head) or not branch or branch.startswith("-"):
             raise NeedsHuman("PR lacks exact Git object identities")

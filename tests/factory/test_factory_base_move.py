@@ -207,6 +207,51 @@ class OrderTests(unittest.TestCase):
         self.assertIn('head=str(pr.get("headRefOid") or "")', self.runtime)
 
 
+class OneBudgetTests(unittest.TestCase):
+    """Every asker of the re-head budget asks the same question, with a head (D-080).
+
+    The budget has three askers in the kernel: the dispatcher deciding what to do next, the
+    re-head itself guarding its own precondition, and the refusal path deciding whether to
+    escalate to a human. `head=None` falls back to the strict pre-D-077 rule -- correct as a
+    default, because a budget that cannot check its own condition must refuse -- which means an
+    asker that simply forgets the argument silently applies the OLD rule while its neighbours
+    apply the new one.
+
+    That is not hypothetical. Run 34122778543: the dispatcher chose `rehead-pr` under the new
+    rule and `rehead_pr` refused it under the old one -- `PR #134 is not a first stale-base
+    refusal` -- leaving the pull request with no way forward at all.
+    """
+
+    def setUp(self):
+        self.source = (ROOT / "factory_kernel" / "runtime.py").read_text(encoding="utf-8")
+        self.tree = ast.parse(self.source)
+
+    def budget_calls(self) -> list[ast.Call]:
+        names = {"rehead_eligible", "rehead_budget_allows"}
+        return [
+            node for node in ast.walk(self.tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name) and node.func.id in names
+        ]
+
+    def test_the_kernel_asks_the_budget_from_every_place_that_needs_it(self):
+        # Dispatcher, re-head guard, refusal path. If this drops, one of them stopped asking.
+        self.assertGreaterEqual(len(self.budget_calls()), 3)
+
+    def test_every_asker_passes_a_head(self):
+        for call in self.budget_calls():
+            with self.subTest(line=call.lineno):
+                self.assertTrue(
+                    any(kw.arg == "head" for kw in call.keywords),
+                    f"factory_kernel/runtime.py:{call.lineno} asks the re-head budget without a "
+                    f"head, so it silently applies the pre-D-077 rule while its neighbours do "
+                    f"not",
+                )
+
+    def test_the_reheads_own_guard_no_longer_claims_a_first_refusal(self):
+        self.assertNotIn("is not a first stale-base refusal", self.source)
+
+
 class RehearsedRunTests(unittest.TestCase):
     """The whole validate path, rehearsed: the check runs, and refusing it stops the run early."""
 

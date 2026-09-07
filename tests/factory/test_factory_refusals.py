@@ -362,19 +362,41 @@ class ReheadTests(unittest.TestCase):
         self.assertEqual(t.outcome, "NeedsHuman")
         self.assertIn("immutable file map", t.error)
 
-    def test_only_a_first_stale_base_refusal_is_reheaded(self):
+    def test_only_an_eligible_stale_base_refusal_is_reheaded(self):
         cases = {
             "not-stale": (refusal_marker("code_holdout"),),
-            "already-reheaded": (refusal_marker("stale_base"), rehead_marker(), refusal_marker("stale_base")),
+            # A re-head happened and the head has MOVED since (the marker records `4...`, the
+            # PR is at `1...`): the pull request itself changed, which is the loop the budget
+            # bounds and still refuses (D-077).
+            "changed-since-the-rehead": (
+                refusal_marker("stale_base"), rehead_marker(), refusal_marker("stale_base")),
             "no-refusal": (),
         }
         for name, comments in cases.items():
             with self.subTest(name):
                 t = rehearse(stale_pr_scenario(name, comments=comments))
                 self.assertEqual(t.outcome, "NeedsHuman")
-                self.assertIn("not a first stale-base refusal", t.error)
+                self.assertIn("not an eligible stale-base refusal", t.error)
                 self.assertEqual(t.execs("factory_provenance.py"), [])
                 self.assertFalse(t.happened("git:rebase"))
+
+    def test_a_second_base_move_on_unchanged_work_is_reheaded(self):
+        """The case D-077 exists for: main moved again and nothing else did.
+
+        The re-head marker records the head the PR is actually at, so the only thing that has
+        happened since is another maintainer merge. Before D-077 this needed a human to delete
+        the marker comment by hand; PR #134 met that wall three times in nine hours.
+        """
+        marker = R.render_rehead_marker({
+            "version": "1.0", "pr": PR_NUMBER, "old_head": "0" * 40, "new_head": HEAD,
+            "old_base": "9" * 40, "new_base": BASE,
+        })
+        t = rehearse(stale_pr_scenario(
+            "second-base-move",
+            comments=(refusal_marker("stale_base"), marker, refusal_marker("stale_base")),
+        ))
+        self.assertNotEqual(t.outcome, "NeedsHuman", t.error)
+        self.assertTrue(t.happened("git:rebase"))
 
     def test_a_pr_without_the_needs_fix_label_is_refused(self):
         t = rehearse(stale_pr_scenario("wrong-label", labels=("factory:needs-review",)))

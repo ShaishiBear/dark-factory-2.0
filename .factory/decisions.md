@@ -4058,3 +4058,48 @@ The second of those escaped the first version of its detector, which asserted th
 contained `raise SystemExit(proc.returncode)`: the mutation left the line and changed the `if`
 above it. A string that is still present is not a behaviour that still happens. It is now a
 behavioural test with a stubbed subprocess, and the escape is why.
+
+## D-080 · One budget, three askers, and only two of them were changed, because a default that fails closed also hides a caller that forgot
+
+**The pull request had no way forward.** Run 34122778543, dispatched immediately after the
+currency check finally reached its program (D-079) and correctly refused PR #134 as a stale base:
+
+```
+KERNEL_DISPATCH kind=rehead-pr number=134
+factory_kernel.runtime.NeedsHuman: PR #134 is not a first stale-base refusal;
+  re-head is not a repair
+```
+
+The dispatcher chose a re-head under the D-077 rule. `rehead_pr` then refused that same re-head
+under the pre-D-077 rule. The two disagreed about the same question, about the same pull request,
+in the same process, one function call apart.
+
+**Why D-077 missed it.** `rehead_eligible(bodies, *, head=None)` treats a missing head as the old
+strict rule, deliberately: a budget that cannot check its own condition must refuse rather than
+assume. That default is right, and it is also why this was silent. An asker that simply does not
+pass `head` does not fail, does not warn, and does not look wrong at the call site — it quietly
+applies the previous policy. D-077 updated the dispatcher and the refusal path, and both are in
+`_record_validation_failure`'s neighbourhood; `rehead_pr`'s own guard is 400 lines away and was
+not.
+
+The guard now asks with the head, and its message no longer says "first": the budget has not
+counted pull requests since D-077 and a refusal that describes a rule nobody applies is the same
+defect one layer up.
+
+**The check is mechanical, so it should be checked mechanically.** Every call of
+`rehead_eligible` or `rehead_budget_allows` in the kernel must pass `head=`. That is an AST
+question with a yes/no answer, it covers askers that do not exist yet, and it would have caught
+this before the run. `tests/factory/test_factory_base_move.py` grows to 39 tests: the kernel asks
+the budget from at least three places, every one of them passes a head, and the re-head's guard
+no longer claims a first refusal.
+
+**What this run also proved.** The two changes it was blocking both work. The currency check
+refused in **0.539 s** at the `currency` stage, before `provenance-fetch` and before any judge,
+and its refusal classified as `stale_base` with the authority `base moved under the PR
+(model-free re-head)`. The five preceding runs of the same PR each spent 869 s and about $1.64 of
+blinded judgement to reach the same conclusion.
+
+**Detection.** Two mutations, `rehead-guard-asks-the-budget-without-a-head` and
+`dispatcher-asks-the-budget-without-a-head`, each verified caught by injection into a real
+`build_copy`. Both express the same defect from opposite ends, which is the point: the property
+is that the askers agree, not that any one of them is right.
