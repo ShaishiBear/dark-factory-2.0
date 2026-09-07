@@ -63,7 +63,6 @@ Expected repository permissions:
 - **Contents: Read & write** — push/update autonomous branches.
 - **Pull requests: Read & write** — create/update PRs and perform the existing exact-head merge operation where allowed.
 - **Issues: Read & write** — labels/comments/issues used by the factory control plane.
-- **Actions: Read** — only where the worker must inspect/download previous run artifacts for resume/recovery.
 - **Metadata: Read** — implicit/basic repository metadata.
 
 Do not grant unless a concrete implementation proves it is required:
@@ -77,16 +76,18 @@ Do not grant unless a concrete implementation proves it is required:
 - Actions write;
 - Workflows write.
 
+Observation-only Actions operations such as reading/downloading prior workflow artifacts should continue using the ordinary `GITHUB_TOKEN` where sufficient rather than broadening the App installation permissions.
+
 The autonomous product path must remain unable to modify protected workflow/trust-root surfaces under the normal factory capability policy even though the GitHub identity can push ordinary branch content.
 
 ## Credential storage
 
-Recommended repository configuration:
+Repository configuration:
 
-- repository variable: `DARK_FACTORY_APP_ID`
+- repository variable: `DARK_FACTORY_APP_CLIENT_ID`
 - repository secret: `DARK_FACTORY_APP_PRIVATE_KEY`
 
-Generate an installation token at runtime using the pinned `actions/create-github-app-token` action or an equivalently narrow trusted program.
+Generate an installation token at runtime using the reviewed/pinned `actions/create-github-app-token` action. The currently selected action revision uses `client-id`; its `app-id` input is deprecated, so the canonical repository variable is the **Client ID**, not the numeric App ID.
 
 Never commit the private key.
 
@@ -172,7 +173,7 @@ The App itself is not proof. Exact revision identity, required authorities, merg
 ## Immediate sequencing
 
 1. Owner creates and installs the dedicated GitHub App on `ShaishiBear/dark-factory-2.0`.
-2. Owner stores App ID/private key as repository variable/secret.
+2. Owner stores Client ID/private key as repository variable/secret.
 3. Claude creates one bounded maintainer PR implementing token generation and capability-scoped use.
 4. Run the cheap event-shape proof above.
 5. Only when both required checks are proven unattended on an App-created PR should #134 receive another expensive validation.
