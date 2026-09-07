@@ -106,6 +106,9 @@ COPY_FILES = (
     # The detector four re-head defects name. It existed, and was not here, so those
     # defects escaped every run of the family that was supposed to catch them (D-078).
     "tests/factory/test_factory_rehead_guard_files.py",
+    # The wrapper must accept every call the kernel makes of the program it wraps; the
+    # routing that makes that necessary lives one class above the rehearsal (D-079).
+    "tests/factory/test_factory_spine_routing.py",
     # This runner, in the copy: a mutation of its own concurrency or its own accounting has to
     # be injectable somewhere its detector can read it. The copy is never executed as a runner.
     "harness/factory_mutations/run.py",
