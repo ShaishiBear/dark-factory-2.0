@@ -161,6 +161,9 @@ class CredentialScopeTests(unittest.TestCase):
             "PATH": "/usr/bin",
             "NORMAL": "safe",
             "GH_TOKEN": "github-write",
+            # The autonomous identity. It is not a GitHub credential in the `scope="github"`
+            # sense: no observation scope may carry it, only `github-mutation`.
+            "DARK_FACTORY_APP_TOKEN": "app-install-token",
             "DATABASE_URL": "validation-db",
             "OPENROUTER_API_KEY": "validation-llm",
             "ANTHROPIC_API_KEY": "model-auth",
@@ -214,14 +217,33 @@ class CredentialScopeTests(unittest.TestCase):
                 client.push_branch("factory/issue-7")
         argv = run.call_args.args[0]
         env = run.call_args.kwargs["env"]
-        self.assertNotIn("github-write", " ".join(argv))
+        self.assertNotIn("app-install-token", " ".join(argv))
         self.assertNotIn("GH_TOKEN", env)
+        self.assertNotIn("DARK_FACTORY_APP_TOKEN", env)
         self.assertNotIn("DATABASE_URL", env)
         self.assertNotIn("OPENROUTER_API_KEY", env)
         self.assertNotIn("ANTHROPIC_API_KEY", env)
-        self.assertEqual(env["FACTORY_GIT_TOKEN"], "github-write")
+        # The push is an autonomous branch mutation, so it spends the App installation token and
+        # not the Actions token: a `synchronize` GITHUB_TOKEN caused delivers no event, and so
+        # re-runs neither required authority on the new head.
+        self.assertEqual(env["FACTORY_GIT_TOKEN"], "app-install-token")
+        self.assertNotEqual(env["FACTORY_GIT_TOKEN"], "github-write")
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
         self.assertIn("GIT_ASKPASS", env)
+
+    @patch("factory_kernel.github_cli.subprocess.run")
+    def test_a_push_refuses_rather_than_fall_back_to_the_actions_token(self, run):
+        """The whole defect in one assertion: with only GITHUB_TOKEN present the push must not
+        happen at all. A branch pushed by Actions produces a PR no required authority runs on."""
+        run.return_value = Mock(returncode=0, stdout="", stderr="")
+        source = {k: v for k, v in self.source().items() if k != "DARK_FACTORY_APP_TOKEN"}
+        with tempfile.TemporaryDirectory() as tmp:
+            client = GitHubClient("owner/repo", cwd=tmp)
+            with patch.dict(os.environ, source, clear=True):
+                with self.assertRaises(RuntimeError) as caught:
+                    client.push_branch("factory/issue-7")
+        self.assertIn("DARK_FACTORY_APP_TOKEN", str(caught.exception))
+        run.assert_not_called()
 
 
 class GitHubWorkerWorkflowTests(unittest.TestCase):

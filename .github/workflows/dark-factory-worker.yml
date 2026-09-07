@@ -79,6 +79,27 @@ jobs:
           --health-retries 5
 
     steps:
+      # The autonomous identity (docs/DARK_FACTORY_2_AUTONOMOUS_GITHUB_IDENTITY.md). GitHub
+      # creates no workflow run for an event GITHUB_TOKEN caused, so a product PR opened with it
+      # got no `pull_request_target` run at all and a `pull_request` run held for approval. Both
+      # are required contexts on `main` and `bypass_actors` is empty, so no `factory/*` PR could
+      # merge -- and across 89 merged PRs, none ever has. The repository had already met the rule
+      # narrowly: `test_no_dead_closed_event_job` records that a GITHUB_TOKEN-caused close "starts
+      # no workflow run (none existed for #59, #60, #61)". It governs `opened` and `synchronize`
+      # too.
+      #
+      # This token is short-lived (one hour), installation-scoped, and reaches only the two steps
+      # that run the kernel. It does not replace GITHUB_TOKEN: observation keeps using that.
+      - name: Mint the autonomous identity's installation token
+        id: factory_identity
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          # `client-id`, not the deprecated `app-id`: at this pin the action marks `app-id` with
+          # "Use 'client-id' instead". The token is revoked when the job ends (skip-token-revoke
+          # defaults false), so it cannot outlive the run that minted it.
+          client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+
       - name: Checkout current main without persisted credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -400,6 +421,7 @@ jobs:
         if: inputs.resume_pr != '' && inputs.resume_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.factory_identity.outputs.token }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
@@ -409,7 +431,12 @@ jobs:
       - name: Dispatch exactly one factory action
         if: inputs.resume_pr == '' && inputs.resume_run_id == ''
         env:
+          # Observation stays on the Actions token; only the three autonomous mutations spend the
+          # App token, and factory_kernel/credential_env.py is what keeps them apart. The model
+          # subprocess receives neither: ClaudeCliProvider._worker_env is an allowlist and no
+          # GitHub credential is on it.
           GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.factory_identity.outputs.token }}
           # ClaudeCliProvider._worker_env forwards ANTHROPIC_* to the model subprocess, so the
           # CLI picks up the job-level ANTHROPIC_BASE_URL and this token without any provider-code
           # change. OPENROUTER_API_KEY is kept separately because application validation uses it
