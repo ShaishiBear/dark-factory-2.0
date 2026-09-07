@@ -2090,6 +2090,20 @@
       "find": "        env=scoped_environment(scope=\"github\"),\n        capture_output=True,\n        text=True,\n        encoding=\"utf-8\",\n        errors=\"replace\",\n        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope=\"trust-root-currency\"),\n",
       "replace": "        env=scoped_environment(scope=\"github+validation\"),\n        capture_output=True,\n        text=True,\n        encoding=\"utf-8\",\n        errors=\"replace\",\n        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope=\"trust-root-currency\"),\n",
       "why": "Three git diffs and one GitHub read would run holding the validation database credentials they have no use for; caught by tests/factory/test_factory_spine_routing.py (the forwarded call runs with no more credentials than it needs)."
+    },
+    {
+      "id": "rehead-guard-asks-the-budget-without-a-head",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if not rehead_eligible(comments, head=head):\n",
+      "replace": "        if not rehead_eligible(comments):\n",
+      "why": "The re-head's own guard would apply the pre-D-077 rule while the dispatcher applies the new one, so the dispatcher chooses a re-head this refuses and the pull request has no way forward; caught by tests/factory/test_factory_base_move.py (every asker passes a head)."
+    },
+    {
+      "id": "dispatcher-asks-the-budget-without-a-head",
+      "file": "factory_kernel/runtime.py",
+      "find": "                self.github.pr_comments(number), head=str(pr.get(\"headRefOid\") or \"\")\n",
+      "replace": "                self.github.pr_comments(number)\n",
+      "why": "The dispatcher would never choose a second re-head, so a base that moved again under unchanged certified work would sit waiting for a human; caught by tests/factory/test_factory_base_move.py (every asker passes a head)."
     }
   ]
 }
