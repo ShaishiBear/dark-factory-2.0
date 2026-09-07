@@ -204,12 +204,19 @@ class LadderTests(unittest.TestCase):
         self.assertIn("timeout=MUTATIONS_TIMEOUT", code)
 
     def test_a_rung_close_to_its_deadline_says_so(self):
+        """The threshold is moved rather than the clock raced: a test that sleeps to just
+        inside a real deadline is a flaky gate on a loaded runner."""
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            rc, _ = self.ci.run("demo", [sys.executable, "-c", "import time; time.sleep(1.7)"],
-                                timeout=2)
-        self.assertEqual(rc, 0)
+        with mock.patch.object(self.ci, "SLOW_RUNG_FRACTION", 0.0), \
+                contextlib.redirect_stdout(out):
+            rc, _ = self.ci.run("demo", [sys.executable, "-c", "pass"], timeout=60)
+        self.assertEqual(rc, 0, "a slow rung is still a rung that ran")
         self.assertIn("RUNG_SLOW step=demo", out.getvalue())
+        self.assertIn("timeout=60", out.getvalue())
+
+    def test_the_slow_rung_threshold_is_the_records_fraction(self):
+        self.assertEqual(self.ci.SLOW_RUNG_FRACTION,
+                         float(mutation_budget.load()["warn_fraction"]))
 
     def test_a_fast_rung_is_quiet(self):
         out = io.StringIO()

@@ -3559,7 +3559,7 @@ ladder and once in the spine's independent re-observation, and only `harness/obs
 post-merge transcript parser now requires it from the ladder; measuring each family once, in the
 stage that owns it (the rule genesis already follows), would halve the rung again. And 391
 defects × a whole trust-root suite is a cost that grows with the catalogue and will need
-answering again. Pinned by `tests/factory/test_factory_mutation_budget.py` (40 tests: the
+answering again. Pinned by `tests/factory/test_factory_mutation_budget.py` (41 tests: the
 derivation, p100, the rounding, the provenance requirement, the warning threshold, the timing
 and closing line formats, the ladder's timeout and its partial output, the concurrent runner's
 completeness and cleanup, the fail-fast verdict, and the spine's derived deadline). Mutations
