@@ -100,6 +100,9 @@ COPY_FILES = (
     # mutation of the anchor check can be injected and caught like any other (D-076).
     "harness/mutation_anchors.py",
     "tests/factory/test_factory_mutation_anchors.py",
+    # A base that moved is noticed before anything is paid for, and recovered from without a
+    # maintainer deleting a marker by hand (D-077).
+    "tests/factory/test_factory_base_move.py",
     # This runner, in the copy: a mutation of its own concurrency or its own accounting has to
     # be injectable somewhere its detector can read it. The copy is never executed as a runner.
     "harness/factory_mutations/run.py",

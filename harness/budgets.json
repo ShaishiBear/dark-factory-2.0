@@ -263,6 +263,12 @@
       ],
       "unbudgeted_seconds": 910,
       "margin_source": "510 s is the p100 of the three answered preflight probes over nine worker runs (275-510 s, D-070); 400 s is projected for checkout, the four toolchain setups, the pinned CLI installs, the disposable validation database and the locked dependency installs, which the job caches."
+    },
+    "trust-root-currency": {
+      "what": "One `python scripts/factory_evidence.py --currency-only`: one `gh pr view`, one `git rev-parse` and two `git diff --name-only` over the trust-root paths. The three cheap questions the Evidence Bundle opens with, asked before a judge is paid.",
+      "applied_by": [
+        "factory_kernel/runtime.py -- the trust_root_currency stage of a validate action"
+      ]
     }
   },
   "measurements": [
@@ -442,6 +448,16 @@
       "total_seconds": 720,
       "source": "The quick gate's 780 s budget plus 300 s (the 200 s of setup, installs and the security guard, with headroom) is a 1080 s floor; 720 s is the recorded total whose derived budget matches it exactly, which is 18 minutes against the workflow's declared 20.",
       "note": "dark-factory-ci.yml's timeout-minutes: 20 already bounds this; it is recorded so that it stops bounding it loudly rather than silently."
+    },
+    {
+      "id": "trust-root-currency-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "trust-root-currency",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 60,
+      "source": "The work itself is measured: run 34112301646's evidence stage reached these same three checks and refused in 0.395 s, and the provenance-fetch scope shows one `gh` call on this runner at 0.36 s. What is not measured is the worst case of a single GitHub API call, which is why this is a projection and not a reading: 60 s is two orders of magnitude above the observed work, so the derived 120 s bounds a stalled API call rather than a slow diff.",
+      "note": "Replaces the literal `timeout=120` this stage was introduced with (D-077). Replace this projection with a p100 over the first ten runs that record the stage."
     }
   ],
   "_measured_components_2026_09_07": {

@@ -869,9 +869,9 @@
     {
       "id": "rehead-cap-removed",
       "file": "factory_kernel/refusal.py",
-      "find": "    return rehead_count(bodies) == 0\n",
+      "find": "    return str(reheads[-1].get(\"new_head\") or \"\") == head\n",
       "replace": "    return True\n",
-      "why": "A PR whose base keeps moving would be re-headed forever instead of escalating on the second stale refusal."
+      "why": "A pull request that changed after its re-head and failed again would be re-headed forever. The cap is no longer one per PR (D-077); what it refuses now is a second re-head of a head the last one did not produce."
     },
     {
       "id": "rehead-force-push-without-lease",
@@ -2013,6 +2013,48 @@
       "find": "    for outcome, marker in ((\"escaped\", \"FACTORY_MUTATIONS_ESCAPED\"),\n                            (\"not_injected\", \"FACTORY_MUTATIONS_UNINJECTED\")):\n        ids = [result[\"id\"] for result in results if result[\"outcome\"] == outcome]\n        if ids:\n            print(f\"{marker}={','.join(ids)}\", flush=True)\n",
       "replace": "",
       "why": "A failing family would again reach the refusal artifact as a count, because every consumer of this output keeps only its tail."
+    },
+    {
+      "id": "rehead-budget-assumes-a-head-it-was-not-given",
+      "file": "factory_kernel/refusal.py",
+      "find": "    if not head:\n        return False\n",
+      "replace": "    if not head:\n        return True\n",
+      "why": "A caller that cannot say what the head is would get a re-head anyway, so the budget's own condition would go unchecked rather than fail closed."
+    },
+    {
+      "id": "currency-check-runs-after-the-judges",
+      "file": "factory_kernel/runtime.py",
+      "find": "            stage = \"trust_root_currency\"\n            self._exec(\n                [\n                    \"python\", \"scripts/factory_evidence.py\",\n                    \"--pr\", str(pr_number), \"--currency-only\",\n                ],\n                cwd=worktree.path,\n                env=env,\n                credential_scope=\"github\",\n                # The `trust-root-currency` scope in harness/budgets.json, not a literal: this\n                # call bounds a ladder program, and a duration comes from the record (D-075).\n                timeout=ladder_budget.budget_seconds(\n                    ladder_budget.load(), scope=\"trust-root-currency\"),\n                transcript=paths.transcripts / \"currency.log\",\n            )\n\n",
+      "replace": "",
+      "why": "A base move would again cost five blinded judges and $1.64 before a 0.4 s git diff refused it (run 34112301646)."
+    },
+    {
+      "id": "currency-only-falls-through-to-the-bundle",
+      "file": "scripts/factory_evidence.py",
+      "find": "    if args.currency_only:\n        print(f\"EVIDENCE_CURRENCY_OK head={head} base={base}\")\n        return\n\n",
+      "replace": "",
+      "why": "The early check would go on to parse the attached blocks and run the whole ladder, so the cheap pre-check would cost what it was added to save."
+    },
+    {
+      "id": "currency-refusal-recorded-as-the-evidence-bundle",
+      "file": "factory_kernel/refusal.py",
+      "find": "            return \"trust_root_currency\" if stage == \"trust_root_currency\" else \"evidence_spine\"\n",
+      "replace": "            return \"evidence_spine\"\n",
+      "why": "A non-stale failure of the pre-check would be recorded as a refusal by the Evidence Bundle, which never ran."
+    },
+    {
+      "id": "stale-base-escalation-ignores-the-budget",
+      "file": "factory_kernel/runtime.py",
+      "find": "                if not rehead_budget_allows(self.github.pr_comments(pr_number), head=head):\n",
+      "replace": "                if False:\n",
+      "why": "A pull request that changed after its re-head and hit a stale base again would never be escalated, and the comment would promise a re-head the dispatch refuses."
+    },
+    {
+      "id": "rehearsal-conflates-the-two-evidence-calls",
+      "file": "harness/rehearsal.py",
+      "find": "        if tool == \"factory_evidence.py\" and \"--currency-only\" in argv:\n            phase = \"currency\"\n",
+      "replace": "",
+      "why": "One program is called twice in a validate with different failure modes. Conflating them aims every evidence scenario at whichever call runs first, so the Evidence Bundle's own scenarios would silently stop exercising the bundle."
     }
   ]
 }

@@ -619,10 +619,16 @@ def verify_proof(proof: dict, head: str, contract: dict, contract_hash: str) -> 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pr", required=True)
-    ap.add_argument("--verdict", required=True)
-    ap.add_argument("--architecture-verdict", required=True)
-    ap.add_argument("--output", required=True)
+    ap.add_argument("--verdict")
+    ap.add_argument("--architecture-verdict")
+    ap.add_argument("--output")
+    # The three cheap deterministic questions this program asks first, asked on their own. The
+    # kernel runs this before it pays for a judge; the full run below asks them again and is
+    # the authority. An extra refusal point can only refuse more, never authorise (D-077).
+    ap.add_argument("--currency-only", action="store_true")
     args = ap.parse_args()
+    if not args.currency_only and not (args.verdict and args.architecture_verdict and args.output):
+        die("--verdict, --architecture-verdict and --output are required without --currency-only")
 
     first = gh_json(args.pr)
     head, base, body = first["headRefOid"], first["baseRefOid"], first["body"] or ""
@@ -635,6 +641,10 @@ def main() -> None:
     drift = trust_root_drift(head)
     if drift:
         die("PR trust root is not current with origin/main; rebase required: " + ", ".join(drift))
+
+    if args.currency_only:
+        print(f"EVIDENCE_CURRENCY_OK head={head} base={base}")
+        return
 
     contract, contract_hash = extract(body, "contract")
     design, design_hash = extract(body, "design")

@@ -386,6 +386,13 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
         argv = resolve_trusted_program(ROOT, argv)
         tool = Path(argv[1]).name if len(argv) > 1 else argv[0]
         phase = argv[2] if tool == "merge_verify.py" and len(argv) > 2 else ""
+        # `factory_evidence.py` is now called twice in one validate: once early with
+        # `--currency-only` for the three cheap checks, once for the whole Evidence Bundle. They
+        # are separate steps with separate failure modes, so they get separate names, exactly as
+        # merge_verify's two phases do -- otherwise `fail="factory_evidence.py"` would hit the
+        # first call and a scenario meant for the bundle would refuse before it (D-077).
+        if tool == "factory_evidence.py" and "--currency-only" in argv:
+            phase = "currency"
         name = f"{tool}:{phase}" if phase else tool
         trace.record("exec", name, argv=tuple(argv), cwd=str(cwd))
         if fail == name:
@@ -410,6 +417,12 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
                                    if pack_checkpoints is not None
                                    else [{"acceptance_id": "AC-1"}],
                 }), encoding="utf-8")
+        if tool == "factory_evidence.py" and "--currency-only" in argv:
+            # The early trust-root currency check. Its three questions are about a real PR
+            # worktree against a real origin/main, neither of which a rehearsal has; the step is
+            # recorded so the ordering assertions can read it, and refusing it is what the
+            # `factory_evidence.py:currency` scenario is for.
+            return ""
         if tool == "factory_evidence.py":
             # Stand in for the evidence authority by running its real architecture-holdout rule.
             # Everything else that tool does is out of scope here, but this gate must not be
@@ -699,6 +712,17 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario("security-guard-fails", fail="factory_security.py"),
     Scenario("provenance-fetch-fails", fail="factory_provenance.py"),
     Scenario("evidence-bundle-fails", fail="factory_evidence.py"),
+    # The early trust-root currency check, refusing for its own reason and for a stale base.
+    # Both must stop the run before a single judge is paid, which is the whole point (D-077).
+    Scenario("trust-root-currency-fails", fail="factory_evidence.py:currency"),
+    Scenario(
+        "trust-root-currency-finds-a-stale-base",
+        fail="factory_evidence.py:currency",
+        fail_detail=(
+            "EVIDENCE_FAIL: PR trust root is not current with origin/main; "
+            "rebase required: harness/ci.py"
+        ),
+    ),
     Scenario("merge-authorization-fails", fail="merge_verify.py:pre"),
     Scenario("merge-verification-fails", fail="merge_verify.py:post"),
     Scenario("merge-verification-fails-and-github-is-down",

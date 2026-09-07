@@ -49,7 +49,7 @@ from .refusal import (
     ToolRefused,
     describe,
     refusal_record,
-    rehead_count,
+    rehead_budget_allows,
     rehead_eligible,
     render_refusal_marker,
     render_rehead_marker,
@@ -383,7 +383,11 @@ class KernelRuntime:
             key=lambda row: (str(row.get("updatedAt") or ""), int(row["number"])),
         ):
             number = int(pr["number"])
-            if rehead_eligible(self.github.pr_comments(number)):
+            # The head decides whether a second re-head is the same certified work meeting a
+            # base that moved again, or a pull request that has changed since (D-077).
+            if rehead_eligible(
+                self.github.pr_comments(number), head=str(pr.get("headRefOid") or "")
+            ):
                 return DispatchDecision(
                     "rehead-pr", number, "stale-base refusal; model-free re-head onto current main"
                 )
@@ -1759,10 +1763,36 @@ class KernelRuntime:
                             f"{pack_base}, current {base}; main moved under the PR"
                         ),
                     )
+            # Whether this PR's trust root is still current with main is a `git diff` away, and
+            # until now it was asked only inside the Evidence Bundle -- after five blinded
+            # judges had run. Run 34112301646 spent 869 s and $1.64 on them and was then refused
+            # in 0.395 s by exactly this check; it was the fifth time PR #134 paid for that, and
+            # the pack-base comparison above does not catch it, because a pack cut from the
+            # current base can still carry a trust root main has moved past. Ask it here, from
+            # the same program, so a base move costs seconds instead of a judge cycle. The
+            # Evidence Bundle asks all three questions again and remains the authority: this can
+            # only refuse a PR sooner, never authorise one (D-077).
+            stage = "trust_root_currency"
+            self._exec(
+                [
+                    "python", "scripts/factory_evidence.py",
+                    "--pr", str(pr_number), "--currency-only",
+                ],
+                cwd=worktree.path,
+                env=env,
+                credential_scope="github",
+                # The `trust-root-currency` scope in harness/budgets.json, not a literal: this
+                # call bounds a ladder program, and a duration comes from the record (D-075).
+                timeout=ladder_budget.budget_seconds(
+                    ladder_budget.load(), scope="trust-root-currency"),
+                transcript=paths.transcripts / "currency.log",
+            )
+
             # The pack is fetched and verified before the code holdout runs, not after: the
             # holdout's proof summary carries the RED evidence, and the note-bound red-proof is
             # the source the attached block is checked against. Both steps are deterministic and
             # model-free, so nothing about the holdout's blinding changes (D-048).
+            stage = "provenance"
             pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)
 
             stage = "attached_evidence"
@@ -3490,11 +3520,14 @@ class KernelRuntime:
                 "artifacts."
             )
             if reason_code == "stale_base":
-                second = rehead_count(self.github.pr_comments(pr_number)) >= 1
-                if second:
+                # The same budget the next dispatch will apply, asked here with this refusal's
+                # own head. The marker for THIS refusal is not posted yet, so the eligibility
+                # predicate cannot be used; its budget clause can (D-077).
+                if not rehead_budget_allows(self.github.pr_comments(pr_number), head=head):
                     summary += (
-                        "\nmain moved under this PR again after a re-head. The re-head budget is "
-                        "one per PR, so this needs a human."
+                        "\nmain moved under this PR again, and the head is not the one the last "
+                        "re-head produced, so the pull request itself changed in between. That "
+                        "is the loop the re-head budget bounds, and it needs a human."
                     )
                     self.github.add_pr_label(pr_number, self.config.labels["needs_human"])
                 else:
