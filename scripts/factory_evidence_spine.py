@@ -24,6 +24,7 @@ from factory_kernel.credential_env import scoped_environment
 from factory_kernel.evidence_closure import compile_full_spine
 from factory_kernel.independence import externally_supplied_claims
 from factory_kernel.provenance import verify_pack
+from harness import mutation_budget
 
 
 def fail(message: str) -> None:
@@ -58,7 +59,10 @@ def observe_factory_authority(legacy: dict) -> None:
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=1200,
+        # The same bare literal the mutation rung carried, one authority further out: 1200
+        # was never measured against a catalogue that has since grown past three hundred
+        # defects. Derived from harness/mutations/budget.json (D-073).
+        timeout=mutation_budget.budget_seconds(mutation_budget.load(), scope="factory-family"),
     )
     text = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode:

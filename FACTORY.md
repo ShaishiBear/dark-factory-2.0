@@ -179,6 +179,8 @@ python harness/ci.py
 
 The full gate includes static analysis, unit tests, real browser E2E, protected holdouts, application mutations, factory trust-root mutations, immunity/ratchet checks and their counted positive markers. Environment-dependent E2E prerequisites remain explicit; missing credentials or browser infrastructure are a failed prerequisite, never a silent skip.
 
+The mutation rung is the ladder's most expensive step and the only one whose cost grows with the catalogue: nine application defects, each re-running all four channels on a mutated tree, and 391 factory trust-root defects, each in its own copy of the trust root. Its deadline is therefore derived rather than written — `harness/mutation_budget.py` reads the measurements in `harness/mutations/budget.json` and gives `harness/ci.py`, the nested factory call and the spine's independent re-observation `ceil(p100 × headroom / 60) × 60` seconds each. The rung reports its own clock as it goes: `MUTATION_TIMING id=<id> seconds=<n> outcome=<...>` per application defect, `seconds=<n>` on every factory defect line, `MUTATIONS_SECONDS` / `FACTORY_MUTATIONS_SECONDS` totals, `MUTATIONS_OK defects=<n> seconds=<n> budget=<n>`, and a `MUTATIONS_BUDGET_WARNING` while it is still green. Every timed rung of the ladder prints `RUNG_SLOW` on the same threshold, and a rung that times out keeps whatever it had already printed (D-073).
+
 ## Triage
 
 When there is no PR to validate and no accepted issue to build, `factory_kernel.triage.TriageEngine` handles a bounded batch. It preserves the previous anti-flood rule: non-owner accounts are capped at three issues per UTC day. Blocked issues are filtered through `scripts/frontier_filter.py` before a model sees the batch.

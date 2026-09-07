@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Mutation-test copied factory trust-root code without touching the live worktree."""
+"""Mutation-test copied factory trust-root code without touching the live worktree.
+
+Every defect gets its own copy of the trust root, so the defects are independent by
+construction and are evaluated CONCURRENTLY (D-073). Each copy's focused suite stops at its
+first red file: the property this runner asserts is "the focused suite goes red", and a suite
+that has already produced one red is red, so stopping there reaches the identical verdict.
+The order those files run in is the baseline's own measurement of what each one costs,
+cheapest first -- the baseline runs all of them anyway, and every file still runs whenever
+nothing goes red, so the ordering only decides which red is found first.
+"""
 from __future__ import annotations
 
 import json
@@ -8,9 +17,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "harness"))
+from mutation_budget import budget_seconds, drift_warning, load  # noqa: E402
+
 MUTATION_DIR = Path(__file__).resolve().parent
 DEFECT_FILES = (
     MUTATION_DIR / "defects.json",
@@ -77,6 +91,13 @@ COPY_FILES = (
     "harness/genesis-recipe.json",
     "harness/mutations/run.py",
     "harness/mutations/defects.json",
+    "harness/mutations/budget.json",
+    "harness/mutation_budget.py",
+    "harness/ci.py",
+    # This runner, in the copy: a mutation of its own concurrency or its own accounting has to
+    # be injectable somewhere its detector can read it. The copy is never executed as a runner.
+    "harness/factory_mutations/run.py",
+    "tests/factory/test_factory_mutation_budget.py",
     "harness/focused.py",
     "tests/factory/test_factory_security.py",
     "tests/factory/test_e2e_contract.py",
@@ -173,7 +194,18 @@ COPY_FILES = (
     ".factory/decisions.md",
     "tests/factory/test_factory_carry.py",
 )
-TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith("tests/"))
+# A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
+# JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python
+# program: three of them are not valid Python, exited non-zero, and made the baseline red, so
+# this family refused to start with `focused baseline is red` every time it was reached. The
+# nested run inside harness/mutations/run.py timed out before reaching it, which is why nobody
+# saw it (D-073).
+TEST_FILES = tuple(
+    rel for rel in COPY_FILES
+    if rel.startswith("tests/") and rel.endswith(".py") and Path(rel).name.startswith("test_")
+)
+BUDGET = load()
+FAMILY_BUDGET_SECONDS = budget_seconds(BUDGET, scope="factory-family")
 
 
 def build_copy(parent: Path) -> Path:
@@ -193,22 +225,55 @@ def build_copy(parent: Path) -> Path:
     return target
 
 
-def run_tests(root: Path) -> subprocess.CompletedProcess[str]:
+def worker_count() -> int:
+    """How many defect copies are evaluated at once.
+
+    Each copy is a separate tree and a separate set of child processes, so the only shared
+    resource is the machine. `FACTORY_MUTATION_WORKERS` exists for a host that wants to hold
+    the runner to one core; it can only change how long the run takes, never its verdict.
+    """
+    override = os.environ.get("FACTORY_MUTATION_WORKERS", "").strip()
+    if override.isdigit() and int(override) > 0:
+        return min(int(override), 32)
+    return max(1, min(8, os.cpu_count() or 2))
+
+
+def run_tests(
+    root: Path, order: tuple[str, ...] | None = None
+) -> tuple[subprocess.CompletedProcess[str], dict[str, float]]:
+    """Run the focused suite in `root`, stopping at the first red file.
+
+    Returns the verdict and what each file that ran cost. The verdict is exactly the one the
+    exhaustive loop reached -- red iff some file is red -- because a suite is red as soon as
+    one of its files is, and a green suite still runs every file.
+    """
     outputs: list[str] = []
-    failed = False
+    durations: dict[str, float] = {}
     env = dict(os.environ)
     python_paths = [str(root), str(root / "scripts")]
     if env.get("PYTHONPATH"):
         python_paths.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(python_paths)
-    for rel in TEST_FILES:
+    for rel in order or TEST_FILES:
+        started = time.monotonic()
         proc = subprocess.run(
             [sys.executable, rel], cwd=root, env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=180,
         )
+        durations[rel] = round(time.monotonic() - started, 3)
         outputs.append((proc.stdout or "") + (proc.stderr or ""))
-        failed = failed or proc.returncode != 0
-    return subprocess.CompletedProcess([], 1 if failed else 0, "\n".join(outputs), "")
+        if proc.returncode != 0:
+            return subprocess.CompletedProcess([], 1, "\n".join(outputs), ""), durations
+    return subprocess.CompletedProcess([], 0, "\n".join(outputs), ""), durations
+
+
+def cheapest_first(durations: dict[str, float]) -> tuple[str, ...]:
+    """Every test file, ordered by what the baseline measured it to cost.
+
+    The set is always the whole suite, so nothing is dropped and an escape is still an escape;
+    an unmeasured file sorts last rather than being assumed cheap.
+    """
+    return tuple(sorted(TEST_FILES, key=lambda rel: (durations.get(rel, float("inf")), rel)))
 
 
 def inject(root: Path, defect: dict) -> bool:
@@ -258,7 +323,36 @@ def load_defects() -> list[dict]:
     return defects
 
 
+def evaluate(defect: dict, order: tuple[str, ...]) -> dict:
+    """One defect, in its own copy of the trust root, which is removed however this ends."""
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix=f"dark-factory-meta-{defect['id']}-") as tmp:
+        root = build_copy(Path(tmp))
+        if not inject(root, defect):
+            outcome, detail = "not_injected", "anchor missing/non-unique"
+        elif run_tests(root, order)[0].returncode != 0:
+            outcome, detail = "caught", "focused suite went red"
+        else:
+            outcome, detail = "escaped", f"<-- {defect['why']}"
+    return {"id": defect["id"], "outcome": outcome, "detail": detail,
+            "seconds": round(time.monotonic() - started, 1)}
+
+
+def evaluate_all(defects: list[dict], order: tuple[str, ...], workers: int) -> list[dict]:
+    """Every defect in the manifest, evaluated, whatever the clock says.
+
+    `map` keeps manifest order in the report and re-raises a worker's exception instead of
+    dropping that defect's result: a defect that could not be evaluated must stop the run, not
+    quietly leave the catalogue.
+    """
+    if workers <= 1:
+        return [evaluate(defect, order) for defect in defects]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(lambda defect: evaluate(defect, order), defects))
+
+
 def main() -> int:
+    started = time.monotonic()
     try:
         defects = load_defects()
     except (OSError, ValueError, RuntimeError) as exc:
@@ -268,35 +362,39 @@ def main() -> int:
         return 1
 
     with tempfile.TemporaryDirectory(prefix="dark-factory-meta-baseline-") as tmp:
-        baseline = run_tests(build_copy(Path(tmp)))
+        baseline, durations = run_tests(build_copy(Path(tmp)))
         if baseline.returncode != 0:
             print("FACTORY_MUTATIONS_REFUSED focused baseline is red", flush=True)
             print((baseline.stdout or "")[-2500:], flush=True)
             return 1
+    order = cheapest_first(durations)
     print("FACTORY_MUTATION_BASELINE_OK", flush=True)
 
-    caught = not_injected = 0
-    print("FACTORY_MUTATION_START", flush=True)
-    for defect in defects:
-        with tempfile.TemporaryDirectory(prefix=f"dark-factory-meta-{defect['id']}-") as tmp:
-            root = build_copy(Path(tmp))
-            if not inject(root, defect):
-                not_injected += 1
-                print(f"  NOT_INJECTED  {defect['id']:<48} anchor missing/non-unique", flush=True)
-                continue
-            result = run_tests(root)
-            if result.returncode != 0:
-                caught += 1
-                print(f"  CAUGHT        {defect['id']:<48} focused suite went red", flush=True)
-            else:
-                print(f"  ESCAPED       {defect['id']:<48} <-- {defect['why']}", flush=True)
+    workers = worker_count()
+    print(f"FACTORY_MUTATION_START defects={len(defects)} workers={workers} "
+          f"files={len(TEST_FILES)}", flush=True)
+    results = evaluate_all(defects, order, workers)
+    labels = {"caught": "CAUGHT      ", "escaped": "ESCAPED     ",
+              "not_injected": "NOT_INJECTED"}
+    for result in results:
+        print(f"  {labels[result['outcome']]}  {result['id']:<48} "
+              f"{result['detail']} seconds={result['seconds']}", flush=True)
 
     total = len(defects)
+    caught = sum(1 for result in results if result["outcome"] == "caught")
+    not_injected = sum(1 for result in results if result["outcome"] == "not_injected")
+    seconds = round(time.monotonic() - started, 1)
     print(f"FACTORY_MUTATIONS_TOTAL={total}", flush=True)
     print(f"FACTORY_MUTATIONS_CAUGHT={caught}", flush=True)
     print(f"FACTORY_MUTATIONS_NOT_INJECTED={not_injected}", flush=True)
+    print(f"FACTORY_MUTATIONS_SECONDS={seconds}", flush=True)
+    warning = drift_warning(seconds, BUDGET, scope="factory-family",
+                            marker="FACTORY_MUTATIONS_BUDGET_WARNING")
+    if warning:
+        print(warning, flush=True)
     if caught == total and not_injected == 0:
-        print("FACTORY_MUTATIONS_OK", flush=True)
+        print(f"FACTORY_MUTATIONS_OK defects={total} seconds={seconds} "
+              f"budget={FAMILY_BUDGET_SECONDS}", flush=True)
         return 0
     print("FACTORY_MUTATIONS_FAILED - factory trust-root bypass survived", flush=True)
     return 1

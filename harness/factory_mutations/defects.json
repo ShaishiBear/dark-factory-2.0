@@ -1845,6 +1845,104 @@
       "find": "    red_files, guard_files = checkpoint_file_sets(checkpoints)\n",
       "replace": "    red_files, guard_files = checkpoint_file_sets(checkpoints)\n    red_files = red_files | guard_files\n",
       "why": "The evidence bundle held the same conflation as the re-head, one stage later: replaying RED against the whole `files` map refuses any proof whose guard checkpoints pin a file the commit correctly left alone, so a re-headed guarded build would die at validation instead; caught by tests/factory/test_factory_rehead_guard_files.py (a commit changing only the red file is accepted, and replay_red asks the checkpoints) (D-072)."
+    },
+    {
+      "id": "mutation-budget-warning-removed",
+      "file": "harness/mutations/run.py",
+      "find": "    if warning:\n        print(warning, flush=True)\n    print(f\"MUTATIONS_SECONDS={seconds:.1f}\", flush=True)\n",
+      "replace": "    print(f\"MUTATIONS_SECONDS={seconds:.1f}\", flush=True)\n",
+      "why": "The rung's only warning that it is running out of clock is the line it prints while it still passes; without it the next person meets the drift as `TIMEOUT after Ns` on the one run that mattered, which is how run 34066724127 ended; caught by tests/factory/test_factory_mutation_budget.py (a run near the budget warns while it still passes) (D-073)."
+    },
+    {
+      "id": "mutation-budget-is-a-bare-literal-again",
+      "file": "harness/ci.py",
+      "find": "timeout=MUTATIONS_TIMEOUT)",
+      "replace": "timeout=900)",
+      "why": "The literal is the defect: 900 was never measured against the catalogue or the suites it re-runs, and nothing recorded where it came from; caught by tests/factory/test_factory_mutation_budget.py (the rung is not given a literal) (D-073)."
+    },
+    {
+      "id": "mutation-budget-ignores-its-headroom",
+      "file": "harness/mutation_budget.py",
+      "find": "    generous = measured_seconds(record, scope) * float(record[\"headroom\"])\n",
+      "replace": "    generous = measured_seconds(record, scope)\n",
+      "why": "A budget equal to the worst observation is that observation with a rounding error: the first run one second slower than the slowest recorded one fails; caught by tests/factory/test_factory_mutation_budget.py (the budget covers the measurement with headroom) (D-073)."
+    },
+    {
+      "id": "mutation-budget-takes-the-mean-not-the-worst",
+      "file": "harness/mutation_budget.py",
+      "find": "    return max(float(entry[\"total_seconds\"]) for entry in measurements(record, scope))\n",
+      "replace": "    values = [float(entry[\"total_seconds\"]) for entry in measurements(record, scope)]\n    return sum(values) / len(values)\n",
+      "why": "A rung has to finish on its worst run, not its average one; a mean silently sets the budget below half the recorded observations; caught by tests/factory/test_factory_mutation_budget.py (p100 and not the mean) (D-073)."
+    },
+    {
+      "id": "factory-mutations-skip-defects-when-short-of-time",
+      "file": "harness/factory_mutations/run.py",
+      "find": "    if workers <= 1:\n        return [evaluate(defect, order) for defect in defects]\n",
+      "replace": "    affordable = int(FAMILY_BUDGET_SECONDS // 12)\n    if len(defects) > affordable:\n        defects = defects[:affordable]\n    if workers <= 1:\n        return [evaluate(defect, order) for defect in defects]\n",
+      "why": "The clock is a budget, not a filter: a catalogue trimmed to what the runner thinks it can afford reports FACTORY_MUTATIONS_TOTAL for a smaller catalogue, and every dropped defect counts as neither caught nor escaped; caught by tests/factory/test_factory_mutation_budget.py (the whole catalogue is evaluated however long it takes) (D-073)."
+    },
+    {
+      "id": "factory-mutations-lose-an-escape-under-concurrency",
+      "file": "harness/factory_mutations/run.py",
+      "find": "        return list(pool.map(lambda defect: evaluate(defect, order), defects))\n",
+      "replace": "        results = list(pool.map(lambda defect: evaluate(defect, order), defects))\n        return [result for result in results if result[\"outcome\"] != \"escaped\"]\n",
+      "why": "Running the copies concurrently must not change the verdict: a pool that drops an escaped result reports caught == total and passes a run in which a trust-root bypass survived; caught by tests/factory/test_factory_mutation_budget.py (every defect is evaluated and reported in manifest order) (D-073)."
+    },
+    {
+      "id": "factory-mutations-order-narrows-the-suite",
+      "file": "harness/factory_mutations/run.py",
+      "find": "    return tuple(sorted(TEST_FILES, key=lambda rel: (durations.get(rel, float(\"inf\")), rel)))\n",
+      "replace": "    ordered = sorted(TEST_FILES, key=lambda rel: (durations.get(rel, float(\"inf\")), rel))\n    return tuple(ordered[:8])\n",
+      "why": "Cheapest-first ordering is sound only because the order is a permutation of the whole suite; a prefix turns it into running the tests most likely to be quick instead of the suite, and a defect whose only detector is expensive escapes unnoticed; caught by tests/factory/test_factory_mutation_budget.py (the order is every file cheapest first) (D-073)."
+    },
+    {
+      "id": "factory-mutations-run-fixtures-as-tests",
+      "file": "harness/factory_mutations/run.py",
+      "find": "TEST_FILES = tuple(\n    rel for rel in COPY_FILES\n    if rel.startswith(\"tests/\") and rel.endswith(\".py\") and Path(rel).name.startswith(\"test_\")\n)\n",
+      "replace": "TEST_FILES = tuple(rel for rel in COPY_FILES if rel.startswith(\"tests/\"))\n",
+      "why": "Selecting every copied path under tests/ hands the recorded JSON fixtures to `python <path>`; three of them are not valid Python, so the baseline is red and the whole family refuses with `focused baseline is red` on every platform; caught by tests/factory/test_factory_mutation_budget.py (only test modules are run as tests) (D-073)."
+    },
+    {
+      "id": "factory-mutations-stop-before-a-green-suite-finishes",
+      "file": "harness/factory_mutations/run.py",
+      "find": "        if proc.returncode != 0:\n            return subprocess.CompletedProcess([], 1, \"\\n\".join(outputs), \"\"), durations\n",
+      "replace": "        return subprocess.CompletedProcess(\n            [], proc.returncode, \"\\n\".join(outputs), \"\"), durations\n",
+      "why": "Stopping at the first red is verdict-identical only because a green file does not stop the suite; returning after the first file whatever it said makes a green baseline out of a red one, and an escape out of every defect whose detector is not the first file; caught by tests/factory/test_factory_mutation_budget.py (a green suite still runs every file) (D-073)."
+    },
+    {
+      "id": "mutation-timing-line-loses-its-outcome",
+      "file": "harness/mutations/run.py",
+      "find": "    return f\"MUTATION_TIMING id={defect_id} seconds={seconds:.1f} outcome={outcome}\"\n",
+      "replace": "    return f\"MUTATION_TIMING id={defect_id} seconds={seconds:.1f}\"\n",
+      "why": "A per-defect clock without its outcome cannot distinguish a defect that was expensive because it was caught late from one that was expensive because it escaped and paid for every channel; caught by tests/factory/test_factory_mutation_budget.py (the timing line format) (D-073)."
+    },
+    {
+      "id": "mutations-ok-line-drops-its-clock",
+      "file": "harness/mutations/run.py",
+      "find": "            f\"MUTATIONS_OK defects={total} seconds={seconds:.1f} budget={RUNG_BUDGET_SECONDS}\",\n",
+      "replace": "            \"MUTATIONS_OK\",\n",
+      "why": "The total against the budget is the number that makes drift visible in the evidence log; without it a rung at 40% of its budget and one at 99% are the same green line; caught by tests/factory/test_factory_mutation_budget.py (the closing line reports the clock against the budget) (D-073)."
+    },
+    {
+      "id": "ci-timeout-discards-what-the-rung-said",
+      "file": "harness/ci.py",
+      "find": "        detail = f\"TIMEOUT after {timeout}s\"\n        return 124, f\"{detail}\\n{partial[-4000:]}\" if partial else detail\n",
+      "replace": "        return 124, f\"TIMEOUT after {timeout}s\"\n",
+      "why": "A timeout that throws away the partial output is the failure nobody can diagnose: run 34066724127 reported `TIMEOUT after 900s` and nothing about which defect, or even which family, the clock had reached; caught by tests/factory/test_factory_mutation_budget.py (a timeout keeps what the rung managed to say) (D-073)."
+    },
+    {
+      "id": "ci-slow-rung-warning-removed",
+      "file": "harness/ci.py",
+      "find": "    if seconds > timeout * SLOW_RUNG_FRACTION:\n",
+      "replace": "    if False:\n",
+      "why": "A rung that finishes just inside its timeout is the run before the one that fails, and looks identical to a fast one; the warning is the only notice anyone gets while the ladder is still green; caught by tests/factory/test_factory_mutation_budget.py (a rung close to its deadline says so) (D-073)."
+    },
+    {
+      "id": "spine-factory-authority-keeps-its-literal",
+      "file": "scripts/factory_evidence_spine.py",
+      "find": "        timeout=mutation_budget.budget_seconds(mutation_budget.load(), scope=\"factory-family\"),\n",
+      "replace": "        timeout=1200,\n",
+      "why": "The spine re-observes the factory family independently, so it carried the same unmeasured deadline one authority further out: 1200s was never measured against a catalogue of 391 defects; caught by tests/factory/test_factory_mutation_budget.py (the spine bounds the factory family by the derived budget) (D-073)."
     }
   ]
 }

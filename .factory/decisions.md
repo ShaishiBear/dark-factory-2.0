@@ -3474,3 +3474,101 @@ guard hash. `harness/rehearsal.py` grew `pack_checkpoints`, `test_commit_changed
 `rehead-changed-guard-file-accepted` and `evidence-replay-compares-the-whole-file-map` in
 `harness/factory_mutations/defects.json`, each verified by direct injection on the maintainer's
 Windows host.
+
+## D-073 · The mutation rung's budget comes from a measurement, because the first validation run to reach it died on a number nobody had ever measured
+
+**Status:** recorded · **Raised:** 2026-09-07 · **Evidence:** PR #134 (issue #103), worker run
+34066724127 — the factory's first build to pass every judge and the browser journey.
+
+That run passed security, provenance, all five blinded judges, static, unit, the holdout and,
+for the first time, the whole browser journey (`E2E_PASSED steps=21`,
+`HOLDOUT_PASSED scenarios=3 assertions=9`, the streaming UI observed as
+`[send-button, stop-button+assistant-text, send-button+assistant-text+citation]`). Then:
+
+```
+TIMEOUT after 900s
+GATE_FAILED: mutations
+```
+
+`harness/ci.py` ran the rung as `run("mutations", [...], timeout=900)`. Nothing recorded where
+900 came from. Underneath it the application catalogue had gone from four defects to nine, the
+factory trust-root catalogue to 391, and the suite each channel re-runs to 2184 tests.
+
+**Measured, before deciding anything.** The maintainer's Windows host cannot run the rung at
+all — `uv` and `bun` are not installed there, so the `quick` channel can never be green and the
+runner refuses at its baseline (`python -m unittest discover -s tests/factory` on clean
+`origin/main` there: 1576 tests, 216.5 s, 32 failures and 120 errors). So the parts were
+measured where each part actually runs:
+
+- **The quick channel, on the validation host:** 179.027 s (run 34066408781, `rehead-quick-gate`),
+  203.383 s (run 34061371205, `quick-gate`), and 207.4 s measured off the timestamps of the
+  `quick-authority` job of run 34066129225 (`23:10:39.7` → `STATIC_OK` `23:11:56.99` →
+  `UNIT_PASSED tests=2184` / `GATE_OK` `23:14:07.08`). p100 **207.4 s**.
+- **The rest of the ladder, on the validation host:** run 34066724127's evidence stage was
+  `seconds=1191.719 outcome=refused`, of which 900 s was this timeout — so static, unit, app
+  start, the browser journey and the holdout together cost **291.7 s**.
+- **The deterministic channels:** `scripts/factory_security.py --worktree` 0.39 s and
+  `harness/immunity.py` 0.23 s on the maintainer's host; the guard's `--pr` form 1.4 s in CI.
+- **The factory family's unit of work, file by file:** one copy of the trust root costs 0.13 s
+  to build and **235.3 s** to run, across 72 test modules — median 0.59 s, p90 7.81 s, max
+  60.7 s (`test_factory_bootstrap.py`). There are **391 defects**.
+
+Which gives, for the rung as it stood: **2674 s** for the application family (ten iterations of
+one baseline plus nine defects, each paying the quick channel) — 2.97× the budget it was given,
+and the family the clock was still inside when it expired — and **23,000 s** (383 minutes) for
+the factory family behind it. No budget that covers that is a budget; it is a work day.
+
+**And the factory family had never run at all.** `TEST_FILES` selected every copied path under
+`tests/`, which includes the recorded JSON fixtures the tests read, and `run_tests` executed
+each of them with `python <path>`. Three are not valid Python, so `FACTORY_MUTATIONS_REFUSED
+focused baseline is red` was the outcome every time that family was reached — on any platform.
+Nobody saw it because the application family exhausted the 900 s first, and because
+`run()` discarded the timed-out rung's partial output.
+
+**Decision.** The clock is derived from recorded measurements, and it never selects what runs.
+
+- `harness/mutations/budget.json` holds the measurements; `harness/mutation_budget.py` derives
+  `ceil(p100(totals for a scope) × headroom / 60) × 60` from them, with headroom ≥ 1.5 and every
+  entry required to carry its date, environment, kind (`measured` / `projected`) and source.
+  `harness/ci.py`, the nested factory call and `scripts/factory_evidence_spine.py`'s independent
+  re-observation (which carried the same unmeasured shape as `timeout=1200`) all read it. p100
+  and not the mean: a rung has to finish on its worst run.
+- **The cheapest honest reduction, not a bigger number**, for the family that made the total
+  unreasonable. The 391 copies are independent by construction, so they are evaluated
+  concurrently; each copy's focused suite stops at its first red file, in the order the baseline
+  measured those files to cost, cheapest first. Both are verdict-identical: a suite is red as
+  soon as one file is red, a green suite still runs every file, and the order is always a
+  permutation of the whole suite. Against the measured cost distribution that is 30.3 s per
+  caught defect instead of 235.3 s (12.9%; declaration order would be 86.1 s), so the family
+  projects to 391 × 30.3 / 4 = **2962 s** and the rung to **5636 s**, budgeted at **8460 s**
+  (141 min) with the family alone at **4500 s**. No defect was dropped, no defect was narrowed
+  to its own detector, and the rung is not skipped in validation.
+- **Drift is visible while the run still passes.** `MUTATION_TIMING id=<id> seconds=<n>
+  outcome=caught|escaped` per application defect, `seconds=` on every factory defect line,
+  `MUTATIONS_SECONDS` / `FACTORY_MUTATIONS_SECONDS` totals, `MUTATIONS_OK defects=<n>
+  seconds=<n> budget=<n>`, and `MUTATIONS_BUDGET_WARNING` above `warn_fraction` (0.75) of the
+  budget. Every other timed rung of the ladder prints `RUNG_SLOW step=<name> seconds=<n>
+  timeout=<n> fraction=<f>` on the same threshold, and a rung that does time out now keeps the
+  output it had already produced, so the next timeout names the defect it reached.
+
+**Consequences.** Both entries in the record are `kind: projected` and say so: this host cannot
+produce an end-to-end number, and the first full run on the validation host publishes real ones
+that should replace them — the timing lines exist for exactly that. Two facts are left standing
+for whoever reads them next. The factory family runs **twice** in validation, once nested in the
+ladder and once in the spine's independent re-observation, and only `harness/observe.py`'s
+post-merge transcript parser now requires it from the ladder; measuring each family once, in the
+stage that owns it (the rule genesis already follows), would halve the rung again. And 391
+defects × a whole trust-root suite is a cost that grows with the catalogue and will need
+answering again. Pinned by `tests/factory/test_factory_mutation_budget.py` (41 tests: the
+derivation, p100, the rounding, the provenance requirement, the warning threshold, the timing
+and closing line formats, the ladder's timeout and its partial output, the concurrent runner's
+completeness and cleanup, the fail-fast verdict, and the spine's derived deadline). Mutations
+`mutation-budget-warning-removed`, `mutation-budget-is-a-bare-literal-again`,
+`mutation-budget-ignores-its-headroom`, `mutation-budget-takes-the-mean-not-the-worst`,
+`factory-mutations-skip-defects-when-short-of-time`,
+`factory-mutations-lose-an-escape-under-concurrency`, `factory-mutations-order-narrows-the-suite`,
+`factory-mutations-run-fixtures-as-tests`, `factory-mutations-stop-before-a-green-suite-finishes`,
+`mutation-timing-line-loses-its-outcome`, `mutations-ok-line-drops-its-clock`,
+`ci-timeout-discards-what-the-rung-said`, `ci-slow-rung-warning-removed` and
+`spine-factory-authority-keeps-its-literal` in `harness/factory_mutations/defects.json`, each
+verified by direct injection into a real copy on the maintainer's Windows host.
