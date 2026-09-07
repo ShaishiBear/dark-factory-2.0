@@ -3843,3 +3843,106 @@ platform reasons and CI is the authority on the rest.
 **Still open: the three escapes.** This change does not fix them; it makes the next run say which
 they are. Twenty-three of the twenty-six failures are closed here, and the escapes are the
 remaining work, tracked as its own change once a validation run names them.
+
+## D-077 · A base move is cheap to notice and free to recover from, because five judges kept being paid to discover a `git diff`
+
+**What a maintainer merge costs an open factory PR.** Validation run 34112301646 of PR #134 on
+2026-09-07:
+
+```
+FACTORY_STAGE kind=agent name=holdout               seconds=238.4 cost_usd=0.300865
+FACTORY_STAGE kind=agent name=architecture-holdout  seconds=  8.5 cost_usd=0.108295
+FACTORY_STAGE kind=agent name=contract-certifier    seconds=211.3 cost_usd=0.298865
+FACTORY_STAGE kind=agent name=design-certifier      seconds=150.7 cost_usd=0.450620
+FACTORY_STAGE kind=agent name=governor-certifier    seconds=260.6 cost_usd=0.478875
+FACTORY_STAGE kind=exec  name=evidence              seconds=  0.4 outcome=refused
+EVIDENCE_FAIL: PR trust root is not current with origin/main; rebase required: ...
+```
+
+869 s and $1.64 of blinded judgement, then a refusal in 0.395 s by a `git diff`. That was the
+fifth time this one PR paid for it (01:04, 01:24, 03:51, 05:48, 10:29Z), and the answer had been
+knowable before the first judge started every time.
+
+**Why D-042's early check does not catch it.** `validate_pr` already compares the provenance
+pack's declared base with GitHub's current base before it fetches the pack, and refuses
+`stale_base` there. That is a different question. `trust_root_drift` compares the PR head's
+*trust-root files* with `origin/main`; a pack cut from what GitHub reports as the current base
+can still carry a trust root `main` has moved past, which is exactly the state a re-headed PR is
+in when another maintainer PR lands during its validation. Both questions are cheap; only one
+of them was being asked early.
+
+**The check moves, the authority does not.** `scripts/factory_evidence.py --currency-only` runs
+the same three checks the Evidence Bundle opens with — the worktree is the PR head, the PR has
+not touched the trust root, the trust root is current — and exits. The kernel runs it right
+after the pack-base comparison, before the code holdout, as its own `trust_root_currency` stage.
+The Evidence Bundle asks all three again and is still the authority. **An added refusal point
+can only refuse more, never authorise**: if the pre-check were wrong in the permissive
+direction, the bundle refuses exactly as it did before, so this cannot widen what merges.
+
+Its refusal keeps its class. `is_stale_base` classifies by message text before any stage or tool
+rule runs, so the same sentence from the same program is a `stale_base` refusal wherever it is
+raised — which is what makes the re-head follow automatically. Only the *non*-stale failures of
+the pre-check needed a new code, because recording them as `evidence_spine` would name an
+authority that never ran.
+
+**The budget counted the wrong thing.** `rehead_eligible` allowed one re-head per pull request.
+Its reasoning was sound — bound a loop nobody has data to size — but a base that moved because a
+human merged is not that loop. A re-head is model-free: it rebases, replays RED at the rebased
+test-author commit, re-runs conformance and every downstream gate, and re-publishes provenance.
+How many happen is decided by how often a maintainer merges. PR #134 hit the wall three times in
+nine hours, and each time a maintainer deleted the marker comment by hand so the factory could
+continue. That is precisely the shepherding the budget was never meant to create.
+
+The budget now counts base moves. A second re-head is allowed only when the PR's head is exactly
+the head the last re-head produced — nothing has happened to this pull request since, except
+that main moved again. A PR that *changed* after its re-head and failed again is still refused,
+because that is the loop. A caller that cannot say what the head is gets the old strict rule: a
+budget that cannot check its own condition must refuse rather than assume.
+
+**Found by the check shipped one hour earlier.** Inserting the currency call between
+`_builder_pack` and the holdout broke the anchor of `pack-verified-after-holdout`, and rewriting
+`rehead_eligible` broke `rehead-cap-removed`. `harness/mutation_anchors.py` (D-076) named both
+before this change was committed, which is the first thing that check has caught and exactly the
+silence it was built to end. The currency call moved one step earlier so the D-048 ordering
+anchor is untouched, and `rehead-cap-removed` is re-anchored onto the cap that exists today
+rather than being duplicated by a new defect.
+
+**The budget has two askers, and one of them cannot ask the predicate.** The refusal path
+escalates a repeat stale base to `factory:needs-human`, and it decides that WHILE it composes
+the refusal comment — so the marker for the refusal it is describing is not in the comments
+yet, and `rehead_eligible` would answer False for the wrong reason. It was asking
+`rehead_count(...) >= 1` and posting "the re-head budget is one per PR", which this change makes
+untrue: a message that contradicts what the next dispatch does is worse than no message. The
+budget clause is now `rehead_budget_allows`, called by the predicate and by the refusal path
+with that refusal's own head, so both answer the same question from the same code.
+
+**One program, two calls, two failure modes.** `harness/rehearsal.py` records `_exec` by tool
+name, so both calls of `factory_evidence.py` were one step: `argv.index("--architecture-verdict")`
+raised `ValueError` on the currency call and took seven test files down with it, and
+`fail="factory_evidence.py"` would have aimed the Evidence Bundle's own scenario at the
+pre-check that now runs first. The currency call gets its own step name, exactly as
+`merge_verify.py`'s two phases do, and two scenarios exercise it: one refusing for its own
+reason, one refusing for a stale base.
+
+This was found locally only because `FACTORY_WORKDIR` was set. `.factory/kernel.json`'s
+`work_root` is `/tmp/dark-factory`, which is not absolute on Windows, so fourteen test files die
+at `setUpClass` and a baseline taken without it reports them red on clean `main` too -- hiding
+seven real regressions inside a pre-existing red. A local baseline that does not set it is worse
+than none.
+
+**Detection.** `tests/factory/test_factory_base_move.py` (36 tests) pins the budget across a
+first, second and third base move, the changed-head refusal, the missing-head strict fallback,
+every non-stale reason code, the budget clause answering with no refusal marker posted and
+agreeing with the predicate once one is, the ordering of the currency call before both holdouts
+and the certifiers, its credential scope, the dispatch passing the head, the refusal path asking
+the budget rather than the old count, the early return's position between the drift check and
+the contract parse, and the bundle's three questions still being asked in full. Six of those run
+the whole validate path through the rehearsal: the check is a step of a healthy run, it precedes
+the holdout and the bundle, refusing it pays for no judge and never merges, its own failure
+names its own stage, a stale base found early is still a stale base and still re-head eligible,
+and the bundle's scenario still refuses at the bundle. Seven mutations -- `rehead-cap-removed`
+(re-anchored), `rehead-budget-assumes-a-head-it-was-not-given`,
+`stale-base-escalation-ignores-the-budget`, `currency-check-runs-after-the-judges`,
+`currency-only-falls-through-to-the-bundle`, `currency-refusal-recorded-as-the-evidence-bundle`
+and `rehearsal-conflates-the-two-evidence-calls` -- each verified caught by direct injection on
+the maintainer's Windows host.

@@ -26,6 +26,7 @@ REASON_CODES: tuple[str, ...] = (
     "attached_evidence",
     "code_holdout",
     "provenance",
+    "trust_root_currency",
     "architecture_holdout",
     "certifier:contract",
     "certifier:design",
@@ -43,6 +44,7 @@ AUTHORITY: Mapping[str, str] = {
     "attached_evidence": "attached contract/proof parser",
     "code_holdout": "blinded code holdout",
     "provenance": "builder provenance verifier",
+    "trust_root_currency": "trust-root currency check (scripts/factory_evidence.py)",
     "architecture_holdout": "independent architecture holdout",
     "certifier:contract": "independent contract certifier",
     "certifier:design": "independent design certifier",
@@ -68,7 +70,7 @@ STALE_BASE_PATTERNS: tuple[tuple[str, str], ...] = (
 # Non-stale reasons that the kernel decides from the stage it was in, not from a tool's text.
 STAGE_CODES: frozenset[str] = frozenset({
     "identity", "security_guard", "attached_evidence", "code_holdout", "provenance",
-    "architecture_holdout", "evidence_spine", "merge_preauth",
+    "trust_root_currency", "architecture_holdout", "evidence_spine", "merge_preauth",
 })
 
 REFUSAL_MARKER = "<!-- dark-factory-refusal:"
@@ -151,7 +153,13 @@ def classify(stage: str, exc: BaseException) -> str:
         if exc.tool == "factory_provenance.py":
             return "provenance"
         if exc.tool in {"factory_evidence.py", "factory_evidence_spine.py"}:
-            return "architecture_holdout" if "architecture holdout" in text.lower() else "evidence_spine"
+            if "architecture holdout" in text.lower():
+                return "architecture_holdout"
+            # The same program answers two questions at two points in the run. A stale base is
+            # already decided above, by text, whichever point raised it; what is left is the
+            # early currency check's own non-stale failures, which are not the Evidence Bundle's
+            # and must not be recorded as if the bundle had run (D-077).
+            return "trust_root_currency" if stage == "trust_root_currency" else "evidence_spine"
         if exc.tool == "merge_verify.py" and exc.phase == "pre":
             return "merge_preauth"
     if stage == "certifier":
@@ -286,14 +294,43 @@ def resume_count(bodies: Iterable[str]) -> int:
     return len(_markers(bodies, RESUME_MARKER))
 
 
-def rehead_eligible(bodies: Iterable[str]) -> bool:
-    """A PR may be re-headed exactly once, and only when its latest refusal is a stale base.
+def rehead_eligible(bodies: Iterable[str], *, head: str | None = None) -> bool:
+    """A PR may be re-headed when its latest refusal is a stale base, and either it has never
+    been re-headed or nothing but the base has changed since the last one.
 
     Every other reason code is either terminal or a candidate for a loop nobody has data to
     size yet; neither is this function's business.
+
+    The budget bounds a loop nobody has data to size. A base that moved because a maintainer
+    merged to `main` is not that loop: the re-head is model-free, it re-proves RED at the
+    rebased commit and every downstream gate, and how many of them happen is decided by how
+    often a human merges, not by anything the factory chooses. PR #134 met that wall three
+    times in nine hours and each one needed a maintainer to delete the marker by hand, which is
+    the shepherding the budget was never meant to create.
+
+    What the budget must still refuse is a PR that keeps CHANGING and keeps failing, so a
+    second re-head is allowed only when the head is exactly the one the last re-head produced:
+    nothing has happened to this pull request since, except that main moved again. A caller
+    that cannot say what the head is gets the old strict rule, because a budget that cannot
+    check its own condition must refuse.
     """
     bodies = list(bodies)
     refusal = latest_refusal(bodies)
     if refusal is None or refusal.get("reason_code") != "stale_base":
         return False
-    return rehead_count(bodies) == 0
+    return rehead_budget_allows(bodies, head=head)
+
+
+def rehead_budget_allows(bodies: Iterable[str], *, head: str | None = None) -> bool:
+    """The budget clause on its own, without the "latest refusal is a stale base" condition.
+
+    The kernel needs this while it is still WRITING that stale-base refusal: the marker is not
+    in the comments yet, so `rehead_eligible` cannot be asked, and the message it posts has to
+    say truthfully whether the next dispatch will re-head or whether this needs a human.
+    """
+    reheads = _markers(bodies, REHEAD_MARKER)
+    if not reheads:
+        return True
+    if not head:
+        return False
+    return str(reheads[-1].get("new_head") or "") == head
