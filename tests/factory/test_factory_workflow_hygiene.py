@@ -19,6 +19,7 @@ REGRESSION = WORKFLOWS / "dark-factory-main-regression.yml"
 WORKER = WORKFLOWS / "dark-factory-worker.yml"
 TRUST_ROOT = WORKFLOWS / "dark-factory-trust-root.yml"
 CLEANUP = WORKFLOWS / "dark-factory-branch-cleanup.yml"
+CANARY = WORKFLOWS / "dark-factory-identity-canary.yml"
 
 
 def uses_lines(text: str) -> set[str]:
@@ -384,6 +385,165 @@ class ValidationDatabaseTests(unittest.TestCase):
             self.assertTrue(image.startswith("pgvector/pgvector:"), f"{path.name}: {image}")
             # Same major as production (deploy/docker-compose.yml pins pgvector/pgvector:pg16).
             self.assertEqual(image, "pgvector/pgvector:pg16", path.name)
+
+
+class AutonomousIdentityTests(unittest.TestCase):
+    """The identity that mutates GitHub must be one whose events GitHub actually delivers.
+
+    GitHub creates no workflow run for an event caused by GITHUB_TOKEN. `TrustRootHygieneTests.
+    test_no_dead_closed_event_job` above already records that rule for `closed` ("none existed for
+    #59, #60, #61") -- but the rule is not about `closed`, it governs `opened` and `synchronize`
+    too. While the kernel opened product PRs and pushed their heads with GITHUB_TOKEN,
+    `dark-factory-trust-root.yml` -- `pull_request_target`, and one of the two contexts
+    `main-protection` requires with an empty `bypass_actors` -- never ran on a `factory/*` branch
+    even once, and `dark-factory-ci.yml` sat in `action_required`. No `factory/*` PR has ever
+    merged. `test_authority_job_runs_on_every_event_it_subscribes_to` could not catch this:
+    subscribing to an event is not the same as the event being delivered.
+
+    The fix is scoped, not global (docs/DARK_FACTORY_2_AUTONOMOUS_GITHUB_IDENTITY.md): observation
+    stays on GITHUB_TOKEN, and only branch push, PR create and the exact-head merge spend the App
+    token. These assertions hold that split in place from both ends.
+    """
+
+    APP_TOKEN = "${{ steps.factory_identity.outputs.token }}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = WORKER.read_text(encoding="utf-8")
+
+    def steps_granting(self, name: str) -> set[str]:
+        """Names of the workflow steps whose `env:` block carries `name`."""
+        granted, step = set(), None
+        for line in self.text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- name: "):
+                step = stripped[len("- name: "):]
+            elif step and stripped.startswith(f"{name}:"):
+                granted.add(step)
+        return granted
+
+    def test_the_minting_action_is_pinned_and_reads_the_configured_variable_and_secret(self) -> None:
+        match = re.search(r"uses: actions/create-github-app-token@(\S+)", self.text)
+        self.assertTrue(match is not None, "the worker mints no App token")
+        self.assertRegex(match.group(1), r"^[0-9a-f]{40}$", "pin the action to a full commit sha")
+        self.assertTrue("client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}" in self.text)
+        self.assertTrue("private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}" in self.text)
+        # `app-id` is deprecated at this pin in favour of `client-id`.
+        self.assertEqual(self.text.count("app-id:"), 0, "use client-id, not the deprecated app-id")
+
+    def test_only_the_two_steps_that_run_the_kernel_are_granted_the_app_token(self) -> None:
+        self.assertEqual(
+            self.steps_granting("DARK_FACTORY_APP_TOKEN"),
+            {"Dispatch exactly one factory action", "Resume the pushed PR from its artifacts"},
+            "the App token is a capability, not an ambient credential",
+        )
+
+    def test_the_app_token_comes_only_from_the_minting_step(self) -> None:
+        values = re.findall(r"^\s*DARK_FACTORY_APP_TOKEN: (.+)$", self.text, re.M)
+        self.assertTrue(values, "no step is granted the App token")
+        for value in values:
+            self.assertEqual(value.strip(), self.APP_TOKEN, value)
+
+    def test_the_token_is_minted_before_the_first_step_that_spends_it(self) -> None:
+        # Both markers are asserted present before their positions are compared, so a missing one
+        # fails with this test's own verdict rather than a ValueError out of `str.index`.
+        self.assertTrue("id: factory_identity" in self.text, "the worker mints no App token")
+        self.assertTrue(f"DARK_FACTORY_APP_TOKEN: {self.APP_TOKEN}" in self.text, "nothing spends it")
+        mint = self.text.index("id: factory_identity")
+        first_use = self.text.index(f"DARK_FACTORY_APP_TOKEN: {self.APP_TOKEN}")
+        self.assertLess(mint, first_use, "the token is spent before it is minted")
+
+    def test_observation_still_runs_on_the_ordinary_actions_token(self) -> None:
+        """Requirement 4 of the decision: do not replace GITHUB_TOKEN globally. The read-only
+        steps must keep it, so a regression that swapped everything to the App token is a
+        failure here just as a regression that dropped the App token is one above."""
+        observers = self.steps_granting("GH_TOKEN")
+        for step in ("Check operational prerequisites", "Fail closed on emergency stop before dispatch"):
+            self.assertIn(step, observers, f"{step} lost its read credential")
+        for value in re.findall(r"^\s*GH_TOKEN: (.+)$", self.text, re.M):
+            self.assertEqual(value.strip(), "${{ github.token }}", value)
+
+
+class AutonomousIdentityCapabilityTests(unittest.TestCase):
+    """The same split, asserted against the code rather than the workflow text.
+
+    A workflow that grants the token proves nothing on its own: what matters is which operations
+    can spend it. These run the real `scoped_environment` and read the real adapter.
+    """
+
+    SOURCE = {
+        "PATH": "/usr/bin",
+        "NORMAL": "safe",
+        "GH_TOKEN": "actions-token",
+        "GITHUB_TOKEN": "actions-token",
+        "DARK_FACTORY_APP_TOKEN": "app-token",
+        "DATABASE_URL": "validation-db",
+    }
+
+    def test_the_app_token_is_stripped_from_every_scope_but_its_own(self) -> None:
+        from factory_kernel.credential_env import scoped_environment
+        for scope in ("none", "github", "validation", "github+validation"):
+            child = scoped_environment(source=self.SOURCE, scope=scope)
+            self.assertNotIn("DARK_FACTORY_APP_TOKEN", child, scope)
+        granted = scoped_environment(source=self.SOURCE, scope="github-mutation")
+        self.assertEqual(granted["DARK_FACTORY_APP_TOKEN"], "app-token")
+
+    def test_the_mutation_scope_carries_no_actions_token_to_fall_back_to(self) -> None:
+        from factory_kernel.credential_env import scoped_environment
+        granted = scoped_environment(source=self.SOURCE, scope="github-mutation")
+        self.assertNotIn("GH_TOKEN", granted)
+        self.assertNotIn("GITHUB_TOKEN", granted)
+
+    def test_a_model_worker_never_receives_either_github_credential(self) -> None:
+        from unittest import mock
+        from factory_kernel.providers import ClaudeCliProvider
+        with mock.patch.dict("os.environ", self.SOURCE, clear=True):
+            env = ClaudeCliProvider._worker_env({})
+        self.assertNotIn("DARK_FACTORY_APP_TOKEN", env)
+        self.assertNotIn("GH_TOKEN", env)
+        self.assertNotIn("GITHUB_TOKEN", env)
+
+    def test_exactly_the_three_autonomous_mutations_spend_the_app_identity(self) -> None:
+        """Requirement 5 names three operations. `run_as_app` is how they are spent, so the set
+        of methods that reach it is the set of operations that hold the capability."""
+        import ast
+        source = (ROOT / "factory_kernel" / "github_cli.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        spenders = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Attribute) and inner.attr in {"run_as_app", "_autonomous_identity"}:
+                    spenders.add(node.name)
+        self.assertEqual(spenders, {"create_pr", "push_branch", "merge_squash", "run_as_app"})
+
+    def test_the_merge_stays_bound_to_the_exact_authorized_head(self) -> None:
+        source = (ROOT / "factory_kernel" / "github_cli.py").read_text(encoding="utf-8")
+        merge = source.split("def merge_squash", 1)[1].split("\n    @staticmethod", 1)[0]
+        self.assertIn('info.get("headRefOid") != expected_head', merge)
+        self.assertIn("refusing merge: PR head moved after authorization", merge)
+        self.assertIn('"--match-head-commit", expected_head', merge)
+
+    def test_the_canary_proves_the_event_path_and_holds_no_other_authority(self) -> None:
+        """The canary exists to observe event delivery, so it must stay that: read-only Actions
+        token, no factory dispatch, and it never merges what it opens."""
+        text = CANARY.read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read\n", text)
+        self.assertNotIn("contents: write", text)
+        self.assertNotIn("pull-requests: write", text)
+        self.assertNotIn("pr merge", text)
+        self.assertNotIn("python -m factory_kernel", text, "the canary dispatches no factory work")
+        self.assertIn("client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}", text)
+        for line in uses_lines(text):
+            self.assertRegex(line, r"@[0-9a-f]{40}$", line)
+
+    def test_the_trust_root_authority_still_judges_from_the_protected_base(self) -> None:
+        """Requirement 7: the App changes who causes the event, never what judges it."""
+        text = TRUST_ROOT.read_text(encoding="utf-8")
+        self.assertIn("pull_request_target:", text)
+        self.assertIn("ref: ${{ github.sha }}", text)
+        self.assertNotIn("create-github-app-token", text, "the authority needs no write identity")
 
 
 if __name__ == "__main__":

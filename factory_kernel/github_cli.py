@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
-from .credential_env import scoped_environment
+from .credential_env import GITHUB_MUTATION_CREDENTIAL, scoped_environment
 
 
 class GitHubClient:
@@ -24,6 +24,46 @@ class GitHubClient:
             ["gh", *args],
             cwd=self.cwd,
             env=scoped_environment(scope="github"),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+        if proc.returncode:
+            detail = ((proc.stdout or "") + (proc.stderr or ""))[-3000:]
+            raise RuntimeError(f"gh {' '.join(args)} failed rc={proc.returncode}: {detail}")
+        return proc.stdout or ""
+
+    def _autonomous_identity(self) -> dict[str, str]:
+        """The environment a GitHub *mutation* runs in: the App installation token, alone.
+
+        Three operations need this and nothing else does -- pushing an autonomous branch, opening
+        or updating an autonomous PR, and the exact-head merge. They need it because GitHub
+        delivers no `pull_request` or `pull_request_target` event for anything GITHUB_TOKEN
+        caused, and both required contexts on `main` are produced by those events.
+
+        `scope="github-mutation"` carries the App token and neither GH_TOKEN nor GITHUB_TOKEN, so
+        when the App token is absent this raises instead of quietly authenticating as Actions and
+        opening a PR that can never be judged. Failing closed here is the point: an unmergeable PR
+        that looks normal costs a full validation ladder to discover.
+        """
+        env = scoped_environment(scope="github-mutation")
+        token = env.pop(GITHUB_MUTATION_CREDENTIAL, "")
+        if not token:
+            raise RuntimeError(
+                f"autonomous GitHub mutation requires {GITHUB_MUTATION_CREDENTIAL}; GITHUB_TOKEN "
+                "is not a fallback, because GitHub starts no workflow run for an event it causes"
+            )
+        env["GH_TOKEN"] = token
+        return env
+
+    def run_as_app(self, args: list[str], *, timeout: int = 60) -> str:
+        """`gh`, authenticated as the App installation rather than as Actions."""
+        proc = subprocess.run(
+            ["gh", *args],
+            cwd=self.cwd,
+            env=self._autonomous_identity(),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -141,7 +181,10 @@ class GitHubClient:
             raise ValueError("PR head/base/title must be non-empty")
         if not body_file.is_file():
             raise ValueError("PR body file is missing")
-        self.run(
+        # Opened as the App: this is the event that must start `quick-authority` and
+        # `trust-root-authority`. Reading the result back afterwards is observation, so it stays
+        # on the ordinary token.
+        self.run_as_app(
             [
                 "pr", "create", "-R", self.repository, "--head", head, "--base", base,
                 "--title", title, "--body-file", str(body_file),
@@ -197,10 +240,10 @@ class GitHubClient:
             raise ValueError("unsafe branch name")
         if force_with_lease is not None and not re.fullmatch(r"[0-9a-f]{40,64}", force_with_lease):
             raise ValueError("force-with-lease requires the exact old head object id")
-        github_env = scoped_environment(scope="github")
-        token = github_env.get("GH_TOKEN") or github_env.get("GITHUB_TOKEN")
-        if not token:
-            raise RuntimeError("git push requires GH_TOKEN or GITHUB_TOKEN")
+        # Pushed as the App, because a `synchronize` caused by GITHUB_TOKEN delivers no event and
+        # so re-runs neither required authority on the new head. `_autonomous_identity` raises
+        # when the App token is absent rather than falling back.
+        token = self._autonomous_identity()["GH_TOKEN"]
         with tempfile.TemporaryDirectory(prefix="dark-factory-git-auth-") as tmp:
             askpass = Path(tmp) / "askpass.sh"
             askpass.write_text(
@@ -246,7 +289,9 @@ class GitHubClient:
         info = self.pr(number)
         if info.get("headRefOid") != expected_head:
             raise RuntimeError("refusing merge: PR head moved after authorization")
-        self.run(
+        # The merge broker: App identity, still bound to the exact authorized head by both the
+        # check above and `--match-head-commit`, which GitHub itself enforces.
+        self.run_as_app(
             [
                 "pr", "merge", str(number), "-R", self.repository, "--squash",
                 "--match-head-commit", expected_head,

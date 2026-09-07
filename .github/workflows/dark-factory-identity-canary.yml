@@ -1,0 +1,94 @@
+name: dark-factory-identity-canary
+
+# Proves the production GitHub EVENT shape for the autonomous identity, and nothing else. No model
+# budget, no factory ladder, no product change: one throwaway docs file, pushed and opened by the
+# App, so the two required contexts can be observed arriving on their own.
+#
+# What must be true on the PR this opens (docs/DARK_FACTORY_2_AUTONOMOUS_GITHUB_IDENTITY.md):
+#   1. the `pull_request` run is created automatically, in no approval-required state;
+#   2. `quick-authority` executes and reports on the exact head;
+#   3. the `pull_request_target` run fires automatically;
+#   4. `trust-root-authority` executes the base's workflow and code, binding the head as data;
+#   5. both required contexts appear on the same latest head;
+#   6. branch rules would allow the merge once both are green;
+#   7. moving the head re-runs both authorities on the new head -- which is why this pushes a
+#      second commit rather than one;
+#   8. no manual approval anywhere in the path.
+#
+# Run it by pushing any `identity-canary/**` branch, or from the Actions tab once merged. It never
+# merges what it opens; the operator reads the checks and closes the PR.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['identity-canary/**']
+
+# The Actions token stays read-only here. Every write below is the App's, which is the whole point:
+# a write GITHUB_TOKEN performs delivers no event.
+permissions:
+  contents: read
+
+concurrency:
+  group: dark-factory-identity-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    if: github.repository == 'ShaishiBear/dark-factory-2.0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Mint the autonomous identity's installation token
+        id: factory_identity
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+
+      - name: Checkout current main without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Open a throwaway PR as the App and move its head once
+        shell: bash
+        env:
+          APP_TOKEN: ${{ steps.factory_identity.outputs.token }}
+        run: |
+          set -euo pipefail
+          branch="canary/app-identity-${GITHUB_RUN_ID}"
+          note="docs/identity-canary/${GITHUB_RUN_ID}.md"
+          remote="https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          git config user.name 'dark-factory-identity-canary'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$branch"
+
+          mkdir -p "$(dirname "$note")"
+          printf 'Event-shape canary for run %s. Disposable; close and delete.\n' "$GITHUB_RUN_ID" > "$note"
+          git add "$note"
+          git commit -q -m "test(identity): event-shape canary for run ${GITHUB_RUN_ID}"
+          git push -q "$remote" "HEAD:refs/heads/$branch"
+          first="$(git rev-parse HEAD)"
+          echo "CANARY_FIRST_HEAD=$first"
+
+          GH_TOKEN="$APP_TOKEN" gh pr create -R "$GITHUB_REPOSITORY" \
+            --head "$branch" --base main \
+            --title "test(identity): event-shape canary for run ${GITHUB_RUN_ID}" \
+            --body "Disposable canary proving the autonomous identity's GitHub event path. Opened by the App installation, not GITHUB_TOKEN. Not for merge -- close it once both required contexts are observed."
+
+          number="$(GH_TOKEN="$APP_TOKEN" gh pr view "$branch" -R "$GITHUB_REPOSITORY" --json number --jq '.number')"
+          echo "CANARY_PR=$number"
+
+          # Condition 7: a `synchronize` the App causes must re-run both authorities on the new
+          # head. The pause lets the first head's runs be created and observed separately.
+          sleep 45
+          printf 'Head moved once, to prove the authorities re-run.\n' >> "$note"
+          git add "$note"
+          git commit -q -m "test(identity): move the canary head once"
+          git push -q "$remote" "HEAD:refs/heads/$branch"
+          second="$(git rev-parse HEAD)"
+          echo "CANARY_SECOND_HEAD=$second"
+          echo "CANARY_READY pr=$number first=$first second=$second"
