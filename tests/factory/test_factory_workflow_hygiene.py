@@ -7,6 +7,7 @@ our own branches.
 """
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -20,6 +21,25 @@ WORKER = WORKFLOWS / "dark-factory-worker.yml"
 TRUST_ROOT = WORKFLOWS / "dark-factory-trust-root.yml"
 CLEANUP = WORKFLOWS / "dark-factory-branch-cleanup.yml"
 CANARY = WORKFLOWS / "dark-factory-identity-canary.yml"
+
+
+def copied_into_mutation_copies() -> set[str]:
+    """The factory runner's `COPY_FILES`, read as data rather than imported.
+
+    `harness` is not an importable package, and importing the runner to read one constant would
+    drag its whole module surface into every copy that runs this file.
+    """
+    source = (ROOT / "harness" / "factory_mutations" / "run.py").read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "COPY_FILES" for target in node.targets
+        ):
+            return {
+                element.value
+                for element in node.value.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
+    raise AssertionError("harness/factory_mutations/run.py defines no COPY_FILES")
 
 
 def uses_lines(text: str) -> set[str]:
@@ -524,6 +544,27 @@ class AutonomousIdentityCapabilityTests(unittest.TestCase):
         self.assertIn('info.get("headRefOid") != expected_head', merge)
         self.assertIn("refusing merge: PR head moved after authorization", merge)
         self.assertIn('"--match-head-commit", expected_head', merge)
+
+    def test_every_workflow_this_module_reads_is_carried_into_a_mutation_copy(self) -> None:
+        """This file runs inside all 428 factory mutation copies, so every path it opens at module
+        scope must be in `COPY_FILES` or the focused baseline is red and the whole family REFUSES
+        rather than runs -- 428 defects unevaluated, after the judges have already been paid.
+
+        That is exactly what D-081 was (`defects.json` missing from the copy set), and adding
+        `dark-factory-identity-canary.yml` to this module in #150 without adding it to `COPY_FILES`
+        did it a second time: run 34145842963 spent $1.60 on five green judges and then refused at
+        `FileNotFoundError: .../dark-factory-identity-canary.yml`. The next constant added above
+        fails here, in the static rung, for a few milliseconds instead.
+        """
+        carried = copied_into_mutation_copies()
+        for path in (WORKER, TRUST_ROOT, REGRESSION, CLEANUP, CANARY):
+            rel = path.relative_to(ROOT).as_posix()
+            self.assertIn(
+                rel,
+                carried,
+                f"{rel} is read by this module but not in harness/factory_mutations/run.py "
+                "COPY_FILES; every mutation copy's baseline would go red on it",
+            )
 
     def test_the_canary_proves_the_event_path_and_holds_no_other_authority(self) -> None:
         """The canary exists to observe event delivery, so it must stay that: read-only Actions
