@@ -2055,6 +2055,20 @@
       "find": "        if tool == \"factory_evidence.py\" and \"--currency-only\" in argv:\n            phase = \"currency\"\n",
       "replace": "",
       "why": "One program is called twice in a validate with different failure modes. Conflating them aims every evidence scenario at whichever call runs first, so the Evidence Bundle's own scenarios would silently stop exercising the bundle."
+    },
+    {
+      "id": "mutation-detector-reference-check-made-vacuous",
+      "file": "harness/mutation_anchors.py",
+      "find": "            if named in tests:\n                continue\n",
+      "replace": "            continue\n",
+      "why": "A defect could again name a detector that never runs, which is how four re-head defects escaped from D-072 onward; caught by tests/factory/test_factory_mutation_anchors.py (a named detector outside the suite fails)."
+    },
+    {
+      "id": "rehead-guard-detector-dropped-from-the-copy-set",
+      "file": "harness/factory_mutations/run.py",
+      "find": "    \"tests/factory/test_factory_rehead_guard_files.py\",\n",
+      "replace": "",
+      "why": "The detector four re-head defects name would stop running in the copies, and those defects would silently escape again; caught by tests/factory/test_factory_mutation_anchors.py (every detector the catalogue names is in the suite)."
     }
   ]
 }

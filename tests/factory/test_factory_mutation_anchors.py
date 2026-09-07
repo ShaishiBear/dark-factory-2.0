@@ -54,10 +54,17 @@ anchors = _load_checker()
 
 
 def _fake_runner(defects: list[dict], copy_files: tuple[str, ...],
-                 copy_dirs: tuple[str, ...] = ()) -> types.SimpleNamespace:
+                 copy_dirs: tuple[str, ...] = (),
+                 test_files: tuple[str, ...] | None = None) -> types.SimpleNamespace:
     """A stand-in for `harness/factory_mutations/run.py` with a catalogue of our choosing."""
+    if test_files is None:
+        test_files = tuple(
+            rel for rel in copy_files
+            if rel.startswith("tests/") and Path(rel).name.startswith("test_")
+        )
     return types.SimpleNamespace(
-        load_defects=lambda: defects, COPY_FILES=copy_files, COPY_DIRS=copy_dirs
+        load_defects=lambda: defects, COPY_FILES=copy_files, COPY_DIRS=copy_dirs,
+        TEST_FILES=test_files,
     )
 
 
@@ -168,6 +175,107 @@ class FactoryFamilyTests(unittest.TestCase):
         self.assertEqual(len(failures), 2)
         self.assertTrue(any("one" in line for line in failures))
         self.assertTrue(any("two" in line for line in failures))
+
+
+class NamedDetectorTests(unittest.TestCase):
+    """A defect whose stated detector never runs escapes whatever that test proves (D-078).
+
+    `tests/factory/test_factory_rehead_guard_files.py` was written, committed and green, and was
+    never in `COPY_FILES`. A copy runs the files in `COPY_FILES` and nothing else, so all four
+    defects whose `why` named it escaped every run of the family that existed to catch them --
+    three of them silently, from D-072 until the first run to report escapes by name.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def runner(self, defects: list[dict], test_files: tuple[str, ...]):
+        return _fake_runner(defects, test_files, test_files=test_files)
+
+    def test_a_named_detector_in_the_suite_passes(self):
+        runner = self.runner(
+            [{"id": "d", "file": "x", "find": "y", "replace": "",
+              "why": "caught by tests/factory/test_factory_thing.py (it goes red)"}],
+            ("tests/factory/test_factory_thing.py",),
+        )
+        self.assertEqual(anchors.check_named_detectors(runner), [])
+
+    def test_a_named_detector_outside_the_suite_fails(self):
+        runner = self.runner(
+            [{"id": "unwired", "file": "x", "find": "y", "replace": "",
+              "why": "caught by tests/factory/test_factory_missing.py (it goes red)"}],
+            ("tests/factory/test_factory_thing.py",),
+        )
+        failures = anchors.check_named_detectors(runner)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("unwired", failures[0])
+        self.assertIn("tests/factory/test_factory_missing.py", failures[0])
+
+    def test_a_why_that_names_no_detector_is_not_a_failure(self):
+        # Most defects describe the property in prose without naming a file. That is allowed.
+        runner = self.runner(
+            [{"id": "d", "file": "x", "find": "y", "replace": "",
+              "why": "The guard could be made advisory."}],
+            (),
+        )
+        self.assertEqual(anchors.check_named_detectors(runner), [])
+
+    def test_a_defect_with_no_why_at_all_is_not_a_failure(self):
+        runner = self.runner([{"id": "d", "file": "x", "find": "y", "replace": ""}], ())
+        self.assertEqual(anchors.check_named_detectors(runner), [])
+
+    def test_every_named_detector_is_reported_not_only_the_first(self):
+        runner = self.runner(
+            [
+                {"id": "one", "file": "x", "find": "y", "replace": "",
+                 "why": "caught by tests/factory/test_factory_a.py"},
+                {"id": "two", "file": "x", "find": "y", "replace": "",
+                 "why": "caught by tests/factory/test_factory_b.py"},
+            ],
+            (),
+        )
+        failures = anchors.check_named_detectors(runner)
+        self.assertEqual(len(failures), 2)
+        self.assertTrue(any("one" in line for line in failures))
+        self.assertTrue(any("two" in line for line in failures))
+
+    def test_one_defect_naming_two_detectors_reports_both(self):
+        runner = self.runner(
+            [{"id": "d", "file": "x", "find": "y", "replace": "",
+              "why": "caught by tests/factory/test_factory_a.py and "
+                     "tests/factory/test_factory_b.py"}],
+            ("tests/factory/test_factory_a.py",),
+        )
+        failures = anchors.check_named_detectors(runner)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("test_factory_b.py", failures[0])
+
+    def test_the_message_distinguishes_unwired_from_nonexistent(self):
+        # A detector that exists is a wiring mistake; one that does not is a wrong name. The
+        # fix differs, so the line says which.
+        runner = self.runner(
+            [{"id": "d", "file": "x", "find": "y", "replace": "",
+              "why": "caught by tests/factory/test_factory_definitely_absent.py"}],
+            (),
+        )
+        self.assertIn("does not exist", anchors.check_named_detectors(runner)[0])
+
+
+class RealCatalogueTests(unittest.TestCase):
+    """The one assertion in this file that may read the real catalogue.
+
+    The anchor check may NOT: a copy has exactly one anchor deliberately removed, so asserting
+    every anchor injects would go red in all of them and report every defect as caught. The
+    detector-reference check is different in kind. It reads `why` strings and `TEST_FILES`, and
+    injecting a source anchor touches neither, so it answers the same in every copy as it does
+    on `main` -- except in the copies that mutate the copy set itself, where going red is
+    exactly right (D-078).
+    """
+
+    def test_every_detector_the_catalogue_names_is_in_the_suite(self):
+        self.assertEqual(anchors.check_named_detectors(anchors._factory_runner()), [])
 
 
 class ApplicationFamilyTests(unittest.TestCase):

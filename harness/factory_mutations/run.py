@@ -103,6 +103,9 @@ COPY_FILES = (
     # A base that moved is noticed before anything is paid for, and recovered from without a
     # maintainer deleting a marker by hand (D-077).
     "tests/factory/test_factory_base_move.py",
+    # The detector four re-head defects name. It existed, and was not here, so those
+    # defects escaped every run of the family that was supposed to catch them (D-078).
+    "tests/factory/test_factory_rehead_guard_files.py",
     # This runner, in the copy: a mutation of its own concurrency or its own accounting has to
     # be injectable somewhere its detector can read it. The copy is never executed as a runner.
     "harness/factory_mutations/run.py",

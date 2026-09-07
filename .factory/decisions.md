@@ -3946,3 +3946,60 @@ and the bundle's scenario still refuses at the bundle. Seven mutations -- `rehea
 `currency-only-falls-through-to-the-bundle`, `currency-refusal-recorded-as-the-evidence-bundle`
 and `rehearsal-conflates-the-two-evidence-calls` -- each verified caught by direct injection on
 the maintainer's Windows host.
+
+## D-078 · Every detector a defect names must actually run, because a green test file that was never wired in let four defects escape
+
+**The first run to name its escapes named these.** Validation run 34114507758 of PR #134, the
+first since D-076 taught the mutation runners to print their failures by name:
+
+```
+FACTORY_MUTATIONS_TOTAL=414
+FACTORY_MUTATIONS_CAUGHT=411
+FACTORY_MUTATIONS_NOT_INJECTED=0
+FACTORY_MUTATIONS_ESCAPED=rehead-guard-hashes-unverified,rehead-changed-guard-file-accepted,evidence-replay-compares-the-whole-file-map
+```
+
+`NOT_INJECTED=0` is D-076 holding. The three escapes were the other half of that refusal, and
+before D-076 they were a bare count that cost a local re-run of the whole catalogue to identify.
+Named, they took one query to diagnose: **all three `why` fields name the same detector**,
+`tests/factory/test_factory_rehead_guard_files.py`.
+
+**The file exists. It is green. It was never in `COPY_FILES`.** A mutation copy runs the test
+files in `COPY_FILES` and nothing else, so the detector written for those defects has never once
+run against them. It was added by D-072 together with the four defects it proves, and the copy
+set was not updated with it. Three escaped silently from that day; the fourth,
+`rehead-compares-the-whole-file-map`, happened to be caught by an unrelated file, which is why
+the count was three and not four — and which is exactly how this stays hidden.
+
+**This is D-076's silence one field over.** An anchor that no longer matches and a detector that
+never runs both leave a defect in the catalogue with nothing behind it, and both are invisible
+until a full harness run fifty minutes into a validation. A defect's `why` routinely says
+"caught by tests/factory/test_x.py"; that sentence was the only record of which test is supposed
+to notice the defect, and it was prose. `harness/mutation_anchors.py` now reads those references
+and refuses any that is not in the suite the copies run, naming the defect, the file, and
+whether the file is missing from the copy set or missing from the repository — because the fix
+differs. It costs a regex over 295 `why` strings and runs in the same static rung.
+
+The audit found exactly one such file across 24 named detectors and 96 references. Adding it to
+`COPY_FILES` catches all four defects: verified by injecting each into a real `build_copy` and
+running the detector there (1.1 s each). The file is hermetic under D-074 — it runs green from a
+copy that is not a repository.
+
+**Detection.** `tests/factory/test_factory_mutation_anchors.py` grows to 29 tests: a named
+detector inside the suite passes, one outside it fails, a `why` that names no detector is not a
+failure, a defect with no `why` is not a failure, every named detector is reported rather than
+the first, one defect naming two detectors reports both, and the message distinguishes "exists
+but is not in the copy set" from "does not exist".
+
+One of them reads the REAL catalogue, which the anchor check may never do. The distinction is
+load-bearing: a copy has one anchor deliberately removed, so asserting every anchor injects
+would go red in all 422 copies and report every defect as caught. The detector-reference check
+reads `why` strings and `TEST_FILES`, and injecting a source anchor touches neither — it answers
+the same in every copy as on `main`, except in the copies that mutate the copy set itself, where
+red is the correct answer. That is what makes
+`rehead-guard-detector-dropped-from-the-copy-set` catchable at all.
+
+Two mutations, `mutation-detector-reference-check-made-vacuous` and
+`rehead-guard-detector-dropped-from-the-copy-set`, each verified caught by injection into a real
+`build_copy` on the maintainer's Windows host, along with the four re-head defects this change
+re-arms.
