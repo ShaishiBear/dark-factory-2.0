@@ -41,6 +41,11 @@ RUNG_SECONDS = budget.budget_seconds(BUDGET, scope="static-rung")
 # through shutil.which for the Windows .cmd-shim problem, and a shell string would
 # reintroduce the quoting bugs that ate 2026-04-14.
 CHECKS = [
+    # First because it costs milliseconds and because what it catches is invisible everywhere
+    # else: a mutation anchor that no longer matches its source reports `not_injected` only in
+    # the full harness, fifty minutes into a validation, and the defect it names has had no
+    # detector since the refactor that moved it (D-076).
+    ("mutation-anchors", ROOT, [sys.executable, str(HERE / "mutation_anchors.py")]),
     ("ruff-lint",   BACKEND,  ["uv", "run", "ruff", "check", "."]),
     ("ruff-format", BACKEND,  ["uv", "run", "ruff", "format", "--check", "."]),
     ("mypy",        BACKEND,  ["uv", "run", "mypy", "."]),

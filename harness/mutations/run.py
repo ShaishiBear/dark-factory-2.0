@@ -226,6 +226,11 @@ def main(argv: list[str] | None = None) -> int:
     defects = json.loads(DEFECTS.read_text(encoding="utf-8"))["defects"]
     total = caught = not_injected = 0
     quick_caught = independent_caught = citation_caught = security_caught = 0
+    # Named, not just counted. Every consumer of this output keeps only its tail -- the kernel
+    # stores the last characters of a refused tool's output in `validation-refusal.json` -- so
+    # a failure that names its members only in the per-defect lines above arrives anonymous.
+    escaped_ids: list[str] = []
+    uninjected_ids: list[str] = []
 
     print("MUTATION_START", flush=True)
     for defect in defects:
@@ -236,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if not apply(defect):
                 not_injected += 1
+                uninjected_ids.append(defect["id"])
                 print(
                     f"  NOT_INJECTED  {defect['id']:<38} "
                     f"anchor not found in {defect['file']}",
@@ -267,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             else:
                 outcome = "escaped"
+                escaped_ids.append(defect["id"])
                 requirement = (
                     f" required channel(s) stayed green: {', '.join(missing_required)};"
                     if missing_required else ""
@@ -299,6 +306,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"MUTATIONS_NOT_INJECTED={not_injected}", flush=True)
 
     app_ok = caught == total and not_injected == 0
+    if not app_ok:
+        for ids, marker in ((escaped_ids, "MUTATIONS_ESCAPED"),
+                            (uninjected_ids, "MUTATIONS_UNINJECTED")):
+            if ids:
+                print(f"{marker}={','.join(ids)}", flush=True)
     if application_only:
         if app_ok:
             print("MUTATIONS_APPLICATION_ONLY_OK", flush=True)
