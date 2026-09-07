@@ -8,8 +8,8 @@
     {
       "id": "security-verdict-forced-pass",
       "file": "scripts/factory_security.py",
-      "find": "\"verdict\": \"pass\" if not findings else \"fail\",",
-      "replace": "\"verdict\": \"pass\",",
+      "find": "    verdict = \"pass\" if not findings else \"fail\"\n",
+      "replace": "    verdict = \"pass\"\n",
       "why": "The deterministic security guard could make all findings advisory."
     },
     {
@@ -64,9 +64,9 @@
     {
       "id": "worker-bare-isolation-disabled",
       "file": "factory_kernel/providers.py",
-      "find": "            \"--bare\",",
-      "replace": "            \"--bare-disabled\",",
-      "why": "Project plugins, hooks, skills or auto-memory could silently expand the headless worker authority surface."
+      "find": "ISOLATION_FLAGS: tuple[str, ...] = (\"--safe-mode\", \"--setting-sources\", \"\")",
+      "replace": "ISOLATION_FLAGS: tuple[str, ...] = (\"--setting-sources\", \"\")",
+      "why": "Project plugins, hooks, skills, commands or auto-memory could silently expand the headless worker authority surface. `--safe-mode` is what disables them since D-065 replaced `--bare`, which also forced the CLI into simple mode."
     },
     {
       "id": "worker-test-envelope-disabled",
@@ -449,8 +449,8 @@
     {
       "id": "kernel-build-worktree-sees-holdout",
       "file": "factory_kernel/runtime.py",
-      "find": "            blind=BUILDER_BLIND_PATHS,\n",
-      "replace": "",
+      "find": "            base_dir=self.config.runtime.work_root / \"worktrees\",\n            blind=BUILDER_BLIND_PATHS,\n",
+      "replace": "            base_dir=self.config.runtime.work_root / \"worktrees\",\n",
       "why": "The build worktree would be created unblinded even though the policy names the paths."
     },
     {
@@ -547,8 +547,8 @@
     {
       "id": "kernel-red-proof-holds-github-credentials",
       "file": "factory_kernel/runtime.py",
-      "find": "                cwd=worktree.path,\n                env=env,\n                credential_scope=\"none\",\n                timeout=600,\n                transcript=paths.transcripts / \"red-gate.log\",",
-      "replace": "                cwd=worktree.path,\n                env=env,\n                credential_scope=\"github\",\n                timeout=600,\n                transcript=paths.transcripts / \"red-gate.log\",",
+      "find": "                        credential_scope=\"none\",\n                        timeout=600,\n                        transcript=paths.transcripts / log,\n",
+      "replace": "                        credential_scope=\"github\",\n                        timeout=600,\n                        transcript=paths.transcripts / log,\n",
       "why": "The RED proof runs model-authored checkpoint commands; giving it GitHub scope hands a repository token to code the model wrote."
     },
     {
@@ -561,14 +561,14 @@
     {
       "id": "proof-checkpoint-env-unscrubbed",
       "file": "scripts/factory_proof.py",
-      "find": "    p=subprocess.run(argv,cwd=ROOT/cwd,env=checkpoint_env(),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)",
-      "replace": "    p=subprocess.run(argv,cwd=ROOT/cwd,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=300)",
+      "find": "        p=subprocess.run(argv,cwd=ROOT/cwd,env=checkpoint_env(),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=CHECKPOINT_TIMEOUT_SECONDS)",
+      "replace": "        p=subprocess.run(argv,cwd=ROOT/cwd,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=CHECKPOINT_TIMEOUT_SECONDS)",
       "why": "The defence-in-depth scrub is gone; a caller that forgets the credential scope would leak GH_TOKEN into a model-authored command."
     },
     {
       "id": "kernel-design-context-heartbeat-dropped",
       "file": "factory_kernel/runtime.py",
-      "find": "            self._lease_heartbeat(\"touch\", issue_number, \"design-context\", paths, cwd=worktree.path)\n",
+      "find": "                self._lease_heartbeat(\n                    \"touch\", issue_number, \"design-context\", paths, cwd=worktree.path\n                )\n",
       "replace": "",
       "why": "A stage would run with no heartbeat, so a long context/design phase could be reaped as stale mid-build."
     },
@@ -624,8 +624,8 @@
     {
       "id": "kernel-second-review-runs-one-axis",
       "file": "factory_kernel/runtime.py",
-      "find": "        for axis in AXES:\n            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=context, env=env)",
-      "replace": "        for axis in AXES[:1]:\n            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=context, env=env)",
+      "find": "        for axis in AXES:\n            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=full_context, env=env)",
+      "replace": "        for axis in AXES[:1]:\n            self._agent(ROLE_FOR_AXIS[axis], worktree.path, paths, context=full_context, env=env)",
       "why": "Only the Spec reviewer would run; the Standards artifact would be stale or absent."
     },
     {
@@ -645,8 +645,8 @@
     {
       "id": "kernel-repro-not-executed-for-bugs",
       "file": "factory_kernel/runtime.py",
-      "find": "            if role == \"investigate\":\n                # The red loop",
-      "replace": "            if False:\n                # The red loop",
+      "find": "                if role == \"investigate\":\n                    # The red loop",
+      "replace": "                if False:\n                    # The red loop",
       "why": "Bug builds would proceed to the contract without the red loop the rules describe."
     },
     {
@@ -743,8 +743,8 @@
     {
       "id": "context-worker-brief-reduced-to-hash",
       "file": "factory_kernel/runtime.py",
-      "find": "            self._agent(\n                \"context\",\n                worktree.path,\n                paths,\n                context=self._worker_brief(",
-      "replace": "            self._agent(\n                \"context\",\n                worktree.path,\n                paths,\n                context=(f\"Validated contract sha256: {contract_hash}\" or self._worker_brief(",
+      "find": "                    context=self._worker_brief(\n                        paths, contract_hash=contract_hash, issue_context=issue_context\n                    ),\n",
+      "replace": "                    context=f\"Validated contract sha256: {contract_hash}\",\n",
       "why": "The context worker would again receive only the hash and have to rediscover the whole task from disk, the slowest stage of the first canary."
     },
     {
@@ -792,8 +792,8 @@
     {
       "id": "provider-timeout-swallowed",
       "file": "factory_kernel/providers.py",
-      "find": "        except subprocess.TimeoutExpired as exc:\n",
-      "replace": "        except subprocess.TimeoutExpired as exc:\n            return AgentResult(provider_id=self.provider_id, model=model, content=\"\")\n",
+      "find": "        if run.timed_out:\n",
+      "replace": "        if False:\n",
       "why": "A timed-out worker would be reported as a successful empty result instead of a failed stage."
     },
     {
@@ -805,9 +805,9 @@
     },
     {
       "id": "prompt-placeholders-not-rendered",
-      "file": "factory_kernel/worker_runtime.py",
-      "find": "        prompt = render_prompt(prompt, env)\n",
-      "replace": "",
+      "file": "factory_kernel/prompt_render.py",
+      "find": "    values = {\"ARTIFACTS_DIR\": str(artifacts_dir(env))}\n",
+      "replace": "    return prompt\n    values = {\"ARTIFACTS_DIR\": str(artifacts_dir(env))}\n",
       "why": "Workers would again receive `$ARTIFACTS_DIR` literally and, having no shell, write into a directory of that name (canary run 33910993905)."
     },
     {
@@ -917,10 +917,10 @@
     },
     {
       "id": "red-gate-refuses-spec-files-the-commit-authority-accepts",
-      "file": "scripts/factory_proof.py",
-      "find": "    return 'test' in low or '/tests/' in slashed or '/__tests__/' in slashed or '.spec.' in low or low.endswith('conftest.py')\n",
-      "replace": "    return 'test' in low or '/tests/' in slashed or low.endswith('conftest.py')\n",
-      "why": "A .spec. acceptance file committed by git_authority would be refused by RED, leaving a stray commit on the branch."
+      "file": "scripts/factory_shapes.py",
+      "find": "TEST_MARKERS: tuple[str, ...] = (\"/tests/\", \"/__tests__/\", \".test.\", \".spec.\")",
+      "replace": "TEST_MARKERS: tuple[str, ...] = (\"/tests/\", \".test.\")",
+      "why": "A .spec. or __tests__ acceptance file committed by git_authority would be refused by RED, leaving a stray commit on the branch. Since D-064 one predicate (scripts/factory_shapes.test_shaped) serves RED, the commit authority and the architecture guard, so the disagreement is now a mutation of that shared list."
     },
     {
       "id": "context-object-entries-refused-again",
@@ -960,8 +960,8 @@
     {
       "id": "test-author-not-told-deferred-symptom",
       "file": "factory_kernel/runtime.py",
-      "find": "                ) + self._deferred_symptom_brief(paths.artifacts),\n",
-      "replace": "                ),\n",
+      "find": "            ) + self._deferred_symptom_brief(paths.artifacts)\n",
+      "replace": "            )\n",
       "why": "The RED gate would demand a symptom string the test author was never shown, refusing every deferred-repro bug after a full RED run."
     },
     {
@@ -1016,8 +1016,8 @@
     {
       "id": "provenance-script-imports-kernel-without-bootstrap",
       "file": "scripts/factory_provenance.py",
-      "find": "ROOT = Path(__file__).resolve().parents[1]\nsys.path.insert(0, str(ROOT))\n",
-      "replace": "ROOT = Path(__file__).resolve().parents[1]\n",
+      "find": "HERE = Path(__file__).resolve().parent\nsys.path.insert(0, str(HERE.parent))\n",
+      "replace": "HERE = Path(__file__).resolve().parent\n",
       "why": "The publish step runs from a detached PR-head worktree; without the bootstrap the kernel import fails there and a completed build never reaches review, as on canary attempt 10."
     },
     {
@@ -1100,8 +1100,8 @@
     {
       "id": "proof-runner-output-unsanitised",
       "file": "scripts/factory_proof.py",
-      "find": "    return p.returncode,sanitise_output((p.stdout or '')+(p.stderr or ''))",
-      "replace": "    return p.returncode,(p.stdout or '')+(p.stderr or '')",
+      "find": "    return rc,sanitise_output(out),round(time.monotonic()-started,3),fault",
+      "replace": "    return rc,out,round(time.monotonic()-started,3),fault",
       "why": "Terminal control sequences would re-enter the stored RED tail; the attached proof can then stop being JSON after the PR-body round trip."
     },
     {
@@ -1121,15 +1121,15 @@
     {
       "id": "provider-nonzero-exit-bypasses-transient-classification",
       "file": "factory_kernel/providers.py",
-      "find": "            transient = _transient_from_stdout(stdout, role=request.role)\n            if transient is not None:\n                raise transient\n",
+      "find": "            transient = _transient_from_stdout(\n                stdout,\n                role=request.role,\n                events_seen=run.events_seen,\n                thinking_tokens=run.thinking_tokens,\n            )\n            if transient is not None:\n                raise transient\n",
       "replace": "",
       "why": "A non-zero CLI exit would again raise the generic failure before its envelope is classified, so a dropped stream is refused instead of retried (D-040)."
     },
     {
       "id": "failed-stage-record-skipped",
-      "file": "factory_kernel/worker_runtime.py",
-      "find": "            self._record_failed_agent(paths, role, exc, started=started)\n            raise",
-      "replace": "            raise",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._record_failed_agent(\n                paths, request.role, exc, started=started, model=model,\n                effort=request.effort, record=record, stage_run=stage_run,\n            )\n            raise\n",
+      "replace": "            raise\n",
       "why": "A worker stage that failed would again leave no agent-<role>.json and no timing row, so a dropped stream is evidenced only by the exception text (D-041)."
     },
     {
@@ -1156,8 +1156,8 @@
     {
       "id": "publish-base-read-from-branch-tip",
       "file": "factory_kernel/runtime.py",
-      "find": "                \"--base\", base_sha,\n",
-      "replace": "                \"--base\", self._git(\"rev-parse\", f\"origin/{self.config.default_branch}\"),\n",
+      "find": "                \"python\", \"scripts/factory_provenance.py\", \"publish\",\n                \"--pr\", str(pr_number),\n                \"--artifacts\", str(paths.artifacts),\n                \"--base\", base_sha,\n",
+      "replace": "                \"python\", \"scripts/factory_provenance.py\", \"publish\",\n                \"--pr\", str(pr_number),\n                \"--artifacts\", str(paths.artifacts),\n                \"--base\", self._git(\"rev-parse\", f\"origin/{self.config.default_branch}\"),\n",
       "why": "publish would record the base branch tip at publish time instead of the commit the branch was cut from, which is exactly the false binding the first production pack carried."
     },
     {
@@ -1212,8 +1212,8 @@
     {
       "id": "rehead-accepts-any-commit-shape",
       "file": "factory_kernel/runtime.py",
-      "find": "        if changed != sorted(files):\n            raise NeedsHuman(\"rebased test-author commit does not change exactly the RED-hashed files; re-head refused\")\n",
-      "replace": "        if False:\n            raise NeedsHuman(\"rebased test-author commit does not change exactly the RED-hashed files; re-head refused\")\n",
+      "find": "        self._verify_test_commit_files(cwd, test_commit, changed, red_files, guard_files, files)\n",
+      "replace": "",
       "why": "RED would be replayed at a commit that also changes production files, which the evidence bundle's reconstruction refuses; the re-head must refuse first."
     },
     {
@@ -1233,14 +1233,14 @@
     {
       "id": "e2e-login-probe-assumed-green",
       "file": "harness/e2e.py",
-      "find": "        probe_status, probe_cookie, probe_body = _probe_login(app, email, password)\n",
-      "replace": "        probe_status, probe_cookie, probe_body = 200, True, \"\"\n",
+      "find": "        probe_status, probe_cookie, probe_body, cookie = _probe_login(app, email, password)\n",
+      "replace": "        probe_status, probe_cookie, probe_body, cookie = 200, True, \"\", None\n",
       "why": "The harness would launch the browser without asking the route whether it accepts the validation account, so a route refusal would surface only as a silent predicate timeout with no reason in the log (D-047)."
     },
     {
       "id": "e2e-failure-dump-skipped",
       "file": "harness/e2e.py",
-      "find": "    except E2EFailure as exc:\n        _dump_failure(session, artifacts, str(exc), (password,))\n        raise\n",
+      "find": "    except E2EFailure as exc:\n        _dump_failure(session, artifacts, str(exc), (password, *secrets))\n        raise\n",
       "replace": "    except E2EFailure as exc:\n        raise\n",
       "why": "A broken browser journey would leave no page, console, network or cookie evidence in the uploaded artifact, which is exactly what made D-047 a two-run diagnosis."
     },
@@ -1499,8 +1499,8 @@
     {
       "id": "read-scope-lets-factory-kernel-through",
       "file": "factory_kernel/worker_policy.py",
-      "find": "TRUST_ROOT_DENY_PATHS: tuple[str, ...] = (\n    \"factory_kernel/**\",\n",
-      "replace": "TRUST_ROOT_DENY_PATHS: tuple[str, ...] = (\n",
+      "find": "    \".git/**\",\n    \"factory_kernel/**\",\n",
+      "replace": "    \".git/**\",\n",
       "why": "Every worker's deny list would omit factory_kernel/**, and a file inside the working directory is readable without any rule, so the kernel's own source would be back in every builder's reach while the allow rules looked complete; caught by tests/factory/test_factory_read_scope_and_draft_deadline.py (every tool-bearing role is denied the trust root; a mutation role is told paths not bare tools; the probe argv carries the deny) (D-057)."
     },
     {
@@ -1978,6 +1978,41 @@
       "find": "        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope=\"evidence-bundle\"),\n",
       "replace": "        timeout=3000,\n",
       "why": "The wrapper that contains the whole ladder, back to a number nobody measured: 3000 s bounds a program that runs a 10020 s ladder, which is the defect one authority out from the 1800 s that killed run 34081507222 after every judge had passed. The detector reads the syntax tree, so writing 3001 instead is caught identically; caught by tests/factory/test_factory_ladder_budget.py (the ladder files carry no literal timeout) (D-075)."
+    },
+    {
+      "id": "mutation-anchor-check-dropped-from-the-static-rung",
+      "file": "harness/static.py",
+      "find": "    (\"mutation-anchors\", ROOT, [sys.executable, str(HERE / \"mutation_anchors.py\")]),\n",
+      "replace": "",
+      "why": "The anchor check would exist and never run, so drift would again be invisible until the mutation rung fifty minutes into a validation."
+    },
+    {
+      "id": "mutation-anchor-uniqueness-made-vacuous",
+      "file": "harness/mutation_anchors.py",
+      "find": "        if found != 1:\n",
+      "replace": "        if False:\n",
+      "why": "A factory defect whose anchor is missing or ambiguous would be reported as injectable, which is exactly the silence this check exists to end."
+    },
+    {
+      "id": "mutation-anchor-copy-set-check-skipped",
+      "file": "harness/mutation_anchors.py",
+      "find": "    if rel in copy_files:\n        return True\n    return any(rel == d or rel.startswith(d + \"/\") for d in copy_dirs)\n",
+      "replace": "    return True\n",
+      "why": "A defect naming a file the runner never copies would pass the check while being impossible to inject."
+    },
+    {
+      "id": "mutation-anchor-failures-reported-as-a-count",
+      "file": "harness/mutation_anchors.py",
+      "find": "        for line in failures:\n            print(line, flush=True)\n",
+      "replace": "",
+      "why": "A count with no names is what let twenty-three drifted defects accumulate across ten merges (D-076)."
+    },
+    {
+      "id": "factory-mutation-failures-leave-their-members-unnamed",
+      "file": "harness/factory_mutations/run.py",
+      "find": "    for outcome, marker in ((\"escaped\", \"FACTORY_MUTATIONS_ESCAPED\"),\n                            (\"not_injected\", \"FACTORY_MUTATIONS_UNINJECTED\")):\n        ids = [result[\"id\"] for result in results if result[\"outcome\"] == outcome]\n        if ids:\n            print(f\"{marker}={','.join(ids)}\", flush=True)\n",
+      "replace": "",
+      "why": "A failing family would again reach the refusal artifact as a count, because every consumer of this output keeps only its tail."
     }
   ]
 }

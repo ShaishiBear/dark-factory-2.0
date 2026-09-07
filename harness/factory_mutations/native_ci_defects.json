@@ -119,8 +119,8 @@
     {
       "id": "worker-cli-route-probe-advisory",
       "file": ".github/workflows/dark-factory-worker.yml",
-      "find": "              echo \"FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model $model\"\n              head -c 600 /tmp/route-probe.json; echo; head -c 400 /tmp/route-probe.err; echo\n              exit 1\n",
-      "replace": "              echo \"FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model $model\"\n              head -c 600 /tmp/route-probe.json; echo; head -c 400 /tmp/route-probe.err; echo\n              true\n",
+      "find": "              echo \"FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model $model ($verdict)\"\n              head -c 600 /tmp/route-probe.json; echo; head -c 400 /tmp/route-probe.err; echo\n              exit 1\n",
+      "replace": "              echo \"FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model $model ($verdict)\"\n              head -c 600 /tmp/route-probe.json; echo; head -c 400 /tmp/route-probe.err; echo\n              true\n",
       "why": "A dead model route would be logged and the dispatch would proceed to burn a validation ladder discovering it."
     },
     {

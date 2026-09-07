@@ -3751,3 +3751,95 @@ subset fails there rather than passing quietly. Mutations
 and `spine-literal-timeout-reintroduced-for-the-evidence-bundle` in
 `harness/factory_mutations/defects.json`, each verified by direct injection on the maintainer's
 Windows host, along with the four D-073 mutations whose anchors moved with the rename.
+
+## D-076 · Every mutation defect must be injectable, and the static rung says so, because twenty-three had quietly stopped being detectors
+
+**The gate that blocked the whole factory.** Validation run 34088776764 of PR #134 (issue #103)
+on 2026-09-07 05:57Z was the first run since D-075 to get past the trust-root currency check and
+actually reach the mutation rung. It passed security, provenance and all five blinded judges, ran
+409 factory defects in 1943.6 s, and refused:
+
+```
+FACTORY_MUTATIONS_TOTAL=409
+FACTORY_MUTATIONS_CAUGHT=383
+FACTORY_MUTATIONS_NOT_INJECTED=23
+FACTORY_MUTATIONS_FAILED - factory trust-root bypass survived
+GATE_FAILED: mutations
+EVIDENCE_SPINE_FAIL: core Evidence Bundle authority rejected the PR
+```
+
+Twenty-three defects could not be injected at all, and three escaped. None of the twenty-three
+had anything to do with #134, whose diff is frontend product code: the trust root in that PR is
+byte-identical to `main`'s, so `main` was failing its own mutation catalogue. Nothing could merge
+until it stopped.
+
+**What "not injected" actually means.** A mutation defect is an exact anchor into source. The
+runner copies the trust root, requires `text.count(find) == 1`, rewrites that one occurrence, and
+asserts the focused suite goes red. When a refactor moves the anchor, the count becomes 0 (or 2)
+and the defect is reported `not_injected` — the catalogue still lists it, the run still prints a
+total, and **the property it stood for has had no detector since the refactor**. It is not a
+failing test. It is a test that quietly stopped existing.
+
+Reconstructed with a local replica of `inject()` against `main` at `574857f`, which reproduced
+the runner's twenty-three exactly. Every one was drift, not deliberate removal:
+`--bare` had become `ISOLATION_FLAGS` (D-065); `timeout=300` had become
+`CHECKPOINT_TIMEOUT_SECONDS` (D-075); the RED credential scope had moved inside `_red_gate`;
+`blind=BUILDER_BLIND_PATHS` had gained two more call sites so the anchor was no longer unique;
+the `.spec.` predicate had moved to the one shared `scripts/factory_shapes.test_shaped` (D-064);
+the failed-stage record had moved from `worker_runtime` to `runtime`'s single agent funnel
+(D-050); the re-head's file-shape check had moved into `_verify_test_commit_files` (D-072). Each
+anchor is re-pointed at the code that carries the property today, and two `why` texts are
+rewritten where the mechanism itself changed rather than merely moved.
+
+**Why it took ten merges to notice.** The only thing that runs the mutation rung is the full
+harness. The full harness runs in factory validation — roughly fifty minutes in, after five model
+judges — and in the daily main regression, which since #119 fails at the E2E rung and returns
+before it ever reaches mutations. `quick-authority` and `trust-root-authority`, the two checks a
+maintainer pull request actually meets, run `harness/ci.py --quick`: static and unit. So every
+maintainer PR from #126 to #138 was free to move an anchor, and thirteen of them did.
+
+**The check belongs where the anchor moves.** Injectability is pure text: read the file, count the
+anchor. `harness/mutation_anchors.py` does it for all 414 factory defects and all 9 application
+defects in under a second, and it is now the first check in the static rung, which means it runs
+in `--quick`, which means it runs on every maintainer pull request. The maintainer who moves an
+anchor is told on their own PR, by name, instead of a validation fifty minutes deep being told a
+number three days later.
+
+It mirrors each runner's own rule rather than inventing a third. The factory family copies the
+trust root and requires a unique anchor, so a file outside the copy set fails even when the anchor
+matches — the copy would not contain it. The application family mutates the live worktree and
+requires only presence, because `uuid-normaliser-dropped` deliberately changes the first of two
+identical call sites to make two entry points derive different lock keys; an ambiguous application
+anchor is a printed note, not a failure.
+
+**It must never run inside a mutation copy.** A copy has exactly one anchor deliberately removed.
+A check of every anchor would go red in all 414 copies and report all 414 defects as caught,
+converting the family's entire signal into noise. The static rung is not run by any copy; the
+copies run the test files in `COPY_FILES` and nothing else. `tests/factory/test_factory_mutation_anchors.py`
+is in that set and therefore does run in every copy, so every fixture in it is synthetic and no
+test in it reads the real catalogue.
+
+**A failure now names its members.** The second half of the diagnosis cost as much as the first.
+`validation-refusal.json` stores the tail of a refused tool's output, and 409 per-defect lines
+pushed the three `ESCAPED` rows out of it; the workflow log holds the exception, not the stream.
+The refusal reached the overseer as "three survivors" with no names, and identifying them needed a
+local re-run of the whole catalogue. Both runners now print `FACTORY_MUTATIONS_ESCAPED=<ids>` /
+`FACTORY_MUTATIONS_UNINJECTED=<ids>` (and `MUTATIONS_ESCAPED` / `MUTATIONS_UNINJECTED`) at the
+tail, beside the failure marker, where truncation cannot reach them. This is the same principle as
+D-041 and D-054: a failure that records only a count is a failure that has to be reproduced before
+it can be read.
+
+**Detection.** `tests/factory/test_factory_mutation_anchors.py` (21 tests) pins copy-set membership
+including the prefix near-miss, all four ways a factory defect fails to inject, the application
+family's weaker rule and its ambiguity note, the reporting of every failing defect rather than the
+first, the `MUTATION_ANCHORS_OK`/`_FAILED` markers with both totals, the static rung's call, and
+both runners' tail markers with the factory one ordered before its failure line. Five mutations —
+`mutation-anchor-check-dropped-from-the-static-rung`, `mutation-anchor-uniqueness-made-vacuous`,
+`mutation-anchor-copy-set-check-skipped`, `mutation-anchor-failures-reported-as-a-count` and
+`factory-mutation-failures-leave-their-members-unnamed` — each verified caught by direct injection
+on the maintainer's Windows host, because the full focused suite is red there for unrelated
+platform reasons and CI is the authority on the rest.
+
+**Still open: the three escapes.** This change does not fix them; it makes the next run say which
+they are. Twenty-three of the twenty-six failures are closed here, and the escapes are the
+remaining work, tracked as its own change once a validation run names them.

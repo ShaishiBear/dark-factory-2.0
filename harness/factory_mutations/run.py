@@ -96,6 +96,10 @@ COPY_FILES = (
     "harness/ci.py",
     "harness/static.py",
     "harness/unit.py",
+    # The check that keeps this catalogue honest, and its own detector. Both are copied so a
+    # mutation of the anchor check can be injected and caught like any other (D-076).
+    "harness/mutation_anchors.py",
+    "tests/factory/test_factory_mutation_anchors.py",
     # This runner, in the copy: a mutation of its own concurrency or its own accounting has to
     # be injectable somewhere its detector can read it. The copy is never executed as a runner.
     "harness/factory_mutations/run.py",
@@ -411,6 +415,18 @@ def main() -> int:
         print(f"FACTORY_MUTATIONS_OK defects={total} seconds={seconds} "
               f"budget={FAMILY_BUDGET_SECONDS}", flush=True)
         return 0
+    # WHICH defects failed, at the tail, next to the marker that says the family failed. The
+    # per-defect lines above are 409 of them and every consumer of this output keeps only the
+    # end of it: the kernel stores the last characters of a refused tool's output
+    # (`validation-refusal.json`), and the workflow log shows the exception, not the stream. On
+    # 2026-09-07 that left "FACTORY_MUTATIONS_FAILED" with three anonymous survivors and a
+    # count of twenty-three uninjected, and diagnosing it needed a local re-run of the whole
+    # catalogue. A failure names its own members here so the refusal artifact carries them.
+    for outcome, marker in (("escaped", "FACTORY_MUTATIONS_ESCAPED"),
+                            ("not_injected", "FACTORY_MUTATIONS_UNINJECTED")):
+        ids = [result["id"] for result in results if result["outcome"] == outcome]
+        if ids:
+            print(f"{marker}={','.join(ids)}", flush=True)
     print("FACTORY_MUTATIONS_FAILED - factory trust-root bypass survived", flush=True)
     return 1
 
