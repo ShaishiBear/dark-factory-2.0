@@ -44,6 +44,7 @@ COPY_FILES = (
     ".github/workflows/dark-factory-trust-root.yml",
     ".github/workflows/dark-factory-main-regression.yml",
     ".github/workflows/dark-factory-branch-cleanup.yml",
+    ".github/workflows/dark-factory-identity-canary.yml",
     ".factory/architecture.json",
     ".factory/prompts/holdout.md",
     ".factory/prompts/investigate.md",
