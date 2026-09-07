@@ -482,7 +482,7 @@ class BuildSideRequestTests(unittest.TestCase):
                 mock.patch("factory_kernel.worker_runtime.method_block", return_value=""),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
-                rt._agent(role, ROOT, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
+                rt._agent(role, Path(tmp), paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
             (req,) = provider.requests
             return req
 
@@ -511,7 +511,7 @@ class BuildSideRequestTests(unittest.TestCase):
             prompt.write_text("judge\n", encoding="utf-8")
             rt.config.prompt_path = lambda role, cwd: prompt
             with contextlib.redirect_stdout(io.StringIO()):
-                rt._agent("conformance", ROOT, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
+                rt._agent("conformance", Path(tmp), paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
             (req,) = provider.requests
             self.assertIs(req.path_scope, path_scope("conformance"))
 

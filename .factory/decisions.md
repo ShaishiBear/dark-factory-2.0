@@ -3572,3 +3572,72 @@ completeness and cleanup, the fail-fast verdict, and the spine's derived deadlin
 `ci-timeout-discards-what-the-rung-said`, `ci-slow-rung-warning-removed` and
 `spine-factory-authority-keeps-its-literal` in `harness/factory_mutations/defects.json`, each
 verified by direct injection into a real copy on the maintainer's Windows host.
+
+## D-074 · The factory mutation family's first real run found a test that was not hermetic, because a suite that needs the tree around it cannot be run from a copy
+
+**Status:** recorded · **Raised:** 2026-09-07 · **Evidence:** validation run 34073357593 of
+PR #134 — the first run in which the factory mutation family ever executed.
+
+D-073 gave the family a budget derived from measurement, and the family reached the end of it
+for the first time: `MUTATIONS_SECONDS=1055.1`, inside its bound. It still reported
+
+```
+MUTATIONS_FAILED - an application or factory defect can currently escape
+```
+
+and the reason was not a defect that escaped. It was the baseline:
+
+```
+File "/tmp/dark-factory-meta-baseline-p2dsxx2r/root/tests/factory/test_factory_worker_throughput.py",
+  line 262, in test_worker_stage_writes_text_telemetry_and_timing
+File ".../factory_kernel/worker_runtime.py", line 437, in _refuse_literal_artifacts_dir
+File ".../factory_kernel/runtime.py", line 3419, in _git
+ToolRefused: git status --porcelain --untracked-files=all failed rc=128:
+  fatal: not a git repository (or any of the parent directories): .git
+```
+
+`WorkerControlledRuntime._agent` finishes a non-mutation role by running `git status` in the
+directory it was handed, and the test handed it `ROOT` — the tree the test file itself lives
+in. In a checkout that works, because the checkout happens to be a repository. The family
+copies the trust root into a plain temporary directory, so there is no `.git` above `root/`,
+and the ambient dependence the test had always carried became an error.
+
+**The decision.** A test in `tests/factory/` may not depend on the tree around it being a
+repository. The stage gets a repository the test created
+(`git_repo()` in `tests/factory/test_factory_worker_throughput.py`), and every other place in
+the suite that named the ambient checkout as a stage's working directory now names a directory
+the test owns instead — `test_factory_authority_bounds.py` (2), `test_factory_prompt_paths.py`,
+`test_factory_read_scope_and_draft_deadline.py` (2) and `test_factory_failed_stage_telemetry.py`,
+none of which was failing, all of which were one deleted stub away from failing.
+
+**What the sweep found.** The whole 84-file suite was run twice on the maintainer's Windows
+host at `origin/main` 3d1873f, once from the worktree and once from a copy of it with `.git`
+removed, comparing failure sets file by file and, inside every red file, test id by test id.
+Exactly one file differs: `tests/factory/test_factory_worker_throughput.py`. With
+`FACTORY_WORKDIR` set to an absolute path the baseline is a single known red
+(`test_factory_bootstrap.py`, the genesis driver's `sha256` under CRLF), identical in both
+trees, so nothing is hidden behind an earlier failure. After the fix, both trees are that same
+single red. No test in the suite genuinely needs the real repository.
+
+**Why the detector is static.** The honest behavioural check — build a non-repository copy and
+run the suite in it — is precisely what the family already does 391 times, and putting it
+inside the suite would make each of those 391 copies build and run a copy of its own.
+`tests/factory/test_factory_suite_hermetic.py` parses each `tests/factory/test_*.py` instead
+and refuses any call that runs `git` in the checkout the file lives in: `_agent`'s and `_git`'s
+working directory, or a `git` subprocess, given the module's `__file__`-derived root or
+anything assigned from it. `_exec` is deliberately outside that set — it runs whatever argv it
+is handed, its subprocess boundary is mocked everywhere the suite points it at the checkout,
+and a rule over it would flag tests that execute nothing. The check costs about 0.2 s, runs in
+every copy, and is exact about the mechanism that actually broke. It is also applied to
+itself: `PositiveControlTests` feeds the analyser sources it must flag, so a scan reduced to
+"find nothing" fails there rather than passing quietly.
+
+**Consequences.** Suite hermeticity is a precondition for the factory mutation family running
+at all, not a property of one test: every one of the 391 copies runs this suite, so a single
+non-hermetic test costs the whole family, and it costs it as `focused baseline is red` —
+a refusal that names no defect. The family had never run before D-073, which is why a
+dependence this old surfaced only now. Mutations
+`worker-throughput-stage-borrows-the-ambient-repository` and
+`suite-hermeticity-scan-stops-reading-agent-call-sites` in
+`harness/factory_mutations/defects.json`, each verified by direct injection into a copy that
+is not a repository on the maintainer's Windows host.
