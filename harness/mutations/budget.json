@@ -1,0 +1,61 @@
+{
+  "_what_this_is": [
+    "THE MEASUREMENT THE MUTATION RUNG'S CLOCK IS DERIVED FROM. harness/mutation_budget.py",
+    "computes budget = ceil(p100(total_seconds for a scope) * headroom / 60) * 60, and",
+    "harness/ci.py, harness/mutations/run.py, harness/factory_mutations/run.py and",
+    "scripts/factory_evidence_spine.py all read their timeout from that derivation instead of",
+    "carrying a literal. tests/factory/test_factory_mutation_budget.py pins the relation, so",
+    "the only way to raise a budget is to record the run that justifies it.",
+    "",
+    "Two scopes, because two callers bound two different things: 'mutation-rung' is the whole",
+    "rung harness/ci.py runs (the application family and the factory family nested inside it),",
+    "'factory-family' is a standalone harness/factory_mutations/run.py (the nested call and the",
+    "evidence spine's independent re-observation).",
+    "",
+    "kind='measured' is a wall clock somebody read off a real end-to-end run. kind='projected'",
+    "is composed from measured parts and says so, in `source`, with the parts. A projection is",
+    "a placeholder for the first real measurement, not a substitute for it: the runners print",
+    "MUTATIONS_SECONDS / FACTORY_MUTATIONS_SECONDS and per-defect MUTATION_TIMING lines, so the",
+    "first full run replaces these entries with observations."
+  ],
+
+  "headroom": 1.5,
+  "warn_fraction": 0.75,
+
+  "measurements": [
+    {
+      "id": "mutation-rung-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "mutation-rung",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 5636,
+      "source": "2674s application family + 2962s factory family. Application: ten iterations (one clean baseline plus nine defects), each running all four channels; the quick channel is the whole cost and was measured at 179.027s, 203.383s and 207.4s on three ubuntu runs (worker runs 34066408781 rehead-quick-gate, 34061371205 quick-gate, and the quick-authority job of run 34066129225), p100 207.4s, plus a 60s allowance for holdout+citation+security (security --worktree measured at 0.39s locally and ~1.4s in CI; holdout and citation are bounded by the 84.3s that the ladder's app-start+e2e+holdout segment cost in run 34066724127). Factory: 391 defects, four concurrent copies, each copy's focused suite stopped at its first red file in the baseline's own cheapest-first order; the 72-file suite was measured file-by-file at 235.3s total on the maintainer's Windows host, whose measured cost distribution gives an expected 30.3s per caught defect (12.9% of the suite) => 391 * 30.3 / 4 = 2962s, taking no credit for the CI runner being faster than that host.",
+      "note": "The 900s literal this replaces was never measured. Run 34066724127 (PR #134) passed security, provenance, all five judges, static, unit, the browser journey and the holdout, then died on 'TIMEOUT after 900s / GATE_FAILED: mutations' while still inside the application family - which alone projects to 2674s, 2.97x the budget it was given."
+    },
+    {
+      "id": "factory-family-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "factory-family",
+      "kind": "projected",
+      "environment": "maintainer Windows host (per-file measurement), four concurrent copies",
+      "total_seconds": 2962,
+      "source": "391 defects across the eight manifests, one copy each, four concurrent. Per-file wall clock of the whole 72-file focused suite measured on 2026-09-07 at origin/main 6a7f8c6: 235.3s total, median 0.59s, p90 7.81s, max 60.7s (test_factory_bootstrap.py). Stopping at the first red in cheapest-first order gives an expected 30.3s per caught defect against that distribution; 391 * 30.3 / 4 = 2962s.",
+      "note": "Without the reduction the same catalogue is 391 * 235.3 / 4 = 23,000s (383 minutes) on that host. Before the reduction it could not run at all: TEST_FILES selected every copied path under tests/, including recorded JSON fixtures that run_tests executed as Python, three of which exit non-zero, so the family refused with 'focused baseline is red' whenever it was reached."
+    }
+  ],
+
+  "_measured_components_2026_09_07": {
+    "quick_gate_seconds_ubuntu": [179.027, 203.383, 207.4],
+    "focused_suite_seconds_windows": 235.3,
+    "focused_suite_files": 72,
+    "focused_suite_expected_prefix_seconds_cheapest_first": 30.3,
+    "focused_suite_expected_prefix_seconds_declaration_order": 86.1,
+    "security_worktree_seconds_windows": 0.39,
+    "immunity_seconds_windows": 0.23,
+    "factory_defects": 391,
+    "application_defects": 9
+  },
+
+  "_raise_this": "By recording the run that justifies it, in the same reviewed change. A budget raised without a measurement behind it is the literal this file exists to retire."
+}

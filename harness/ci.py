@@ -39,6 +39,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -46,6 +47,22 @@ ROOT = HERE.parent
 QUICK = "--quick" in sys.argv
 
 CONFIG = json.loads((HERE / "harness.config.json").read_text(encoding="utf-8"))
+
+sys.path.insert(0, str(HERE))
+import mutation_budget  # noqa: E402
+
+# NOT A LITERAL. This rung ran with `timeout=900` and nothing recorded where 900 came from,
+# while the defect catalogue and the suites each defect re-runs both grew underneath it. The
+# first validation run that reached the rung died on `TIMEOUT after 900s` with every other
+# gate green, including the browser journey (PR #134, run 34066724127). The number is now
+# derived from the measurements in harness/mutations/budget.json, so raising it means
+# recording the run that justifies it (D-073).
+MUTATION_BUDGET = mutation_budget.load()
+MUTATIONS_TIMEOUT = mutation_budget.budget_seconds(
+    MUTATION_BUDGET, scope="mutation-rung")
+# The share of a rung's timeout that is close enough to say so out loud while the rung still
+# passes. Drift from 40% to 95% of a budget is invisible until the run it stops.
+SLOW_RUNG_FRACTION = float(MUTATION_BUDGET["warn_fraction"])
 
 
 def resolve(argv: list[str]) -> list[str]:
@@ -86,16 +103,37 @@ def resolve(argv: list[str]) -> list[str]:
 
 
 def run(step: str, cmd: str | list[str], timeout: int = 300) -> tuple[int, str]:
-    """One rung. A timeout is a FAILURE, not a skip - a hung check reports nothing."""
+    """One rung. A timeout is a FAILURE, not a skip - a hung check reports nothing.
+
+    A rung that finishes inside its timeout but only just is the run before the one that
+    times out, and it looks identical to a fast one. So every rung reports how much of its
+    budget it used once it crosses SLOW_RUNG_FRACTION of it. The mutation rung learned this
+    the expensive way (D-073); the same line is free for the rest of the ladder.
+    """
     argv = resolve(shlex.split(cmd, posix=False) if isinstance(cmd, str) else list(cmd))
+    started = time.monotonic()
     try:
         p = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=timeout)
-        return p.returncode, (p.stdout or "") + (p.stderr or "")
-    except subprocess.TimeoutExpired:
-        return 124, f"TIMEOUT after {timeout}s"
+        rc, out = p.returncode, (p.stdout or "") + (p.stderr or "")
+    except subprocess.TimeoutExpired as expired:
+        # KEEP WHAT THE RUNG MANAGED TO SAY. Discarding the partial output made the mutation
+        # rung's timeout undiagnosable: `TIMEOUT after 900s` and nothing about which defect,
+        # or even which family, the clock had reached (D-073).
+        partial = "".join(
+            stream.decode("utf-8", "replace") if isinstance(stream, bytes) else (stream or "")
+            for stream in (expired.stdout, expired.stderr)
+        ).strip()
+        detail = f"TIMEOUT after {timeout}s"
+        return 124, f"{detail}\n{partial[-4000:]}" if partial else detail
     except OSError as e:
         return 127, f"could not run {argv[0] if argv else cmd!r}: {e}"
+    seconds = time.monotonic() - started
+    if seconds > timeout * SLOW_RUNG_FRACTION:
+        print(f"RUNG_SLOW step={step} seconds={seconds:.1f} timeout={timeout} "
+              f"fraction={seconds / timeout:.2f} - this rung is close to the deadline that "
+              f"would report it as a failure. Re-measure it before it gets there.", flush=True)
+    return rc, out
 
 
 def watchdog(seconds: int, label: str, app=None):
@@ -254,7 +292,8 @@ def main() -> int:
     if os.environ.get("FACTORY_IN_MUTATION") == "1":
         print("MUTATIONS_SKIPPED running inside a mutation build", flush=True)
     elif mutate.exists():
-        rc, out = run("mutations", [sys.executable, str(mutate)], timeout=900)
+        print(f"MUTATIONS_BUDGET seconds={MUTATIONS_TIMEOUT}", flush=True)
+        rc, out = run("mutations", [sys.executable, str(mutate)], timeout=MUTATIONS_TIMEOUT)
         print(out.strip(), flush=True)
         if rc != 0:
             return fail("mutations")

@@ -31,11 +31,18 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "harness"))
+from mutation_budget import budget_seconds, drift_warning, load  # noqa: E402
+
 DEFECTS = Path(__file__).resolve().parent / "defects.json"
 FACTORY_MUTATIONS = ROOT / "harness" / "factory_mutations" / "run.py"
+BUDGET = load()
+RUNG_BUDGET_SECONDS = budget_seconds(BUDGET, scope="mutation-rung")
+FACTORY_BUDGET_SECONDS = budget_seconds(BUDGET, scope="factory-family")
 CHANNELS = (
     ("quick", [sys.executable, "harness/ci.py", "--quick"]),
     ("holdout", [sys.executable, ".factory/holdout/run.py"]),
@@ -71,7 +78,13 @@ def _quick_rung(stdout: str) -> str:
 
 
 def run_channels() -> dict[str, tuple[bool, str]]:
-    """Return channel -> (went_red, detail), without short-circuiting."""
+    """Return channel -> (went_red, detail), without short-circuiting.
+
+    Every channel is evaluated for every defect, deliberately: which channel notices a defect
+    is the measurement (`MUTATIONS_INDEPENDENT_CAUGHT`, `MUTATIONS_SECURITY_CAUGHT`, both
+    ratcheted in `.factory/locks/floor.json`), so stopping at the first red would trade the
+    evidence for the clock.
+    """
     env = dict(os.environ, FACTORY_IN_MUTATION="1")
     results: dict[str, tuple[bool, str]] = {}
     for name, command in CHANNELS:
@@ -81,11 +94,24 @@ def run_channels() -> dict[str, tuple[bool, str]]:
             env=env,
             capture_output=True,
             text=True,
+            # ONE channel, not the rung: the widest of the four is the quick gate, measured at
+            # 179.0/203.4/207.4 s on three ubuntu runs (D-073). The rung's own budget is
+            # derived in harness/mutation_budget.py and applied by harness/ci.py.
             timeout=900,
         )
         detail = _quick_rung(proc.stdout or "") if name == "quick" else name
         results[name] = (proc.returncode != 0, detail)
     return results
+
+
+def timing_line(defect_id: str, seconds: float, outcome: str) -> str:
+    """One defect's clock. The rung's total is the sum of these plus the baseline.
+
+    A rung with a budget and no per-item timings can only be debugged by bisecting a timeout,
+    which is what happened to run 34066724127: the whole rung reported `TIMEOUT after 900s`
+    and nothing said which defect, or even which family, the clock had reached (D-073).
+    """
+    return f"MUTATION_TIMING id={defect_id} seconds={seconds:.1f} outcome={outcome}"
 
 
 def baseline_is_green() -> bool:
@@ -113,7 +139,7 @@ def run_factory_mutations() -> bool:
         return False
     proc = subprocess.run(
         [sys.executable, str(FACTORY_MUTATIONS)], cwd=ROOT, capture_output=True,
-        text=True, encoding="utf-8", errors="replace", timeout=900,
+        text=True, encoding="utf-8", errors="replace", timeout=FACTORY_BUDGET_SECONDS,
     )
     if proc.stdout.strip():
         print(proc.stdout.strip(), flush=True)
@@ -122,6 +148,29 @@ def run_factory_mutations() -> bool:
             print(proc.stderr.strip()[-2000:], flush=True)
         return False
     return True
+
+
+def report_clock(total: int, started: float, ok: bool, failure: str) -> None:
+    """Close the rung with its clock against its budget, whichever way it went.
+
+    The budget is derived from `harness/mutations/budget.json` (see harness/mutation_budget.py),
+    and the warning fires while the run still passes, so the next person sees the rung running
+    out of room instead of discovering it as a timeout.
+    """
+    seconds = time.monotonic() - started
+    warning = drift_warning(
+        seconds, BUDGET, scope="mutation-rung", marker="MUTATIONS_BUDGET_WARNING"
+    )
+    if warning:
+        print(warning, flush=True)
+    print(f"MUTATIONS_SECONDS={seconds:.1f}", flush=True)
+    if ok:
+        print(
+            f"MUTATIONS_OK defects={total} seconds={seconds:.1f} budget={RUNG_BUDGET_SECONDS}",
+            flush=True,
+        )
+    else:
+        print(failure, flush=True)
 
 
 def application_only_requested(argv: list[str]) -> bool:
@@ -139,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     # factory-mutations stage already owns, and the nested run is what timed out under the
     # decomposition. Default behaviour is unchanged for ordinary canonical use.
     application_only = application_only_requested(sys.argv[1:] if argv is None else argv)
+    started = time.monotonic()
 
     if not DEFECTS.exists():
         print("MUTATIONS_ABSENT no defects.json next to this script", flush=True)
@@ -152,8 +202,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    baseline_started = time.monotonic()
     if not baseline_is_green():
         return 1
+    print(f"MUTATION_BASELINE_SECONDS={time.monotonic() - baseline_started:.1f}", flush=True)
 
     defects = json.loads(DEFECTS.read_text(encoding="utf-8"))["defects"]
     total = caught = not_injected = 0
@@ -163,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
     for defect in defects:
         total += 1
         injected = False
+        outcome = "not_injected"
+        defect_started = time.monotonic()
         try:
             if not apply(defect):
                 not_injected += 1
@@ -189,12 +243,14 @@ def main(argv: list[str] | None = None) -> int:
 
             if red_channels and not missing_required:
                 caught += 1
+                outcome = "caught"
                 details = ", ".join(results[name][1] for name in red_channels)
                 print(
                     f"  CAUGHT        {defect['id']:<38} by {details}",
                     flush=True,
                 )
             else:
+                outcome = "escaped"
                 requirement = (
                     f" required channel(s) stayed green: {', '.join(missing_required)};"
                     if missing_required else ""
@@ -206,6 +262,10 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             if injected:
                 git("checkout", "--", defect["file"])
+            print(
+                timing_line(defect["id"], time.monotonic() - defect_started, outcome),
+                flush=True,
+            )
 
     if not tree_is_clean():
         print(
@@ -226,20 +286,21 @@ def main(argv: list[str] | None = None) -> int:
     if application_only:
         if app_ok:
             print("MUTATIONS_APPLICATION_ONLY_OK", flush=True)
-            print("MUTATIONS_OK", flush=True)
+            report_clock(total, started, True, "")
             return 0
-        print("MUTATIONS_FAILED - an application defect can currently escape", flush=True)
+        report_clock(
+            total, started, False,
+            "MUTATIONS_FAILED - an application defect can currently escape",
+        )
         return 1
 
     factory_ok = run_factory_mutations()
-    if app_ok and factory_ok:
-        print("MUTATIONS_OK", flush=True)
-        return 0
-
-    print(
+    report_clock(
+        total, started, app_ok and factory_ok,
         "MUTATIONS_FAILED - an application or factory defect can currently escape",
-        flush=True,
     )
+    if app_ok and factory_ok:
+        return 0
     return 1
 
 
