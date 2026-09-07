@@ -38,9 +38,9 @@ if str(HARNESS) not in sys.path:
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import mutation_budget  # noqa: E402
+import budget as mutation_budget  # noqa: E402
 
-RECORD = HARNESS / "mutations" / "budget.json"
+RECORD = HARNESS / "budgets.json"
 TIMING = re.compile(r"^MUTATION_TIMING id=(\S+) seconds=(\d+\.\d) outcome=(caught|escaped|not_injected)$")
 OK_LINE = re.compile(r"^MUTATIONS_OK defects=(\d+) seconds=(\d+\.\d) budget=(\d+)$", re.M)
 
@@ -52,10 +52,17 @@ def load_module(name: str, path: Path):
     return module
 
 
+SYNTHETIC_SCOPES = {
+    "mutation-rung": {"what": "the rung", "applied_by": ["a test"]},
+    "factory-family": {"what": "the family", "applied_by": ["a test"]},
+}
+
+
 def synthetic(**over) -> dict:
     record = {
         "headroom": 1.5,
         "warn_fraction": 0.75,
+        "scopes": {name: dict(entry) for name, entry in SYNTHETIC_SCOPES.items()},
         "measurements": [
             {"id": "a", "date": "2026-09-07", "scope": "mutation-rung", "kind": "measured",
              "environment": "test", "source": "test", "total_seconds": 1000},
@@ -109,14 +116,14 @@ class RecordedMeasurementTests(unittest.TestCase):
         self.record = mutation_budget.load()
 
     def test_the_record_is_valid_and_covers_every_scope(self):
-        for scope in mutation_budget.SCOPES:
+        for scope in mutation_budget.scope_names(self.record):
             self.assertTrue(mutation_budget.measurements(self.record, scope),
                             f"no measurement records the {scope} scope")
 
     def test_the_budget_covers_the_measurement_with_headroom(self):
         headroom = float(self.record["headroom"])
         self.assertGreaterEqual(headroom, mutation_budget.MINIMUM_HEADROOM)
-        for scope in mutation_budget.SCOPES:
+        for scope in mutation_budget.scope_names(self.record):
             measured = mutation_budget.measured_seconds(self.record, scope)
             self.assertGreaterEqual(
                 mutation_budget.budget_seconds(self.record, scope), measured * headroom,
@@ -149,6 +156,12 @@ class RecordedMeasurementTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mutation_budget.validate(record)
 
+    def test_a_measurement_for_an_undeclared_scope_is_refused(self):
+        record = synthetic()
+        record["measurements"][0]["scope"] = "no-such-rung"
+        with self.assertRaises(ValueError):
+            mutation_budget.validate(record)
+
     def test_the_record_on_disk_parses_as_the_module_reads_it(self):
         raw = json.loads(RECORD.read_text(encoding="utf-8"))
         self.assertEqual(raw["measurements"], self.record["measurements"])
@@ -176,7 +189,7 @@ class WarningTests(unittest.TestCase):
             threshold, self.record, scope="mutation-rung", marker="M"))
 
     def test_the_threshold_is_the_stated_fraction_of_the_budget(self):
-        for scope in mutation_budget.SCOPES:
+        for scope in mutation_budget.scope_names(self.record):
             self.assertAlmostEqual(
                 mutation_budget.warn_seconds(self.record, scope),
                 mutation_budget.budget_seconds(self.record, scope)

@@ -45,6 +45,15 @@ jobs:
   dispatch:
     if: github.repository == 'ShaishiBear/dark-factory-2.0'
     runs-on: ubuntu-24.04
+    # THE ONE WRAPPER THE BUDGET RECORD CANNOT CLOSE, and it is left honest rather than
+    # papered over. A validate-and-merge dispatch contains the evidence spine (15540 s) and
+    # then post-merge validation (11400 s), plus the five judge and certifier stages at their
+    # worker-policy walls (5 x 675 s) and about 900 s of setup: a 31665 s / 528-minute floor.
+    # GitHub caps a hosted job at 360 minutes, so NO value here bounds it, and raising 300 to
+    # 340 would buy the appearance of a bound without one. 8580 s of the ladder's 10020 s is
+    # the mutation rung, which is a projection with no observation behind it; measuring it is
+    # what closes this, not a bigger number here. Recorded in harness/budgets.json under
+    # `_the_one_wrapper_this_record_cannot_close` and in .factory/decisions.md D-075.
     timeout-minutes: 300
     env:
       # Model calls are routed to OpenRouter's Anthropic-compatible Messages endpoint rather than

@@ -3641,3 +3641,113 @@ dependence this old surfaced only now. Mutations
 `suite-hermeticity-scan-stops-reading-agent-call-sites` in
 `harness/factory_mutations/defects.json`, each verified by direct injection into a copy that
 is not a repository on the maintainer's Windows host.
+
+## D-075 · Every timeout comes from one budget, and a wrapper bounds what it contains, because the same defect ended three runs in two days
+
+**The third instance, and the one that named the class.** D-073 derived the mutation rung's
+clock from measurement after run 34066724127 of PR #134 died on `TIMEOUT after 900s` with every
+other gate green. It gave the rung 8460 s and the factory family 4500 s. The next validation
+run of the same PR, 34081507222 on 2026-09-07 04:43Z, passed security, provenance and all five
+judges, and then:
+
+```
+FACTORY_STAGE kind=exec name=evidence seconds=1819.168 outcome=refused
+subprocess.TimeoutExpired: Command '[python, harness/ci.py]' timed out after 1800 seconds
+```
+
+`scripts/factory_evidence.py` ran the whole ladder as one subprocess with a literal
+`timeout=1800`. An inner budget now exceeded its wrapper by a factor of 4.7. The 1800 lived one
+file further in than the report placed it: `scripts/factory_evidence_spine.py` bounds
+`factory_evidence.py` at 3000 s, and `factory_evidence.py` bounds `harness/ci.py` at 1800 s.
+Both were literals, and both were too small.
+
+Three instances of one defect in two days: the mutation rung's 900, the spine's 1200, the
+ladder's 1800. Each a duration written as a literal, each outgrown in silence, each discovered
+as a timeout on the run that mattered. The rule that ends it has two halves, and D-073 shipped
+only the first.
+
+**A duration comes from a measurement.** `harness/mutation_budget.py` becomes
+`harness/budget.py` and `harness/mutations/budget.json` becomes `harness/budgets.json`, because
+they no longer describe the mutation rung: they describe every clock in the ladder. Eighteen
+scopes, each with an observation behind it and a `kind` that says `measured` or `projected` out
+loud, each derived as `ceil(p100 x headroom / 60) x 60`.
+
+**A wrapper bounds what it contains.** Every scope also declares the scopes whose clocks run
+inside it (`contains`), the contained work whose deadline is set elsewhere (`bounded_seconds`,
+added as it stands, because a bound given headroom twice is how a tower inflates), and the
+measured work with no deadline at all (`unbudgeted_seconds`, which gets the headroom).
+`harness/budget.py:validate()` **refuses** a record in which any wrapper's budget is below that
+sum -- from `load()`, not only from a test, so an inconsistent record stops every runner that
+reads it. Raising an inner budget past its wrapper now fails the suite in the change that
+raises it, instead of arriving as a `TimeoutExpired` on a future validation run.
+
+**What the audit found once the rule existed.** Every wrapper in the ladder, checked against
+what it contains:
+
+| Wrapper | Was | Contained | Now |
+|---|---|---|---|
+| `harness/ci.py` static rung | 300 (implicit default) | `harness/static.py`, 5 x 600 = 3000 | 360, one shared deadline |
+| `harness/static.py` per check | 600 | -- | what is left of 360 |
+| `harness/ci.py` unit rung | 300 (implicit default) | `harness/unit.py`, 3 x 900 = 2700 | 360, one shared deadline |
+| `harness/unit.py` per suite | 900 | -- | what is left of 360 |
+| `harness/ci.py` e2e watchdog | 360 (in `harness.config.json`) | the two stream probes | 360, from the record |
+| `harness/ci.py` holdout rung | 300 (implicit default) | -- | 120 |
+| `harness/mutations/run.py` per channel | 900 | `ci.py --quick`, 360 + 360 = 720 | min(780, family remainder) |
+| `factory_kernel/runtime.py` quick gate, x2 | 900 | `ci.py --quick`, 750 | 780 |
+| `dark-factory-ci.yml` | 20 min | 1080 s = 18 min | 20 min, unchanged and now checked |
+| application family | nothing bounded it at all | 40 channel runs | 4020, one shared deadline |
+| `harness/factory_mutations/run.py` per file | 180 | -- | min(120, family remainder) |
+| factory family | 4500 | one file, immunity | 4500, unchanged |
+| `harness/ci.py` mutation rung | 8460 | 4020 + 4500 = 8520 | **8580** -- D-073's own number was 60 s short of its two parts |
+| `scripts/factory_evidence.py` ladder | **1800** | 9900 | 10020 |
+| `harness/observe.py` ladder | 3600 | 9900 | 10020 |
+| `harness/post_merge.py` ladder | 3600 | 9900 | 10020 |
+| `scripts/factory_evidence_spine.py` -> bundle | 3000 | 10517 | 10620 |
+| `scripts/factory_evidence_spine.py` -> provenance | 240 | -- | 240, from the record |
+| `factory_kernel/runtime.py` evidence-spine stage | 2400 | 15450 | 15540 -- it was already below the 3000 it allowed its own child |
+| `factory_kernel/worker_runtime.py` post-merge | 4800 | 11400 | 11400 |
+| `dark-factory-main-regression.yml` | 150 min | 11385 s = 189.8 min | **190 min** |
+
+Wrappers checked and left alone: `dark-factory-trust-root.yml`'s
+`timeout-minutes: 10` and `dark-factory-branch-cleanup.yml`'s `timeout-minutes: 10` bound
+deterministic guards measured in single-digit seconds; the kernel's `provider.timeout_seconds`
+(2700) already has a containment check of exactly this shape in
+`worker_policy.assert_caps_fit_timeout`, which refuses any role whose wall (max 2025 s at 30
+turns) would not fit under it; the remaining `subprocess` timeouts in `scripts/` and `harness/`
+bound single `git` and `gh` calls and contain nothing that carries a budget.
+
+**The one wrapper no number can close, recorded rather than papered over.**
+`dark-factory-worker.yml` allows a dispatch 300 minutes. A validate-and-merge dispatch contains
+the evidence spine (15540 s) and then post-merge validation (11400 s), plus five judge and
+certifier stages at their worker-policy walls (5 x 675 s) and about 900 s of setup: a 31665 s,
+528-minute floor. GitHub caps a hosted job at 360 minutes, so no value of `timeout-minutes`
+bounds it, and raising 300 to 340 would buy the appearance of a bound without one. 8580 s of
+the ladder's 10020 s is the mutation rung, and that number is a projection with no observation
+behind it: 2674 s of arithmetic for the application family and 2962 s of arithmetic for the
+factory family, neither ever timed end to end. **What closes this wrapper is the first real
+measurement of the mutation rung, not a bigger number in a workflow file.** The arithmetic is
+written into `.github/workflows/dark-factory-worker.yml` beside the value it cannot justify, and
+into `harness/budgets.json` under `_the_one_wrapper_this_record_cannot_close`, so the next
+person meets it as a stated open question rather than as a cancelled job.
+
+**Two repairs that fell out of the audit.** `harness/mutations/run.py` called
+`subprocess.run(..., timeout=900)` with no handler, so a channel that ran long would have taken
+the whole runner down with a traceback and no verdict for any defect; a timeout is now a red
+channel named `<channel>-timeout`, never mistaken for a real catch. And
+`harness/harness.config.json` no longer carries `e2e_timeout_s`: it was the only rung deadline
+that lived in configuration while the other four lived as literals in code, and one record for
+all five is the whole point.
+
+**Detection.** `tests/factory/test_factory_ladder_budget.py` (23 tests) pins the containment
+rule for every declared scope, the connectedness of the chain from the job down to one test
+file, the refusal of a record whose wrapper stopped containing its parts, the labelling of a
+projected budget, the absence of any literal `timeout=<number>` in the six ladder files and in
+the ladder call of the five files that also bound plumbing, and both job limits (`dark-factory-main-regression.yml` and
+`dark-factory-ci.yml`) against the gates they run. The no-literal detector reads the syntax tree rather than the text, so
+`timeout=901` is caught exactly as `timeout=900` was; a substring rule would not have been. The
+containment walk is a function whose coverage is asserted separately, so narrowing it to a
+subset fails there rather than passing quietly. Mutations
+`ladder-budget-inner-raised-past-its-wrapper`, `ladder-budget-containment-check-made-vacuous`
+and `spine-literal-timeout-reintroduced-for-the-evidence-bundle` in
+`harness/factory_mutations/defects.json`, each verified by direct injection on the maintainer's
+Windows host, along with the four D-073 mutations whose anchors moved with the rename.

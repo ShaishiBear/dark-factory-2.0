@@ -30,9 +30,14 @@ jobs:
   regression:
     if: github.repository == 'ShaishiBear/dark-factory-2.0'
     runs-on: ubuntu-24.04
-    # 120 for the full harness plus a headroom half-hour for the four preflight probes, whose
-    # measured cost over nine worker runs was 275-510 s for the three answered ones (D-070).
-    timeout-minutes: 150
+    # NOT A GUESS, AND NOT A LITERAL EITHER. This job is the outermost wrapper of the full
+    # ladder, so it is the `main-regression-job` scope in harness/budgets.json: the ladder's
+    # own 10020 s budget plus 1365 s for the preflight probes (275-510 s over nine worker runs,
+    # D-070) and the toolchain setup, which is 11400 s -- exactly 190 minutes.
+    # tests/factory/test_factory_ladder_budget.py fails if this number drops below the budget
+    # the record derives, so an inner budget can no longer outgrow this one in silence. The
+    # previous 150 was already below the 8460 s the mutation rung alone had been given (D-075).
+    timeout-minutes: 190
     env:
       # Identical to dark-factory-worker.yml, and for the same reason: the Anthropic SDK inside
       # Claude Code appends `/v1/messages` to this value, so it must be the API root. The probes

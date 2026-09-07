@@ -11,6 +11,10 @@ from pathlib import Path
 # head's copy of a validator must not be the program that judges that PR.
 HERE = Path(__file__).resolve().parent
 ROOT = Path.cwd().resolve()
+# From beside this file, for the same reason every validator here is: the ladder's deadline
+# must come from the trusted checkout's budget record, never from the PR head's copy of it.
+sys.path.insert(0, str(HERE.parent))
+from harness import budget as ladder_budget  # noqa: E402, I001
 BLOCK = re.compile(
     r"<!-- factory-(contract|proof|design):start -->\s*```factory-\1\s*(\{.*?\})\s*```\s*"
     r"\1-sha256:\s*([0-9a-f]{64})\s*<!-- factory-\1:end -->", re.S
@@ -658,9 +662,15 @@ def main() -> None:
     holdout_result = verify_architecture_holdout(holdout, architecture_result["changed_files"], policy)
 
     floors = json.loads(run(["git", "show", "origin/main:.factory/locks/floor.json"]).stdout)
+    # NOT A LITERAL. This call carried `timeout=1800` while the mutation rung inside the
+    # ladder had just been given 8460 s -- an inner budget four times its own wrapper. Run
+    # 34081507222 of PR #134 passed security, provenance and all five judges and then died on
+    # `TimeoutExpired: harness/ci.py timed out after 1800 seconds`. The `ladder` scope in
+    # harness/budgets.json is checked to be at least the sum of the rungs it contains (D-075).
     harness = run(
-        [sys.executable, "harness/ci.py"], timeout=1800, check=False,
-        credential_scope="validation",
+        [sys.executable, "harness/ci.py"],
+        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="ladder"),
+        check=False, credential_scope="validation",
     )
     transcript = (harness.stdout or "") + (harness.stderr or "")
     if harness.returncode:

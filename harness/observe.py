@@ -11,7 +11,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+
+sys.path.insert(0, str(HERE))
+import budget  # noqa: E402
+
 REQUIRED_ENV = (
     "DATABASE_URL", "OPENROUTER_API_KEY", "JWT_SECRET", "SUPADATA_API_KEY",
     "YOUTUBE_CHANNEL_ID", "DARK_FACTORY_E2E_EMAIL", "DARK_FACTORY_E2E_PASSWORD",
@@ -104,7 +109,8 @@ def observe(*, allow_non_main: bool = False) -> dict:
     if not ratchet_eligible and not allow_non_main:
         die("ratchet observation requires HEAD == origin/main; use --allow-non-main for diagnostics only")
 
-    harness = run([sys.executable, "harness/ci.py"], timeout=3600, check=False)
+    harness = run([sys.executable, "harness/ci.py"], check=False,
+                  timeout=budget.budget_seconds(budget.load(), scope="ladder"))
     transcript = (harness.stdout or "") + (harness.stderr or "")
     if harness.returncode:
         die("full validation-host harness failed: " + transcript[-2000:])

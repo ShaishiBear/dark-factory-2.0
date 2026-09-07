@@ -81,6 +81,10 @@ from .worker_policy import (
     stage_timeout_seconds,
 )
 from .worktree import Worktree, create_detached, remove
+# The spine's deadline, from the same record every rung inside it reads. Imported by module
+# path rather than relatively because harness/ is not a package of the kernel; it is the
+# ladder the kernel runs.
+from harness import budget as ladder_budget
 
 STAGE_TIMINGS = "stage-timings.jsonl"
 STAGE_LINE_PREFIX = "FACTORY_STAGE"
@@ -665,7 +669,10 @@ class KernelRuntime:
                 list(self.config.validation.quick_command),
                 cwd=worktree.path,
                 env=env,
-                timeout=900,
+                # `harness/ci.py --quick` is the static rung and the unit rung, each of which
+                # now allows 360 s of its own; a wrapper of 900 s was above that by luck, not
+                # by construction. The `quick-gate` scope is checked against both (D-075).
+                timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="quick-gate"),
                 transcript=paths.transcripts / "quick-gate.log",
             )
             self._assert_clean(worktree.path)
@@ -1808,7 +1815,12 @@ class KernelRuntime:
                 cwd=worktree.path,
                 env=env,
                 credential_scope="github+validation",
-                timeout=2400,
+                # The spine runs the Evidence Bundle, which runs the whole ladder. 2400 s was
+                # already below the 3000 s the spine allowed the Evidence Bundle alone, before
+                # any mutation budget grew; the `evidence-spine` scope in harness/budgets.json
+                # is checked to bound everything it contains (D-075).
+                timeout=ladder_budget.budget_seconds(
+                    ladder_budget.load(), scope="evidence-spine"),
                 transcript=paths.transcripts / "evidence.log",
             )
             stage = "merge_preauth"
@@ -1981,7 +1993,10 @@ class KernelRuntime:
                 list(self.config.validation.quick_command),
                 cwd=worktree.path,
                 env=env,
-                timeout=900,
+                # `harness/ci.py --quick` is the static rung and the unit rung, each of which
+                # now allows 360 s of its own; a wrapper of 900 s was above that by luck, not
+                # by construction. The `quick-gate` scope is checked against both (D-075).
+                timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="quick-gate"),
                 transcript=paths.transcripts / "rehead-quick-gate.log",
             )
             self._assert_clean(worktree.path)

@@ -1,0 +1,476 @@
+{
+  "_what_this_is": [
+    "EVERY DURATION IN THE LADDER, AND WHAT EACH ONE CONTAINS. harness/budget.py computes",
+    "budget = ceil(p100(total_seconds for a scope) * headroom / 60) * 60, and harness/ci.py,",
+    "harness/static.py, harness/unit.py, harness/mutations/run.py,",
+    "harness/factory_mutations/run.py, harness/observe.py, harness/post_merge.py,",
+    "scripts/factory_evidence.py, scripts/factory_evidence_spine.py,",
+    "factory_kernel/runtime.py and factory_kernel/worker_runtime.py all read their timeouts",
+    "from that derivation instead of carrying a literal.",
+    "",
+    "Every scope also declares WHAT RUNS INSIDE IT. harness/budget.py:validate() refuses a",
+    "record in which a wrapper's budget is smaller than the sum of the budgets it contains,",
+    "so raising an inner budget past its wrapper fails the suite -- and every gate that loads",
+    "this file -- in the change that raises it. That rule is the D-075 half. The D-073 half is",
+    "that a number without a recorded observation behind it cannot exist here at all.",
+    "",
+    "kind='measured' is a wall clock somebody read off a real run. kind='projected' is",
+    "composed from measured parts, or preserves an inherited bound nobody has measured yet,",
+    "and says so in `source` with the parts. A projection is a placeholder for the first real",
+    "measurement, not a substitute for it: the runners print MUTATIONS_SECONDS /",
+    "FACTORY_MUTATIONS_SECONDS, per-defect MUTATION_TIMING lines and RUNG_SLOW warnings, so",
+    "real runs replace these entries with observations.",
+    "",
+    "`contains` counts a scope ONCE when its clock shares this scope's deadline (one static",
+    "check inside the static rung, one focused test file inside the factory family): the inner",
+    "number names which step hung and can never outlive the wrapper. `bounded_seconds` is",
+    "contained work whose deadline is set somewhere else and is added as it stands.",
+    "`unbudgeted_seconds` is a measurement of contained work with no deadline at all, so it is",
+    "the one part that gets the headroom."
+  ],
+  "headroom": 1.5,
+  "warn_fraction": 0.75,
+  "scopes": {
+    "static-rung": {
+      "what": "The static rung: ruff lint, ruff format, mypy, tsc and biome.",
+      "applied_by": [
+        "harness/ci.py run('static', ...) -- the subprocess timeout on harness/static.py",
+        "harness/static.py -- one deadline shared by all five checks, each given what is left"
+      ]
+    },
+    "unit-rung": {
+      "what": "The unit rung: backend pytest, frontend vitest and the factory trust-root suite.",
+      "applied_by": [
+        "harness/ci.py run('unit', ...) -- the subprocess timeout on harness/unit.py",
+        "harness/unit.py -- one deadline shared by all three suites, each given what is left"
+      ]
+    },
+    "quick-gate": {
+      "what": "One whole `python harness/ci.py --quick`: the static rung and the unit rung, and nothing below them.",
+      "applied_by": [
+        "factory_kernel/runtime.py -- the build's quick gate and the re-head's quick gate",
+        ".github/workflows/dark-factory-ci.yml -- the quick-authority check",
+        "harness/mutations/run.py -- the quick channel of every application mutation"
+      ],
+      "contains": [
+        {
+          "scope": "static-rung",
+          "count": 1
+        },
+        {
+          "scope": "unit-rung",
+          "count": 1
+        }
+      ],
+      "unbudgeted_seconds": 20,
+      "margin_source": "ci.py's own work in quick mode: config load, argv resolution and marker printing, measured under 20 s inside the 179.0-207.4 s the whole quick gate cost on three ubuntu runs."
+    },
+    "quick-gate-job": {
+      "what": "The dark-factory-ci GitHub job: checkout, four toolchain setups, locked installs, the security guard and the quick gate.",
+      "applied_by": [
+        ".github/workflows/dark-factory-ci.yml timeout-minutes"
+      ],
+      "contains": [
+        {
+          "scope": "quick-gate",
+          "count": 1
+        }
+      ],
+      "unbudgeted_seconds": 200,
+      "margin_source": "projected: checkout, setup-python/node/uv/bun, `uv sync --frozen` and a cache-warm `bun install --frozen-lockfile`, and scripts/factory_security.py, which measured 0.39 s locally and about 1.4 s in CI."
+    },
+    "e2e-rung": {
+      "what": "The browser journey watchdog: the one rung that cannot have a subprocess timeout.",
+      "applied_by": [
+        "harness/ci.py watchdog(...) around run_e2e"
+      ]
+    },
+    "holdout-rung": {
+      "what": "The blinded holdout, .factory/holdout/run.py.",
+      "applied_by": [
+        "harness/ci.py run('holdout', ...)"
+      ]
+    },
+    "mutation-channel": {
+      "what": "One of the four channels evaluated for one application mutation: the quick gate, the holdout, the citation probe or the security guard.",
+      "applied_by": [
+        "harness/mutations/run.py run_channels() -- capped, and never past the application family's own deadline"
+      ],
+      "contains": [
+        {
+          "scope": "quick-gate",
+          "count": 1
+        }
+      ]
+    },
+    "application-family": {
+      "what": "The whole application mutation family: a clean baseline plus every defect in harness/mutations/defects.json, each evaluated by all four channels.",
+      "applied_by": [
+        "harness/mutations/run.py -- one deadline shared by the baseline and every defect"
+      ],
+      "contains": [
+        {
+          "scope": "mutation-channel",
+          "count": 1
+        }
+      ]
+    },
+    "factory-focused-file": {
+      "what": "One file of the focused trust-root suite inside one defect copy.",
+      "applied_by": [
+        "harness/factory_mutations/run.py run_tests()"
+      ]
+    },
+    "immunity-check": {
+      "what": "harness/immunity.py, the active immunity obligation the factory family refuses to start without.",
+      "applied_by": [
+        "harness/factory_mutations/run.py immunity_is_green()"
+      ]
+    },
+    "factory-family": {
+      "what": "The whole factory trust-root mutation family: every defect across the eight manifests, in its own copy of the trust root, evaluated concurrently.",
+      "applied_by": [
+        "harness/mutations/run.py run_factory_mutations() -- the nested call",
+        "scripts/factory_evidence_spine.py observe_factory_authority() -- the spine's independent re-observation"
+      ],
+      "contains": [
+        {
+          "scope": "factory-focused-file",
+          "count": 1
+        },
+        {
+          "scope": "immunity-check",
+          "count": 1
+        }
+      ]
+    },
+    "mutation-rung": {
+      "what": "The mutation rung of the ladder: the application family and the factory family nested inside it.",
+      "applied_by": [
+        "harness/ci.py run('mutations', ...)"
+      ],
+      "contains": [
+        {
+          "scope": "application-family",
+          "count": 1
+        },
+        {
+          "scope": "factory-family",
+          "count": 1
+        }
+      ]
+    },
+    "ladder": {
+      "what": "One whole `python harness/ci.py`: static, unit, app start, the browser journey, the holdout and the mutation rung.",
+      "applied_by": [
+        "scripts/factory_evidence.py -- the full canonical harness inside the Evidence Bundle",
+        "harness/post_merge.py -- the same ladder re-run on the merge commit",
+        "harness/observe.py -- the validation-host ratchet observation"
+      ],
+      "contains": [
+        {
+          "scope": "static-rung",
+          "count": 1
+        },
+        {
+          "scope": "unit-rung",
+          "count": 1
+        },
+        {
+          "scope": "e2e-rung",
+          "count": 1
+        },
+        {
+          "scope": "holdout-rung",
+          "count": 1
+        },
+        {
+          "scope": "mutation-rung",
+          "count": 1
+        }
+      ],
+      "bounded_seconds": 90,
+      "unbudgeted_seconds": 20,
+      "margin_source": "bounded: app start is bounded by http.boot_timeout_s=90 in harness/harness.config.json, which harness/appproc.py enforces before the e2e watchdog is armed. unbudgeted: ci.py's own work between rungs (config load, driver construction and teardown, marker printing) measured under 20 s across the ladder segment of run 34066724127, whose static+unit+app-start+e2e+holdout total was 291.7 s."
+    },
+    "evidence-bundle": {
+      "what": "One whole `python scripts/factory_evidence.py`: the deterministic recomputation of contract, proof, architecture, security and ratchets, with the full ladder in the middle.",
+      "applied_by": [
+        "scripts/factory_evidence_spine.py -- the core Evidence Bundle v5 authority"
+      ],
+      "contains": [
+        {
+          "scope": "ladder",
+          "count": 1
+        }
+      ],
+      "unbudgeted_seconds": 331.1,
+      "margin_source": "p100 of the `evidence` exec stage on four worker runs that reached it and refused before the ladder, so the number is the deterministic half alone: 331.125 s (run 34002518961, PR #112), 218.279 s (33947564054, PR #91), 211.194 s (33960088633, PR #99), 200.322 s (33950794336, PR #93)."
+    },
+    "provenance-fetch": {
+      "what": "scripts/factory_provenance.py fetch: the exact-head builder provenance pack.",
+      "applied_by": [
+        "scripts/factory_evidence_spine.py"
+      ]
+    },
+    "evidence-spine": {
+      "what": "One whole `python scripts/factory_evidence_spine.py`: the core Evidence Bundle, the independent factory-family re-observation, the provenance fetch and the 21-claim closure.",
+      "applied_by": [
+        "factory_kernel/runtime.py -- the evidence_spine stage of a validate action"
+      ],
+      "contains": [
+        {
+          "scope": "evidence-bundle",
+          "count": 1
+        },
+        {
+          "scope": "factory-family",
+          "count": 1
+        },
+        {
+          "scope": "provenance-fetch",
+          "count": 1
+        }
+      ],
+      "unbudgeted_seconds": 60,
+      "margin_source": "projected: spine closure itself is hashing and certificate loading over artifacts already on disk (factory_kernel/evidence_closure.py), which has never been observed above a few seconds; 60 s is a placeholder until a run that reaches closure records it."
+    },
+    "post-merge": {
+      "what": "One whole `python harness/post_merge.py`: a fresh locked environment on the merge commit and the full ladder re-run against it.",
+      "applied_by": [
+        "factory_kernel/worker_runtime.py -- the post-merge validation of a merged PR"
+      ],
+      "contains": [
+        {
+          "scope": "ladder",
+          "count": 1
+        }
+      ],
+      "bounded_seconds": 1200,
+      "unbudgeted_seconds": 120,
+      "margin_source": "bounded: `uv sync --frozen --all-extras` and `bun install --frozen-lockfile` carry their own 600 s deadlines in harness/post_merge.py. unbudgeted: worktree creation, four git plumbing calls and the result payload, none observed above a minute."
+    },
+    "main-regression-job": {
+      "what": "The dark-factory-main-regression GitHub job: four preflight probes and then the full ladder on current main.",
+      "applied_by": [
+        ".github/workflows/dark-factory-main-regression.yml timeout-minutes"
+      ],
+      "contains": [
+        {
+          "scope": "ladder",
+          "count": 1
+        }
+      ],
+      "unbudgeted_seconds": 910,
+      "margin_source": "510 s is the p100 of the three answered preflight probes over nine worker runs (275-510 s, D-070); 400 s is projected for checkout, the four toolchain setups, the pinned CLI installs, the disposable validation database and the locked dependency installs, which the job caches."
+    }
+  },
+  "measurements": [
+    {
+      "id": "static-rung-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "static-rung",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 207.4,
+      "source": "Bounded above by the whole quick gate, which is the static rung and the unit rung together and was measured at 179.027 s, 203.383 s and 207.4 s on three ubuntu runs (worker run 34066408781 rehead-quick-gate, worker run 34061371205 quick-gate, and the quick-authority job of run 34066129225); p100 207.4 s. No run has yet reported the halves separately, so each half carries the pair's total until one does.",
+      "note": "Replaces `timeout=600` per check in harness/static.py (five checks, so a 3000 s rung wearing a 600 s label) and the implicit `timeout=300` harness/ci.py gave the rung that contains it. The inner number was five times the outer one."
+    },
+    {
+      "id": "unit-rung-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "unit-rung",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 207.4,
+      "source": "The same quick-gate p100 of 207.4 s over runs 34066408781, 34061371205 and 34066129225 bounds this half as well; the two halves have never been reported separately. The factory trust-root suite alone runs 1679 tests in 223 s on the maintainer's Windows host.",
+      "note": "Replaces `timeout=900` per suite in harness/unit.py (three suites, so 2700 s inside a rung harness/ci.py bounded at 300 s)."
+    },
+    {
+      "id": "e2e-rung-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "e2e-rung",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner with agent-browser",
+      "total_seconds": 240,
+      "source": "The journey streams the locked question twice, once from the harness (E2E_STREAM_PROBE) and once in the browser, each bounded by browser.response_timeout_s=90, plus the login probes and browser startup (D-051). The whole app-start + e2e + holdout segment cost 84.3 s in run 34066724127, so 240 s is the composition of the declared per-stream bounds rather than the observed cost.",
+      "note": "Carries forward the `e2e_timeout_s: 360` that harness/harness.config.json held, which is exactly 240 x 1.5."
+    },
+    {
+      "id": "holdout-rung-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "holdout-rung",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 60,
+      "source": "Part of the 84.3 s that app start, the browser journey and the holdout cost together in run 34066724127; .factory/holdout/run.py makes nine expect() calls against an already-running app, and the citation probe beside it measured 0.4 s locally. 60 s is the segment's whole cost attributed to the holdout alone."
+    },
+    {
+      "id": "mutation-channel-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "mutation-channel",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 520,
+      "source": "The widest of the four channels is the quick gate, measured at 179.027 s, 203.383 s and 207.4 s on three ubuntu runs (34066408781 rehead-quick-gate, 34061371205 quick-gate, the quick-authority job of 34066129225); p100 207.4 s. The other three are far cheaper: security --worktree 0.39 s and immunity 0.23 s on the maintainer's Windows host. The recorded total is 520 s rather than 207.4 s so the derived budget (780 s) covers what the child's OWN static and unit rungs allow (360 + 360 + 30): a channel that killed `ci.py --quick` before its rungs did would report a timeout that is not the gate's.",
+      "note": "Replaces `timeout=900` in harness/mutations/run.py, which was never measured against any channel."
+    },
+    {
+      "id": "application-family-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "application-family",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 2674,
+      "source": "Ten iterations (one clean baseline plus nine defects), each running all four channels. The quick channel is effectively the whole cost, at the measured p100 of 207.4 s, plus a 60 s allowance per iteration for holdout, citation and security (security --worktree measured at 0.39 s locally and about 1.4 s in CI; holdout and citation are bounded by the 84.3 s that the ladder's app-start+e2e+holdout segment cost in run 34066724127). 10 x (207.4 + 60) = 2674 s.",
+      "note": "Carried over from the D-073 record, where it was the application half of the mutation-rung projection. It is its own scope now so the rung that contains it can be checked against it."
+    },
+    {
+      "id": "factory-focused-file-2026-09-07-measured",
+      "date": "2026-09-07",
+      "scope": "factory-focused-file",
+      "kind": "measured",
+      "environment": "maintainer Windows host, per-file measurement at origin/main 6a7f8c6",
+      "total_seconds": 60.7,
+      "source": "The most expensive single file of the 72-file focused suite, test_factory_bootstrap.py, timed at 60.7 s on 2026-09-07; the suite's median was 0.59 s and its p90 7.81 s.",
+      "note": "Replaces `timeout=180` in harness/factory_mutations/run.py. The derived 120 s cap is applied together with whatever is left of the factory family's own deadline, so a copy can never outlive the family that owns it."
+    },
+    {
+      "id": "immunity-check-2026-09-07-measured",
+      "date": "2026-09-07",
+      "scope": "immunity-check",
+      "kind": "measured",
+      "environment": "maintainer Windows host at origin/main 6a7f8c6",
+      "total_seconds": 0.23,
+      "source": "harness/immunity.py measured at 0.23 s on 2026-09-07, the same run that measured the focused suite file-by-file and security --worktree at 0.39 s. The derived budget is the one-minute floor the rounding imposes, which is the literal it replaces."
+    },
+    {
+      "id": "factory-family-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "factory-family",
+      "kind": "projected",
+      "environment": "maintainer Windows host (per-file measurement), four concurrent copies",
+      "total_seconds": 2962,
+      "source": "391 defects across the eight manifests, one copy each, four concurrent. Per-file wall clock of the whole 72-file focused suite measured on 2026-09-07 at origin/main 6a7f8c6: 235.3 s total, median 0.59 s, p90 7.81 s, max 60.7 s (test_factory_bootstrap.py). Stopping at the first red in cheapest-first order gives an expected 30.3 s per caught defect against that distribution; 391 * 30.3 / 4 = 2962 s.",
+      "note": "Without the reduction the same catalogue is 391 * 235.3 / 4 = 23,000 s (383 minutes) on that host. The catalogue is 406 defects as of this change; the projection is not re-derived here because it is due a real measurement, not a better estimate."
+    },
+    {
+      "id": "mutation-rung-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "mutation-rung",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 5700,
+      "source": "2674 s application family + 2962 s factory family = 5636 s, raised to 5700 s so that the derived budget (8580 s) covers the two families' own budgets (4020 + 4500 = 8520 s), each of which is rounded up to a whole minute independently. The D-073 record derived 8460 s from the 5636 s sum, which was 60 s LESS than the two budgets it contains -- the same defect one level down.",
+      "note": "The 900 s literal this replaced was never measured. Run 34066724127 (PR #134) passed security, provenance, all five judges, static, unit, the browser journey and the holdout, then died on 'TIMEOUT after 900s / GATE_FAILED: mutations' while still inside the application family."
+    },
+    {
+      "id": "ladder-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "ladder",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 6650,
+      "source": "The five rungs at their own budgets (360 + 360 + 360 + 120 + 8580 = 9780 s), plus the 90 s app-start bound and 20 s of ci.py's own work, is a 9900 s floor; 6650 s is the smallest recorded total whose derived budget (10020 s) clears it. The measured ladder is far cheaper: static + unit + app start + e2e + holdout came to 291.7 s in run 34066724127, and only the mutation rung has ever been the expensive part.",
+      "note": "Replaces `timeout=1800` in scripts/factory_evidence.py, which killed run 34081507222 of PR #134 after every gate had passed, and `timeout=3600` in harness/observe.py and harness/post_merge.py. 1800 s bounded a mutation rung that had just been given 8460 s."
+    },
+    {
+      "id": "evidence-bundle-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "evidence-bundle",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 7050,
+      "source": "The ladder's 10020 s budget plus 497 s (the 331.1 s p100 of the deterministic half, with headroom) is a 10517 s floor; 7050 s is the smallest recorded total whose derived budget (10620 s) clears it.",
+      "note": "Replaces `timeout=3000` in scripts/factory_evidence_spine.py, which bounded a program that itself allowed 1800 s for the ladder alone plus every recomputation around it."
+    },
+    {
+      "id": "provenance-fetch-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "provenance-fetch",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 160,
+      "source": "No run has recorded this fetch's wall clock. 160 s preserves the inherited 240 s bound exactly (160 x 1.5), and is marked projected until a spine run that reaches the fetch reports it. The fetch is a handful of `gh` calls plus a git fetch, all of which carry their own 30-60 s deadlines inside scripts/factory_provenance.py."
+    },
+    {
+      "id": "evidence-spine-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "evidence-spine",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 10350,
+      "source": "The Evidence Bundle's 10620 s budget, the factory family's 4500 s (the spine re-observes it independently) and the provenance fetch's 240 s, plus 90 s for closure, is a 15450 s floor; 10350 s is the smallest recorded total whose derived budget (15540 s) clears it.",
+      "note": "Replaces `timeout=2400` in factory_kernel/runtime.py, which was already smaller than the 3000 s the spine allowed the Evidence Bundle it runs first -- the wrapper was below its own child before any of the mutation budgets grew."
+    },
+    {
+      "id": "post-merge-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "post-merge",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 7600,
+      "source": "The ladder's 10020 s budget, the two 600 s dependency installs, and 180 s for worktree and git work, is an 11400 s floor; 7600 s is the recorded total whose derived budget matches it exactly.",
+      "note": "Replaces `timeout=4800` in factory_kernel/worker_runtime.py, which bounded a program that already allowed 3600 s for the ladder plus 1200 s of installs."
+    },
+    {
+      "id": "main-regression-job-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "main-regression-job",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU",
+      "total_seconds": 7600,
+      "source": "The ladder's 10020 s budget plus 1365 s (the 910 s of preflight and setup, with headroom) is an 11385 s floor; 7600 s is the smallest recorded total whose derived budget (11400 s, exactly 190 minutes) clears it.",
+      "note": "The workflow's timeout-minutes was 150 when the mutation rung alone had been given 8460 s and the four rungs above it another 291.7 s measured: the job limit was already below the gate it wraps. D-073 flagged the previous value of 120 for the same reason."
+    },
+    {
+      "id": "quick-gate-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "quick-gate",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU (the validation host)",
+      "total_seconds": 520,
+      "source": "The static rung and the unit rung at their own budgets (360 + 360 = 720 s) plus 30 s of ci.py's own work is a 750 s floor; 520 s is the smallest recorded total whose derived budget (780 s) clears it. The measured cost of the pair is 207.4 s p100 over three ubuntu runs; the two halves have never been reported separately, which is why each half carries the pair's total and the sum double-counts.",
+      "note": "Replaces `timeout=900` on both quick-gate calls in factory_kernel/runtime.py."
+    },
+    {
+      "id": "quick-gate-job-2026-09-07-projection",
+      "date": "2026-09-07",
+      "scope": "quick-gate-job",
+      "kind": "projected",
+      "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU",
+      "total_seconds": 720,
+      "source": "The quick gate's 780 s budget plus 300 s (the 200 s of setup, installs and the security guard, with headroom) is a 1080 s floor; 720 s is the recorded total whose derived budget matches it exactly, which is 18 minutes against the workflow's declared 20.",
+      "note": "dark-factory-ci.yml's timeout-minutes: 20 already bounds this; it is recorded so that it stops bounding it loudly rather than silently."
+    }
+  ],
+  "_measured_components_2026_09_07": {
+    "quick_gate_seconds_ubuntu": [
+      179.027,
+      203.383,
+      207.4
+    ],
+    "ladder_static_unit_appstart_e2e_holdout_seconds": 291.7,
+    "evidence_deterministic_half_seconds": [
+      331.125,
+      218.279,
+      211.194,
+      200.322
+    ],
+    "focused_suite_seconds_windows": 235.3,
+    "focused_suite_files": 72,
+    "focused_suite_worst_file_seconds": 60.7,
+    "focused_suite_expected_prefix_seconds_cheapest_first": 30.3,
+    "focused_suite_expected_prefix_seconds_declaration_order": 86.1,
+    "security_worktree_seconds_windows": 0.39,
+    "immunity_seconds_windows": 0.23,
+    "factory_defects": 406,
+    "application_defects": 9,
+    "preflight_probe_seconds": [
+      275,
+      510
+    ]
+  },
+  "_raise_this": "By recording the run that justifies it, in the same reviewed change -- and by raising every wrapper that contains it in that same change, because harness/budget.py refuses a record whose wrappers no longer bound their parts. A budget raised without a measurement behind it is the literal this file exists to retire; a wrapper left behind when an inner budget grows is the timeout that ended run 34081507222.",
+  "_the_one_wrapper_this_record_cannot_close": "dark-factory-worker.yml's `timeout-minutes: 300`. A validate-and-merge dispatch contains the evidence spine (15540 s) and then post-merge validation (11400 s), plus the five judge and certifier stages at their worker-policy walls (5 x 675 s) and about 900 s of setup, for a 31665 s (528 minute) floor. GitHub caps a hosted job at 360 minutes, so no value of timeout-minutes bounds it. That is a signal to MEASURE the mutation rung -- 8580 s of the 10020 s ladder is a projection with no observation behind it -- not to raise a job limit past what the platform allows. Recorded here, and in D-075, rather than papered over with a number that would not hold."
+}

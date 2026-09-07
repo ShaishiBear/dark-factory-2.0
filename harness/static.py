@@ -21,9 +21,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
 BACKEND = ROOT / "app" / "backend"
 FRONTEND = ROOT / "app" / "frontend"
+
+sys.path.insert(0, str(HERE))
+import budget  # noqa: E402
+
+# ONE DEADLINE FOR THE WHOLE RUNG, not one per check. Each of the five checks carried
+# `timeout=600`, which is a 3000 s rung wearing a 600 s label -- inside a rung `harness/ci.py`
+# bounded at 300 s, so the inner number was five times the outer one. Now both come from the
+# `static-rung` scope in harness/budgets.json, and each check is given what is LEFT of it, so
+# the rung cannot outlive the wrapper that contains it (D-075).
+BUDGET = budget.load()
+RUNG_SECONDS = budget.budget_seconds(BUDGET, scope="static-rung")
 
 # (label, cwd, argv). Kept as argv rather than shell strings: `ci.py` resolves argv[0]
 # through shutil.which for the Windows .cmd-shim problem, and a shell string would
@@ -40,6 +52,10 @@ CHECKS = [
 def main() -> int:
     failed: list[str] = []
     ran = 0
+    # The reserve is what this runner keeps back so that IT names the check that ran long,
+    # before ci.py's own timeout kills the process with nothing to say.
+    until = budget.deadline(BUDGET, "static-rung")
+    print(f"STATIC_BUDGET seconds={RUNG_SECONDS}", flush=True)
 
     for label, cwd, argv in CHECKS:
         if not cwd.exists():
@@ -48,15 +64,17 @@ def main() -> int:
             print(f"STATIC_MISSING {label}: {cwd} does not exist", flush=True)
             failed.append(label)
             continue
+        left = budget.remaining(until)
         try:
             p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=600)
+                               encoding="utf-8", errors="replace", timeout=left)
         except FileNotFoundError:
             print(f"STATIC_MISSING {label}: {argv[0]} is not on PATH", flush=True)
             failed.append(label)
             continue
         except subprocess.TimeoutExpired:
-            print(f"STATIC_TIMEOUT {label} after 600s", flush=True)
+            print(f"STATIC_TIMEOUT {label} after {left:.0f}s of the {RUNG_SECONDS}s "
+                  f"static-rung budget", flush=True)
             failed.append(label)
             continue
 
