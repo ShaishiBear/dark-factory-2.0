@@ -2104,6 +2104,13 @@
       "find": "                self.github.pr_comments(number), head=str(pr.get(\"headRefOid\") or \"\")\n",
       "replace": "                self.github.pr_comments(number)\n",
       "why": "The dispatcher would never choose a second re-head, so a base that moved again under unchanged certified work would sit waiting for a human; caught by tests/factory/test_factory_base_move.py (every asker passes a head)."
+    },
+    {
+      "id": "copies-cannot-read-the-catalogue",
+      "file": "harness/factory_mutations/run.py",
+      "find": "    \"harness/factory_mutations/defects.json\",\n",
+      "replace": "",
+      "why": "load_defects() requires all eight manifests, so a copy without them cannot load this runner at all: every test that asks it a question dies with `required factory mutation manifest missing`, the baseline goes red, and the whole family is REFUSED rather than run; caught by tests/factory/test_factory_mutation_anchors.py (the copy set carries every manifest the runner requires)."
     }
   ]
 }

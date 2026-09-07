@@ -112,6 +112,18 @@ COPY_FILES = (
     # This runner, in the copy: a mutation of its own concurrency or its own accounting has to
     # be injectable somewhere its detector can read it. The copy is never executed as a runner.
     "harness/factory_mutations/run.py",
+    # ...and the manifests it reads. `load_defects()` requires all eight, so without them the
+    # runner cannot be loaded from inside a copy at all, and any test that asks it a question
+    # dies with `required factory mutation manifest missing` -- which is what turned the whole
+    # family's baseline red in run 34125312694 (D-081). They are data, never injected.
+    "harness/factory_mutations/defects.json",
+    "harness/factory_mutations/native_ci_defects.json",
+    "harness/factory_mutations/post_merge_defects.json",
+    "harness/factory_mutations/benchmark_defects.json",
+    "harness/factory_mutations/spine_defects.json",
+    "harness/factory_mutations/independence_defects.json",
+    "harness/factory_mutations/bootstrap_defects.json",
+    "harness/factory_mutations/genesis_driver_defects.json",
     "tests/factory/test_factory_mutation_budget.py",
     "tests/factory/test_factory_ladder_budget.py",
     "harness/focused.py",
