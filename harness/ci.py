@@ -49,20 +49,26 @@ QUICK = "--quick" in sys.argv
 CONFIG = json.loads((HERE / "harness.config.json").read_text(encoding="utf-8"))
 
 sys.path.insert(0, str(HERE))
-import mutation_budget  # noqa: E402
+import budget  # noqa: E402
 
-# NOT A LITERAL. This rung ran with `timeout=900` and nothing recorded where 900 came from,
-# while the defect catalogue and the suites each defect re-runs both grew underneath it. The
-# first validation run that reached the rung died on `TIMEOUT after 900s` with every other
-# gate green, including the browser journey (PR #134, run 34066724127). The number is now
-# derived from the measurements in harness/mutations/budget.json, so raising it means
-# recording the run that justifies it (D-073).
-MUTATION_BUDGET = mutation_budget.load()
-MUTATIONS_TIMEOUT = mutation_budget.budget_seconds(
-    MUTATION_BUDGET, scope="mutation-rung")
+# NO LITERAL SECONDS IN THIS FILE. Every rung's deadline, and the deadline of the ladder
+# itself, is derived from the measurements in harness/budgets.json. The mutation rung ran with
+# `timeout=900` and nothing recorded where 900 came from; the first validation run that
+# reached it died on `TIMEOUT after 900s` with every other gate green (PR #134, run
+# 34066724127, D-073). Then the WRAPPER that contains this whole ladder was found still
+# carrying `timeout=1800` while the rung inside it had been given 8460 s, and run 34081507222
+# of the same PR died on that instead, after every judge had passed (D-075). A budget nobody
+# measured is a deadline; a wrapper that does not bound what it contains is the same defect
+# one level out. harness/budget.py refuses a record where either is true.
+LADDER_BUDGET = budget.load()
+STATIC_TIMEOUT = budget.budget_seconds(LADDER_BUDGET, scope="static-rung")
+UNIT_TIMEOUT = budget.budget_seconds(LADDER_BUDGET, scope="unit-rung")
+E2E_TIMEOUT = budget.budget_seconds(LADDER_BUDGET, scope="e2e-rung")
+HOLDOUT_TIMEOUT = budget.budget_seconds(LADDER_BUDGET, scope="holdout-rung")
+MUTATIONS_TIMEOUT = budget.budget_seconds(LADDER_BUDGET, scope="mutation-rung")
 # The share of a rung's timeout that is close enough to say so out loud while the rung still
 # passes. Drift from 40% to 95% of a budget is invisible until the run it stops.
-SLOW_RUNG_FRACTION = float(MUTATION_BUDGET["warn_fraction"])
+SLOW_RUNG_FRACTION = float(LADDER_BUDGET["warn_fraction"])
 
 
 def resolve(argv: list[str]) -> list[str]:
@@ -102,7 +108,7 @@ def resolve(argv: list[str]) -> list[str]:
     return [found or head, *argv[1:]]
 
 
-def run(step: str, cmd: str | list[str], timeout: int = 300) -> tuple[int, str]:
+def run(step: str, cmd: str | list[str], *, timeout: int) -> tuple[int, str]:
     """One rung. A timeout is a FAILURE, not a skip - a hung check reports nothing.
 
     A rung that finishes inside its timeout but only just is the run before the one that
@@ -160,8 +166,9 @@ def watchdog(seconds: int, label: str, app=None):
               f"upstream can interrupt this rung, so the run is being killed here. If a "
               f"browser CLI is involved, the usual cause is capture_output=True on a "
               f"process that spawns a daemon: redirect to a real file handle instead. "
-              f"Raise e2e_timeout_s in harness.config.json if the journey is genuinely "
-              f"this slow.", flush=True)
+              f"Record a slower observation for the 'e2e-rung' scope in "
+              f"harness/budgets.json if the journey is genuinely this slow -- and raise "
+              f"every wrapper that contains it in the same change.", flush=True)
         print(f"GATE_FAILED: {label}", flush=True)
         try:
             if app is not None:
@@ -205,13 +212,17 @@ def optional_step(name: str, marker: str) -> bool:
 def main() -> int:
     print(f"HARNESS_START mode={'quick' if QUICK else 'full'} driver={CONFIG.get('driver')}",
           flush=True)
+    # Say what the clocks ARE before running under them. A timeout is only diagnosable next
+    # to the budget it broke, and every one of these came from harness/budgets.json.
+    print(f"RUNG_BUDGETS static={STATIC_TIMEOUT} unit={UNIT_TIMEOUT} e2e={E2E_TIMEOUT} "
+          f"holdout={HOLDOUT_TIMEOUT} mutations={MUTATIONS_TIMEOUT}", flush=True)
 
     # --- 1. static -----------------------------------------------------------
     static_cmd = CONFIG.get("static", "").strip()
     if not static_cmd:
         optional_step("static", "STATIC")
     else:
-        rc, out = run("static", static_cmd)
+        rc, out = run("static", static_cmd, timeout=STATIC_TIMEOUT)
         if rc != 0:
             return fail("static", out)
         # Preserve the stack-specific rung's positive evidence (including its count).
@@ -226,7 +237,7 @@ def main() -> int:
     if not unit_cmd:
         optional_step("unit", "UNIT")
     else:
-        rc, out = run("unit", unit_cmd)
+        rc, out = run("unit", unit_cmd, timeout=UNIT_TIMEOUT)
         if rc != 0:
             return fail("unit", out)
         pattern = CONFIG.get("unit_count_pattern", "").strip()
@@ -260,7 +271,7 @@ def main() -> int:
     from e2e import run_e2e                                      # noqa: E402
 
     with make_driver(CONFIG) as app:                             # prints APP_STARTED
-        wd = watchdog(int(CONFIG.get("e2e_timeout_s", 300)), "e2e", app)
+        wd = watchdog(E2E_TIMEOUT, "e2e", app)
         try:
             steps = run_e2e(app)
         finally:
@@ -275,7 +286,8 @@ def main() -> int:
         # those rather than the thing you meant.
         holdout = ROOT / ".factory" / "holdout" / "run.py"
         if holdout.exists():
-            rc, out = run("holdout", [sys.executable, str(holdout)])
+            rc, out = run("holdout", [sys.executable, str(holdout)],
+                          timeout=HOLDOUT_TIMEOUT)
             if rc != 0:
                 return fail("holdout", out)
             print(out.strip(), flush=True)

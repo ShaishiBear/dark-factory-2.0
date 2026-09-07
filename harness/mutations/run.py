@@ -36,13 +36,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "harness"))
-from mutation_budget import budget_seconds, drift_warning, load  # noqa: E402
+from budget import budget_seconds, deadline, drift_warning, load, remaining  # noqa: E402
 
 DEFECTS = Path(__file__).resolve().parent / "defects.json"
 FACTORY_MUTATIONS = ROOT / "harness" / "factory_mutations" / "run.py"
 BUDGET = load()
 RUNG_BUDGET_SECONDS = budget_seconds(BUDGET, scope="mutation-rung")
 FACTORY_BUDGET_SECONDS = budget_seconds(BUDGET, scope="factory-family")
+CHANNEL_BUDGET_SECONDS = budget_seconds(BUDGET, scope="mutation-channel")
+APPLICATION_BUDGET_SECONDS = budget_seconds(BUDGET, scope="application-family")
+# The whole application family runs under ONE deadline, and each channel is given the smaller
+# of its own budget and what is left of that. Ten iterations times four channels at a
+# per-channel literal is a rung forty times its own label; the deadline is what makes the
+# family's budget bound the family rather than one call inside it (D-075).
+APPLICATION_DEADLINE = deadline(BUDGET, "application-family")
 CHANNELS = (
     ("quick", [sys.executable, "harness/ci.py", "--quick"]),
     ("holdout", [sys.executable, ".factory/holdout/run.py"]),
@@ -88,17 +95,26 @@ def run_channels() -> dict[str, tuple[bool, str]]:
     env = dict(os.environ, FACTORY_IN_MUTATION="1")
     results: dict[str, tuple[bool, str]] = {}
     for name, command in CHANNELS:
-        proc = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            # ONE channel, not the rung: the widest of the four is the quick gate, measured at
-            # 179.0/203.4/207.4 s on three ubuntu runs (D-073). The rung's own budget is
-            # derived in harness/mutation_budget.py and applied by harness/ci.py.
-            timeout=900,
-        )
+        # ONE channel, not the rung: the widest of the four is the quick gate, measured at
+        # 179.0/203.4/207.4 s on three ubuntu runs (D-073). Bounded by the family's remaining
+        # deadline as well, so the four channels of ten iterations cannot together outlive the
+        # application family's own budget (D-075).
+        seconds = min(CHANNEL_BUDGET_SECONDS, remaining(APPLICATION_DEADLINE))
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=seconds,
+            )
+        except subprocess.TimeoutExpired:
+            # A TIMEOUT IS A FAILURE, NOT A CRASH. This call had no handler, so a channel that
+            # ran long took the whole runner down with a traceback and no verdict for any
+            # defect. Red, and named as a timeout so it is never mistaken for a real catch.
+            results[name] = (True, f"{name}-timeout after {seconds:.0f}s")
+            continue
         detail = _quick_rung(proc.stdout or "") if name == "quick" else name
         results[name] = (proc.returncode != 0, detail)
     return results
@@ -153,7 +169,7 @@ def run_factory_mutations() -> bool:
 def report_clock(total: int, started: float, ok: bool, failure: str) -> None:
     """Close the rung with its clock against its budget, whichever way it went.
 
-    The budget is derived from `harness/mutations/budget.json` (see harness/mutation_budget.py),
+    The budget is derived from `harness/budgets.json` (see harness/budget.py),
     and the warning fires while the run still passes, so the next person sees the rung running
     out of room instead of discovering it as a timeout.
     """

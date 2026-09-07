@@ -18,6 +18,8 @@ from .worker_policy import (
     may_change_repo, path_scope, stage_timeout_seconds,
 )
 from .worktree import create_detached, remove
+# The post-merge ladder's deadline, from the same record every rung inside it reads (D-075).
+from harness import budget as ladder_budget
 
 
 # One static retry per mutation stage. A lint failure in a file the worker just wrote is
@@ -94,7 +96,10 @@ class WorkerControlledRuntime(BaseKernelRuntime):
                 cwd=self.repo_root,
                 env={"FACTORY_WORKDIR": str(self.config.runtime.work_root)},
                 credential_scope="validation",
-                timeout=4800,
+                # post_merge.py re-runs the whole ladder on the merge commit after two locked
+                # dependency installs; 4800 s bounded a program that already allowed 3600 s for
+                # the ladder alone (D-075).
+                timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="post-merge"),
                 transcript=transcript,
             )
         except Exception as exc:

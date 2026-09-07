@@ -23,7 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "harness"))
-from mutation_budget import budget_seconds, drift_warning, load  # noqa: E402
+from budget import budget_seconds, deadline, drift_warning, load, remaining  # noqa: E402
 
 MUTATION_DIR = Path(__file__).resolve().parent
 DEFECT_FILES = (
@@ -91,13 +91,16 @@ COPY_FILES = (
     "harness/genesis-recipe.json",
     "harness/mutations/run.py",
     "harness/mutations/defects.json",
-    "harness/mutations/budget.json",
-    "harness/mutation_budget.py",
+    "harness/budgets.json",
+    "harness/budget.py",
     "harness/ci.py",
+    "harness/static.py",
+    "harness/unit.py",
     # This runner, in the copy: a mutation of its own concurrency or its own accounting has to
     # be injectable somewhere its detector can read it. The copy is never executed as a runner.
     "harness/factory_mutations/run.py",
     "tests/factory/test_factory_mutation_budget.py",
+    "tests/factory/test_factory_ladder_budget.py",
     "harness/focused.py",
     "tests/factory/test_factory_security.py",
     "tests/factory/test_e2e_contract.py",
@@ -210,6 +213,12 @@ TEST_FILES = tuple(
 )
 BUDGET = load()
 FAMILY_BUDGET_SECONDS = budget_seconds(BUDGET, scope="factory-family")
+# Sub-bounds of the family, not additions to it. Each is applied together with whatever is
+# LEFT of the family's own deadline, so a copy can never outlive the family that owns it, and
+# the family can never outlive the mutation rung that owns THAT (D-075).
+FILE_SECONDS = budget_seconds(BUDGET, scope="factory-focused-file")
+IMMUNITY_SECONDS = budget_seconds(BUDGET, scope="immunity-check")
+FAMILY_DEADLINE = deadline(BUDGET, "factory-family")
 
 
 def build_copy(parent: Path) -> Path:
@@ -262,7 +271,8 @@ def run_tests(
         started = time.monotonic()
         proc = subprocess.run(
             [sys.executable, rel], cwd=root, env=env, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=180,
+            encoding="utf-8", errors="replace",
+            timeout=min(FILE_SECONDS, remaining(FAMILY_DEADLINE)),
         )
         durations[rel] = round(time.monotonic() - started, 3)
         outputs.append((proc.stdout or "") + (proc.stderr or ""))
@@ -298,7 +308,8 @@ def immunity_is_green() -> bool:
         return False
     proc = subprocess.run(
         [sys.executable, str(IMMUNITY)], cwd=ROOT, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=60,
+        encoding="utf-8", errors="replace",
+        timeout=min(IMMUNITY_SECONDS, remaining(FAMILY_DEADLINE)),
     )
     if proc.stdout.strip():
         print(proc.stdout.strip(), flush=True)

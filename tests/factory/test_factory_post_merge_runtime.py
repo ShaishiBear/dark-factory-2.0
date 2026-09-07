@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from factory_kernel.runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman
 from factory_kernel.worker_runtime import WorkerControlledRuntime
+from harness import budget as ladder_budget
 
 
 MERGE = "a" * 40
@@ -45,7 +46,12 @@ class PostMergeRuntimeTests(unittest.TestCase):
             argv, kwargs = calls[0]
             self.assertEqual(argv[1], "harness/post_merge.py")
             self.assertEqual(kwargs["credential_scope"], "validation")
-            self.assertEqual(kwargs["timeout"], 4800)
+            # Derived, not restated: the post-merge run contains the whole ladder, and 4800
+            # was a literal beneath a ladder whose own budget had outgrown it (D-075).
+            self.assertEqual(
+                kwargs["timeout"],
+                ladder_budget.budget_seconds(ladder_budget.load(), scope="post-merge"),
+            )
 
     def test_no_merge_validation_does_not_run_post_merge(self):
         with tempfile.TemporaryDirectory() as tmp:

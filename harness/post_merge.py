@@ -30,6 +30,7 @@ if str(HERE.parent) not in sys.path:
 
 from factory_kernel.credential_env import scoped_environment  # noqa: E402
 from factory_kernel.worktree import create_detached, remove  # noqa: E402
+from harness import budget as ladder_budget  # noqa: E402
 from harness.observe import parse_transcript  # noqa: E402
 
 
@@ -154,7 +155,9 @@ def execute(*, merge_verification: Path, output: Path) -> dict:
         harness = run(
             [sys.executable, "harness/ci.py"],
             cwd=worktree.path,
-            timeout=3600,
+            # The same ladder the validator ran, so the same budget bounds it: 3600 s was a
+            # literal beneath a mutation rung that had been given 8460 s (D-075).
+            timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="ladder"),
             env=scoped_environment(scope="validation"),
             check=False,
         )

@@ -14,10 +14,20 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
 BACKEND = ROOT / "app" / "backend"
 FRONTEND = ROOT / "app" / "frontend"
 FACTORY = ROOT / "tests" / "factory"
+
+sys.path.insert(0, str(HERE))
+import budget  # noqa: E402
+
+# ONE DEADLINE FOR THE WHOLE RUNG. Each of the three suites carried `timeout=900`, so the rung
+# allowed 2700 s inside a `harness/ci.py` rung bounded at 300 s. Both numbers now come from the
+# `unit-rung` scope in harness/budgets.json, and each suite is given what is LEFT (D-075).
+BUDGET = budget.load()
+RUNG_SECONDS = budget.budget_seconds(BUDGET, scope="unit-rung")
 
 BACKEND_PATTERN = re.compile(r"(\d+) passed")
 FRONTEND_PATTERN = re.compile(r"Tests\s+(\d+) passed")
@@ -32,11 +42,13 @@ def run(
     pattern: re.Pattern[str],
     *,
     env: dict[str, str] | None = None,
+    until: float | None = None,
 ) -> int | None:
     """Return the real test count, or None if a required suite failed or ran nothing."""
     if not cwd.exists():
         print(f"UNIT_MISSING {label}: {cwd} does not exist", flush=True)
         return None
+    left = budget.remaining(until) if until is not None else RUNG_SECONDS
     try:
         p = subprocess.run(
             argv,
@@ -45,14 +57,15 @@ def run(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=900,
+            timeout=left,
             env=env,
         )
     except FileNotFoundError:
         print(f"UNIT_MISSING {label}: {argv[0]} is not on PATH", flush=True)
         return None
     except subprocess.TimeoutExpired:
-        print(f"UNIT_TIMEOUT {label} after 900s", flush=True)
+        print(f"UNIT_TIMEOUT {label} after {left:.0f}s of the {RUNG_SECONDS}s unit-rung "
+              f"budget", flush=True)
         return None
 
     out = ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
@@ -74,10 +87,14 @@ def run(
 
 
 def main() -> int:
+    # The reserve is what this runner keeps back so that IT names the suite that ran long,
+    # before ci.py's own timeout kills the process with nothing to say.
+    until = budget.deadline(BUDGET, "unit-rung")
+    print(f"UNIT_BUDGET seconds={RUNG_SECONDS}", flush=True)
     backend = run("backend", BACKEND,
-                  ["uv", "run", "pytest", "tests", "-q"], BACKEND_PATTERN)
+                  ["uv", "run", "pytest", "tests", "-q"], BACKEND_PATTERN, until=until)
     frontend = run("frontend", FRONTEND,
-                   ["bun", "run", "test"], FRONTEND_PATTERN)
+                   ["bun", "run", "test"], FRONTEND_PATTERN, until=until)
     factory_env = os.environ.copy()
     scripts_path = str(ROOT / "scripts")
     existing_pythonpath = factory_env.get("PYTHONPATH", "")
@@ -99,6 +116,7 @@ def main() -> int:
         ],
         FACTORY_PATTERN,
         env=factory_env,
+        until=until,
     )
 
     if backend is None or frontend is None or factory is None:

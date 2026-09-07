@@ -24,7 +24,7 @@ from factory_kernel.credential_env import scoped_environment
 from factory_kernel.evidence_closure import compile_full_spine
 from factory_kernel.independence import externally_supplied_claims
 from factory_kernel.provenance import verify_pack
-from harness import mutation_budget
+from harness import budget as ladder_budget
 
 
 def fail(message: str) -> None:
@@ -61,8 +61,8 @@ def observe_factory_authority(legacy: dict) -> None:
         errors="replace",
         # The same bare literal the mutation rung carried, one authority further out: 1200
         # was never measured against a catalogue that has since grown past three hundred
-        # defects. Derived from harness/mutations/budget.json (D-073).
-        timeout=mutation_budget.budget_seconds(mutation_budget.load(), scope="factory-family"),
+        # defects. Derived from harness/budgets.json (D-073).
+        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="factory-family"),
     )
     text = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode:
@@ -122,7 +122,11 @@ def run(args: argparse.Namespace) -> None:
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=3000,
+        # The Evidence Bundle runs the whole ladder, so this wrapper must bound the ladder's
+        # own budget plus the deterministic recomputation around it. 3000 s bounded a program
+        # that already allowed 1800 s for the ladder alone -- and 8460 s for one rung of it
+        # (D-075).
+        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="evidence-bundle"),
     )
     if proc.stdout.strip():
         print(proc.stdout.strip())
@@ -156,7 +160,7 @@ def run(args: argparse.Namespace) -> None:
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=240,
+        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="provenance-fetch"),
     )
     if fetch.stdout.strip():
         print(fetch.stdout.strip())

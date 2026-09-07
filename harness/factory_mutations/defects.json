@@ -1862,14 +1862,14 @@
     },
     {
       "id": "mutation-budget-ignores-its-headroom",
-      "file": "harness/mutation_budget.py",
+      "file": "harness/budget.py",
       "find": "    generous = measured_seconds(record, scope) * float(record[\"headroom\"])\n",
       "replace": "    generous = measured_seconds(record, scope)\n",
       "why": "A budget equal to the worst observation is that observation with a rounding error: the first run one second slower than the slowest recorded one fails; caught by tests/factory/test_factory_mutation_budget.py (the budget covers the measurement with headroom) (D-073)."
     },
     {
       "id": "mutation-budget-takes-the-mean-not-the-worst",
-      "file": "harness/mutation_budget.py",
+      "file": "harness/budget.py",
       "find": "    return max(float(entry[\"total_seconds\"]) for entry in measurements(record, scope))\n",
       "replace": "    values = [float(entry[\"total_seconds\"]) for entry in measurements(record, scope)]\n    return sum(values) / len(values)\n",
       "why": "A rung has to finish on its worst run, not its average one; a mean silently sets the budget below half the recorded observations; caught by tests/factory/test_factory_mutation_budget.py (p100 and not the mean) (D-073)."
@@ -1940,7 +1940,7 @@
     {
       "id": "spine-factory-authority-keeps-its-literal",
       "file": "scripts/factory_evidence_spine.py",
-      "find": "        timeout=mutation_budget.budget_seconds(mutation_budget.load(), scope=\"factory-family\"),\n",
+      "find": "        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope=\"factory-family\"),\n",
       "replace": "        timeout=1200,\n",
       "why": "The spine re-observes the factory family independently, so it carried the same unmeasured deadline one authority further out: 1200s was never measured against a catalogue of 391 defects; caught by tests/factory/test_factory_mutation_budget.py (the spine bounds the factory family by the derived budget) (D-073)."
     },
@@ -1957,6 +1957,27 @@
       "find": "        if called in GIT_CWD_POSITION:\n",
       "replace": "        if False:\n",
       "why": "A hermeticity scan that no longer looks at the `_agent`/`_git` call sites reports nothing on a suite that has gone back to running git in its own checkout, which is the defect that made the factory mutation family unusable in the first place; caught by tests/factory/test_factory_suite_hermetic.py (the scan is exercised against sources it must flag) (D-074)."
+    },
+    {
+      "id": "ladder-budget-inner-raised-past-its-wrapper",
+      "file": "harness/budgets.json",
+      "find": "      \"total_seconds\": 2962,\n",
+      "replace": "      \"total_seconds\": 29620,\n",
+      "why": "The exact shape of the defect that ended run 34081507222: an inner budget grows and the wrapper that contains it does not. The factory family's budget goes from 4500 s to 44460 s while the mutation rung that runs it keeps 8580 s, and the spine that re-observes it keeps 15540 s. harness/budget.py:validate() refuses the record, so every runner that loads it stops; caught by tests/factory/test_factory_ladder_budget.py (every wrapper bounds what it contains) (D-075)."
+    },
+    {
+      "id": "ladder-budget-containment-check-made-vacuous",
+      "file": "tests/factory/test_factory_ladder_budget.py",
+      "find": "        for scope in budget.scope_names(record)\n    ]\n",
+      "replace": "        for scope in budget.scope_names(record)[:1]\n    ]\n",
+      "why": "A containment rule that stops examining scopes passes for the same reason an empty suite passes: narrowed to one scope it would still report green while the mutation rung outgrew the ladder. The walk is a function whose coverage is asserted separately, so narrowing it is caught by tests/factory/test_factory_ladder_budget.py (the containment walk covers every declared scope) (D-075)."
+    },
+    {
+      "id": "spine-literal-timeout-reintroduced-for-the-evidence-bundle",
+      "file": "scripts/factory_evidence_spine.py",
+      "find": "        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope=\"evidence-bundle\"),\n",
+      "replace": "        timeout=3000,\n",
+      "why": "The wrapper that contains the whole ladder, back to a number nobody measured: 3000 s bounds a program that runs a 10020 s ladder, which is the defect one authority out from the 1800 s that killed run 34081507222 after every judge had passed. The detector reads the syntax tree, so writing 3001 instead is caught identically; caught by tests/factory/test_factory_ladder_budget.py (the ladder files carry no literal timeout) (D-075)."
     }
   ]
 }
