@@ -1,6 +1,6 @@
 # Dark Factory 2.0 — Architecture Document Index
 
-**Canonical docs branch while current qualification is in flight:** `architecture/dark-factory-2-target-docs`
+**Canonical architecture branch while current qualification is in flight:** `architecture/dark-factory-2-target`
 
 This index exists so future overseers do not use chat transcripts, terminal history or private model memory as competing architecture sources.
 
