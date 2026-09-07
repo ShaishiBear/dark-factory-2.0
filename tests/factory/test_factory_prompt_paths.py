@@ -176,7 +176,9 @@ class LauncherTests(unittest.TestCase):
             rt = self._runtime(Path(tmp), provider)
             with mock.patch("factory_kernel.worker_runtime.method_block", return_value=""):
                 with self.assertRaises(PromptRenderError):
-                    rt._agent("conformance", ROOT, paths, env={})
+                    # A directory this test owns, never its own checkout: the mutation
+                    # family runs this suite from a copy that is not a repository (D-074).
+                    rt._agent("conformance", Path(tmp), paths, env={})
             self.assertEqual(provider.requests, [])
 
     def test_a_worker_that_wrote_to_a_literal_artifacts_dir_is_named_as_that_failure(self):

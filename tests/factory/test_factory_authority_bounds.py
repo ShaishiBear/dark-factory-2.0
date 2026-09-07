@@ -406,7 +406,7 @@ class BuildSideRequestsAreBoundedTests(unittest.TestCase):
             provider = _Provider()
             rt = _runtime(Path(tmp), provider)
             with contextlib.redirect_stdout(io.StringIO()):
-                rt._agent("conformance", ROOT, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
+                rt._agent("conformance", Path(tmp), paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
             (request,) = provider.requests
             self.assertEqual(request.allowed_tools, allowed_tools("conformance"))
             self.assertEqual(request.max_turns, max_turns("conformance"))
@@ -421,14 +421,15 @@ class BuildSideRequestsAreBoundedTests(unittest.TestCase):
             provider = _Provider()
             rt = _runtime(Path(tmp), provider, cls=WorkerControlledRuntime)
             rt._assert_clean = lambda cwd: None
-            # Git state after the worker is another authority's concern; the mutation copy is
-            # not a repository, and the request is built before either check runs.
+            # Git state after the worker is another authority's concern; the directory this
+            # test hands the stage is not a repository, and the request is built before either
+            # check runs. The cwd is the test's own, never this file's checkout (D-074).
             rt._refuse_literal_artifacts_dir = lambda cwd: None
             with (
                 mock.patch("factory_kernel.worker_runtime.method_block", return_value=""),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
-                rt._agent("conformance", ROOT, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
+                rt._agent("conformance", Path(tmp), paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
             (request,) = provider.requests
             self.assertEqual(request.allowed_tools, allowed_tools("conformance"))
             self.assertEqual(request.max_turns, max_turns("conformance"))

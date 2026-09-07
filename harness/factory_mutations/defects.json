@@ -1943,6 +1943,20 @@
       "find": "        timeout=mutation_budget.budget_seconds(mutation_budget.load(), scope=\"factory-family\"),\n",
       "replace": "        timeout=1200,\n",
       "why": "The spine re-observes the factory family independently, so it carried the same unmeasured deadline one authority further out: 1200s was never measured against a catalogue of 391 defects; caught by tests/factory/test_factory_mutation_budget.py (the spine bounds the factory family by the derived budget) (D-073)."
+    },
+    {
+      "id": "worker-throughput-stage-borrows-the-ambient-repository",
+      "file": "tests/factory/test_factory_worker_throughput.py",
+      "find": "            repo = git_repo(Path(tmp))\n",
+      "replace": "            repo = Path(tmp)\n",
+      "why": "The timing/telemetry stage ends in `_refuse_literal_artifacts_dir`, which runs `git status` in the cwd it is handed; a directory that is not a repository is exactly the state the mutation family's copy is in, and that one error refused the whole family with `focused baseline is red` before any defect was evaluated; caught by tests/factory/test_factory_worker_throughput.py (the stage is given a repository the test created) (D-074)."
+    },
+    {
+      "id": "suite-hermeticity-scan-stops-reading-agent-call-sites",
+      "file": "tests/factory/test_factory_suite_hermetic.py",
+      "find": "        if called in GIT_CWD_POSITION:\n",
+      "replace": "        if False:\n",
+      "why": "A hermeticity scan that no longer looks at the `_agent`/`_git` call sites reports nothing on a suite that has gone back to running git in its own checkout, which is the defect that made the factory mutation family unusable in the first place; caught by tests/factory/test_factory_suite_hermetic.py (the scan is exercised against sources it must flag) (D-074)."
     }
   ]
 }

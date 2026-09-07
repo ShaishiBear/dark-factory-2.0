@@ -120,6 +120,10 @@ COPY_FILES = (
     "tests/factory/fixtures/context/run-33914596611-issue-49-task-contract.json",
     "tests/factory/test_factory_workflow_hygiene.py",
     "tests/factory/test_factory_worker_throughput.py",
+    # The rule that keeps this suite runnable from the copy this runner builds: a test that
+    # only passes where the tree around it is a repository makes the whole family unusable,
+    # because every copy runs the suite (D-074).
+    "tests/factory/test_factory_suite_hermetic.py",
     "tests/factory/test_factory_provider_retry.py",
     "tests/factory/test_factory_failed_stage_telemetry.py",
     "tests/factory/fixtures/provider/run-33933101233-test-author-stream-closed.json",

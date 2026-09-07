@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -53,6 +54,25 @@ def provider() -> ClaudeCliProvider:
     return ClaudeCliProvider(ProviderConfig(
         provider_id="claude-cli", binary="claude", model="sonnet", timeout_seconds=60,
     ))
+
+
+def git_repo(parent: Path) -> Path:
+    """A repository this test owns, for a stage that ends by running `git` in its checkout.
+
+    `WorkerControlledRuntime._agent` finishes a non-mutation role with
+    `_refuse_literal_artifacts_dir`, which runs `git status` in the cwd it was handed. Handing
+    it this file's own tree passes only where that tree happens to be a repository; the factory
+    mutation family copies the trust root into a plain directory and runs this suite there, so
+    the ambient repository is exactly what is missing (D-074). The stage gets a repository it
+    created instead.
+    """
+    repo = parent / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "-q"],
+        cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
+    )
+    return repo
 
 
 class TurnCapPolicyTests(unittest.TestCase):
@@ -239,11 +259,11 @@ class _FakeProvider:
 
 
 class TimingAndTelemetryTests(unittest.TestCase):
-    def _runtime(self, tmp: Path):
+    def _runtime(self, tmp: Path, repo: Path):
         from factory_kernel.worker_runtime import WorkerControlledRuntime
 
         rt = object.__new__(WorkerControlledRuntime)
-        rt.repo_root = ROOT
+        rt.repo_root = repo
         rt.provider = _FakeProvider()
         rt.config = mock.Mock()
         rt.config.provider.model = "fake"
@@ -257,9 +277,10 @@ class TimingAndTelemetryTests(unittest.TestCase):
     def test_worker_stage_writes_text_telemetry_and_timing(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RunPaths.create(Path(tmp), "run")
-            rt = self._runtime(Path(tmp))
+            repo = git_repo(Path(tmp))
+            rt = self._runtime(Path(tmp), repo)
             with mock.patch("factory_kernel.worker_runtime.method_block", return_value=""):
-                rt._agent("conformance", ROOT, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
+                rt._agent("conformance", repo, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
             request = rt.provider.requests[0]
             self.assertEqual(request.max_turns, ROLE_MAX_TURNS["conformance"])
             self.assertEqual((paths.transcripts / "agent-conformance.log").read_text(encoding="utf-8"), "worker text\n")

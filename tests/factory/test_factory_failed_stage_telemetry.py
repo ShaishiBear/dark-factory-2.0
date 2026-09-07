@@ -95,9 +95,11 @@ def _runtime(tmp: Path, provider):
     return rt
 
 
-def _run_stage(rt, paths: RunPaths, role: str = "test_author") -> None:
+def _run_stage(rt, paths: RunPaths, cwd: Path, role: str = "test_author") -> None:
+    # The stage's cwd is the directory the caller created, never this file's own checkout: the
+    # mutation family runs this suite from a copy that is not a repository (D-074).
     with mock.patch("factory_kernel.worker_runtime.method_block", return_value=""):
-        rt._agent(role, ROOT, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
+        rt._agent(role, cwd, paths, env={"ARTIFACTS_DIR": str(paths.artifacts)})
 
 
 def _record(paths: RunPaths, role: str) -> dict:
@@ -169,7 +171,7 @@ class FailedStageRecordTests(unittest.TestCase):
             paths = RunPaths.create(Path(tmp), "run")
             rt = _runtime(Path(tmp), _Raising(exc))
             with self.assertRaises(ProviderStageError) as ctx:
-                _run_stage(rt, paths)
+                _run_stage(rt, paths, Path(tmp))
             self.assertIs(ctx.exception, exc)
             record = _record(paths, "test_author")
             self.assertEqual(record["outcome"], "failed")
@@ -195,7 +197,7 @@ class FailedStageRecordTests(unittest.TestCase):
             paths = RunPaths.create(Path(tmp), "run")
             rt = _runtime(Path(tmp), _Raising(exc))
             with self.assertRaises(ProviderStageError):
-                _run_stage(rt, paths, role="context")
+                _run_stage(rt, paths, Path(tmp), role="context")
             record = _record(paths, "context")
             self.assertTrue(record["timed_out"])
             self.assertEqual(record["attempts"], 1)
@@ -206,7 +208,7 @@ class FailedStageRecordTests(unittest.TestCase):
             paths = RunPaths.create(Path(tmp), "run")
             rt = _runtime(Path(tmp), _Raising(ValueError("worker did not return parseable JSON")))
             with self.assertRaises(ValueError):
-                _run_stage(rt, paths, role="review-spec")
+                _run_stage(rt, paths, Path(tmp), role="review-spec")
             record = _record(paths, "review-spec")
             self.assertEqual(record["error_class"], "ValueError")
             self.assertEqual(record["outcome"], "failed")
@@ -220,7 +222,7 @@ class FailedStageRecordTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RunPaths.create(Path(tmp), "run")
             rt = _runtime(Path(tmp), _Ok())
-            _run_stage(rt, paths, role="conformance")
+            _run_stage(rt, paths, Path(tmp), role="conformance")
             record = _record(paths, "conformance")
             # A returned stage says so, the same way a failed one does (D-050).
             self.assertEqual(record["outcome"], "ok")
