@@ -39,7 +39,21 @@ Contains:
 - coordinator/executor concurrency prerequisite;
 - adversarial tests required to prove each extraction genuinely reduces trust.
 
-### 3. `docs/DARK_FACTORY_2_QUALIFICATION_ACCELERATION.md`
+### 3. `docs/DARK_FACTORY_2_AUTONOMOUS_GITHUB_IDENTITY.md`
+
+Read before changing autonomous GitHub credentials, PR creation/update, workflow triggering or merge identity.
+
+Contains:
+
+- the owner-approved decision to use a dedicated repository-scoped GitHub App rather than `GITHUB_TOKEN` or a long-lived PAT for autonomous PR mutations;
+- why current `GITHUB_TOKEN` PR creation cannot produce a fully unattended required-check path;
+- minimum App permissions;
+- token/capability scoping rules;
+- why custom workflow-dispatch/status publication is not the preferred trust shape;
+- the cheap production event-shape proof required before another expensive autonomous qualification;
+- regression requirements that keep the App token out of model workers.
+
+### 4. `docs/DARK_FACTORY_2_QUALIFICATION_ACCELERATION.md`
 
 Read before changing qualification/replay/mutation scheduling.
 
@@ -54,7 +68,7 @@ Contains:
 - post-merge exact-tree proof transfer;
 - performance targets and adversarial tests.
 
-### 4. `docs/DARK_FACTORY_2_CANONICAL_CONTRACTS.md`
+### 5. `docs/DARK_FACTORY_2_CANONICAL_CONTRACTS.md`
 
 Read before implementing Front Door, programmes, graph state, Preflight, learning, capability grants or lease evolution.
 
@@ -78,7 +92,7 @@ Contains canonical target shapes/invariants for:
 
 These contracts are evolutionary targets. Do not flag-day rewrite current proven artifacts merely for uniformity.
 
-### 5. `docs/DARK_FACTORY_2_FRONT_DOOR.md`
+### 6. `docs/DARK_FACTORY_2_FRONT_DOOR.md`
 
 Read before implementing the user-intent / Grill-Me system.
 
@@ -94,7 +108,7 @@ Contains:
 - explicit approval/versioning semantics;
 - Front Door benchmark suite and success metrics.
 
-### 6. `docs/DARK_FACTORY_2_PROGRAMME_AND_PREFLIGHT.md`
+### 7. `docs/DARK_FACTORY_2_PROGRAMME_AND_PREFLIGHT.md`
 
 Read before implementing programme decomposition, programme replanning or multi-option technical exploration.
 
@@ -115,13 +129,13 @@ Contains:
 - strategy-level failure return path;
 - reconsideration and calibration benchmarks.
 
-### 7. Current repository-protected decisions / ADRs / trust policy
+### 8. Current repository-protected decisions / ADRs / trust policy
 
 These remain authoritative for the **currently implemented factory**.
 
 Target documents define where the architecture is going. They do not grant permission to bypass present evidence gates on the way there.
 
-### 8. `HANDOVER.md` / current programme state
+### 9. `HANDOVER.md` / current programme state
 
 Use for live execution state only.
 
@@ -223,6 +237,7 @@ The canonical target set is now intentionally small:
 DARK_FACTORY_2_DOC_INDEX.md
 DARK_FACTORY_2_TARGET_ARCHITECTURE_AND_OVERSEER.md
 DARK_FACTORY_2_KERNEL_TCB_MIGRATION.md
+DARK_FACTORY_2_AUTONOMOUS_GITHUB_IDENTITY.md
 DARK_FACTORY_2_QUALIFICATION_ACCELERATION.md
 DARK_FACTORY_2_CANONICAL_CONTRACTS.md
 DARK_FACTORY_2_FRONT_DOOR.md
