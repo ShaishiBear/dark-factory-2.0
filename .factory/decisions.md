@@ -4003,3 +4003,58 @@ Two mutations, `mutation-detector-reference-check-made-vacuous` and
 `rehead-guard-detector-dropped-from-the-copy-set`, each verified caught by injection into a real
 `build_copy` on the maintainer's Windows host, along with the four re-head defects this change
 re-arms.
+
+## D-079 · A wrapper must accept every call the kernel makes of the program it wraps, because the first production run of a new check refused a real PR for a reason that had nothing to do with it
+
+**The check added by D-077 could not run.** Run 34121299336, the first dispatch after D-077
+merged:
+
+```
+FACTORY_STAGE kind=exec name=currency seconds=0.081 outcome=refused
+factory_evidence_spine.py: error: the following arguments are required:
+  --verdict, --architecture-verdict, --output
+```
+
+0.081 s is the argument parser. PR #134 was refused, correctly recorded as a durable refusal,
+and relabelled — for a defect in the factory, not in the pull request.
+
+**Why the call went somewhere else.** `factory_kernel/worker_runtime.py` rewrites every
+`python scripts/factory_evidence.py ...` to `scripts/factory_evidence_spine.py`. That rule is
+deliberate and blanket: production CLI commands instantiate that class, so no autonomous merge
+can fall back to the legacy Evidence Bundle path — the outer authority must close all protected
+spine claims first. D-077 added a *second* call of that program, and the routing caught it
+exactly as designed. The wrapper's argument surface had never needed to cover more than one call
+shape, and nothing checked that it covered all of them.
+
+The fix keeps the invariant rather than exempting the call from it. The wrapper learns
+`--currency-only` and forwards it to the program that owns those three checks, adding nothing:
+the exit code passes through, and so does the text, because `is_stale_base` classifies by the
+sentence the inner program prints. A wrapper that swallowed either would turn an early stale
+base into something that is not a stale base, and no re-head would follow — the refusal would sit
+on the pull request waiting for a human, which is the outcome D-077 exists to prevent.
+
+**Nothing local could have seen it.** The rehearsal records `_exec` before routing, and the
+routing lives one class above the runtime the rehearsal drives. All 78 test files were green.
+The gap was between two files that never met in a test.
+
+`tests/factory/test_factory_spine_routing.py` closes it generally rather than for this one flag.
+It reads the kernel's `runtime.py` with `ast`, finds every `_exec` argv literal whose program is
+the wrapped one, substitutes a placeholder for each non-literal value — the shape is what is
+under test, not what the kernel puts in it — and requires the wrapper's parser to accept every
+one. A third call added later is covered without editing the test. `build_parser()` is split out
+of `main()` so the surface can be asked without running anything.
+
+**Detection.** Eleven tests: the routing rule is still in place, the kernel makes at least two
+calls of the wrapped program, the wrapper accepts every one of them, one of them is the currency
+check, both call shapes parse, a bundle call missing its arguments is still refused, the forward
+goes to `factory_evidence.py` with `--currency-only` under the `github` scope, a refusal by the
+forwarded program is a refusal by the wrapper, and the refused text reaches the caller so the
+stale-base class survives. Three mutations — `spine-refuses-the-currency-call`,
+`spine-currency-forward-swallows-the-refusal` and
+`spine-currency-forward-takes-validation-credentials` — each verified caught by injection into a
+real `build_copy`.
+
+The second of those escaped the first version of its detector, which asserted the source
+contained `raise SystemExit(proc.returncode)`: the mutation left the line and changed the `if`
+above it. A string that is still present is not a behaviour that still happens. It is now a
+behavioural test with a stubbed subprocess, and the escape is why.

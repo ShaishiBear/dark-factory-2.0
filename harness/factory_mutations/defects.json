@@ -2069,6 +2069,27 @@
       "find": "    \"tests/factory/test_factory_rehead_guard_files.py\",\n",
       "replace": "",
       "why": "The detector four re-head defects name would stop running in the copies, and those defects would silently escape again; caught by tests/factory/test_factory_mutation_anchors.py (every detector the catalogue names is in the suite)."
+    },
+    {
+      "id": "spine-refuses-the-currency-call",
+      "file": "scripts/factory_evidence_spine.py",
+      "find": "    parser.add_argument(\"--verdict\")\n",
+      "replace": "    parser.add_argument(\"--verdict\", required=True)\n",
+      "why": "The wrapper would refuse the early trust-root currency check the kernel routes to it, refusing a real pull request for a reason that has nothing to do with the pull request; caught by tests/factory/test_factory_spine_routing.py (the wrapper accepts every call the kernel makes)."
+    },
+    {
+      "id": "spine-currency-forward-swallows-the-refusal",
+      "file": "scripts/factory_evidence_spine.py",
+      "find": "    if proc.returncode != 0:\n        raise SystemExit(proc.returncode)\n",
+      "replace": "    if False:\n        raise SystemExit(proc.returncode)\n",
+      "why": "A stale trust root would be waved through by the very check added to catch it, because the wrapper would exit zero on the forwarded program's refusal; caught by tests/factory/test_factory_spine_routing.py (the wrapper adds nothing)."
+    },
+    {
+      "id": "spine-currency-forward-takes-validation-credentials",
+      "file": "scripts/factory_evidence_spine.py",
+      "find": "        env=scoped_environment(scope=\"github\"),\n        capture_output=True,\n        text=True,\n        encoding=\"utf-8\",\n        errors=\"replace\",\n        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope=\"trust-root-currency\"),\n",
+      "replace": "        env=scoped_environment(scope=\"github+validation\"),\n        capture_output=True,\n        text=True,\n        encoding=\"utf-8\",\n        errors=\"replace\",\n        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope=\"trust-root-currency\"),\n",
+      "why": "Three git diffs and one GitHub read would run holding the validation database credentials they have no use for; caught by tests/factory/test_factory_spine_routing.py (the forwarded call runs with no more credentials than it needs)."
     }
   ]
 }

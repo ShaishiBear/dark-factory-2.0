@@ -210,13 +210,57 @@ def run(args: argparse.Namespace) -> None:
     )
 
 
-def main() -> None:
+def currency_only(pr: str) -> None:
+    """Forward the three cheap checks to the program that owns them, and nothing else.
+
+    `scripts/factory_evidence.py` is an authority, so the kernel rewrites it to this wrapper
+    (`factory_kernel/trusted_programs.py`) and every call of it arrives here. The early
+    trust-root currency check is one of those calls, and without this it reached an argument
+    parser that demands the whole bundle's arguments: run 34121299336 refused it in 0.081 s with
+    `error: the following arguments are required: --verdict, --architecture-verdict, --output`,
+    which is a real refusal of a real PR for a reason that has nothing to do with the PR (D-079).
+
+    The wrapper adds nothing here. It forwards, and lets the exit code and output through, so
+    the sentence `is_stale_base` matches survives and the refusal keeps its class.
+    """
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "factory_evidence.py"), "--pr", str(pr), "--currency-only"],
+        cwd=ROOT,
+        env=scoped_environment(scope="github"),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="trust-root-currency"),
+    )
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        raise SystemExit(proc.returncode)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The wrapper's argument surface, exposed so a test can prove it accepts every call the
+    kernel makes of the program it wraps (D-079)."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--pr", required=True)
-    parser.add_argument("--verdict", required=True)
-    parser.add_argument("--architecture-verdict", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument("--verdict")
+    parser.add_argument("--architecture-verdict")
+    parser.add_argument("--output")
+    parser.add_argument("--currency-only", action="store_true")
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
+    if args.currency_only:
+        currency_only(args.pr)
+        return
+    if not (args.verdict and args.architecture_verdict and args.output):
+        parser.error(
+            "--verdict, --architecture-verdict and --output are required without --currency-only"
+        )
     run(args)
 
 
