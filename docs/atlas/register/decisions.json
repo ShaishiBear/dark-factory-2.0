@@ -1,0 +1,3066 @@
+{
+  "schema": "dark-factory-decision-register/v1",
+  "generated": "2026-09-08",
+  "source_transcripts": [
+    "darkfactory_chatgpt_history__2_.txt (18 Aug - early Sep 2026)",
+    "ChatGPT-Evaluate_Repository_Progress (3-8 Sep 2026, 41532 lines)"
+  ],
+  "notes": {
+    "status_default": "PROPOSED. The corpus was produced outside the ACP process it defines; nothing in it is decided until adopted (see DFE-001).",
+    "tier_provenance": "Tiers are assigned by the 2026-09-08 evaluation, not by the source corpus. They are a proposal, not a record.",
+    "status_values": [
+      "PROPOSED",
+      "SETTLED",
+      "CONSTITUTIONAL",
+      "BUILT",
+      "PARTIAL",
+      "SUPERSEDED",
+      "OPEN",
+      "AMENDMENT"
+    ],
+    "status_meanings": {
+      "PROPOSED": "Written at implementation grade. No evidence yet. Default.",
+      "SETTLED": "Not to be reopened without new evidence. Evidence, not permission.",
+      "CONSTITUTIONAL": "Not to be reopened without an owner decision. Tier 3.",
+      "BUILT": "Merged and evidenced in the repository.",
+      "PARTIAL": "Partially implemented; named component exists, full decision does not.",
+      "SUPERSEDED": "Replaced. superseded_by names the replacement.",
+      "OPEN": "Deliberately undecided pending implementation evidence.",
+      "AMENDMENT": "A change to the corpus proposed by the 2026-09-08 evaluation."
+    },
+    "usage": "Every PR names the decision IDs it exercises. A PR that contradicts a SETTLED or CONSTITUTIONAL decision requires an ACP."
+  },
+  "registers": {
+    "DFA": "Target architecture directive, 7 Sep, 49 decisions",
+    "DFC": "Canonical contracts / schema specification, 7 Sep, 76 decisions",
+    "DFP": "Preflight algorithm directive, 7 Sep, 81 decisions",
+    "DFF": "Front Door algorithm directive, 7 Sep, 87 decisions",
+    "DFM": "Repository migration directive, 7 Sep, Parts I-XV, 66 items",
+    "DFV": "v3 claim-centric locked decisions, 7 Sep evening, 17 items",
+    "DFG": "Architecture governance / self-modification, commit d2eeda7",
+    "DFE": "Amendments proposed by the 2026-09-08 evaluation and subsequent proposals"
+  },
+  "decisions": [
+    {
+      "id": "DFA-001",
+      "n": 1,
+      "title": "Five-layer system split is decided",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-002",
+      "n": 2,
+      "title": "The kernel has one conceptual job: is this exact transition authorised",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Root position. See DFV-002."
+    },
+    {
+      "id": "DFA-003",
+      "n": 3,
+      "title": "Formalise a machine-readable TCB manifest",
+      "tier": 2,
+      "status": "PROPOSED",
+      "falsifier": "Manifest cannot classify existing modules without ambiguity"
+    },
+    {
+      "id": "DFA-004",
+      "n": 4,
+      "title": "Separate orchestration from authorisation",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-005",
+      "n": 5,
+      "title": "Authorities emit narrow typed attestations",
+      "tier": 2,
+      "status": "PARTIAL",
+      "note": "Attestation concept exists in the evidence spine; typed envelope does not"
+    },
+    {
+      "id": "DFA-006",
+      "n": 6,
+      "title": "Separate action adapters from trusted observations",
+      "tier": 2,
+      "status": "SETTLED",
+      "note": "An untrusted adapter must not both act and be the only observer"
+    },
+    {
+      "id": "DFA-007",
+      "n": 7,
+      "title": "Capability-based execution is the target permission model",
+      "tier": 2,
+      "status": "PARTIAL",
+      "note": "GitHub App token capability split is the first real instance. See DFV-005."
+    },
+    {
+      "id": "DFA-008",
+      "n": 8,
+      "title": "Canonical history is append-only; current state is a materialised view",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-009",
+      "n": 9,
+      "title": "Every durable object carries explicit identity and version context",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-010",
+      "n": 10,
+      "title": "Specification versioning is authoritative; approved spec is immutable",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-011",
+      "n": 11,
+      "title": "User input defaults to exploration, not scope mutation",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-012",
+      "n": 12,
+      "title": "The Front Door produces one authoritative specification",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-013",
+      "n": 13,
+      "title": "Programme synthesis is propose then deterministically compile",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-014",
+      "n": 14,
+      "title": "Programme state is not product intent",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-015",
+      "n": 15,
+      "title": "Preflight is a separate trust domain",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-016",
+      "n": 16,
+      "title": "Candidate exploration uses the F0-F4 fidelity ladder",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-017",
+      "n": 17,
+      "title": "Measured facts, predictions and judgements are different types",
+      "tier": 2,
+      "status": "SETTLED",
+      "note": "Do not convert judgement into fake precision"
+    },
+    {
+      "id": "DFA-018",
+      "n": 18,
+      "title": "Recommendations require explicit assumptions",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-019",
+      "n": 19,
+      "title": "Reactive impact follows recorded graph edges, not model guesswork",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-020",
+      "n": 20,
+      "title": "Rejected alternatives remain durable",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-021",
+      "n": 21,
+      "title": "User candidates get equal evaluation, asymmetric reporting",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-022",
+      "n": 22,
+      "title": "User steering does not command implementation",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-023",
+      "n": 23,
+      "title": "Concurrency uses leases plus optimistic graph versioning",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-024",
+      "n": 24,
+      "title": "Graph mutation is command then event then materialised state",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-025",
+      "n": 25,
+      "title": "Core Project Decision Graph ontology, compact and extensible",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-026",
+      "n": 26,
+      "title": "The graph connects ideas to code end-to-end",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-027",
+      "n": 27,
+      "title": "Factory handoff is a narrow non-authoritative contract",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-028",
+      "n": 28,
+      "title": "Implementation-level vs strategy-level failure are distinct paths",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-029",
+      "n": 29,
+      "title": "Cost is hierarchical and first-class across five budget scopes",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "Structure only; no values. See DFE-005."
+    },
+    {
+      "id": "DFA-030",
+      "n": 30,
+      "title": "Learning has three layers: trajectories, lessons, models",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-031",
+      "n": 31,
+      "title": "Learning never enters blind judges",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Absolute. Structural enforcement, not convention."
+    },
+    {
+      "id": "DFA-032",
+      "n": 32,
+      "title": "Prediction must be calibrated against the real factory",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "See DFE-007 on coverage bias"
+    },
+    {
+      "id": "DFA-033",
+      "n": 33,
+      "title": "Live UI is projection, not authority",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-034",
+      "n": 34,
+      "title": "The UI supports direct graph steering with provenance",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-035",
+      "n": 35,
+      "title": "Implemented architecture is a persistent graph layer",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-036",
+      "n": 36,
+      "title": "Future incidents feed the same graph",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-037",
+      "n": 37,
+      "title": "The UI event transport is replaceable; define an abstract contract",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFA-038",
+      "n": 38,
+      "title": "Storage technology deliberately not pre-decided; semantics are",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFA-039",
+      "n": 39,
+      "title": "Front Door, Preflight and Learning are never in the TCB",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-040",
+      "n": 40,
+      "title": "Preflight and programme reasoning may use cheaper models",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-041",
+      "n": 41,
+      "title": "Avoid premature distributed architecture",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-042",
+      "n": 42,
+      "title": "Avoid premature genericisation across domains",
+      "tier": 2,
+      "status": "SETTLED",
+      "note": "Generic primitive Explore/Gather/Prune/Escalate/Select/Prove/Learn deferred until a second domain proves commonality"
+    },
+    {
+      "id": "DFA-043",
+      "n": 43,
+      "title": "26-step migration dependency order",
+      "tier": 1,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFV-018",
+      "note": "Retain as a dependency reference only"
+    },
+    {
+      "id": "DFA-044",
+      "n": 44,
+      "title": "One integration benchmark before building the whole UI",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "The 17-step end-to-end story including assumption invalidation and candidate revival"
+    },
+    {
+      "id": "DFA-045",
+      "n": 45,
+      "title": "Add an adversarial benchmark proving Preflight can be overruled",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Proves the trust boundary is genuine"
+    },
+    {
+      "id": "DFA-046",
+      "n": 46,
+      "title": "Twenty questions not to be reopened casually",
+      "tier": 3,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFE-003",
+      "note": "Amended: list split into CONSTITUTIONAL and SETTLED; one item demoted"
+    },
+    {
+      "id": "DFA-047",
+      "n": 47,
+      "title": "Eleven decisions intentionally left open for implementation evidence",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFA-048",
+      "n": 48,
+      "title": "How to use this directive: compare, record via ADR, compile to bounded items",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "48.3 ADR recording is what this register implements"
+    },
+    {
+      "id": "DFA-049",
+      "n": 49,
+      "title": "Desired result: the user-facing experience",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFC-001",
+      "n": 1,
+      "title": "Compatibility rule",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-002",
+      "n": 2,
+      "title": "Canonical JSON rules",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-003",
+      "n": 3,
+      "title": "ID strategy: opaque, type-prefixed, never reused",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-004",
+      "n": 4,
+      "title": "Common provenance object",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-005",
+      "n": 5,
+      "title": "Reference object",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-006",
+      "n": 6,
+      "title": "Approved Specification schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-007",
+      "n": 7,
+      "title": "Front Door Interview Ledger schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-008",
+      "n": 8,
+      "title": "Graph command schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-009",
+      "n": 9,
+      "title": "Canonical graph event schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-010",
+      "n": 10,
+      "title": "Graph node materialised envelope",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-011",
+      "n": 11,
+      "title": "Graph edge schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-012",
+      "n": 12,
+      "title": "Question schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-013",
+      "n": 13,
+      "title": "User-added question event",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-014",
+      "n": 14,
+      "title": "Assumption schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3,
+      "note": "Assumptions are first-class; see DFA-020"
+    },
+    {
+      "id": "DFC-015",
+      "n": 15,
+      "title": "Assumption invalidation event",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-016",
+      "n": 16,
+      "title": "Candidate schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-017",
+      "n": 17,
+      "title": "User-added direction",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-018",
+      "n": 18,
+      "title": "Evidence schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-019",
+      "n": 19,
+      "title": "Prediction schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-020",
+      "n": 20,
+      "title": "Disposable probe schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-021",
+      "n": 21,
+      "title": "Candidate evaluation record",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-022",
+      "n": 22,
+      "title": "Recommendation schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-023",
+      "n": 23,
+      "title": "Recommendation decision rule",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-024",
+      "n": 24,
+      "title": "Rejection record",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-025",
+      "n": 25,
+      "title": "Programme schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-026",
+      "n": 26,
+      "title": "Compiled programme DAG schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-027",
+      "n": 27,
+      "title": "Factory handoff schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-028",
+      "n": 28,
+      "title": "Factory handoff binding to the current issue system",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-029",
+      "n": 29,
+      "title": "Factory run schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-030",
+      "n": 30,
+      "title": "Kernel state-transition request",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-031",
+      "n": 31,
+      "title": "Authority attestation schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-032",
+      "n": 32,
+      "title": "Authority independence metadata",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-033",
+      "n": 33,
+      "title": "Capability grant schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-034",
+      "n": 34,
+      "title": "Lease v2 semantics with generation fencing",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-035",
+      "n": 35,
+      "title": "Lease acquisition result",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-036",
+      "n": 36,
+      "title": "Exploration budget schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-037",
+      "n": 37,
+      "title": "User cost approval command",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-038",
+      "n": 38,
+      "title": "Trajectory schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-039",
+      "n": 39,
+      "title": "Trajectory stage attempt",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-040",
+      "n": 40,
+      "title": "Prediction outcome schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-041",
+      "n": 41,
+      "title": "Strategy failure schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-042",
+      "n": 42,
+      "title": "Implementation component schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-043",
+      "n": 43,
+      "title": "Observation schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-044",
+      "n": 44,
+      "title": "Incident schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-045",
+      "n": 45,
+      "title": "Reconsideration schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-046",
+      "n": 46,
+      "title": "Engineering lesson schema, with falsifier",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-047",
+      "n": 47,
+      "title": "Lesson retrieval packet (ExperiencePacket)",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-048",
+      "n": 48,
+      "title": "External source evidence",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-049",
+      "n": 49,
+      "title": "Schema evolution rules",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-050",
+      "n": 50,
+      "title": "Unknown field handling",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-051",
+      "n": 51,
+      "title": "Hashing rule: never self-hash inside the hashed bytes",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFC-052",
+      "n": 52,
+      "title": "Time and ordering: wall clock is not the concurrency order",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFC-053",
+      "n": 53,
+      "title": "Deletion semantics",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-054",
+      "n": 54,
+      "title": "Privacy boundaries",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-055",
+      "n": 55,
+      "title": "Event types initial registry",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-056",
+      "n": 56,
+      "title": "Status vocabulary rule",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-057",
+      "n": 57,
+      "title": "Trust class field is explanatory, never authorising",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFC-058",
+      "n": 58,
+      "title": "Materialised project snapshot",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-059",
+      "n": 59,
+      "title": "Live UI event envelope",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-060",
+      "n": 60,
+      "title": "Frontend action semantics",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-061",
+      "n": 61,
+      "title": "Worked example: full question flow",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-062",
+      "n": 62,
+      "title": "Worked example: promotion flow",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-063",
+      "n": 63,
+      "title": "Worked example: strategy handoff",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-064",
+      "n": 64,
+      "title": "Worked example: real-world rejection",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-065",
+      "n": 65,
+      "title": "Worked example: future incident reconsideration",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-066",
+      "n": 66,
+      "title": "Where schemas live",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-067",
+      "n": 67,
+      "title": "Code generation from schemas",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-068",
+      "n": 68,
+      "title": "Schema tests",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-069",
+      "n": 69,
+      "title": "Cross-schema invariant tests",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-070",
+      "n": 70,
+      "title": "Do not over-normalise text",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-071",
+      "n": 71,
+      "title": "Schema ownership",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-072",
+      "n": 72,
+      "title": "Security principle: references are not authority",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Declared metadata is not an independently enforced fact"
+    },
+    {
+      "id": "DFC-073",
+      "n": 73,
+      "title": "Phased schema rollout, foundation first",
+      "tier": 1,
+      "status": "SETTLED",
+      "note": "Treat as binding. See DFE-004."
+    },
+    {
+      "id": "DFC-074",
+      "n": 74,
+      "title": "Before adopting: compare every schema to existing repo artefacts",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Blocking precondition. Becomes the evidence section of DFE-001."
+    },
+    {
+      "id": "DFC-075",
+      "n": 75,
+      "title": "Acceptance benchmark: full chain representable without destructive mutation",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-076",
+      "n": 76,
+      "title": "Final principle: append-only memory around a small authorisation kernel",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFP-001",
+      "n": 1,
+      "title": "Preflight core principle",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFP-002",
+      "n": 2,
+      "title": "Preflight may never qualify; verdict is always UNPROVEN",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFP-003",
+      "n": 3,
+      "title": "Determine whether exploration is needed at all",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-004",
+      "n": 4,
+      "title": "Three exploration modes: Direct, Light, Deep",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-005",
+      "n": 5,
+      "title": "Candidate generation rule",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-006",
+      "n": 6,
+      "title": "Candidate count",
+      "tier": 0,
+      "status": "OPEN",
+      "note": "To be learned, not specified"
+    },
+    {
+      "id": "DFP-007",
+      "n": 7,
+      "title": "Always include the baseline candidate",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-008",
+      "n": 8,
+      "title": "User-proposed candidates enter the same process",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-009",
+      "n": 9,
+      "title": "Freeze hard constraints before candidate comparison",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-010",
+      "n": 10,
+      "title": "Pre-register the decision policy",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-011",
+      "n": 11,
+      "title": "Do not create a fake universal score",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-012",
+      "n": 12,
+      "title": "Fidelity ladder F0-F4",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-013",
+      "n": 13,
+      "title": "Candidate state machine",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-014",
+      "n": 14,
+      "title": "Cheap invalidity screening first",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-015",
+      "n": 15,
+      "title": "Dominance pruning",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-016",
+      "n": 16,
+      "title": "Preserve the Pareto frontier",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-017",
+      "n": 17,
+      "title": "Uncertainty registry",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-018",
+      "n": 18,
+      "title": "Value-of-information rule for probes",
+      "tier": 1,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFE-005",
+      "note": "V1 replaced with fixed budgets plus logging"
+    },
+    {
+      "id": "DFP-019",
+      "n": 19,
+      "title": "Probe execution threshold",
+      "tier": 1,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFE-005"
+    },
+    {
+      "id": "DFP-020",
+      "n": 20,
+      "title": "Cost control and the three-conjunct escalation predicate",
+      "tier": 2,
+      "status": "SETTLED",
+      "note": "Strongest decision rule in the corpus"
+    },
+    {
+      "id": "DFP-021",
+      "n": 21,
+      "title": "Cost estimates must be calibrated",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-022",
+      "n": 22,
+      "title": "Candidate population is dynamic",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-023",
+      "n": 23,
+      "title": "Candidate novelty test",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-024",
+      "n": 24,
+      "title": "Exploration breadth versus depth",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-025",
+      "n": 25,
+      "title": "Model diversity",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-026",
+      "n": 26,
+      "title": "Long-Horizon Architect participation",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-027",
+      "n": 27,
+      "title": "Reversibility is an explicit criterion",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-028",
+      "n": 28,
+      "title": "Complexity should use observable proxies",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-029",
+      "n": 29,
+      "title": "Expected engineering cost",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-030",
+      "n": 30,
+      "title": "Stop rule: clear winner",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-031",
+      "n": 31,
+      "title": "Stop rule: sufficient confidence",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-032",
+      "n": 32,
+      "title": "Stop rule: budget exhaustion",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-033",
+      "n": 33,
+      "title": "Stop rule: genuine subjective trade-off",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-034",
+      "n": 34,
+      "title": "Do not escalate technical uncertainty prematurely",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "User escalation is for product ownership, not engineering ignorance"
+    },
+    {
+      "id": "DFP-035",
+      "n": 35,
+      "title": "User preference hierarchy",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-036",
+      "n": 36,
+      "title": "Requirement sufficiency",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-037",
+      "n": 37,
+      "title": "Diminishing returns",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-038",
+      "n": 38,
+      "title": "Search exhaustion is not required",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-039",
+      "n": 39,
+      "title": "Recommendation contents",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-040",
+      "n": 40,
+      "title": "Recommendations cannot hide uncertainty",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-041",
+      "n": 41,
+      "title": "Handoff rule",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-042",
+      "n": 42,
+      "title": "Implementation-level failure stays in the factory repair path",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-043",
+      "n": 43,
+      "title": "Strategy-level failure returns to Preflight",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-044",
+      "n": 44,
+      "title": "A failed winner teaches more than a normal failure",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-045",
+      "n": 45,
+      "title": "Reviving rejected candidates",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-046",
+      "n": 46,
+      "title": "Re-evaluation after assumption invalidation",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-047",
+      "n": 47,
+      "title": "Question decomposition",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-048",
+      "n": 48,
+      "title": "Hierarchical exploration",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-049",
+      "n": 49,
+      "title": "Detect coupled choices",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-050",
+      "n": 50,
+      "title": "Candidate graph rather than flat list",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-051",
+      "n": 51,
+      "title": "Historical retrieval must be scoped",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-052",
+      "n": 52,
+      "title": "External research",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-053",
+      "n": 53,
+      "title": "Security-sensitive candidates",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-054",
+      "n": 54,
+      "title": "Migration-sensitive candidates",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-055",
+      "n": 55,
+      "title": "Operational candidates",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-056",
+      "n": 56,
+      "title": "Dependency addition",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-057",
+      "n": 57,
+      "title": "Candidate rejection reason codes",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-058",
+      "n": 58,
+      "title": "Do not prune solely on model preference",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-059",
+      "n": 59,
+      "title": "Exploration telemetry",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-060",
+      "n": 60,
+      "title": "Learn when tournaments are valuable",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-061",
+      "n": 61,
+      "title": "Learn ideal candidate count",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-062",
+      "n": 62,
+      "title": "Learn probe value",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-063",
+      "n": 63,
+      "title": "Learn reasoning-model routing",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-064",
+      "n": 64,
+      "title": "User-facing presentation",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-065",
+      "n": 65,
+      "title": "Candidate animation states",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-066",
+      "n": 66,
+      "title": "Decision completeness rule",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-067",
+      "n": 67,
+      "title": "Direct-mode record",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-068",
+      "n": 68,
+      "title": "Failed direct-mode detection",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-069",
+      "n": 69,
+      "title": "Preflight must avoid architecture astronautics",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-070",
+      "n": 70,
+      "title": "Novel approaches need higher evidence",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-071",
+      "n": 71,
+      "title": "Architecture optionality",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-072",
+      "n": 72,
+      "title": "Default convergence policy",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-073",
+      "n": 73,
+      "title": "Success criterion: the factory rarely disproves it, but still can",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-074",
+      "n": 74,
+      "title": "Minimum viable Preflight: do not wait for learning models",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "Implementation target for V1"
+    },
+    {
+      "id": "DFP-075",
+      "n": 75,
+      "title": "Preflight V2 after trajectories accumulate",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-076",
+      "n": 76,
+      "title": "Preflight V3",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-077",
+      "n": 77,
+      "title": "Canonical Preflight benchmark",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-078",
+      "n": 78,
+      "title": "Anti-benchmark cheating",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-079",
+      "n": 79,
+      "title": "What remains deliberately open in Preflight",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-080",
+      "n": 80,
+      "title": "Final Preflight algorithm summary",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-081",
+      "n": 81,
+      "title": "Preflight architectural invariant",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-001",
+      "n": 1,
+      "title": "Front Door core mission",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-002",
+      "n": 2,
+      "title": "Separate intent detection from interviewing",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-003",
+      "n": 3,
+      "title": "Nine ownership classes for unknowns; only three are the user's",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-004",
+      "n": 4,
+      "title": "The default is not to ask",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-005",
+      "n": 5,
+      "title": "Detect ambiguity through interpretation divergence",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-006",
+      "n": 6,
+      "title": "Ambiguity must be material",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-007",
+      "n": 7,
+      "title": "One question at a time",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-008",
+      "n": 8,
+      "title": "Rank questions by decision value",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-009",
+      "n": 9,
+      "title": "Do not manufacture fake question scores",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-010",
+      "n": 10,
+      "title": "Ask questions that distinguish behaviours",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-011",
+      "n": 11,
+      "title": "Recommendations accompany questions where useful",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-012",
+      "n": 12,
+      "title": "Recommendations are not decisions",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-013",
+      "n": 13,
+      "title": "Avoid technical jargon in user questions",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-014",
+      "n": 14,
+      "title": "Preserve original user wording",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-015",
+      "n": 15,
+      "title": "Support explicit delegation",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-016",
+      "n": 16,
+      "title": "Support deferral",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-017",
+      "n": 17,
+      "title": "Maintain an append-only interview ledger",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-018",
+      "n": 18,
+      "title": "Maintain a provisional intent model",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-019",
+      "n": 19,
+      "title": "Use an internal topic coverage map",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Amended by DFE-006: coverage map is policy, not learnable"
+    },
+    {
+      "id": "DFF-020",
+      "n": 20,
+      "title": "Scenario synthesis is mandatory before completion",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-021",
+      "n": 21,
+      "title": "Off-nominal scenarios expose hidden requirements",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-022",
+      "n": 22,
+      "title": "Distinguish product behaviour from implementation",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-023",
+      "n": 23,
+      "title": "Detect solution masquerading as requirement",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-024",
+      "n": 24,
+      "title": "Optional features default out",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-025",
+      "n": 25,
+      "title": "Existing behaviour is a strong default",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-026",
+      "n": 26,
+      "title": "Research before asking factual questions",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-027",
+      "n": 27,
+      "title": "Front Door research remains bounded",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-028",
+      "n": 28,
+      "title": "Feasibility sanity check before approval",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-029",
+      "n": 29,
+      "title": "Infeasibility becomes a user question only when necessary",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-030",
+      "n": 30,
+      "title": "Requirement quality audit",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-031",
+      "n": 31,
+      "title": "Acceptance criteria are behaviour anchors",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-032",
+      "n": 32,
+      "title": "Acceptance must not over-specify design",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-033",
+      "n": 33,
+      "title": "Traceability is mandatory",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-034",
+      "n": 34,
+      "title": "Contradiction audit",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-035",
+      "n": 35,
+      "title": "Question generation may use counterfactual specs",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-036",
+      "n": 36,
+      "title": "Ask a minimal sufficient question",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-037",
+      "n": 37,
+      "title": "Avoid binary questions where the space is broader",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-038",
+      "n": 38,
+      "title": "Do not burden the user with exhaustive edge cases",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-039",
+      "n": 39,
+      "title": "Security and privacy questioning",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-040",
+      "n": 40,
+      "title": "Performance questioning",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-041",
+      "n": 41,
+      "title": "Scale questioning",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-042",
+      "n": 42,
+      "title": "User interaction depth is adaptive",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-043",
+      "n": 43,
+      "title": "The system should learn user burden",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Constrained by DFE-006"
+    },
+    {
+      "id": "DFF-044",
+      "n": 44,
+      "title": "Question-value telemetry",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-045",
+      "n": 45,
+      "title": "Questions not asked should also be learnable",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Constrained by DFE-006"
+    },
+    {
+      "id": "DFF-046",
+      "n": 46,
+      "title": "Keep assumptions explicit",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-047",
+      "n": 47,
+      "title": "Product assumptions versus engineering assumptions",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-048",
+      "n": 48,
+      "title": "Identify decision authority",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-049",
+      "n": 49,
+      "title": "Draft-spec readiness",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-050",
+      "n": 50,
+      "title": "Fully specified input may require zero questions",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-051",
+      "n": 51,
+      "title": "The final review is not another interrogation",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-052",
+      "n": 52,
+      "title": "Approval must be explicit",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-053",
+      "n": 53,
+      "title": "Validate before asking for approval",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-054",
+      "n": 54,
+      "title": "Spec approval does not mean feasibility proved",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-055",
+      "n": 55,
+      "title": "Known likely infeasibility should still be surfaced",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-056",
+      "n": 56,
+      "title": "After approval, no silent mutation",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-057",
+      "n": 57,
+      "title": "Spec amendment is delta-oriented",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-058",
+      "n": 58,
+      "title": "User steering after approval remains exploration by default",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-059",
+      "n": 59,
+      "title": "Front Door must not create GitHub work directly",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-060",
+      "n": 60,
+      "title": "Front Door must be replayable",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-061",
+      "n": 61,
+      "title": "Front Door trust boundary",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-062",
+      "n": 62,
+      "title": "Front Door cost behaviour",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-063",
+      "n": 63,
+      "title": "Anti-pattern: questionnaire mode",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-064",
+      "n": 64,
+      "title": "Anti-pattern: consultant upsell",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-065",
+      "n": 65,
+      "title": "Anti-pattern: solution anchoring",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-066",
+      "n": 66,
+      "title": "Anti-pattern: confirmation bias",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-067",
+      "n": 67,
+      "title": "Anti-pattern: treating the user as an engineer",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-068",
+      "n": 68,
+      "title": "Anti-pattern: endless completeness",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-069",
+      "n": 69,
+      "title": "Anti-pattern: silent defaults",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-070",
+      "n": 70,
+      "title": "Questions should expose consequences",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-071",
+      "n": 71,
+      "title": "Conflict resolution format",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-072",
+      "n": 72,
+      "title": "Edge-case discovery may produce a default, not a question",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-073",
+      "n": 73,
+      "title": "Avoid requiring fake quantitative precision from users",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-074",
+      "n": 74,
+      "title": "Derived technical requirements are not user-authored requirements",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-075",
+      "n": 75,
+      "title": "Scenario-derived product requirements need approval",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-076",
+      "n": 76,
+      "title": "System-derived technical safeguards need not become user questions",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-077",
+      "n": 77,
+      "title": "Interview learning dataset",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Constrained by DFE-006"
+    },
+    {
+      "id": "DFF-078",
+      "n": 78,
+      "title": "Measure question usefulness",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-079",
+      "n": 79,
+      "title": "Measure missed questions",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Metric amended by DFE-006"
+    },
+    {
+      "id": "DFF-080",
+      "n": 80,
+      "title": "Front Door benchmark suite, 14 cases A-N",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-081",
+      "n": 81,
+      "title": "Front Door success metrics",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-082",
+      "n": 82,
+      "title": "The desired behavioural balance",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-083",
+      "n": 83,
+      "title": "Minimum viable Front Door",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "Implementation target for V1"
+    },
+    {
+      "id": "DFF-084",
+      "n": 84,
+      "title": "Front Door V2",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-085",
+      "n": 85,
+      "title": "Front Door V3",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-086",
+      "n": 86,
+      "title": "Final Front Door algorithm",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-087",
+      "n": 87,
+      "title": "Front Door architectural invariant",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFM-001",
+      "n": 1,
+      "title": "Do not build a second state machine",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Part I. The most important repo-specific correction."
+    },
+    {
+      "id": "DFM-002",
+      "n": 2,
+      "title": "factory_kernel/canonical.py assessment",
+      "tier": 0,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFM-003",
+      "n": 3,
+      "title": "factory_kernel/manifest.py assessment",
+      "tier": 0,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFM-004",
+      "n": 4,
+      "title": "factory_kernel/spine.py assessment",
+      "tier": 0,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFM-005",
+      "n": 5,
+      "title": "factory_kernel/independence.py assessment",
+      "tier": 0,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFM-006",
+      "n": 6,
+      "title": "factory_kernel/evidence_closure.py assessment",
+      "tier": 0,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFM-007",
+      "n": 7,
+      "title": "factory_kernel/provenance.py assessment",
+      "tier": 0,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFM-008",
+      "n": 8,
+      "title": "factory_kernel/authority.py assessment",
+      "tier": 0,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFM-009",
+      "n": 9,
+      "title": "harness/merge_verify.py assessment",
+      "tier": 0,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFM-010",
+      "n": 10,
+      "title": "runtime.py is nine systems merged",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Part III diagnosis"
+    },
+    {
+      "id": "DFM-011",
+      "n": 11,
+      "title": "Target logical architecture and responsibility map",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-012",
+      "n": 12,
+      "title": "providers.py migration",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-013",
+      "n": 13,
+      "title": "Prefer a worker view over prompt-based filesystem trust",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-014",
+      "n": 14,
+      "title": "worker_policy.py",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-015",
+      "n": 15,
+      "title": "credential_env.py",
+      "tier": 2,
+      "status": "PARTIAL",
+      "note": "App-token scope shipped"
+    },
+    {
+      "id": "DFM-016",
+      "n": 16,
+      "title": "github_cli.py",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-017",
+      "n": 17,
+      "title": "Exact-head merge",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "status_note": "BUILT and constitutional"
+    },
+    {
+      "id": "DFM-018",
+      "n": 18,
+      "title": "git_authority.py",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-019",
+      "n": 19,
+      "title": "RED/guard semantics become typed evidence",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-020",
+      "n": 20,
+      "title": "worktree.py",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-021",
+      "n": 21,
+      "title": "trusted_programs.py",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-022",
+      "n": 22,
+      "title": "static_gate.py",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-023",
+      "n": 23,
+      "title": "runtime.py knows far too much about re-head semantics",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-024",
+      "n": 24,
+      "title": "Target claim-driven kernel API",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-025",
+      "n": 25,
+      "title": "Merge is the most privileged transition",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFM-026",
+      "n": 26,
+      "title": "Trajectory retention is the immediate low-risk speed win",
+      "tier": 0,
+      "status": "PROPOSED",
+      "note": "7 to 90 days. Cheapest item in the corpus. Blocks all of DFC phase 5."
+    },
+    {
+      "id": "DFM-027",
+      "n": 27,
+      "title": "One compact trajectory record per attempt",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-028",
+      "n": 28,
+      "title": "Trajectory finalisation on every exit path",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-029",
+      "n": 29,
+      "title": "Trajectory and trusted evidence remain distinct",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-030",
+      "n": 30,
+      "title": "Current workflow cannot meaningfully parallelise",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-031",
+      "n": 31,
+      "title": "Target workflow topology",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-032",
+      "n": 32,
+      "title": "Coordinator: serial and short-lived",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-033",
+      "n": 33,
+      "title": "Executor",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-034",
+      "n": 34,
+      "title": "Workflow dispatch",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-035",
+      "n": 35,
+      "title": "Lease v2 with generation fencing",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Stale generation may compute but not mutate"
+    },
+    {
+      "id": "DFM-036",
+      "n": 36,
+      "title": "Initial persistence for issue execution",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-037",
+      "n": 37,
+      "title": "Four concurrency levels A-D",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-038",
+      "n": 38,
+      "title": "Validation fan-out",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-039",
+      "n": 39,
+      "title": "Global compute semaphore",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-040",
+      "n": 40,
+      "title": "Dedicated architecture-adversarial benchmark programme",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-041",
+      "n": 41,
+      "title": "Kernel adversarial tests K-ADV-1..5",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-042",
+      "n": 42,
+      "title": "Provider/sandbox tests CAP-ADV-1..4",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-043",
+      "n": 43,
+      "title": "Git tests GIT-ADV-1..3",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-044",
+      "n": 44,
+      "title": "Merge tests M-ADV-1..3",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-045",
+      "n": 45,
+      "title": "Lease tests L-ADV-1..4",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-046",
+      "n": 46,
+      "title": "Do not introduce a graph database simply because this is a graph",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-047",
+      "n": 47,
+      "title": "Abstract store contract",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-048",
+      "n": 48,
+      "title": "Event application",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-049",
+      "n": 49,
+      "title": "Materialised graph tables",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-050",
+      "n": 50,
+      "title": "Assumption invalidation query",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-051",
+      "n": 51,
+      "title": "Specification and graph history",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-052",
+      "n": 52,
+      "title": "Do not build graph rendering before backend event semantics",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-053",
+      "n": 53,
+      "title": "Main screen",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-054",
+      "n": 54,
+      "title": "Trust must be visible",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-055",
+      "n": 55,
+      "title": "Node detail panel",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-056",
+      "n": 56,
+      "title": "User steering in the UI",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-057",
+      "n": 57,
+      "title": "Cost UI",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-058",
+      "n": 58,
+      "title": "Timeline",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-059",
+      "n": 59,
+      "title": "Raw trajectory store first",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-060",
+      "n": 60,
+      "title": "Build the learner offline and read-only first",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-061",
+      "n": 61,
+      "title": "Factory knowledge before broad software knowledge",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-062",
+      "n": 62,
+      "title": "Blind judge isolation structurally enforced",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFM-063",
+      "n": 63,
+      "title": "Benchmark 1: fully specified request",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-064",
+      "n": 64,
+      "title": "Benchmark 2: genuine product ambiguity",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-065",
+      "n": 65,
+      "title": "Benchmark 3: programme",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-066",
+      "n": 66,
+      "title": "Benchmark 4: Preflight",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-XIV",
+      "n": null,
+      "title": "16-phase concrete programme order, Phase 0 finish present qualification",
+      "tier": 1,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFV-018",
+      "note": "Part XIV. The floor rule survives: no architecture rewrite before the qualification floor."
+    },
+    {
+      "id": "DFV-001",
+      "n": 1,
+      "title": "Intelligence does not equal authority",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-002",
+      "n": 2,
+      "title": "The kernel gets smaller, not merely better organised",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-003",
+      "n": 3,
+      "title": "No second lifecycle state machine",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-004",
+      "n": 4,
+      "title": "Privileged actions become explicit capabilities",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFV-005",
+      "n": 5,
+      "title": "Autonomous GitHub identity is a dedicated GitHub App",
+      "tier": 2,
+      "status": "BUILT",
+      "note": "Do not reopen PAT vs App without a real constraint"
+    },
+    {
+      "id": "DFV-006",
+      "n": 6,
+      "title": "Programme planning is propose then deterministically compile",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFV-007",
+      "n": 7,
+      "title": "Preflight stays outside the trusted factory; verdict always UNPROVEN",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-008",
+      "n": 8,
+      "title": "Qualification becomes dependency-aware",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "The attestation dependency model. Highest-value decision in the corpus."
+    },
+    {
+      "id": "DFV-009",
+      "n": 9,
+      "title": "Mutation testing becomes detector-specific",
+      "tier": 2,
+      "status": "PARTIAL",
+      "note": "Four injected defects each caught by exactly one detector on the App branch"
+    },
+    {
+      "id": "DFV-010",
+      "n": 10,
+      "title": "Independent authorities fan out concurrently where independent",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFV-011",
+      "n": 11,
+      "title": "Re-head becomes a deterministic authority",
+      "tier": 2,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFE-008",
+      "note": "Amended: derive from the dependency model rather than knowing claim types"
+    },
+    {
+      "id": "DFV-012",
+      "n": 12,
+      "title": "Concurrency uses coordinator plus executors plus leases",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFV-013",
+      "n": 13,
+      "title": "Long-horizon architecture has three roles: architect, governor, holdout",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFV-014",
+      "n": 14,
+      "title": "The Project Decision Graph is the durable project memory",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFV-015",
+      "n": 15,
+      "title": "Losing alternatives are retained",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFV-016",
+      "n": 16,
+      "title": "Learning starts with immutable trajectories; blind judges never see lessons",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-017",
+      "n": 17,
+      "title": "UI is a projection, never authority",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-018",
+      "n": 18,
+      "title": "Six-phase implementation ordering, Phase 0 prove the factory can observe itself",
+      "tier": 1,
+      "status": "PROPOSED",
+      "supersedes": [
+        "DFA-043",
+        "DFM-XIV"
+      ],
+      "note": "Current ordering"
+    },
+    {
+      "id": "DFV-019",
+      "n": 19,
+      "title": "Dark Factory is claim-centric, not task-centric",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Commit 56e1497"
+    },
+    {
+      "id": "DFV-020",
+      "n": 20,
+      "title": "The claim lifecycle UNKNOWN to REJECTED/SUPERSEDED",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFV-021",
+      "n": 21,
+      "title": "Foundation build order: claim, attestation, dependency graph, capability, leases, brokers",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFG-001",
+      "n": 1,
+      "title": "Constitution: eleven clauses",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-002",
+      "n": 2,
+      "title": "Four change tiers 0-3",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-003",
+      "n": 3,
+      "title": "Tier 2 requires an Architecture Change Proposal",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-004",
+      "n": 4,
+      "title": "Architect predicts, Governor enforces, Holdout challenges",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFG-005",
+      "n": 5,
+      "title": "A new authority cannot declare itself valid",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-006",
+      "n": 6,
+      "title": "Shadow and equivalence first, cutover second",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFG-007",
+      "n": 7,
+      "title": "Escalation examples: never PostgreSQL vs SQLite, always weaker-guarantee trades",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-008",
+      "n": 8,
+      "title": "Do not silently drift the architecture; use the six-field amendment format",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFG-009",
+      "n": 9,
+      "title": "Architecture Governor bound to exact contract/context/design/policy hashes",
+      "tier": 2,
+      "status": "BUILT"
+    },
+    {
+      "id": "DFE-001",
+      "n": 1,
+      "title": "AMENDMENT: adopt the corpus via a Tier 2 ACP using DFC-074 as its evidence section",
+      "tier": 3,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-048",
+        "DFC-074",
+        "DFG-003"
+      ],
+      "rationale": "The corpus arrived outside the governance regime it defines. Adoption must be legitimate.",
+      "cost": "half a day"
+    },
+    {
+      "id": "DFE-002",
+      "n": 2,
+      "title": "AMENDMENT: add supersession headers to all three roadmaps; declare DFV-018 current",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-043",
+        "DFM-XIV",
+        "DFV-018"
+      ],
+      "rationale": "Three conflicting roadmaps with no supersession record reproduces the documentation-drift defect one day after it was diagnosed.",
+      "cost": "minutes"
+    },
+    {
+      "id": "DFE-003",
+      "n": 3,
+      "title": "AMENDMENT: split the lock list into CONSTITUTIONAL and SETTLED; demote one-candidate-at-a-time to a default",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-046"
+      ],
+      "rationale": "Twenty undifferentiated locks of uneven evidentiary support will be over-respected or ignored. Concurrent trusted candidates with disjoint blast radii may be correct and should stay empirical.",
+      "cost": "minutes"
+    },
+    {
+      "id": "DFE-004",
+      "n": 4,
+      "title": "AMENDMENT: split canonical contracts into normative phase 1 and proposed phases 2-5",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFC-073"
+      ],
+      "rationale": "49 schemas with no consumer exert gravity. Documents make things look decided.",
+      "cost": "minutes"
+    },
+    {
+      "id": "DFE-005",
+      "n": 5,
+      "title": "AMENDMENT: replace V1 value-of-information with fixed probe budgets plus logging",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-029",
+        "DFP-018",
+        "DFP-019"
+      ],
+      "rationale": "An economic rule with no calibration data is the fake precision DFA-017 forbids. Fit the rule after 100 logged probes.",
+      "cost": "an hour"
+    },
+    {
+      "id": "DFE-006",
+      "n": 6,
+      "title": "AMENDMENT: interview learning may not modify the topic coverage map; change the metric",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFF-019",
+        "DFF-043",
+        "DFF-045",
+        "DFF-077",
+        "DFF-079"
+      ],
+      "rationale": "The Front Door's output is the approved spec. Learning to optimise for approval rather than correctness degrades trust without crossing any trust boundary. Metric should be defects and reconsiderations traced to an unasked question, not user satisfaction.",
+      "cost": "an hour"
+    },
+    {
+      "id": "DFE-007",
+      "n": 7,
+      "title": "AMENDMENT: add runner-up sampling to Preflight calibration",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-032",
+        "DFA-045",
+        "DFP-044",
+        "DFP-077"
+      ],
+      "rationale": "Existing benchmarks test whether Preflight picks a loser, not whether it ever generated the winner. Calibration conditioned on its own generation bias will look excellent while being systematically narrow.",
+      "cost": "cheap to specify, real compute to run"
+    },
+    {
+      "id": "DFE-008",
+      "n": 8,
+      "title": "AMENDMENT: ReheadAuthority becomes a query over the dependency model, not a knower of claim types",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFV-011",
+        "DFM-023",
+        "DFV-008"
+      ],
+      "rationale": "Claim-by-claim reissuance requires claim-type expertise inside a trusted judge. That is TCB regrowth. Preserve exactly those claims whose dependency digests are unchanged.",
+      "cost": "design change; cheap now, expensive later"
+    },
+    {
+      "id": "DFE-009",
+      "n": 9,
+      "title": "AMENDMENT: specify attestation revocation and authority-disagreement resolution",
+      "tier": 3,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFC-031",
+        "DFC-032",
+        "DFV-008"
+      ],
+      "rationale": "Staleness is specified for dependency change but not authority defect. If an authority version is found buggy, every attestation it issued is suspect, including on merged work. No revocation event, no policy, no disagreement procedure.",
+      "cost": "genuinely new design work"
+    },
+    {
+      "id": "DFE-010",
+      "n": 10,
+      "title": "AMENDMENT: generate per-issue decision extracts rather than wholesale references",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-048",
+        "DFC-047"
+      ],
+      "rationale": "300 decisions delivered wholesale is the context-window decay named in the 1.0 diagnostic. Apply the ExperiencePacket pattern to the corpus itself.",
+      "cost": "tooling, once"
+    },
+    {
+      "id": "DFE-011",
+      "n": 11,
+      "title": "AMENDMENT: Preflight self-optimisation loop — specify the mechanism for the four learned decisions",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFP-060",
+        "DFP-061",
+        "DFP-062",
+        "DFP-063",
+        "DFE-007",
+        "DFM-026"
+      ],
+      "rationale": "DFP-060..063 are marked OPEN with the instruction that they be learned rather than specified, and no mechanism is given. Apply the autoresearch pattern to the Preflight algorithm itself: frozen historical decisions as the immutable evaluator, exploration budget fixed, decision quality optimised. Safe because Preflight is outside the TCB, its verdict is permanently UNPROVEN, and the factory is an external referee. Makes DFE-007 and DFM-026 blocking preconditions.",
+      "cost": "month-six capability; preconditions due now",
+      "note": "See 09-ACP-002-PREFLIGHT-LOOP.md. Third of three optimisation proposals; best target, worst readiness. Replay searches, shadow validates. Records the acceleration/Preflight tension."
+    },
+    {
+      "id": "DFE-012",
+      "n": 12,
+      "title": "AMENDMENT: complete the ratchet family with a conditional cost ceiling",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003",
+        "DFM-026",
+        "DFE-011"
+      ],
+      "rationale": "The system has floors that only rise and a TCB that only shrinks, but nothing that stops qualification getting slower. The named accelerations are intentions with no enforcement; the next feature can give them back silently. A ceiling from observed p50, conditional on identical qualification outcome, completes the family using the mechanism the floors already prove. Requires no agent, no corpus, no new concept.",
+      "cost": "instrumentation is the work; the ratchet is a few lines",
+      "note": "See 10-ACP-003-COST-RATCHET.md. Cheapest high-value item available and the only one that could land this month."
+    },
+    {
+      "id": "DFE-013",
+      "n": 13,
+      "title": "AMENDMENT: unify the value-of-information rule and the search-worth test as one principle",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFP-018",
+        "DFP-060",
+        "DFP-061",
+        "DFP-062",
+        "DFE-005",
+        "DFE-012"
+      ],
+      "rationale": "Probe scale and search scale ask the same question: will the evidence change what I do, by more than it costs to get? The discriminator at both scales is the strength of existing priors, not the size of the prize. Stated once in the constitution rather than reinvented per subsystem. Its immediate consequence: do not search a space whose head of distribution is already written down.",
+      "cost": "a paragraph in the constitution; changes what gets built",
+      "note": "See 01-CONSTITUTION.md, 'When search is worth running', and 02 Part M.3."
+    }
+  ]
+}
