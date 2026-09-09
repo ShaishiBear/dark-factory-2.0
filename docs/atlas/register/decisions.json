@@ -2786,7 +2786,8 @@
       "n": 12,
       "title": "Concurrency uses coordinator plus executors plus leases",
       "tier": 2,
-      "status": "PROPOSED"
+      "status": "PROPOSED",
+      "note": "FIRST MEASURED INSTANCE of maintainer-lane versus factory-lane contention, 2026-09-09: three individually trivial register-only PRs (#156, #157, #158) merged while PR #134 was being driven back into the queue. Cost: one full re-head cycle (8m35s) and very nearly an 83-minute validation that would have died at merge pre-authorization with `main moved after evidence`. This is not a factory defect -- both lanes behaved correctly -- it is contention for main between a lane that merges in minutes and a lane that validates in hours. The operational fix used on the day was discipline: merge nothing else while a lap runs. That does not scale, which is what makes it evidence for this decision."
     },
     {
       "id": "DFV-013",
@@ -3214,6 +3215,21 @@
       "rationale": "rehead_eligible requires the latest refusal to be stale_base, so a PR refused for any other reason is skipped by the dispatcher and refused by `rehead` when run by hand. PR #134 passed the entire ladder on 2026-09-07, was refused at the merge by an expired credential, and has been inert since: not eligible for validation (needs-fix, not needs-review) and not eligible for re-head (reason code merge_preauth, not stale_base). Neither DFE-014 nor DFE-018 changes that -- they would have classified the same failure `unknown` and `identity_expired`, and neither is stale_base either. The gap is in the recovery model, not the classifier: a refusal whose cause is infrastructure rather than evidence has no automatic path back, and a human must drive it.",
       "cost": "a design question: which reason codes admit a model-free repair, and what each repair is",
       "note": "Filed 2026-09-09 while hand-driving #134 back into the queue -- a PR the factory could have recovered itself had the reason code been different. The demonstration is the evidence. Not to be folded into DFE-014 or DFE-018: both are about naming a failure correctly, this is about what the system may do once it has. Candidate shape: identity_expired admits a model-free retry (the evidence is intact and bound; only the credential was stale), which is a strictly smaller repair than a re-head. Do not generalise past the codes whose repair can be shown to preserve every binding."
+    },
+    {
+      "id": "DFE-021",
+      "n": 21,
+      "title": "AMENDMENT: a condition detectable early must be checked early -- starting with whole-base movement",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-017",
+        "DFE-020",
+        "DFV-011"
+      ],
+      "rationale": "The stale-base guard is asymmetric. scripts/factory_evidence.py --currency-only runs in the first seconds of validation and checks trust_root_drift(head): TRUST-ROOT files only. harness/merge_verify.py:149 checks whole-main movement -- `current_base != base` -- and runs only at merge pre-authorization, after the full ladder. A base moved by a commit that touches no trust-root file therefore passes every early check and refuses at the end, so the PR pays ~83 minutes to learn something knowable in one gh call at second zero. Observed 2026-09-09: PR #134 was re-headed onto c19546e, then #157 (one line of docs/atlas/register/decisions.json) merged. Nothing early would have caught it; the run was not started, and a second re-head was paid instead.",
+      "cost": "one gh call at an existing rung",
+      "note": "FIX: run the whole-base comparison at the same rung as --currency-only, not only at merge pre-authorization. merge_verify keeps its check -- it is the authority and must re-ask -- but it stops being the FIRST asker. THE CLASS, which matters more than this instance: a condition that is cheap and detectable early being checked late. This is the second recorded instance. The first was mutation injectability, which reported not_injected only in the full harness fifty minutes in until PR #139 moved it to the head of the static rung -- thirteen maintainer PRs had moved anchors in the meantime because nothing a maintainer met could see the drift. Both have the same shape: the authority that can answer cheaply is not asked until something expensive has already run. A third instance is likelier than not; look for it wherever a late gate reads state that was available at the start. DFE-017 reaches for this class from the other direction -- it asks that a floor move when what it measures moves; this asks that a check run when its input is first knowable. Neither subsumes the other and both are about a gate that exists but fires at the wrong time. SEPARATE FROM DFE-020: that is recovery (what a PR may do after a refusal), this is detection (when the refusal arrives)."
     }
   ]
 }
