@@ -3184,6 +3184,21 @@
       "rationale": "The App installation token is minted once per job and read per operation. Tokens live 60 minutes; the three operations that spend the identity span up to 95 minutes and the exact-head merge is by construction the latest. No autonomous PR can merge, because the credential authorising the merge expires before the validation that earns it finishes. Measured: create_pr for PR #134 fired at +56m27s (3m33s of credential life left); merge_squash fired at +94m38s and returned 401 Bad credentials, after the evidence stage (4970.989s) and merge-pre both recorded outcome=ok. A credential-lifetime defect that surfaced at the last spend point, not a merge defect - fixing only the merge leaves a live fault two spend points upstream.",
       "cost": "bounded; a workflow step split plus a refusal code",
       "note": "See 12-ACP-004-AUTONOMOUS-IDENTITY-LIFETIME.md. Tier 2 because it lands in the credential broker, NOT because the design is in question: re-minting costs nothing and weakens nothing, and the capability stays narrow, scoped, one-shot and fallback-free. Rejects giving the kernel the App private key (TCB widening to fix a clock). The exact-head guarantee survives a step split because merge_verify.py pre already writes merge-authorization.json binding base/head/tree/evidence hash and the post check re-verifies against the actual merge commit. Refusal margin 20 minutes, set against observed spend-point ages rather than the 60-minute limit - a five-minute margin would have permitted the 56m27s spend that nearly failed. Falsifier: a build whose validation exceeds TWO HOURS merges successfully with every spend point verifiably younger than its own mint. Makes no claim that wall time is a correctness constraint; that is true only while the credential is misused."
+    },
+    {
+      "id": "DFE-019",
+      "n": 19,
+      "title": "AMENDMENT: split the build's push/PR handoff behind its own mint",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-018",
+        "DFV-005",
+        "DFM-015"
+      ],
+      "rationale": "ACP-004 protected the spend with 95 minutes of headroom and left unprotected the one that came within 3m33s. On run 34061371205 the build called push_branch and create_pr at +56m27s against a 3600s token. merge_squash now runs behind its own mint; push_branch and create_pr still run at the end of one long dispatch step, on the identity minted before it. THE CURRENT FAILURE MODE IS A PUSHED BRANCH WITH NO PR: push_branch spends the identity first, so a build that crosses the hour between the two calls leaves a branch on the remote that no pull request references, and the run that could have finished it is gone. That is worse than the merge failure it mirrors, because the merge at least refused with the evidence intact.",
+      "cost": "a design question, then a workflow step",
+      "note": "Why it was not done inside ACP-004: item 1 was cheap because merge-authorization.json already existed, so the merge step's entire input was on disk and the split cost a CLI entry point. The build handoff has no equivalent artifact - it carries worktree, env, paths, attempt, branch and issue in memory - and inventing one is the actual work. THE OPEN QUESTION IS THE OVERLAP WITH RESUME: `resume_pr` (D-033/D-034) already finishes a build from its uploaded artifacts, but at a LATER seam, after the PR exists. This needs the seam one step earlier, before push_branch. Either the handoff artifact is designed so resume becomes a special case of it, or there are two near-identical recovery paths and the second one will drift from the first. Decide that before writing either. Until this lands, github_cli.SPLIT_OPERATIONS holds only merge_squash and the two unsplit operations print FACTORY_IDENTITY_AGE and proceed rather than refusing - refusing at 1200s what currently succeeds at 3387s would be a regression dressed as a fix. Those age lines are the evidence that will size this work."
     }
   ]
 }

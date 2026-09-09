@@ -108,13 +108,19 @@ The margin is a **refusal**, not a warning. A spend attempted on an over-age ide
 
 ### The margin is policy, and policy is a dependency class
 
-Putting the margin beside the other budget scopes makes it a policy value, so its dependency class must be stated rather than assumed.
+**Changing the identity margin does not invalidate any attestation.** The margin governs whether an *actor* may spend a credential; it is not an input to what any authority proves about a *subject*. An attestation asserts that named evidence was produced against an exact tree by a named authority, and that stays true regardless of the margin under which a later merge ran.
 
-**Changing the identity margin does not invalidate any attestation.** The reason is specific and must not be generalised to the file it lives in. The margin governs whether an *actor* may spend a credential; it is not an input to what any authority proves about a *subject*. An attestation asserts that named evidence was produced against an exact tree by a named authority, and that remains true regardless of the margin under which a later merge ran. `budgets.json` is not among the hashes bound into the spine — `policy_sha256` is `.factory/evidence-spine.json` and `manifest_sha256` is the run manifest — and this value is the one scope in that file which governs a credential rather than a rung.
+**Where it lives, and the case that failed.** The margin is `runtime.autonomous_identity_max_age_seconds` in `.factory/kernel.json`, beside `active_lease_ttl_seconds` and `legacy_lease_ttl_seconds` — the same class of value, a TTL on an operational resource. It was going to go in `harness/budgets.json` beside the other durations, but every scope there is a *ladder* duration derived from measurements via `ceil(p100 × headroom / 60) × 60`, and a credential lifetime is not that kind of number; it would have needed a fabricated measurement to fit the schema.
 
-Every *other* scope in `budgets.json` is a different case: a timeout does change what was proved, because a rung cut short proves less. Those are caught downstream by the floors, which are asserted (`mutations_total >= floor` catches a budget that silenced a rung). The identity margin has no such downstream assertion because it has no downstream effect on proof.
+The obvious defence of `kernel.json` — *the file holds actor governance, so a non-verdict value belongs there* — **is false, and was checked rather than assumed.** The file also holds `prompts`, which names the file each blinded judge reads, and `validation.quick_command`, which names what the builder's gate runs. Both shape verdicts. Neither is bound into any attestation today. So `kernel.json` already mixes classes, and a value placed there on a "this file is not policy" argument would be resting on something untrue.
+
+The narrower claim survives and is the one made: **the `runtime` section specifically is uniformly actor governance** — a rebuild budget, two lease TTLs, a work root, and now a credential age — and none of its members is read by an authority to reach a verdict.
+
+Because the file mixes classes, the classification is written where the value is, using the convention `kernel.json` already uses for exactly this problem: a `_key` sibling documenting the value. That sibling says the margin is not a verdict input, says the claim covers `runtime` and not the file, names `prompts` and `quick_command` as the counterexamples, and forbids generalising outward.
 
 **Corollary, which is the part worth enforcing:** the margin must never become an input to any authority's verdict. The moment a verdict depends on it, this classification is false and it becomes a bound policy hash. Any future change that reads the margin inside an authority reopens this ACP.
+
+**Left open by this ACP:** that `prompts` and `validation.quick_command` shape verdicts and are bound into nothing is a finding of this pass, not a claim about what should happen. It is out of scope here and belongs with DFE-009 (attestation revocation), which is the entry already asking what an attestation should be bound to.
 
 ---
 
