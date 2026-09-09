@@ -210,8 +210,8 @@
     {
       "id": "worker-resume-also-dispatches",
       "file": ".github/workflows/dark-factory-worker.yml",
-      "find": "      - name: Dispatch exactly one factory action\n        id: dispatch\n",
-      "replace": "      - name: Dispatch exactly one factory action\n        id: dispatch2\n",
+      "find": "      - name: Dispatch exactly one factory action\n        id: dispatch\n        if: inputs.resume_pr == '' && inputs.resume_run_id == ''\n",
+      "replace": "      - name: Dispatch exactly one factory action\n        id: dispatch\n",
       "why": "The ordinary dispatch would lose its inverse guard and run after a resume too, so one worker run could finish one PR and start another build; the run must take exactly one action."
     },
     {
