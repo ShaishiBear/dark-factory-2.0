@@ -48,7 +48,29 @@ class ConsumedConfigTests(unittest.TestCase):
     def test_checked_in_policy_carries_exactly_the_schema_keys(self):
         raw = json.loads(POLICY.read_text(encoding="utf-8"))
         self.assertEqual(sorted(raw["validation"]), sorted(f.name for f in dataclasses.fields(ValidationConfig)))
-        self.assertEqual(sorted(raw["runtime"]), sorted(f.name for f in dataclasses.fields(RuntimeConfig)))
+        self.assertEqual(
+            sorted(k for k in raw["runtime"] if not k.startswith("_")),
+            sorted(f.name for f in dataclasses.fields(RuntimeConfig)),
+        )
+
+    @unittest.skipUnless(POLICY.exists(), "repo-shaped copy without the policy")
+    def test_every_documentation_sibling_documents_a_key_that_exists(self):
+        """`_foo` explains `foo`, and `provider` has carried six of them since D-054.
+
+        The no-dead-keys rule is about SETTINGS: a value the kernel parses and nobody reads.
+        A `_`-prefixed sibling is prose, so it is not held to that rule -- but it is held to
+        this one, because a comment describing a key that was removed is the same defect one
+        level up, and nothing checked for it. `runtime` gained its first sibling with ACP-004,
+        where the value's dependency class had to be written down beside the value: this file
+        mixes actor governance with verdict inputs (`prompts` names the file a blinded judge
+        reads), so a reader cannot infer the class from the section alone.
+        """
+        for section in ("provider", "runtime", "validation", "labels", "prompts"):
+            keys = raw = json.loads(POLICY.read_text(encoding="utf-8"))[section]
+            for key in keys:
+                if key.startswith("_"):
+                    with self.subTest(section=section, key=key):
+                        self.assertIn(key[1:], raw, f"{section}.{key} documents nothing")
 
     def test_no_dead_key_is_parsed(self):
         source = (KERNEL / "config.py").read_text(encoding="utf-8")
