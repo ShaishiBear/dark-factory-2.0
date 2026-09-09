@@ -28,15 +28,16 @@
       "OPEN": "Deliberately undecided pending implementation evidence.",
       "AMENDMENT": "A change to the corpus proposed by the 2026-09-08 evaluation."
     },
-    "usage": "Every PR names the decision IDs it exercises. A PR that contradicts a SETTLED or CONSTITUTIONAL decision requires an ACP."
+    "usage": "Every PR names the decision IDs it exercises. A PR that contradicts a SETTLED or CONSTITUTIONAL decision requires an ACP.",
+    "verification_2026_09_09": "Task 1 verification against origin/main f13219b. Every non-PROPOSED status was checked against the repository; entries carry `verified` and, where a repository claim exists, `evidence`. Nothing was downgraded: every error found ran in the direction of UNDERSTATING what exists, so no aspirational claim needed removing. Four corrections of substance: (1) factory_kernel/state.py no longer exists - audit finding B.4 was closed by PR #43, which DELETED the unexecuted state machine, and a regression test now forbids its return; (2) the holdout is genuinely builder-blind via sparse checkout since PR #42, so B.3 is closed; (3) per-stage timing instrumentation is substantially present (record_stage_timing / stage-timings.jsonl), not absent; (4) the merge verifier does enforce byte-identical tree equivalence. Two facts the corpus has no entry for: the measured floors now lag observed evidence by a wide margin (floor unit_tests=1033 and static_checks=5 against an observed UNIT_PASSED tests=2353 and STATIC_OK checks=6 on the same quick gate, run 34332642132), and the daily full-harness regression on main has failed every day since 2026-09-05 at GATE_FAILED: e2e (issue #119)."
   },
   "registers": {
     "DFA": "Target architecture directive, 7 Sep, 49 decisions",
     "DFC": "Canonical contracts / schema specification, 7 Sep, 76 decisions",
     "DFP": "Preflight algorithm directive, 7 Sep, 81 decisions",
     "DFF": "Front Door algorithm directive, 7 Sep, 87 decisions",
-    "DFM": "Repository migration directive, 7 Sep, Parts I-XV, 66 items",
-    "DFV": "v3 claim-centric locked decisions, 7 Sep evening, 17 items",
+    "DFM": "Repository migration directive, 7 Sep, Parts I-XV, 67 items",
+    "DFV": "v3 claim-centric locked decisions, 7 Sep evening, 21 items",
     "DFG": "Architecture governance / self-modification, commit d2eeda7",
     "DFE": "Amendments proposed by the 2026-09-08 evaluation and subsequent proposals"
   },
@@ -77,7 +78,9 @@
       "title": "Authorities emit narrow typed attestations",
       "tier": 2,
       "status": "PARTIAL",
-      "note": "Attestation concept exists in the evidence spine; typed envelope does not"
+      "note": "Partly wrong as written. A typed envelope DOES exist for deterministic commands (authority.py CommandEvidence, carrying authority_id and hashed streams), and the spine emits versioned claim rows (claim_id, stage, artifact_sha256, deterministic_sha256, independent_sha256, exact_head_sha, bindings, completion_level). What is absent is an authority-identified attestation carrying an authority VERSION - which is precisely what DFE-009's revocation proposal needs.",
+      "evidence": "factory_kernel/authority.py (CommandEvidence); factory_kernel/spine.py (compile_evidence_index claim rows)",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFA-006",
@@ -93,7 +96,9 @@
       "title": "Capability-based execution is the target permission model",
       "tier": 2,
       "status": "PARTIAL",
-      "note": "GitHub App token capability split is the first real instance. See DFV-005."
+      "note": "Understated as written. Beyond the App-token split there is a per-role capability surface on main: allowed_tools(role), PathScope(read/write/deny) per role, a tool-less JUDGE_SCOPE, per-role thinking caps, and BUILDER_BLIND_PATHS enforced by sparse checkout. Still PARTIAL because it is a hand-maintained policy table, not the capability-broker model the decision describes. See DFV-005, DFV-004.",
+      "evidence": "factory_kernel/credential_env.py; factory_kernel/worker_policy.py; factory_kernel/worktree.py",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFA-008",
@@ -352,7 +357,9 @@
       "tier": 1,
       "status": "SUPERSEDED",
       "superseded_by": "DFV-018",
-      "note": "Retain as a dependency reference only"
+      "note": "Retain as a dependency reference only",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
     },
     {
       "id": "DFA-044",
@@ -377,7 +384,9 @@
       "tier": 3,
       "status": "SUPERSEDED",
       "superseded_by": "DFE-003",
-      "note": "Amended: list split into CONSTITUTIONAL and SETTLED; one item demoted"
+      "note": "Amended: list split into CONSTITUTIONAL and SETTLED; one item demoted",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
     },
     {
       "id": "DFA-047",
@@ -1113,7 +1122,9 @@
       "tier": 1,
       "status": "SUPERSEDED",
       "superseded_by": "DFE-005",
-      "note": "V1 replaced with fixed budgets plus logging"
+      "note": "V1 replaced with fixed budgets plus logging",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
     },
     {
       "id": "DFP-019",
@@ -1121,7 +1132,9 @@
       "title": "Probe execution threshold",
       "tier": 1,
       "status": "SUPERSEDED",
-      "superseded_by": "DFE-005"
+      "superseded_by": "DFE-005",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
     },
     {
       "id": "DFP-020",
@@ -2188,56 +2201,80 @@
       "n": 2,
       "title": "factory_kernel/canonical.py assessment",
       "tier": 0,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/canonical.py (25 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-003",
       "n": 3,
       "title": "factory_kernel/manifest.py assessment",
       "tier": 0,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/manifest.py (256 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-004",
       "n": 4,
       "title": "factory_kernel/spine.py assessment",
       "tier": 0,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/spine.py (258 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-005",
       "n": 5,
       "title": "factory_kernel/independence.py assessment",
       "tier": 0,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/independence.py (306 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-006",
       "n": 6,
       "title": "factory_kernel/evidence_closure.py assessment",
       "tier": 0,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/evidence_closure.py (475 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-007",
       "n": 7,
       "title": "factory_kernel/provenance.py assessment",
       "tier": 0,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/provenance.py (233 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-008",
       "n": 8,
       "title": "factory_kernel/authority.py assessment",
       "tier": 0,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/authority.py (63 lines). Defines CommandEvidence(authority_id, cwd, argv, exit_code, stdout_sha256, stderr_sha256) - a typed, hashed attestation envelope for deterministic commands. See DFA-005.",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-009",
       "n": 9,
       "title": "harness/merge_verify.py assessment",
       "tier": 0,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: harness/merge_verify.py (251 lines). Enforces tree equivalence, not head equivalence: the merged-commit check dies with 'merged commit tree is not byte-identical to the authorized PR head tree' when merge_tree != auth_tree (merge_verify.py:173). Resolves the M-ADV-3 hedge in 07-ADVERSARIAL-BENCHMARKS.md.",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-010",
@@ -2281,7 +2318,9 @@
       "title": "credential_env.py",
       "tier": 2,
       "status": "PARTIAL",
-      "note": "App-token scope shipped"
+      "note": "App-token scope shipped and tested. scoped_environment() grants DARK_FACTORY_APP_TOKEN only at scope 'github-mutation' and strips GH_TOKEN/GITHUB_TOKEN there, so no silent fallback exists. ClaudeCliProvider._worker_env is a construct-by-inclusion allowlist (exact set + provider prefixes + a separate REQUEST_ENV whitelist) with a test asserting a model worker receives neither GitHub credential. This settles uncertainty-list item 8 and makes CAP-ADV-4 largely redundant. Still PARTIAL: it is one module, not the capability model of DFA-007.",
+      "evidence": "PR #150 (287683f); tests/factory/test_factory_workflow_hygiene.py",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFM-016",
@@ -2650,7 +2689,9 @@
       "tier": 1,
       "status": "SUPERSEDED",
       "superseded_by": "DFV-018",
-      "note": "Part XIV. The floor rule survives: no architecture rewrite before the qualification floor."
+      "note": "Part XIV. The floor rule survives: no architecture rewrite before the qualification floor.",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
     },
     {
       "id": "DFV-001",
@@ -2686,7 +2727,9 @@
       "title": "Autonomous GitHub identity is a dedicated GitHub App",
       "tier": 2,
       "status": "BUILT",
-      "note": "Do not reopen PAT vs App without a real constraint"
+      "note": "Do not reopen PAT vs App without a real constraint. credential_env.py carries DARK_FACTORY_APP_TOKEN under scope 'github-mutation' with no GH_TOKEN/GITHUB_TOKEN fallback. An AST test pins exactly {create_pr, push_branch, merge_squash} as the operations that spend it. PR #151 was opened AND merged by app/shaishibear-dark-factory; PR #149 proved the event shape and was closed, not merged. CAVEAT on the strength of PR #151: it is one file, +6/-0, a disposable markdown note, run from dark-factory-identity-canary.yml (not the worker), whole lifecycle 5m04s. It proves the identity and merge-lane MECHANICS and nothing about a Level-4 lap - no triage, no build, no full harness, no evidence spine. It merged because it was fast enough to beat the App token's 60-minute expiry, which is exactly what refused PR #134 three hours later (run 34151427980: evidence stage 4970s ok, merge-pre ok, then `gh pr merge` 401 Bad credentials). Do not cite #151 as evidence for A.6.",
+      "evidence": "PR #150 (287683f) merged 2026-09-07; PR #151 (app-authored) merged unattended 2026-09-07",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFV-006",
@@ -2716,7 +2759,9 @@
       "title": "Mutation testing becomes detector-specific",
       "tier": 2,
       "status": "PARTIAL",
-      "note": "Four injected defects each caught by exactly one detector on the App branch"
+      "note": "Wrong as written - 'four injected defects on the App branch' is badly stale. main carries 428 factory defects across eight catalogues and 9 application defects. 26 distinct detector test files are named in defect `why` fields and statically verified to be in the runner's copy set (PR #141). Still PARTIAL because detector-SPECIFIC catching is asserted for only 3 defects (must_catch=['security']); no factory defect declares must_catch at all, so for 428 of 437 the named detector is prose plus a presence check, not an enforced attribution.",
+      "evidence": "harness/mutation_anchors.py -> MUTATION_ANCHORS_OK factory=428 application=9 detectors=26; PR #139, PR #141",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFV-010",
@@ -2732,7 +2777,9 @@
       "tier": 2,
       "status": "SUPERSEDED",
       "superseded_by": "DFE-008",
-      "note": "Amended: derive from the dependency model rather than knowing claim types"
+      "note": "Amended by DFE-008: derive from the dependency model rather than knowing claim types. Note for whoever implements DFE-008: a model-free re-head already ships on main for the `stale_base` refusal, gated by a comment-marker budget in refusal.py, not by a dependency query. DFE-008 is therefore a change to existing code, not a greenfield design.",
+      "evidence": "factory_kernel/cli.py (rehead command); factory_kernel/refusal.py (rehead_eligible, rehead_budget_allows); PR #143",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFV-012",
@@ -2871,7 +2918,10 @@
       "n": 9,
       "title": "Architecture Governor bound to exact contract/context/design/policy hashes",
       "tier": 2,
-      "status": "BUILT"
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118), scripts/factory_architecture.py",
+      "note": "The compiled governor artifact binds policy_sha256, contract_sha256, context_sha256 and design_sha256, and the compiler dies when context/design do not carry the hashes they were produced against.",
+      "verified": "2026-09-09 against origin/main f13219b"
     },
     {
       "id": "DFE-001",
@@ -3061,6 +3111,79 @@
       "rationale": "Probe scale and search scale ask the same question: will the evidence change what I do, by more than it costs to get? The discriminator at both scales is the strength of existing priors, not the size of the prize. Stated once in the constitution rather than reinvented per subsystem. Its immediate consequence: do not search a space whose head of distribution is already written down.",
       "cost": "a paragraph in the constitution; changes what gets built",
       "note": "See 01-CONSTITUTION.md, 'When search is worth running', and 02 Part M.3."
+    },
+    {
+      "id": "DFE-014",
+      "n": 14,
+      "title": "AMENDMENT: never attribute a refusal to an authority that did not produce it",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-017",
+        "DFV-005",
+        "DFM-015"
+      ],
+      "rationale": "The Honesty invariant forbids displaying passed/verified unless the real authority produced that result. Its mirror is missing, and the asymmetry has a measured cost. runtime.py sets stage='merge_preauth' before the merge_verify.py pre call and never advances it; merge_squash is invoked ~20 lines later with the cursor unchanged. The failure was a RuntimeError from run_as_app, not a ToolRefused, so refusal.classify() skipped the isinstance branch - including the correct discriminator sitting in it (exc.tool == 'merge_verify.py' and exc.phase == 'pre') - and fell through to `if stage in STAGE_CODES: return stage`. The system named an authority that had already recorded outcome=ok in the same run. This mis-attributes ANY non-ToolRefused exception raised after the last cursor assignment in a stage sequence: structural, not a one-off. Four minutes of diagnosis became four days; issue #119 collected four repeat reports while the 401 sat in the logs. Every guarantee in this system points at proving success honestly and nothing points at reporting failure honestly.",
+      "cost": "an hour, plus the constitutional paragraph",
+      "note": "Asks for three things. (1) The invariant stated in 01-CONSTITUTION.md beside Honesty. (2) classify() must not name an authority on the fallthrough path: unattributed failures report the stage as CONTEXT, not attribution - `stage=merge_preauth authority=unattributed`. (3) An adversarial test that injects a non-ToolRefused exception after a passing authority and asserts the refusal does not name it. DELIBERATELY EXCLUDED: an earlier draft proposed validating attribution against the stage-timings artifact. Rejected - timings are observability only ('nothing reads this file to decide anything'), and making the classifier depend on them would turn an observational artifact into a semi-trusted input, which is DFC-072 (references are not authority) in a new place. Not naming an authority on the fallthrough path is structural rather than heuristic, and is the whole fix."
+    },
+    {
+      "id": "DFE-015",
+      "n": 15,
+      "title": "AMENDMENT: split the unit floor three ways - factory, backend, frontend",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003",
+        "DFM-002"
+      ],
+      "rationale": "1798 of the 2353 tests the unit rung counts are the factory's own trust-root suite. Welded into one number, a product PR is gated on a count dominated by maintainer hardening; conversely product tests can be deleted while the total still rises. Trust-root tests grow when the factory is hardened, product tests when features ship. They ratchet on different clocks and belong in different keys.",
+      "cost": "half a day across three files",
+      "note": "floor.json gains unit_tests_factory / unit_tests_backend / unit_tests_frontend; unit_tests is retired or kept transitionally as the sum. Three coordinated edits: harness/ci.py must stop discarding unit.py's stdout on success (unit.py has emitted `backend= frontend= factory=` all along and nothing has ever seen it); scripts/factory_evidence.py must parse the three fields - the `semantic_markers` block there already shows how to make a floor key optional ('when present here'), so this lands additively with no flag day; floor.json gains the keys. SETTLES A LIVE CONTRADICTION in the same change: unit.py's docstring still says the ratchet is 'based on the last measured backend+frontend total ... factory tests are mandatory immediately without inventing a higher floor'. True at 549; falsified when the 2026-09-04 note moved the floor to the all-three total without touching it. SEQUENCING: do not ratchet to 1798/430/125. Those are inferred from arithmetic (they reproduce both 1033 at d038e93 and 2353 at f13219b exactly) but no run has ever printed them. Land the ci.py change, take the observed values from the next green gate, then ratchet with zero slack, per floor.json's own _raise_these rule."
+    },
+    {
+      "id": "DFE-016",
+      "n": 16,
+      "title": "AMENDMENT: raise static_checks 5 -> 6, finishing the job PR #139 started",
+      "tier": 0,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003"
+      ],
+      "rationale": "PR #139 (d90bac3) added `mutation-anchors` as a sixth check at the head of harness/static.py CHECKS and left static_checks at 5. floor.json's own _structural_ratchet_2026_08_24 note says to raise measured counts 'in the same human-reviewed change'. One line. Registered rather than corrected silently so the ratchet-lag pattern stays visible; see DFE-017.",
+      "cost": "one line"
+    },
+    {
+      "id": "DFE-017",
+      "n": 17,
+      "title": "AMENDMENT: a PR that changes the number of checks or tests must touch floor.json",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003",
+        "DFE-012",
+        "DFE-015",
+        "DFE-016"
+      ],
+      "rationale": "Three instances of one defect in three weeks: floor 549 against an observed 766 (audit finding B.5, diagnosed and corrected); unit_tests 1033 against an observed 2353; static_checks 5 against an observed 6. Three is a pattern, not three accidents. DFE-015 and DFE-016 are each symptomatic of it. The ratchet mechanism is assumed to be self-enforcing and demonstrably is not: it depends on a human remembering, on the same change, and the memory has failed every time it was tested. BEARS DIRECTLY ON DFE-012: ACP-003's argument assumes the ratchet family works as a mechanism. Adding a fourth dial to a mechanism that is not being turned is the wrong order. This lands first.",
+      "cost": "a deterministic check plus its mutation",
+      "note": "Shape: a check that refuses a PR which changes the count a floor measures without changing floor.json. Cheap for static (the CHECKS list is enumerable statically); for unit it needs the observed count, so the honest form is probably a comparison of observed against floor with a required acknowledgement in the diff rather than a purely static test. Belongs in the security guard's ratchet_regressions neighbourhood, which already asserts floor(head) >= floor(base) on both lanes - the missing half is that a floor may not stay still while what it measures moves."
+    },
+    {
+      "id": "DFE-018",
+      "n": 18,
+      "title": "AMENDMENT: the autonomous identity is minted per operation, not once per job",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFV-005",
+        "DFM-015",
+        "DFA-007",
+        "DFE-014"
+      ],
+      "rationale": "The App installation token is minted once per job and read per operation. Tokens live 60 minutes; the three operations that spend the identity span up to 95 minutes and the exact-head merge is by construction the latest. No autonomous PR can merge, because the credential authorising the merge expires before the validation that earns it finishes. Measured: create_pr for PR #134 fired at +56m27s (3m33s of credential life left); merge_squash fired at +94m38s and returned 401 Bad credentials, after the evidence stage (4970.989s) and merge-pre both recorded outcome=ok. A credential-lifetime defect that surfaced at the last spend point, not a merge defect - fixing only the merge leaves a live fault two spend points upstream.",
+      "cost": "bounded; a workflow step split plus a refusal code",
+      "note": "See 12-ACP-004-AUTONOMOUS-IDENTITY-LIFETIME.md. Tier 2 because it lands in the credential broker, NOT because the design is in question: re-minting costs nothing and weakens nothing, and the capability stays narrow, scoped, one-shot and fallback-free. Rejects giving the kernel the App private key (TCB widening to fix a clock). The exact-head guarantee survives a step split because merge_verify.py pre already writes merge-authorization.json binding base/head/tree/evidence hash and the post check re-verifies against the actual merge commit. Refusal margin 20 minutes, set against observed spend-point ages rather than the 60-minute limit - a five-minute margin would have permitted the 56m27s spend that nearly failed. Falsifier: a build whose validation exceeds TWO HOURS merges successfully with every spend point verifiably younger than its own mint. Makes no claim that wall time is a correctness constraint; that is true only while the credential is misused."
     }
   ]
 }

@@ -1,5 +1,13 @@
 # Uncertainty List
 
+> **RESOLVED 2026-09-09 against `origin/main` `f13219b`. Do not read the confidence
+> statements below as current.** Items 1, 3, 5 and 6 came back wrong; items 4 and 7 came back
+> partly wrong; items 2 and 8 were correct. That is above the one-third threshold set at the
+> foot of this document, so the reassessment it calls for is owed. Every error ran in the
+> direction of *understating* what the repository contains. The verdicts are recorded in
+> `register/decisions.json` under `notes.verification_2026_09_09` and summarised in
+> `register/DECISION_REGISTER.md` under "Verification, 2026-09-09".
+
 *Where I'm least confident, ranked by how much would break if I'm wrong. Written 2026-09-08 without repository access; everything in the atlas is transcript-derived. This is the perishable part — my private uncertainty about my own claims — and it exists to make Task 1 sharper than "verify twenty statuses."*
 
 **Check these in order. The first five are load-bearing.**
