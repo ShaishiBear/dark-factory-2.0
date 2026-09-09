@@ -425,7 +425,11 @@ class AutonomousIdentityTests(unittest.TestCase):
     token. These assertions hold that split in place from both ends.
     """
 
+    # ACP-004 gave the merge its own mint, so there are now two minting steps and the
+    # invariant is no longer "one step's output" but "SOME minting step's output". The token
+    # must still never come from anywhere else -- a literal, a secret, or the Actions token.
     APP_TOKEN = "${{ steps.factory_identity.outputs.token }}"
+    MERGE_APP_TOKEN = "${{ steps.merge_identity.outputs.token }}"
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -451,18 +455,45 @@ class AutonomousIdentityTests(unittest.TestCase):
         # `app-id` is deprecated at this pin in favour of `client-id`.
         self.assertEqual(self.text.count("app-id:"), 0, "use client-id, not the deprecated app-id")
 
-    def test_only_the_two_steps_that_run_the_kernel_are_granted_the_app_token(self) -> None:
+    def test_only_the_steps_that_run_the_kernel_are_granted_the_app_token(self) -> None:
         self.assertEqual(
             self.steps_granting("DARK_FACTORY_APP_TOKEN"),
-            {"Dispatch exactly one factory action", "Resume the pushed PR from its artifacts"},
+            {
+                "Dispatch exactly one factory action",
+                "Resume the pushed PR from its artifacts",
+                # Its own step so it can spend an identity minted seconds earlier rather than
+                # one minted before an 83-minute validation (ACP-004).
+                "Merge the PR the evidence authorised",
+            },
             "the App token is a capability, not an ambient credential",
         )
 
-    def test_the_app_token_comes_only_from_the_minting_step(self) -> None:
+    def test_the_app_token_comes_only_from_a_minting_step(self) -> None:
+        """Two mints now, and no other source. The kernel still cannot mint: the private key
+        never leaves `actions/create-github-app-token`, which is why the lifetime fix is a step
+        boundary rather than a broker that holds a signing key."""
         values = re.findall(r"^\s*DARK_FACTORY_APP_TOKEN: (.+)$", self.text, re.M)
         self.assertTrue(values, "no step is granted the App token")
+        minted = {self.APP_TOKEN, self.MERGE_APP_TOKEN}
         for value in values:
-            self.assertEqual(value.strip(), self.APP_TOKEN, value)
+            self.assertIn(value.strip(), minted, value)
+        self.assertNotIn(
+            "DARK_FACTORY_APP_PRIVATE_KEY", self.text.split("jobs:", 1)[1].replace(
+                "private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}", ""
+            ),
+            "the private key reaches nothing but the minting action",
+        )
+
+    def test_the_merge_spends_an_identity_minted_after_validation_ran(self) -> None:
+        """The defect in one assertion: the merge must not reuse the job's first token."""
+        merge_step = self.text.index("- name: Merge the PR the evidence authorised")
+        merge_mint = self.text.index("- name: Mint a fresh identity for the merge")
+        dispatch = self.text.index("- name: Dispatch exactly one factory action")
+        self.assertLess(dispatch, merge_mint, "the second mint must follow the validation")
+        self.assertLess(merge_mint, merge_step, "the mint must precede the spend")
+        granted = self.text[merge_step:merge_step + 1200]
+        self.assertIn(f"DARK_FACTORY_APP_TOKEN: {self.MERGE_APP_TOKEN}", granted)
+        self.assertNotIn(f"DARK_FACTORY_APP_TOKEN: {self.APP_TOKEN}", granted)
 
     def test_the_token_is_minted_before_the_first_step_that_spends_it(self) -> None:
         # Both markers are asserted present before their positions are compared, so a missing one

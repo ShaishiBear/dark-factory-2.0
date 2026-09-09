@@ -820,10 +820,19 @@ class CarryInBuildIssueTests(unittest.TestCase):
         self.assertEqual(source.count("self._carry_reuse("), 1)
 
     def test_a_merge_drops_the_issues_carry(self):
-        source = inspect.getsource(KernelRuntime.validate_pr)
+        """The drop moved into `_merge_and_verify` with ACP-004, so BOTH merge entry points --
+        the inline one and the one that runs behind its own freshly minted identity -- drop the
+        carry. The ordering it pins is unchanged: after the merge, before the verified marker."""
+        source = inspect.getsource(KernelRuntime._merge_and_verify)
         self.assertIn("self._carry_drop(", source)
         self.assertLess(source.index("merge_squash"), source.index("self._carry_drop("))
         self.assertLess(source.index("self._carry_drop("), source.index("FACTORY_MERGED_VERIFIED"))
+
+    def test_both_merge_entry_points_share_the_one_drop(self):
+        source = inspect.getsource(KernelRuntime)
+        self.assertEqual(source.count("self._carry_drop("), 1, "one merge, one drop")
+        for entry in (KernelRuntime.validate_pr, KernelRuntime.merge_authorized):
+            self.assertIn("self._merge_and_verify(", inspect.getsource(entry))
 
 
 # --- what the carry must not change -------------------------------------------------------------

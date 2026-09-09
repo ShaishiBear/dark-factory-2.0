@@ -27,6 +27,7 @@
     "max_attempts": 2,
     "active_lease_ttl_seconds": 21600,
     "legacy_lease_ttl_seconds": 86400,
+    "autonomous_identity_max_age_seconds": 1200,
     "work_root": "/tmp/dark-factory"
   },
   "labels": {

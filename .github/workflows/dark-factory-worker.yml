@@ -100,6 +100,13 @@ jobs:
           client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
           private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
 
+      # An installation token lives 60 minutes and carries no readable expiry, so the kernel
+      # cannot tell a fresh one from a dead one. Recording the mint time is what turns a 401
+      # ninety-five minutes in (run 34151427980) into a refusal that names its own cause.
+      - name: Record when the identity was minted
+        shell: bash
+        run: echo "DARK_FACTORY_APP_TOKEN_MINTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout current main without persisted credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -429,6 +436,7 @@ jobs:
         run: python -m factory_kernel resume --pr "$RESUME_PR" --artifacts "$RESUME_ARTIFACTS"
 
       - name: Dispatch exactly one factory action
+        id: dispatch
         if: inputs.resume_pr == '' && inputs.resume_run_id == ''
         env:
           # Observation stays on the Actions token; only the three autonomous mutations spend the
@@ -445,7 +453,38 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
-        run: python -m factory_kernel dispatch --once
+        # --defer-merge stops after merge pre-authorization and prints the authorization path.
+        # The merge is a separate step below so it can spend an identity minted seconds earlier
+        # rather than one minted before a validation that takes 83 minutes (ACP-004).
+        run: python -m factory_kernel dispatch --once --defer-merge
+
+      # A second mint, for the one operation that is always last. `create-github-app-token`
+      # stays the only holder of the private key -- the kernel never gains the ability to mint,
+      # which is the whole reason the fix is a step boundary and not a broker change.
+      - name: Mint a fresh identity for the merge
+        id: merge_identity
+        if: steps.dispatch.outputs.merge_authorization != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+
+      - name: Merge the PR the evidence authorised
+        if: steps.dispatch.outputs.merge_authorization != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.merge_identity.outputs.token }}
+          FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
+          MERGE_PR: ${{ steps.dispatch.outputs.merge_pr }}
+          MERGE_AUTHORIZATION: ${{ steps.dispatch.outputs.merge_authorization }}
+        # Nothing is re-decided here. merge-authorization.json binds base, head, tree and the
+        # evidence hash; the kernel re-reads it, refuses if the PR head moved, and hands the
+        # same artifact to the same post-merge verifier the inline path used.
+        run: |
+          # This step's identity, not the job's: the age the kernel checks is seconds, not the
+          # 95 minutes that killed run 34151427980.
+          export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
+          python -m factory_kernel merge --pr "$MERGE_PR"             --from-authorization "$MERGE_AUTHORIZATION"
 
       # Observability only: nothing reads these to decide anything. Model transcripts, the
       # per-stage telemetry and timings, the deterministic gates' logs and the run's JSON

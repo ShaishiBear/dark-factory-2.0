@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Mapping
 
 GITHUB_CREDENTIALS = ("GH_TOKEN", "GITHUB_TOKEN")
@@ -16,6 +17,13 @@ GITHUB_CREDENTIALS = ("GH_TOKEN", "GITHUB_TOKEN")
 # required contexts on `main` with no bypass actors, which is why no `factory/*` PR had ever
 # merged. See docs/DARK_FACTORY_2_AUTONOMOUS_GITHUB_IDENTITY.md.
 GITHUB_MUTATION_CREDENTIAL = "DARK_FACTORY_APP_TOKEN"
+# When the installation token above was minted, as a Unix timestamp, exported by the workflow
+# step that minted it. A GitHub App installation token lives 60 minutes and the kernel cannot
+# see its expiry, so the mint time is the only thing that lets a spend fail closed BEFORE the
+# API rather than after it. Its absence is not a free pass: `identity_age_seconds` returns None
+# and the caller refuses, because an identity that cannot say how old it is cannot be shown to
+# be fresh (ACP-004).
+GITHUB_MUTATION_MINTED_AT = "DARK_FACTORY_APP_TOKEN_MINTED_AT"
 VALIDATION_CREDENTIALS = (
     "DATABASE_URL",
     "OPENROUTER_API_KEY",
@@ -35,10 +43,37 @@ PROVIDER_CREDENTIAL_PREFIXES = (
 SCOPES = {"none", "github", "validation", "github+validation", "github-mutation"}
 
 
+def identity_age_seconds(
+    now: float | None = None, source: Mapping[str, str] | None = None
+) -> float | None:
+    """How old the autonomous identity is, in seconds, or None when that cannot be established.
+
+    None is a refusal, not a default. The whole point of this value is that run 34151427980
+    spent a 95-minute-old token and learned it was dead from a 401; an identity that cannot
+    state its age is exactly as unprovable as one that is known to be stale.
+    """
+    original = dict(os.environ if source is None else source)
+    raw = original.get(GITHUB_MUTATION_MINTED_AT, "").strip()
+    if not raw:
+        return None
+    try:
+        minted = float(raw)
+    except ValueError:
+        return None
+    if minted <= 0:
+        return None
+    age = (time.time() if now is None else now) - minted
+    # A clock that runs backwards is not evidence of freshness.
+    return age if age >= 0 else None
+
+
 def _sensitive(name: str) -> bool:
     return (
         name in GITHUB_CREDENTIALS
         or name == GITHUB_MUTATION_CREDENTIAL
+        # Not a secret, but it belongs to the identity: stripped by default and put back only
+        # for `github-mutation`, so the age of a token can only be read where the token is.
+        or name == GITHUB_MUTATION_MINTED_AT
         or name in VALIDATION_CREDENTIALS
         or name.startswith(PROVIDER_CREDENTIAL_PREFIXES)
     )
@@ -74,6 +109,8 @@ def scoped_environment(
     # Actions token when the App token is absent -- there is nothing to fall back to.
     if scope == "github-mutation" and original.get(GITHUB_MUTATION_CREDENTIAL):
         child[GITHUB_MUTATION_CREDENTIAL] = original[GITHUB_MUTATION_CREDENTIAL]
+        if original.get(GITHUB_MUTATION_MINTED_AT):
+            child[GITHUB_MUTATION_MINTED_AT] = original[GITHUB_MUTATION_MINTED_AT]
 
     if extra:
         for key, value in extra.items():
