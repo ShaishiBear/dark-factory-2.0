@@ -295,8 +295,8 @@
     {
       "id": "runtime-stop-not-rechecked-before-merge",
       "file": "factory_kernel/runtime.py",
-      "find": "            self.check_stop()\n            self.github.cwd = str(worktree.path)",
-      "replace": "            self.github.cwd = str(worktree.path)",
+      "find": "            self.check_stop()\n            return self._merge_and_verify(\n",
+      "replace": "            return self._merge_and_verify(\n",
       "why": "A stop pressed during a long validation would no longer prevent the irreversible merge."
     },
     {
@@ -316,8 +316,8 @@
     {
       "id": "runtime-post-merge-failure-raises-no-incident",
       "file": "factory_kernel/runtime.py",
-      "find": "        except PostMergeUnverified as exc:\n            self._raise_post_merge_incident(pr_number, linked_issue, exc)",
-      "replace": "        except PostMergeUnverified as exc:\n            self._record_validation_failure(pr_number, linked_issue, exc)",
+      "find": "            self._raise_post_merge_incident(pr_number, linked_issue, incident)\n            raise incident from exc\n",
+      "replace": "            raise incident from exc\n",
       "why": "An unverified merge on main would be reported as an ordinary failure, telling humans no merge was authorized and leaving the hourly worker free to build on it."
     },
     {
@@ -330,8 +330,8 @@
     {
       "id": "runtime-post-merge-verification-failure-swallowed",
       "file": "factory_kernel/runtime.py",
-      "find": "            except Exception as exc:  # the merge is already on main; this is an incident\n                raise PostMergeUnverified(",
-      "replace": "            except Exception as exc:  # mutated: swallow\n                _ = PostMergeUnverified(",
+      "find": "        except Exception as exc:  # the merge is already on main; this is an incident\n            incident = PostMergeUnverified(\n",
+      "replace": "        except Exception:  # the merge is already on main\n            pass\n        if False:\n            incident = PostMergeUnverified(\n",
       "why": "A failed post-merge verification would be indistinguishable from a verified merge."
     },
     {
@@ -827,8 +827,8 @@
     {
       "id": "refusal-classifier-always-unknown",
       "file": "factory_kernel/refusal.py",
-      "find": "    text = str(exc)\n    if is_stale_base(text):\n        return \"stale_base\"\n",
-      "replace": "    return \"unknown\"\n    text = str(exc)\n    if is_stale_base(text):\n        return \"stale_base\"\n",
+      "find": "    if is_stale_base(text):\n        return \"stale_base\"\n",
+      "replace": "    if is_stale_base(text):\n        return \"unknown\"\n",
       "why": "Every refusal would again reach GitHub as an unclassified failure; nothing downstream could tell a moved base from a security veto."
     },
     {
@@ -1247,15 +1247,15 @@
     {
       "id": "holdout-shown-only-green",
       "file": "factory_kernel/runtime.py",
-      "find": "                \"proof_summary\": proof_summary,\n            }\n            stage = \"code_holdout\"\n",
-      "replace": "                \"proof_summary\": {k: v for k, v in proof_summary.items() if k != \"red_results\"},\n            }\n            stage = \"code_holdout\"\n",
+      "find": "                \"proof_summary\": proof_summary,\n            }\n            self._authority_cursor = stage_context = \"code_holdout\"\n",
+      "replace": "                \"proof_summary\": \"GREEN\",\n            }\n            self._authority_cursor = stage_context = \"code_holdout\"\n",
       "why": "The code holdout would again see GREEN results and no RED evidence, which is exactly the gap a careful judge refused on in run 33955178802 (D-048)."
     },
     {
       "id": "pack-verified-after-holdout",
       "file": "factory_kernel/runtime.py",
-      "find": "            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)\n\n            stage = \"attached_evidence\"\n            changed_files = sorted(x for x in changed if x)\n            proof_summary = self._holdout_proof_summary(\n                proof, pack, changed_files=changed_files,\n                worktree=worktree.path, base=base, head=head,\n            )\n            holdout_context = {\n                \"contract\": contract,\n                \"changed_files\": changed_files,\n                \"diff_sha256\": hashlib.sha256(patch.encode()).hexdigest(),\n                \"diff\": patch,\n                \"proof_summary\": proof_summary,\n            }\n            stage = \"code_holdout\"\n            verdict = self._run_blinded_holdout(paths, holdout_context)\n            if verdict.get(\"verdict\") != \"pass\":\n                raise NeedsHuman(\"blinded holdout rejected PR\")\n\n            stage = \"architecture_holdout\"\n",
-      "replace": "            pack_dir = paths.artifacts / \"spine\"\n            self._exec(\n                [\n                    \"python\", \"scripts/factory_provenance.py\", \"fetch\",\n                    \"--head\", head, \"--base\", base, \"--issue\", str(linked_issue),\n                    \"--output-dir\", str(pack_dir),\n                ],\n                cwd=self.repo_root,\n                env={\"FACTORY_REPO\": self.config.repository},\n                credential_scope=\"github\",\n                timeout=240,\n                transcript=paths.transcripts / \"provenance-fetch.log\",\n            )\n            pack = self._read_json(pack_dir / \"builder-provenance.json\")\n\n            stage = \"attached_evidence\"\n            changed_files = sorted(x for x in changed if x)\n            proof_summary = self._holdout_proof_summary(\n                proof, pack, changed_files=changed_files,\n                worktree=worktree.path, base=base, head=head,\n            )\n            holdout_context = {\n                \"contract\": contract,\n                \"changed_files\": changed_files,\n                \"diff_sha256\": hashlib.sha256(patch.encode()).hexdigest(),\n                \"diff\": patch,\n                \"proof_summary\": proof_summary,\n            }\n            stage = \"code_holdout\"\n            verdict = self._run_blinded_holdout(paths, holdout_context)\n            if verdict.get(\"verdict\") != \"pass\":\n                raise NeedsHuman(\"blinded holdout rejected PR\")\n\n            stage = \"provenance\"\n            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)\n            stage = \"architecture_holdout\"\n",
+      "find": "            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)\n\n            self._authority_cursor = stage_context = \"attached_evidence\"\n",
+      "replace": "            pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)\n\n            self._authority_cursor = stage_context = \"code_holdout\"\n",
       "why": "The RED evidence handed to the holdout would be cross-checked against a pack nobody had verified yet; verify_pack must precede the judge that relies on it (D-048)."
     },
     {
@@ -2024,8 +2024,8 @@
     {
       "id": "currency-check-runs-after-the-judges",
       "file": "factory_kernel/runtime.py",
-      "find": "            stage = \"trust_root_currency\"\n            self._exec(\n                [\n                    \"python\", \"scripts/factory_evidence.py\",\n                    \"--pr\", str(pr_number), \"--currency-only\",\n                ],\n                cwd=worktree.path,\n                env=env,\n                credential_scope=\"github\",\n                # The `trust-root-currency` scope in harness/budgets.json, not a literal: this\n                # call bounds a ladder program, and a duration comes from the record (D-075).\n                timeout=ladder_budget.budget_seconds(\n                    ladder_budget.load(), scope=\"trust-root-currency\"),\n                transcript=paths.transcripts / \"currency.log\",\n            )\n\n",
-      "replace": "",
+      "find": "            self._authority_cursor = stage_context = \"trust_root_currency\"\n            self._exec(\n",
+      "replace": "            self._authority_cursor = stage_context = \"trust_root_currency\"\n            _ = lambda: self._exec(\n",
       "why": "A base move would again cost five blinded judges and $1.64 before a 0.4 s git diff refused it (run 34112301646)."
     },
     {

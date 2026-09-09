@@ -63,6 +63,7 @@ class RuntimeConfig:
     max_attempts: int
     active_lease_ttl_seconds: int
     legacy_lease_ttl_seconds: int
+    autonomous_identity_max_age_seconds: int
     work_root: Path
 
 
@@ -221,6 +222,10 @@ def load_config(path: str | Path) -> KernelConfig:
             max_attempts=_positive_int(runtime.get("max_attempts"), "runtime.max_attempts"),
             active_lease_ttl_seconds=_positive_int(
                 runtime.get("active_lease_ttl_seconds"), "runtime.active_lease_ttl_seconds"
+            ),
+            autonomous_identity_max_age_seconds=_positive_int(
+                runtime.get("autonomous_identity_max_age_seconds"),
+                "runtime.autonomous_identity_max_age_seconds",
             ),
             legacy_lease_ttl_seconds=_positive_int(
                 runtime.get("legacy_lease_ttl_seconds"), "runtime.legacy_lease_ttl_seconds"

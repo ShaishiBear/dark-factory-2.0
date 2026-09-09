@@ -326,7 +326,18 @@ class KernelRuntime:
         self.repo_root = repo_root.resolve()
         self.config = config
         self.provider = ClaudeCliProvider(config.provider)
-        self.github = GitHubClient(config.repository, cwd=self.repo_root)
+        self.github = GitHubClient(
+            config.repository,
+            cwd=self.repo_root,
+            identity_max_age_seconds=config.runtime.autonomous_identity_max_age_seconds,
+        )
+        # The authority currently executing, or None. Opened by the stage sequence in
+        # `validate_pr`, closed by `_exec` when the authority returns. Only an OPEN cursor may
+        # name an authority in a refusal; see `refusal.classify` and DFE-014.
+        self._authority_cursor: str | None = None
+        # Set by `dispatch_once(merge=False)` to (pr_number, authorization_path) when a PR was
+        # validated and authorised but deliberately not merged in this step.
+        self.pending_merge: tuple[int, Path] | None = None
 
     # ---------- control plane ----------
 
@@ -406,9 +417,19 @@ class KernelRuntime:
         return DispatchDecision("idle", reason="no review PR or accepted idle issue")
 
     def dispatch_once(self, *, merge: bool = True) -> DispatchDecision:
+        """Run one action. `merge=False` stops validation at merge pre-authorization.
+
+        The deferred merge is not "no merge": the authorization artifact is written and the
+        caller is told where it is, so a later step can spend a freshly minted identity on it
+        (ACP-004). `self.pending_merge` is how the workflow learns that.
+        """
+        self.pending_merge = None
         decision = self.choose_dispatch()
         if decision.kind == "validate-pr" and decision.number is not None:
-            self.validate_pr(decision.number, merge=merge)
+            bundle = self.validate_pr(decision.number, merge=merge)
+            authorization = Path(bundle).parent / "merge-authorization.json"
+            if merge is False and authorization.is_file():
+                self.pending_merge = (decision.number, authorization)
         elif decision.kind == "rehead-pr" and decision.number is not None:
             self.rehead_pr(decision.number)
         elif decision.kind == "build-issue" and decision.number is not None:
@@ -1713,8 +1734,12 @@ class KernelRuntime:
         )
         linked_issue = self._linked_issue_number(str(info.get("body") or ""))
         # The stage the validator is in when it refuses is what turns a refusal into a reason
-        # code (factory_kernel/refusal.py); a bare exception class never could.
-        stage = "security_guard"
+        # code (factory_kernel/refusal.py); a bare exception class never could. The cursor names
+        # the authority CURRENTLY EXECUTING and is closed by `_exec` the moment that authority
+        # returns, so a failure after it cannot borrow its name (DFE-014). `stage_context` keeps
+        # the last opened stage for the record, as context and never as attribution.
+        self._authority_cursor = "security_guard"
+        stage_context = "security_guard"
         try:
             self._prepare_worktree(worktree.path, paths)
             env = self._run_env(paths, base_ref=base)
@@ -1734,7 +1759,7 @@ class KernelRuntime:
                 transcript=paths.transcripts / "security.log",
             )
 
-            stage = "attached_evidence"
+            self._authority_cursor = stage_context = "attached_evidence"
             contract, proof = self._extract_attached(str(info.get("body") or ""))
             contract_issue = contract.get("issue")
             if isinstance(contract_issue, Mapping) and isinstance(contract_issue.get("number"), int):
@@ -1747,7 +1772,7 @@ class KernelRuntime:
             ).splitlines()
             policy = self._read_json(worktree.path / ".factory/architecture.json")
 
-            stage = "provenance"
+            self._authority_cursor = stage_context = "provenance"
             # GitHub's baseRefOid is the current tip of main. The pack declares the base the
             # branch was actually cut from; when the two differ, main moved under the PR, and
             # that is a stale_base refusal here, at the earliest point it can be known, rather
@@ -1772,7 +1797,7 @@ class KernelRuntime:
             # the same program, so a base move costs seconds instead of a judge cycle. The
             # Evidence Bundle asks all three questions again and remains the authority: this can
             # only refuse a PR sooner, never authorise one (D-077).
-            stage = "trust_root_currency"
+            self._authority_cursor = stage_context = "trust_root_currency"
             self._exec(
                 [
                     "python", "scripts/factory_evidence.py",
@@ -1792,10 +1817,10 @@ class KernelRuntime:
             # holdout's proof summary carries the RED evidence, and the note-bound red-proof is
             # the source the attached block is checked against. Both steps are deterministic and
             # model-free, so nothing about the holdout's blinding changes (D-048).
-            stage = "provenance"
+            self._authority_cursor = stage_context = "provenance"
             pack = self._builder_pack(paths, head=head, base=base, issue=linked_issue)
 
-            stage = "attached_evidence"
+            self._authority_cursor = stage_context = "attached_evidence"
             changed_files = sorted(x for x in changed if x)
             proof_summary = self._holdout_proof_summary(
                 proof, pack, changed_files=changed_files,
@@ -1808,12 +1833,12 @@ class KernelRuntime:
                 "diff": patch,
                 "proof_summary": proof_summary,
             }
-            stage = "code_holdout"
+            self._authority_cursor = stage_context = "code_holdout"
             verdict = self._run_blinded_holdout(paths, holdout_context)
             if verdict.get("verdict") != "pass":
                 raise NeedsHuman("blinded holdout rejected PR")
 
-            stage = "architecture_holdout"
+            self._authority_cursor = stage_context = "architecture_holdout"
             architecture_holdout = self._run_architecture_holdout(
                 paths,
                 pack=pack,
@@ -1821,11 +1846,11 @@ class KernelRuntime:
                 changed_files=sorted(x for x in changed if x),
                 diff=patch,
             )
-            stage = "certifier"
+            self._authority_cursor = stage_context = "certifier"
             self._certify_precode_claims(
                 paths, pack=pack, head=head, base=base, issue=linked_issue
             )
-            stage = "evidence_spine"
+            self._authority_cursor = stage_context = "evidence_spine"
             self._write_json(
                 paths.artifacts / "validator-verdict.json",
                 {
@@ -1853,7 +1878,7 @@ class KernelRuntime:
                     ladder_budget.load(), scope="evidence-spine"),
                 transcript=paths.transcripts / "evidence.log",
             )
-            stage = "merge_preauth"
+            self._authority_cursor = stage_context = "merge_preauth"
             self._exec(
                 [
                     "python", "harness/merge_verify.py", "pre", "--pr", str(pr_number),
@@ -1867,43 +1892,162 @@ class KernelRuntime:
                 transcript=paths.transcripts / "merge-pre.log",
             )
             if not merge:
-                print(f"FACTORY_VALIDATED pr=#{pr_number} head={head} merge=disabled")
+                print(
+                    f"FACTORY_VALIDATED pr=#{pr_number} head={head} merge=deferred "
+                    f"authorization={paths.artifacts / 'merge-authorization.json'}"
+                )
                 return paths.artifacts / "evidence-bundle.json"
 
             # Irreversible action: stop state and expected head are both rechecked immediately.
             self.check_stop()
-            self.github.cwd = str(worktree.path)
-            self.github.merge_squash(pr_number, expected_head=head)
-            try:
-                self._exec(
-                    [
-                        "python", "harness/merge_verify.py", "post", "--pr", str(pr_number),
-                        "--evidence", str(paths.artifacts / "evidence-bundle.json"),
-                        "--authorization", str(paths.artifacts / "merge-authorization.json"),
-                        "--output", str(paths.artifacts / "merge-verification.json"),
-                    ],
-                    cwd=worktree.path,
-                    env=env,
-                    credential_scope="github",
-                    timeout=240,
-                    transcript=paths.transcripts / "merge-post.log",
-                )
-            except Exception as exc:  # the merge is already on main; this is an incident
-                raise PostMergeUnverified(
-                    f"post-merge verification failed for #{pr_number}: {exc}"
-                ) from exc
-            # The merge closes the issue, so its carry can never be reused again: a build of a
-            # closed issue is not a build (D-071).
-            if isinstance(linked_issue, int):
-                self._carry_drop(paths, worktree.path, env, issue_number=linked_issue)
-            print(f"FACTORY_MERGED_VERIFIED pr=#{pr_number} evidenced_head={head}")
-            return paths.artifacts / "merge-verification.json"
-        except PostMergeUnverified as exc:
-            self._raise_post_merge_incident(pr_number, linked_issue, exc)
+            return self._merge_and_verify(
+                pr_number,
+                head=head,
+                cwd=worktree.path,
+                env=env,
+                paths=paths,
+                evidence=paths.artifacts / "evidence-bundle.json",
+                authorization=paths.artifacts / "merge-authorization.json",
+                linked_issue=linked_issue,
+            )
+        except PostMergeUnverified:
             raise
         except Exception as exc:
             self._record_validation_failure(
-                pr_number, linked_issue, exc, stage=stage, paths=paths, head=head, base=base
+                pr_number, linked_issue, exc, stage=self._authority_cursor,
+                stage_context=stage_context, paths=paths, head=head, base=base,
+            )
+            raise
+        finally:
+            self.github.cwd = str(self.repo_root)
+            try:
+                remove(self.repo_root, worktree)
+            except RuntimeError:
+                pass
+
+    def _merge_and_verify(
+        self,
+        pr_number: int,
+        *,
+        head: str,
+        cwd: Path,
+        env: Mapping[str, str],
+        paths: RunPaths,
+        evidence: Path,
+        authorization: Path,
+        linked_issue: int | None,
+    ) -> Path:
+        """Spend the identity on the merge, then prove the merge matches what was authorised.
+
+        The ONE implementation of the most privileged transition, shared by the inline path and
+        by `merge_authorized`. It was briefly two, and the mutation catalogue said so on the
+        change that duplicated it: three anchors into this block reported `occurs 2x, must occur
+        once`, which is exactly a detector telling you a property now has two homes.
+        """
+        self.github.cwd = str(cwd)
+        self.github.merge_squash(pr_number, expected_head=head)
+        try:
+            self._exec(
+                [
+                    "python", "harness/merge_verify.py", "post", "--pr", str(pr_number),
+                    "--evidence", str(evidence),
+                    "--authorization", str(authorization),
+                    "--output", str(paths.artifacts / "merge-verification.json"),
+                ],
+                cwd=cwd,
+                env=env,
+                credential_scope="github",
+                timeout=240,
+                transcript=paths.transcripts / "merge-post.log",
+            )
+        except Exception as exc:  # the merge is already on main; this is an incident
+            incident = PostMergeUnverified(
+                f"post-merge verification failed for #{pr_number}: {exc}"
+            )
+            self._raise_post_merge_incident(pr_number, linked_issue, incident)
+            raise incident from exc
+        # The merge closes the issue, so its carry can never be reused again: a build of a
+        # closed issue is not a build (D-071).
+        if isinstance(linked_issue, int):
+            self._carry_drop(paths, cwd, env, issue_number=linked_issue)
+        print(f"FACTORY_MERGED_VERIFIED pr=#{pr_number} evidenced_head={head}")
+        return paths.artifacts / "merge-verification.json"
+
+    # ---------- merge, as its own step with its own identity ----------
+
+    def merge_authorized(self, pr_number: int, *, artifacts: Path) -> Path:
+        """Spend the identity on a merge the evidence already authorised, in a fresh step.
+
+        This exists because the identity is a 60-minute credential and validation is not a
+        60-minute operation. Run 34151427980 passed every rung -- the evidence stage returned
+        ok after 4970.989 s -- and then failed at `gh pr merge` with a 401, because the token
+        it spent had been minted 95 minutes earlier and `github-mutation` has no fallback by
+        design. Splitting the merge into its own workflow step, behind its own mint, is the fix;
+        the age check in `github_cli` is the guardrail that stops the fault recurring silently.
+
+        NOTHING IS RE-DECIDED HERE. `merge-authorization.json` was written by
+        `harness/merge_verify.py pre` and binds base, head, tree and the evidence hash; this
+        method re-reads it, rebuilds a worktree at exactly that head, and hands the same
+        artifact to the same post-merge verifier that the inline path uses. The exact-head
+        guarantee survives the split because it was made artifact-mediated before anything
+        needed it to be: `merge_squash` still refuses if the PR head moved, and
+        `merge_verify.py post` still refuses if the merged tree is not byte-identical to the
+        authorised one.
+        """
+        self.check_stop()
+        artifacts = Path(artifacts).resolve()
+        authorization = artifacts / "merge-authorization.json"
+        evidence = artifacts / "evidence-bundle.json"
+        for required in (authorization, evidence):
+            if not required.is_file():
+                raise NeedsHuman(f"cannot merge #{pr_number}: {required.name} is missing")
+
+        authorized = json.loads(authorization.read_text(encoding="utf-8"))
+        head = str(authorized.get("head_sha") or "")
+        base = str(authorized.get("base_sha") or "")
+        if not re.fullmatch(r"[0-9a-f]{40,64}", head):
+            raise NeedsHuman("merge authorization carries no exact head")
+
+        info = self.github.pr(pr_number, holdout_safe=True)
+        if info.get("state") != "OPEN":
+            raise NeedsHuman(f"PR #{pr_number} is not open")
+        if str(info.get("headRefOid") or "") != head:
+            raise NeedsHuman(
+                f"PR #{pr_number} head moved after authorization: authorised {head}, "
+                f"now {info.get('headRefOid')}. The evidence is stale; revalidate."
+            )
+        linked_issue = self._linked_issue_number(str(info.get("body") or ""))
+
+        run_id = f"merge-{pr_number}-{uuid.uuid4().hex[:12]}"
+        paths = RunPaths.create(self.config.runtime.work_root, run_id)
+        self._git("fetch", "origin", head, self.config.default_branch)
+        worktree = create(
+            self.repo_root,
+            head,
+            base_dir=self.config.runtime.work_root / "merge-worktrees",
+        )
+        # No authority executes in this step. The cursor stays closed, so a failure here is
+        # reported unattributed rather than borrowing the name of the last thing that passed
+        # -- which is the defect this whole sequence was built around (DFE-014).
+        self._authority_cursor = None
+        try:
+            env = self._run_env(paths, base_ref=base)
+            return self._merge_and_verify(
+                pr_number,
+                head=head,
+                cwd=worktree.path,
+                env=env,
+                paths=paths,
+                evidence=evidence,
+                authorization=authorization,
+                linked_issue=linked_issue,
+            )
+        except PostMergeUnverified:
+            raise
+        except Exception as exc:
+            self._record_validation_failure(
+                pr_number, linked_issue, exc, stage=self._authority_cursor,
+                stage_context="merge", paths=paths, head=head, base=base,
             )
             raise
         finally:
@@ -3456,6 +3600,11 @@ class KernelRuntime:
             )
         if proc.returncode:
             raise ToolRefused(argv, rc=proc.returncode, output=output)
+        # The authority returned. Close the cursor so nothing raised after this point can be
+        # attributed to it: a stage name is an assertion about who spoke, and this program has
+        # now finished speaking (DFE-014, 01-CONSTITUTION.md "Diagnosis"). Clearing a cursor
+        # that is already closed is a no-op, which is why the build path may share this method.
+        self._authority_cursor = None
         return output
 
     def _kernel_checkout(self) -> Path:
@@ -3497,16 +3646,21 @@ class KernelRuntime:
         linked_issue: int | None,
         exc: Exception,
         *,
-        stage: str,
+        stage: str | None,
+        stage_context: str | None = None,
         paths: RunPaths,
         head: str,
         base: str,
     ) -> None:
         """Make the refusal a durable fact: a reason code on the PR, a scrubbed record in the
-        run's artifacts, and the issue's rebuild budget charged only when the build was at fault."""
+        run's artifacts, and the issue's rebuild budget charged only when the build was at fault.
+
+        `stage` is the authority that was executing, or None when none was; `stage_context` is
+        where the run had reached. Only the first may name an authority (DFE-014)."""
         refusal = describe(stage, exc)
         record = refusal_record(
-            refusal, pr=pr_number, head=head, base=base, stage=stage, timestamp=_utc_now()
+            refusal, pr=pr_number, head=head, base=base, stage=stage,
+            stage_context=stage_context, timestamp=_utc_now(),
         )
         try:
             self._write_json(paths.artifacts / "validation-refusal.json", record)

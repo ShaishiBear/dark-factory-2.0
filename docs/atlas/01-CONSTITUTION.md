@@ -91,6 +91,7 @@ Non-negotiable. A change to any of these is a constitutional change.
 | **Cost** | Cheap models and static analysis for exploration; expensive trusted execution only for candidates worth proving. |
 | **User authority** | The user may decide technical implementation but **may not silently change approved product intent or hard constraints**. Conversely, the human must always retain a compliant lane to maintain the judge. |
 | **Honesty** | Never display *passed / simulated / verified / proven / qualified* unless the real authority produced that result. |
+| **Diagnosis** | Never attribute a failure to an authority that did not produce it. An unexplained failure must say so. Failure reporting is held to the same standard as success reporting, and by the same rule: only the authority that actually spoke may be named. |
 | **Acceleration** | Making proof cheaper is legitimate. Making it weaker is a constitutional change. |
 
 ### The four-state honesty vocabulary
@@ -98,6 +99,22 @@ Non-negotiable. A change to any of these is a constitutional change.
 > **Predicted · Probed · Simulated · Proven**
 
 Never fake theatre. The UI is a projection of canonical state, never an authority, and it cannot invent progress or promote an exploratory choice into an approved requirement.
+
+### The asymmetry this corrects
+
+Every mechanism in this system is built to prove success honestly. Almost nothing is built to explain failure honestly. Evidence closure, independence, exact-head binding, mutation, the floors and the ratchets all exist to stop a false *pass*. Not one of them looks at what the system says when it stops.
+
+That asymmetry has a measured cost. On 7 September a merge was refused, correctly, and the refusal named an authority that had already succeeded in the same run. Both working mechanisms — the detection that stopped the merge and the instrumentation that recorded the real cause — did their jobs. The human still had the wrong answer for four days, and a downstream issue collected four repeat reports built on it.
+
+**Detection and diagnosis are different capabilities, and this system has only ever invested in the first.** A correct refusal that misidentifies its own cause is not a partial success; for everyone downstream it is a false statement made by a trusted component, and it propagates exactly as a false *pass* would.
+
+Three consequences, which generalise past any particular defect:
+
+- **Attribution requires evidence, like everything else.** Naming an authority in a failure is a claim about what happened. Position in a sequence, a stage variable, a filename or a code path's location is not evidence that an authority ran and spoke. A component that cannot show which authority produced a failure must report the failure unattributed.
+- **`unknown` is an honest answer and must stay available.** The pressure on any classifier is to always return something specific. A system that cannot say *I do not know what refused this* will invent an attribution, and the invented one will be confident.
+- **The cost of a wrong diagnosis is paid by whoever reads it next**, and it compounds while nobody re-derives it. This is the same reasoning that makes stale documentation a correctness defect rather than hygiene debt: both are false inputs to a reader who has no reason to doubt them.
+
+The next instance of this will not be the mechanism that caused the last one. The invariant is therefore about what may be *asserted* in a failure, not about any particular classifier.
 
 ### The type distinction beneath it
 

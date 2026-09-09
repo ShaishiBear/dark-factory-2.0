@@ -190,14 +190,20 @@ class OrderTests(unittest.TestCase):
         certifiers = self.runtime.index("_certify_precode_claims(\n")
         self.assertLess(currency, certifiers)
 
+    # The cursor spelling changed with DFE-014 (`stage = "X"` became
+    # `self._authority_cursor = stage_context = "X"`, so an authority that has returned can no
+    # longer be named by a later failure). The property these two pin is unchanged: the
+    # currency check is still its own named stage, and still asks for the narrower scope.
+    CURSOR = 'self._authority_cursor = stage_context = '
+
     def test_the_currency_check_is_its_own_named_stage(self):
-        self.assertIn('stage = "trust_root_currency"', self.runtime)
+        self.assertIn(self.CURSOR + '"trust_root_currency"', self.runtime)
 
     def test_the_currency_check_asks_for_no_more_credentials_than_it_needs(self):
         # The window between the flag and the next stage carries the scope for this call.
         window = self.runtime[
             self.runtime.index('"--currency-only",'):
-            self.runtime.index('stage = "attached_evidence"',
+            self.runtime.index(self.CURSOR + '"attached_evidence"',
                                self.runtime.index('"--currency-only",'))
         ]
         self.assertIn('credential_scope="github"', window)

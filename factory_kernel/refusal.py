@@ -22,6 +22,7 @@ from typing import Iterable, Mapping
 
 REASON_CODES: tuple[str, ...] = (
     "identity",
+    "identity_expired",
     "security_guard",
     "attached_evidence",
     "code_holdout",
@@ -40,6 +41,9 @@ REASON_CODES: tuple[str, ...] = (
 # The authority that speaks for each reason code, for humans reading the PR.
 AUTHORITY: Mapping[str, str] = {
     "identity": "validator preconditions",
+    # Not an authority's verdict about the candidate: the candidate was never judged. The
+    # autonomous identity was too old to spend, so the kernel declined to act at all.
+    "identity_expired": "autonomous identity age check (the App token was too old to spend)",
     "security_guard": "deterministic security guard (scripts/factory_security.py)",
     "attached_evidence": "attached contract/proof parser",
     "code_holdout": "blinded code holdout",
@@ -52,7 +56,10 @@ AUTHORITY: Mapping[str, str] = {
     "evidence_spine": "evidence spine (scripts/factory_evidence_spine.py)",
     "merge_preauth": "merge pre-authorization (harness/merge_verify.py pre)",
     "stale_base": "base moved under the PR (model-free re-head)",
-    "unknown": "unclassified",
+    # Not a name. A failure nothing claimed is reported as claimed by nothing: the Diagnosis
+    # invariant forbids naming an authority that did not produce the failure, and the pressure
+    # on any classifier is to always return something specific (DFE-014).
+    "unknown": "unattributed - no authority reported this failure",
 }
 
 # The three producers of a stale-base refusal, pinned by their message text. They live in
@@ -99,6 +106,15 @@ GENERIC_SECRET = re.compile(
 REDACTED = "[REDACTED]"
 
 
+class IdentityExpired(RuntimeError):
+    """The autonomous identity was too old to spend, or could not state its age.
+
+    Raised BEFORE the API call, which is the whole point. Run 34151427980 discovered a dead
+    token from a 401 ninety-five minutes into a run that had already passed every rung; this
+    refusal is what that should have said, at minute twenty, with the reason in its name.
+    """
+
+
 class ToolRefused(RuntimeError):
     """A deterministic subprocess refused. Carries what refused, not just that something did.
 
@@ -137,14 +153,28 @@ def is_stale_base(text: str) -> bool:
     return any(pattern in text for _producer, pattern in STALE_BASE_PATTERNS)
 
 
-def classify(stage: str, exc: BaseException) -> str:
+def classify(stage: str | None, exc: BaseException) -> str:
     """The stable reason code for a refusal raised while the validator was in `stage`.
 
     Text is consulted only where a stage has more than one refuser inside it: a stale base is
     reported by three different programs, and the evidence spine is the one stage that also
     speaks for the architecture holdout.
+
+    `stage` is None when no authority is executing. It is the caller's job to close its cursor
+    when an authority returns (`KernelRuntime._exec` does this), and this function's job to
+    refuse to attribute when it is closed: naming an authority in a failure is a claim about
+    what happened, and position in a sequence is not evidence that an authority ran and spoke.
+
+    Run 34151412... refused PR #134 as `merge_preauth` because the cursor still said
+    `merge_preauth` twenty lines after that authority had returned; the actual failure was a
+    401 from `gh pr merge`. The refusal was correct and its attribution was false, which cost
+    four days and four repeat reports on issue #119. See 01-CONSTITUTION.md, "Diagnosis".
     """
     text = str(exc)
+    # This one names itself. It is raised by the credential broker before any authority is
+    # asked anything, so no cursor -- open or closed -- has a better claim on it.
+    if isinstance(exc, IdentityExpired):
+        return "identity_expired"
     if is_stale_base(text):
         return "stale_base"
     if isinstance(exc, ToolRefused):
@@ -167,7 +197,10 @@ def classify(stage: str, exc: BaseException) -> str:
         if match:
             return "certifier:" + {"architecture-governor": "governor"}.get(match.group(1), match.group(1))
         return "unknown"
-    if stage in STAGE_CODES:
+    # The stage fallthrough is an assertion about which authority spoke, so it may fire only
+    # while that authority is still executing. A closed cursor is not weaker evidence than an
+    # open one -- it is evidence of the opposite.
+    if stage is not None and stage in STAGE_CODES:
         return stage
     return "unknown"
 
@@ -192,7 +225,7 @@ class Refusal:
     exception: str
 
 
-def describe(stage: str, exc: BaseException) -> Refusal:
+def describe(stage: str | None, exc: BaseException) -> Refusal:
     code = classify(stage, exc)
     if code not in REASON_CODES:
         raise ValueError(f"unknown reason code {code!r}")
@@ -212,14 +245,19 @@ def describe(stage: str, exc: BaseException) -> Refusal:
 
 
 def refusal_record(
-    refusal: Refusal, *, pr: int, head: str, base: str, stage: str, timestamp: str
+    refusal: Refusal, *, pr: int, head: str, base: str, stage: str | None,
+    stage_context: str | None = None, timestamp: str,
 ) -> dict:
+    """`stage` is the authority that was executing, or None. `stage_context` is where the run
+    had got to, and is CONTEXT, never attribution: it says what had last completed, which is
+    exactly the thing a closed cursor may not be read as blaming (DFE-014)."""
     return {
         "version": "1.0",
         "pr": pr,
         "head": head,
         "base": base,
-        "stage": stage,
+        "stage": stage or "",
+        "stage_context": stage_context or "",
         "reason_code": refusal.reason_code,
         "authority": refusal.authority,
         "tool": refusal.tool,
@@ -240,6 +278,7 @@ def render_refusal_marker(record: Mapping[str, object]) -> str:
         "head": record["head"],
         "base": record["base"],
         "stage": record["stage"],
+        "stage_context": record.get("stage_context", ""),
         "reason_code": record["reason_code"],
         "authority": record["authority"],
         "timestamp": record["timestamp"],

@@ -1,8 +1,8 @@
 # Dark Factory — Programme Atlas
 
-Rebuilt from `darkfactory_chatgpt_history__2_.txt` (18 Aug – early Sep 2026) and `ChatGPT-Evaluate_Repository_Progress` (3–8 Sep 2026, 41,532 lines, 131 turns). Current as of **7 Sep 2026**, architecture branch at `56e1497`.
+Rebuilt from `darkfactory_chatgpt_history__2_.txt` (18 Aug – early Sep 2026) and `ChatGPT-Evaluate_Repository_Progress` (3–8 Sep 2026, 41,532 lines, 131 turns). Current as of **7 Sep 2026**, architecture branch at `c1f7ef0` (the atlas recorded `56e1497`; eight further commits landed that evening, adding V3 migration plans and no new decisions).
 
-**This atlas has not been checked against the repository.** Every claim about repository state is transcript-derived. Verifying it is the first task in `08-HANDOVER-TO-CLAUDE-CODE.md`.
+**Verified against `origin/main` `f13219b` on 2026-09-09.** Task 1 is done. Five of the eight uncertainty items came back wrong or partly wrong — all of them understating what the repository contains, none overstating it. See `11-UNCERTAINTY-LIST.md` for the verdicts and `register/DECISION_REGISTER.md` for the corrections.
 
 ## Reading order
 
@@ -18,19 +18,20 @@ Rebuilt from `darkfactory_chatgpt_history__2_.txt` (18 Aug – early Sep 2026) a
 | **8** | `08-HANDOVER-TO-CLAUDE-CODE.md` | State, first tasks in order, working rules, and the opening prompt. |
 | **9** | `09-ACP-002-PREFLIGHT-LOOP.md` | Optimising the Preflight algorithm against recorded history. Best target, worst readiness — month six. |
 | **10** | `10-ACP-003-COST-RATCHET.md` | The conditional cost ceiling that completes the ratchet family. **The one that could land this month.** |
-| **11** | `11-UNCERTAINTY-LIST.md` | Where the atlas is least confident, ranked. Read alongside Task 1. |
-| — | `register/` | The 403-decision register, validator and extract tool. Used every session. |
+| **11** | `11-UNCERTAINTY-LIST.md` | Where the atlas was least confident, ranked. **Resolved 2026-09-09** — read the header first. |
+| **12** | `12-ACP-004-AUTONOMOUS-IDENTITY-LIFETIME.md` | The credential-lifetime defect that blocks every autonomous merge. **The one blocking the canary.** |
+| — | `register/` | The 408-decision register, validator and extract tool. Used every session. |
 
 ## The register
 
-`register/decisions.json` — 403 decisions across eight registers, each with an ID, status, tier and supersession links. `validate_register.py` enforces integrity; `extract.py` produces per-issue decision packets with transitive resolution.
+`register/decisions.json` — 408 decisions across eight registers, each with an ID, status, tier and supersession links. `validate_register.py` enforces integrity; `extract.py` produces per-issue decision packets with transitive resolution.
 
 ```
 PROPOSED         243     no evidence behind them
 SETTLED           78     reopening needs evidence
 CONSTITUTIONAL    40     reopening needs an owner decision
 BUILT             10     merged and evidenced
-AMENDMENT         10     open, from the evaluation
+AMENDMENT         18     open, from the evaluation and after
 OPEN               9     deliberately undecided
 SUPERSEDED         6     replaced
 PARTIAL            4     component exists, decision does not
@@ -56,6 +57,6 @@ And one rule governing when automated search is worth running at all, at every s
 
 ## Two things to hold onto
 
-**The corpus is not decided.** 400 well-reasoned claims at PROPOSED, awaiting the evidence that promotes or rejects them. Writing is not deciding — that is the precedent the whole system exists to prevent.
+**The corpus is not decided.** 243 well-reasoned claims at PROPOSED, awaiting the evidence that promotes or rejects them. Writing is not deciding — that is the precedent the whole system exists to prevent.
 
-**The standing instruction outranks all of it.** No general architecture work until the canary completes or exposes a concrete blocker. The machinery is ahead of the evidence, and one proven Level-4 lap is worth more than any of these documents.
+**The standing instruction outranks all of it.** No general architecture work until the canary completes or exposes a concrete blocker. **The concrete blocker has been found** and is written up in `12-ACP-004`: the App installation token is minted once per job and spent up to 95 minutes later, so no autonomous PR can merge. PR #134 passed the entire ladder and was refused at the last step by a credential 35 minutes dead. The machinery is ahead of the evidence, and one proven Level-4 lap is worth more than any of these documents.

@@ -14,6 +14,24 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / ".factory" / "kernel.json"
 
 
+def _emit_step_outputs(**values: str) -> None:
+    """Hand the workflow what the next step needs, through GITHUB_OUTPUT when it exists.
+
+    Printed as well as written, so a run's log says what was handed on even when this is not
+    running under Actions.
+    """
+    import os
+
+    destination = os.environ.get("GITHUB_OUTPUT", "")
+    for key, value in values.items():
+        print(f"FACTORY_OUTPUT {key}={value}", flush=True)
+    if not destination:
+        return
+    with open(destination, "a", encoding="utf-8") as handle:
+        for key, value in values.items():
+            handle.write(key + "=" + value + chr(10))
+
+
 def manifest_validate(path: str) -> int:
     manifest = RunManifest.load(path)
     print(f"MANIFEST_OK claims={len(manifest.claims)} sha256={manifest.sha256()}")
@@ -40,6 +58,8 @@ def main() -> int:
     dispatch = sub.add_parser("dispatch")
     dispatch.add_argument("--once", action="store_true", help="execute exactly one priority item")
     dispatch.add_argument("--no-merge", action="store_true")
+    # Validate and authorise, but leave the merge to a step with a fresher identity.
+    dispatch.add_argument("--defer-merge", action="store_true")
 
     build = sub.add_parser("build")
     build.add_argument("--issue", type=int, required=True)
@@ -47,6 +67,19 @@ def main() -> int:
     validate = sub.add_parser("validate")
     validate.add_argument("--pr", type=int, required=True)
     validate.add_argument("--no-merge", action="store_true")
+
+    # The merge as its own invocation, so the workflow can mint a fresh identity immediately
+    # before it. Decides nothing: it reads the authorization the evidence already produced
+    # (ACP-004).
+    merge = sub.add_parser(
+        "merge", help="merge a PR the evidence already authorised, behind a fresh identity"
+    )
+    merge.add_argument("--pr", type=int, required=True)
+    merge.add_argument(
+        "--from-authorization",
+        required=True,
+        help="artifacts directory holding merge-authorization.json and evidence-bundle.json",
+    )
 
     rehead = sub.add_parser("rehead", help="re-head a stale-base refused PR onto current main")
     rehead.add_argument("--pr", type=int, required=True)
@@ -88,7 +121,15 @@ def main() -> int:
         if args.command == "dispatch":
             if not args.once:
                 parser.error("dispatch currently requires --once; scheduling belongs outside kernel")
-            decision = rt.dispatch_once(merge=not args.no_merge)
+            decision = rt.dispatch_once(
+                merge=not (args.no_merge or args.defer_merge)
+            )
+            if args.defer_merge and rt.pending_merge is not None:
+                pr_number, authorization = rt.pending_merge
+                _emit_step_outputs(
+                    merge_pr=str(pr_number),
+                    merge_authorization=str(authorization.parent),
+                )
             if decision.kind == "idle":
                 count = TriageEngine(rt).run_once()
                 print(f"KERNEL_DISPATCH kind=triage decisions={count}")
@@ -102,6 +143,10 @@ def main() -> int:
         if args.command == "build":
             pr = rt.build_issue(args.issue)
             print(f"KERNEL_BUILD_OK issue={args.issue} pr={pr}")
+            return 0
+        if args.command == "merge":
+            output = rt.merge_authorized(args.pr, artifacts=Path(args.from_authorization))
+            print(output)
             return 0
         if args.command == "validate":
             output = rt.validate_pr(args.pr, merge=not args.no_merge)

@@ -1,6 +1,6 @@
 # Dark Factory — Decision Register
 
-**400 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
+**409 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
 
 This exists to make one sentence operational: *these are well-reasoned claims at status PROPOSED, awaiting the evidence that promotes or rejects them.* Until now that was a posture. Now it is a file with IDs in it.
 
@@ -17,7 +17,7 @@ Run `python3 validate_register.py` in CI. A register that no longer validates is
 ## Current state
 
 ```
-400 decisions
+409 decisions
 
 DFA    49   Target architecture directive
 DFC    76   Canonical contracts / schema specification
@@ -26,18 +26,18 @@ DFF    87   Front Door algorithm directive
 DFM    67   Repository migration directive, Parts I-XV
 DFV    21   v3 claim-centric locked decisions
 DFG     9   Architecture governance / self-modification
-DFE    10   Amendments from the 2026-09-08 evaluation
+DFE    19   Amendments from the 2026-09-08 evaluation and after
 
 PROPOSED         243     awaiting evidence
 SETTLED           78     reopening needs evidence, not permission
 CONSTITUTIONAL    40     reopening needs an owner decision
 BUILT             10     merged and evidenced
-AMENDMENT         10     open, from the evaluation
+AMENDMENT         19     open, from the evaluation and after
 OPEN               9     deliberately undecided
 SUPERSEDED         6     replaced; superseded_by names the replacement
 PARTIAL            4     component exists, decision does not
 
-tier 0   36      tier 1  172      tier 2  149      tier 3   43
+tier 0   37      tier 1  175      tier 2  154      tier 3   43
 ```
 
 **118 decisions require an ACP to contradict. 243 have no evidence behind them at all.** That ratio is the honest picture of the corpus, and it is why adoption (DFE-001) matters more than implementation speed.
@@ -73,9 +73,9 @@ Generate the block with `python3 extract.py DFM-026 --markdown` and paste it int
 
 **A decision that cannot be falsified is not a decision.** Several entries carry a `falsifier` field. Most do not, and that is a gap worth closing opportunistically: when you touch a decision, write down what would prove it wrong.
 
-## The ten open amendments
+## The nineteen open amendments
 
-Ordered by cost. None of them block the canary.
+Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest do not.
 
 | ID | Amendment | Affects | Cost |
 |---|---|---|---|
@@ -89,6 +89,14 @@ Ordered by cost. None of them block the canary.
 | **DFE-009** | Specify attestation revocation and authority-disagreement resolution | DFC-031/032, DFV-008 | Genuinely new design work |
 | **DFE-007** | Runner-up sampling in Preflight calibration | DFA-032/045, DFP-044/077 | Cheap to specify, real compute to run |
 | **DFE-010** | Per-issue decision extracts rather than wholesale references | DFA-048, DFC-047 | Tooling, once — `extract.py` is the first cut |
+| **DFE-016** | Raise `static_checks` 5 → 6, finishing the job PR #139 started | DFA-003 | One line |
+| **DFE-014** | Never attribute a refusal to an authority that did not produce it | DFA-017, DFV-005, DFM-015 | An hour, plus the constitutional paragraph |
+| **DFE-015** | Split the unit floor three ways — factory, backend, frontend | DFA-003, DFM-002 | Half a day across three files |
+| **DFE-017** | A PR that changes the number of checks or tests must touch `floor.json` | DFA-003, DFE-012/015/016 | A deterministic check plus its mutation |
+| **DFE-018** | The autonomous identity is minted per operation, not once per job | DFV-005, DFM-015, DFA-007, DFE-014 | Bounded — see `12-ACP-004` |
+| **DFE-019** | Split the build's push/PR handoff behind its own mint | DFE-018, DFV-005, DFM-015 | A design question, then a workflow step |
+
+**DFE-018 and DFE-014 come first**, in that order: DFE-018 is the blocker (no autonomous PR can merge) and DFE-014 is why it took four days to find. **DFE-017 lands before DFE-012** — ACP-003's argument assumes the ratchet family works as a mechanism, and three misses in three weeks say it does not; adding a fourth dial to a mechanism nobody is turning is the wrong order.
 
 **DFE-002, DFE-003 and DFE-004 should land before anyone implements from the corpus**, because they change what "decided" means. **DFE-008, DFE-009 and DFE-010** get more expensive the longer they wait.
 
@@ -118,4 +126,15 @@ The floor rule from the superseded DFM-XIV survives independently and is not sup
 
 Built 2026-09-08 from `darkfactory_chatgpt_history__2_.txt` and `ChatGPT-Evaluate_Repository_Progress` (41,532 lines). Decision titles are faithful to the source headings; statuses, tiers and amendments are judgements added on top, and are marked as such in `decisions.json`.
 
-The register has not been checked against the repository. Several `BUILT` and `PARTIAL` statuses are transcript-derived and up to a day stale. **First task in Claude Code: verify every non-PROPOSED status against the actual repo, and correct it.** A register that overstates what exists is worse than no register, and the system's own honesty rule applies to it.
+## Verification, 2026-09-09
+
+Every non-`PROPOSED` status has now been checked against `origin/main` at `f13219b`. Verified entries carry a `verified` field, and every entry making a repository claim carries `evidence` naming the PR or file that supports it.
+
+**Nothing was downgraded.** The feared failure mode — a register that overstates what exists — did not occur. Every error ran the other way: the register understated the repository. The four corrections of substance are recorded in `decisions.json` under `notes.verification_2026_09_09`, and the fuller account is in `11-UNCERTAINTY-LIST.md`.
+
+Two facts the corpus has no entry for at all, both found during this pass:
+
+- **The measured floors lag their own evidence again.** `floor.json` records `unit_tests: 1033` and `static_checks: 5`; the same canonical quick gate observed `UNIT_PASSED tests=2353` and `STATIC_OK checks=6` on 2026-09-09 (run 34332642132). This is audit finding B.5 recurring at roughly four times its original magnitude, against a stated zero-slack rule.
+- **The daily full-harness regression on `main` has failed every day since 2026-09-05**, always at `GATE_FAILED: e2e`. Escalated as issue #119, now `factory:needs-human`.
+
+Statuses, tiers and amendments remain judgements added on top of the source corpus, not findings from it.
