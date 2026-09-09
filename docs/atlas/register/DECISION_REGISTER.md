@@ -1,6 +1,6 @@
 # Dark Factory — Decision Register
 
-**410 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
+**411 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
 
 This exists to make one sentence operational: *these are well-reasoned claims at status PROPOSED, awaiting the evidence that promotes or rejects them.* Until now that was a posture. Now it is a file with IDs in it.
 
@@ -17,7 +17,7 @@ Run `python3 validate_register.py` in CI. A register that no longer validates is
 ## Current state
 
 ```
-410 decisions
+411 decisions
 
 DFA    49   Target architecture directive
 DFC    76   Canonical contracts / schema specification
@@ -26,18 +26,18 @@ DFF    87   Front Door algorithm directive
 DFM    67   Repository migration directive, Parts I-XV
 DFV    21   v3 claim-centric locked decisions
 DFG     9   Architecture governance / self-modification
-DFE    20   Amendments from the 2026-09-08 evaluation and after
+DFE    21   Amendments from the 2026-09-08 evaluation and after
 
 PROPOSED         243     awaiting evidence
 SETTLED           78     reopening needs evidence, not permission
 CONSTITUTIONAL    40     reopening needs an owner decision
 BUILT             10     merged and evidenced
-AMENDMENT         20     open, from the evaluation and after
+AMENDMENT         21     open, from the evaluation and after
 OPEN               9     deliberately undecided
 SUPERSEDED         6     replaced; superseded_by names the replacement
 PARTIAL            4     component exists, decision does not
 
-tier 0   37      tier 1  175      tier 2  155      tier 3   43
+tier 0   37      tier 1  176      tier 2  155      tier 3   43
 ```
 
 **118 decisions require an ACP to contradict. 243 have no evidence behind them at all.** That ratio is the honest picture of the corpus, and it is why adoption (DFE-001) matters more than implementation speed.
@@ -73,7 +73,7 @@ Generate the block with `python3 extract.py DFM-026 --markdown` and paste it int
 
 **A decision that cannot be falsified is not a decision.** Several entries carry a `falsifier` field. Most do not, and that is a gap worth closing opportunistically: when you touch a decision, write down what would prove it wrong.
 
-## The twenty open amendments
+## The twenty-one open amendments
 
 Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest do not.
 
@@ -96,6 +96,7 @@ Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest
 | **DFE-018** | The autonomous identity is minted per operation, not once per job | DFV-005, DFM-015, DFA-007, DFE-014 | Bounded — see `12-ACP-004` |
 | **DFE-019** | Split the build's push/PR handoff behind its own mint | DFE-018, DFV-005, DFM-015 | A design question, then a workflow step |
 | **DFE-020** | Only `stale_base` has a model-free recovery path; every other refusal is terminal | DFE-014, DFE-018, DFV-011 | A design question |
+| **DFE-021** | A condition detectable early must be checked early — starting with whole-base movement | DFE-017, DFE-020, DFV-011 | One `gh` call at an existing rung |
 
 **DFE-018 and DFE-014 come first**, in that order: DFE-018 is the blocker (no autonomous PR can merge) and DFE-014 is why it took four days to find. **DFE-017 lands before DFE-012** — ACP-003's argument assumes the ratchet family works as a mechanism, and three misses in three weeks say it does not; adding a fourth dial to a mechanism nobody is turning is the wrong order.
 
@@ -139,6 +140,21 @@ The artifacts said *retry the merge*: `merge-authorization.json` written, the sp
 - **Two further days parked**, because `merge_preauth` is not `stale_base` and only `stale_base` has a model-free recovery path (DFE-020). The factory skipped the PR; `rehead` refused it by hand.
 
 Six days, from one wrong word in a refusal that was otherwise right. **A wrong diagnosis is not a smaller defect than a wrong verdict — it is the same defect, pointed at whoever reads it next.**
+
+## A class worth naming: detectable early, checked late
+
+Two recorded instances, and the second was found by walking into it.
+
+| Condition | Cheaply knowable at | Actually checked at | Closed by |
+|---|---|---|---|
+| Mutation anchor no longer injectable | second zero, pure text | the full harness, ~50 min in | PR #139 — moved to the head of the static rung |
+| Main moved by a non-trust-root commit | second zero, one `gh` call | merge pre-authorization, ~83 min in | open — DFE-021 |
+
+Both have one shape: **the authority that could answer cheaply is not asked until something expensive has already run.** In the first case thirteen maintainer PRs moved anchors before anyone noticed, because nothing a maintainer met could see the drift. In the second, `--currency-only` checks trust-root drift in the first seconds while `merge_verify.py:149` checks whole-main movement only at the end, so a base moved by a docs commit passes every early gate.
+
+A third instance is likelier than not. Look wherever a late gate reads state that was available at the start.
+
+DFE-017 reaches for this class from the other side — it asks that a floor move when what it measures moves. DFE-021 asks that a check run when its input is first knowable. Neither subsumes the other; both are about a gate that exists and fires at the wrong time.
 
 ## Verification, 2026-09-09
 
