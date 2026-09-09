@@ -1994,6 +1994,11 @@ class KernelRuntime:
         `merge_verify.py post` still refuses if the merged tree is not byte-identical to the
         authorised one.
         """
+        # No authority executes in this step, so nothing raised here may borrow a name. Cleared
+        # at ENTRY rather than after the worktree: the refusals above it -- a missing artifact, a
+        # closed PR, a head that moved -- are refusals too, and an early return must not leave a
+        # cursor a previous stage opened (DFE-014).
+        self._authority_cursor = None
         self.check_stop()
         artifacts = Path(artifacts).resolve()
         authorization = artifacts / "merge-authorization.json"
@@ -2021,15 +2026,11 @@ class KernelRuntime:
         run_id = f"merge-{pr_number}-{uuid.uuid4().hex[:12]}"
         paths = RunPaths.create(self.config.runtime.work_root, run_id)
         self._git("fetch", "origin", head, self.config.default_branch)
-        worktree = create(
+        worktree = create_detached(
             self.repo_root,
             head,
             base_dir=self.config.runtime.work_root / "merge-worktrees",
         )
-        # No authority executes in this step. The cursor stays closed, so a failure here is
-        # reported unattributed rather than borrowing the name of the last thing that passed
-        # -- which is the defect this whole sequence was built around (DFE-014).
-        self._authority_cursor = None
         try:
             env = self._run_env(paths, base_ref=base)
             return self._merge_and_verify(
