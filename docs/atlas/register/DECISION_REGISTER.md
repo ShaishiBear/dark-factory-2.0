@@ -1,6 +1,6 @@
 # Dark Factory — Decision Register
 
-**411 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
+**412 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
 
 This exists to make one sentence operational: *these are well-reasoned claims at status PROPOSED, awaiting the evidence that promotes or rejects them.* Until now that was a posture. Now it is a file with IDs in it.
 
@@ -17,7 +17,7 @@ Run `python3 validate_register.py` in CI. A register that no longer validates is
 ## Current state
 
 ```
-411 decisions
+412 decisions
 
 DFA    49   Target architecture directive
 DFC    76   Canonical contracts / schema specification
@@ -26,18 +26,18 @@ DFF    87   Front Door algorithm directive
 DFM    67   Repository migration directive, Parts I-XV
 DFV    21   v3 claim-centric locked decisions
 DFG     9   Architecture governance / self-modification
-DFE    21   Amendments from the 2026-09-08 evaluation and after
+DFE    22   Amendments from the 2026-09-08 evaluation and after
 
 PROPOSED         243     awaiting evidence
 SETTLED           78     reopening needs evidence, not permission
 CONSTITUTIONAL    40     reopening needs an owner decision
 BUILT             10     merged and evidenced
-AMENDMENT         21     open, from the evaluation and after
+AMENDMENT         22     open, from the evaluation and after
 OPEN               9     deliberately undecided
 SUPERSEDED         6     replaced; superseded_by names the replacement
 PARTIAL            4     component exists, decision does not
 
-tier 0   37      tier 1  176      tier 2  155      tier 3   43
+tier 0   37      tier 1  177      tier 2  155      tier 3   43
 ```
 
 **118 decisions require an ACP to contradict. 243 have no evidence behind them at all.** That ratio is the honest picture of the corpus, and it is why adoption (DFE-001) matters more than implementation speed.
@@ -73,7 +73,7 @@ Generate the block with `python3 extract.py DFM-026 --markdown` and paste it int
 
 **A decision that cannot be falsified is not a decision.** Several entries carry a `falsifier` field. Most do not, and that is a gap worth closing opportunistically: when you touch a decision, write down what would prove it wrong.
 
-## The twenty-one open amendments
+## The twenty-two open amendments
 
 Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest do not.
 
@@ -97,6 +97,7 @@ Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest
 | **DFE-019** | Split the build's push/PR handoff behind its own mint | DFE-018, DFV-005, DFM-015 | A design question, then a workflow step |
 | **DFE-020** | Only `stale_base` has a model-free recovery path; every other refusal is terminal | DFE-014, DFE-018, DFV-011 | A design question |
 | **DFE-021** | A condition detectable early must be checked early — starting with whole-base movement | DFE-017, DFE-020, DFV-011 | One `gh` call at an existing rung |
+| **DFE-022** | A rung's observed measurement must survive a later rung's failure | DFA-003, DFE-015/017, DFM-026 | A scrubbed per-rung measurements file |
 
 **DFE-018 and DFE-014 come first**, in that order: DFE-018 is the blocker (no autonomous PR can merge) and DFE-014 is why it took four days to find. **DFE-017 lands before DFE-012** — ACP-003's argument assumes the ratchet family works as a mechanism, and three misses in three weeks say it does not; adding a fourth dial to a mechanism nobody is turning is the wrong order.
 
@@ -140,6 +141,18 @@ The artifacts said *retry the merge*: `merge-authorization.json` written, the sp
 - **Two further days parked**, because `merge_preauth` is not `stale_base` and only `stale_base` has a model-free recovery path (DFE-020). The factory skipped the PR; `rehead` refused it by hand.
 
 Six days, from one wrong word in a refusal that was otherwise right. **A wrong diagnosis is not a smaller defect than a wrong verdict — it is the same defect, pointed at whoever reads it next.**
+
+## Three gates, three different wrongnesses
+
+Filed within a day of each other, and easy to conflate. They are not the same defect and they do not share a fix.
+
+| | The gate | What is wrong with it |
+|---|---|---|
+| **DFE-017** | a floor | it does not move when the thing it measures moves |
+| **DFE-021** | a check | it runs long after its input was knowable |
+| **DFE-022** | a measurement | it does not survive an unrelated later failure |
+
+The third was found the hard way. On 2026-09-09 run 34379226169 passed E2E for the first time under this kernel — provably, since the mutation rung runs after it and ran — and the number was lost, because mutations failed twenty minutes later for an unrelated reason and the bundle is assembled once at the end. `.factory/locks/floor.json` has waited months for exactly that value.
 
 ## A class worth naming: detectable early, checked late
 
