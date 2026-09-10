@@ -1,6 +1,6 @@
 # Dark Factory — Decision Register
 
-**416 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
+**417 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
 
 This exists to make one sentence operational: *these are well-reasoned claims at status PROPOSED, awaiting the evidence that promotes or rejects them.* Until now that was a posture. Now it is a file with IDs in it.
 
@@ -17,7 +17,7 @@ Run `python3 validate_register.py` in CI. A register that no longer validates is
 ## Current state
 
 ```
-416 decisions
+417 decisions
 
 DFA    49   Target architecture directive
 DFC    76   Canonical contracts / schema specification
@@ -26,18 +26,18 @@ DFF    87   Front Door algorithm directive
 DFM    67   Repository migration directive, Parts I-XV
 DFV    21   v3 claim-centric locked decisions
 DFG     9   Architecture governance / self-modification
-DFE    26   Amendments from the 2026-09-08 evaluation and after
+DFE    27   Amendments from the 2026-09-08 evaluation and after
 
 PROPOSED         243     awaiting evidence
 SETTLED           78     reopening needs evidence, not permission
 CONSTITUTIONAL    40     reopening needs an owner decision
 BUILT             10     merged and evidenced
-AMENDMENT         26     open, from the evaluation and after
+AMENDMENT         27     open, from the evaluation and after
 OPEN               9     deliberately undecided
 SUPERSEDED         6     replaced; superseded_by names the replacement
 PARTIAL            4     component exists, decision does not
 
-tier 0   37      tier 1  177      tier 2  158      tier 3   44
+tier 0   37      tier 1  177      tier 2  159      tier 3   44
 ```
 
 **118 decisions require an ACP to contradict. 243 have no evidence behind them at all.** That ratio is the honest picture of the corpus, and it is why adoption (DFE-001) matters more than implementation speed.
@@ -73,7 +73,7 @@ Generate the block with `python3 extract.py DFM-026 --markdown` and paste it int
 
 **A decision that cannot be falsified is not a decision.** Several entries carry a `falsifier` field. Most do not, and that is a gap worth closing opportunistically: when you touch a decision, write down what would prove it wrong.
 
-## The twenty-six open amendments
+## The twenty-seven open amendments
 
 Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest do not.
 
@@ -102,6 +102,7 @@ Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest
 | **DFE-024** | A test that reads source is not a test that ran it | DFE-023, DFA-017, DFV-009, DFE-015 | The rule is cheap; the audit is unscoped |
 | **DFE-025** | A refusal must distinguish a verdict from an authority that never ran | DFE-014/020, DFA-032, DFV-016 | A reason code |
 | **DFE-026** | The only lane that proves the judge is the lane forbidden from changing it | DFE-021/023/024, DFA-018, DFV-002, DFM-001 | Tier 3 — the cheap end is hours |
+| **DFE-027** | A marker must not name more than the check behind it proves | DFE-022/023/024, DFA-017 | Small instance; open general question |
 
 **DFE-018 and DFE-014 come first**, in that order: DFE-018 is the blocker (no autonomous PR can merge) and DFE-014 is why it took four days to find. **DFE-017 lands before DFE-012** — ACP-003's argument assumes the ratchet family works as a mechanism, and three misses in three weeks say it does not; adding a fourth dial to a mechanism nobody is turning is the wrong order.
 
@@ -173,6 +174,7 @@ Filed within a day of each other, and easy to conflate. They are not the same de
 | **DFE-022** | a measurement | it does not survive an unrelated later failure |
 | **DFE-023** | a green marker | it asserts more than the check behind it examined |
 | **DFE-024** | a passing test | it examined the code's spelling, never its behaviour |
+| **DFE-027** | a marker | its name is broader than the check that produced it |
 | **DFE-025** | a refusal | it credits an authority with a judgement it never made |
 
 The fourth is the one to be most careful about. The other three fail visibly — a stale floor, a late refusal, a lost number. `MUTATION_ANCHORS_OK` fails by **succeeding**.
@@ -195,6 +197,14 @@ The shape recurred the next day in an unrelated mechanism (**DFE-024**). Every t
 The exposure is enumerable rather than hypothetical: a defect can only be defanged by someone moving its anchor, so the population is every defect whose `find`/`replace` has ever changed. A git walk of both catalogues across all 82 commits that touched them gives **37** — 22 from PR #139, 7 from PR #155, 8 from six other commits. None has ever been checked for preserved meaning.
 
 The third was found the hard way. On 2026-09-09 run 34379226169 passed E2E for the first time under this kernel — provably, since the mutation rung runs after it and ran — and the number was lost, because mutations failed twenty minutes later for an unrelated reason and the bundle is assembled once at the end. `.factory/locks/floor.json` has waited months for exactly that value.
+
+## Two of seven markers found unsound, neither by looking
+
+`MUTATION_ANCHORS_OK` reads as *the catalogue is intact* and means *every `find` string occurs exactly once* (DFE-023). `E2E_STREAM_UI` reads as *the streaming UI worked* and passes on either of two routes — one that proves it, and one (`arrived_at_once`, `polls <= 1`) that only proves the answer was fast (DFE-027).
+
+Neither is a bug. Both checks do exactly what their code says. The gap in each is between what the check proves and what its **name** implies to whoever reads the bundle.
+
+`STATIC_OK` · `UNIT_PASSED` · `E2E_PASSED` · `HOLDOUT_PASSED` · `MUTATIONS_CAUGHT` · `IMMUNITY_OK` · `MUTATION_ANCHORS_OK` — every one is a name attached to a claim, produced by a specific program with specific passing conditions. **Nothing anywhere checks that a marker's name is not broader than the check behind it.** Two were found by accident; the rest are unexamined. Reading each name against its producer's passing condition is an afternoon, and cheaper than finding the third one the way the first two were found.
 
 ## Evidence, and the absence of evidence, recorded as the same fact
 
