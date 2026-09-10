@@ -152,9 +152,11 @@ Two lanes reach `main`. The **autonomous** lane pays 21 required claims, eleven 
 
 Of the 428 factory mutation defects, **193 mutate `factory_kernel`.** They are reached at rung 5 of the full ladder. `--quick` returns at rung 2.
 
-> **The 193 mutations that prove the kernel's detectors work run only on pull requests that may not change the kernel.**
+> **The lane that writes the judge proves the least, and the lane that proves the most is forbidden from writing it.**
 
-That is not a coverage gap. It is a consequence of how the two lanes were defined — which is why DFE-021, DFE-023, DFE-024 and the lint gap, which look like four findings, are one. Each is a hole in the maintenance lane; none can bite the autonomous lane. **Every defect of 8–10 September entered through the maintenance lane** — four for four, all merged on static-plus-unit.
+Concretely: of the 428 factory mutation defects, **193 mutate `factory_kernel`** — and they run only on pull requests that may not change it. Every defect of 8–10 September entered through the maintenance lane; the autonomous lane caught all four, at 21, 57, 89 and 4 minutes each, **one per attempt.**
+
+That is not a coverage gap. It is a consequence of how the two lanes were defined — which is why DFE-021, DFE-023, DFE-024 and the lint gap, which look like four findings, are one. Each is a hole in the maintenance lane; none can bite the autonomous lane. Four for four, all merged on static-plus-unit.
 
 And the daily `main-regression` is the only post-merge route to those 193. It has failed at rung 3 every day since 5 September, so **nothing has verified the kernel's own detectors against anything for five days** — while issue #119 sat at `factory:needs-human`, read as a stuck browser test.
 
