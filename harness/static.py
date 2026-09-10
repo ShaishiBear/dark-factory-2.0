@@ -46,6 +46,36 @@ CHECKS = [
     # the full harness, fifty minutes into a validation, and the defect it names has had no
     # detector since the refactor that moved it (D-076).
     ("mutation-anchors", ROOT, [sys.executable, str(HERE / "mutation_anchors.py")]),
+    # Second, and for the same reason as the first: milliseconds, and invisible everywhere else.
+    # The four checks below lint app/backend and app/frontend. NOTHING linted the trust root --
+    # the kernel that judges every product PR received less static analysis than the product it
+    # judges. `merge_authorized` carried `create(` where the import is `create_detached`; it
+    # passed its whole suite, passed static, passed unit, and raised NameError on its first real
+    # invocation in the merge step of run 34399514537, eighty-nine minutes into a lap that had
+    # gone green on every rung. `ruff --select F` refuses it in milliseconds, on its own pull
+    # request. Verified in both directions before this check was added: clean on the tree as it
+    # stands, one error with that name restored (DFE-026).
+    #
+    # `--select F` is pyflakes only, not the backend's full rule set: that reports 156 findings
+    # here and would make this a formatting argument instead of a proof one. `--isolated` so the
+    # backend's pyproject config, with its own selections and excludes, cannot narrow what the
+    # trust root is held to. Run from BACKEND only to borrow its pinned ruff; the paths are
+    # absolute and nothing under app/ is examined here.
+    #
+    # THE THREE IGNORES ARE A DEBT, NOT A POLICY. `--select F` alone reports 30 findings on the
+    # trust root today: 27 F401 unused imports, 2 F841 unused locals, 1 F541 f-string with no
+    # placeholder. Every one is hygiene; not one is a defect. Fixing thirty files here would
+    # make this pull request about something other than the check it adds, and this check is
+    # about Lane A being proved by less than Lane B (DFE-026), so it is the only variable in its
+    # own change. The correctness half of F -- undefined names, redefinitions, comparison and
+    # format errors -- is enforced from today with nothing excused. Delete an ignore and fix
+    # what it was hiding; the list only shrinks.
+    ("ruff-trust-root", BACKEND, [
+        "uv", "run", "ruff", "check", "--isolated", "--no-cache",
+        "--select", "F", "--ignore", "F401,F841,F541",
+        str(ROOT / "factory_kernel"), str(ROOT / "harness"),
+        str(ROOT / "scripts"), str(ROOT / "tests" / "factory"),
+    ]),
     ("ruff-lint",   BACKEND,  ["uv", "run", "ruff", "check", "."]),
     ("ruff-format", BACKEND,  ["uv", "run", "ruff", "format", "--check", "."]),
     ("mypy",        BACKEND,  ["uv", "run", "mypy", "."]),
