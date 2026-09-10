@@ -270,6 +270,67 @@ describe('formatCitation', () => {
     expect(result).toContain('0:10–0:20');
     expect(result).toContain('> "Test snippet text"');
   });
+
+  // AC-1: unparseable YouTube video_url — degraded fallback must still keep the
+  // quoted transcript snippet as a continuation blockquote (issue #49).
+  it('AC-1 unparseable YouTube video_url keeps the transcript snippet blockquote', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = {
+      ...baseCitation,
+      video_url: 'not-a-url',
+      snippet: 'Relevant text',
+    };
+    const result = formatCitation(citation);
+    expect(result).toContain('\n  > "Relevant text"');
+    warnSpy.mockRestore();
+  });
+
+  // AC-2: same citation — degraded fallback must start with the "- " list marker
+  // (so it no longer merges into the previous list item) and keep the
+  // unavailable-timestamp tail this branch already emits.
+  it('AC-2 unparseable YouTube video_url starts with list marker and keeps unavailable tail', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = {
+      ...baseCitation,
+      video_url: 'not-a-url',
+      snippet: 'Relevant text',
+    };
+    const result = formatCitation(citation);
+    expect(result).toContain('- Test Video Title');
+    expect(result).toContain('(timestamp link unavailable) — 0:10–0:20');
+    warnSpy.mockRestore();
+  });
+
+  // AC-3: Dynamous citation with no lesson_url — degraded fallback must start
+  // with the "- " list marker, contain no "](" (no link target to point at),
+  // and still emit the snippet as a continuation blockquote.
+  it('AC-3 empty Dynamous lesson_url starts with list marker and has no markdown link', () => {
+    const citation = {
+      ...baseCitation,
+      source_type: 'dynamous' as const,
+      video_url: '',
+      lesson_url: '',
+    };
+    const result = formatCitation(citation);
+    expect(result).toContain('- Test Video Title');
+    expect(result).not.toContain('](');
+    expect(result).toContain('> "Test snippet text"');
+  });
+
+  // AC-4: YouTube video_url parses but has no "v" param — degraded fallback
+  // must start with the "- " list marker, keep the unavailable-timestamp tail
+  // this branch already emits, NOT deep-link to a bogus youtube.com/watch?v=,
+  // and still emit the snippet as a continuation blockquote.
+  it('AC-4 YouTube video_url without v param starts with list marker and keeps snippet', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const citation = { ...baseCitation, video_url: 'https://www.youtube.com/' };
+    const result = formatCitation(citation);
+    expect(result).toContain('- Test Video Title');
+    expect(result).toContain('(timestamp link unavailable) — 0:10–0:20');
+    expect(result).not.toContain('[Test Video Title](https://www.youtube.com/watch?v=');
+    expect(result).toContain('> "Test snippet text"');
+    warnSpy.mockRestore();
+  });
 });
 
 describe('formatSources', () => {
