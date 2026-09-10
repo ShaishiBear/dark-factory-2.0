@@ -167,6 +167,14 @@ And the daily `main-regression` is the only post-merge route to those 193.
 
 Two things to read before acting. This is a **proof** asymmetry, not an authorisation one: the trust-root veto works exactly as designed. And the fix is **not** the full ladder on the maintenance lane — that recreates audit finding B.1, the deadlock where nobody can safely maintain the judge. The cheap end (lint the trust root, oblige new trusted functions to be invoked, move millisecond checks to the static rung) would have caught **three of this week's four**; the fourth was a credential lifetime that no static check could see.
 
+## The runner's failure mode is not one wrong number — it is every number
+
+A boundary trace on 2026-09-10 found eight of the twenty-one functions in the two mutation runners were never *entered* by any test. Among them `apply`, which injects a defect; `run_channels`, which decides one was caught; and `baseline_is_green`, which refuses to mutate an already-red tree.
+
+A defanged catalogue entry costs one detector (DFE-023). **A runner that silently no-ops costs the whole family at once**: every defect would report injected-and-caught, `MUTATIONS_NOT_INJECTED` would stay 0, `MUTATIONS_CAUGHT` would equal `MUTATIONS_TOTAL`, the ratchet would hold, the floors would pass, and the evidence bundle would say 428/428. Nothing in the repository would contradict it.
+
+Closed 2026-09-10: eighteen tests that run the real functions, falsified against five injected failure modes — a no-op `apply`, a short-circuiting `run_channels`, a disarmed `baseline_is_green`, an unnamed timeout, and an immunity check that accepts silence.
+
 ## Four gates, four different wrongnesses
 
 Filed within a day of each other, and easy to conflate. They are not the same defect and they do not share a fix.
