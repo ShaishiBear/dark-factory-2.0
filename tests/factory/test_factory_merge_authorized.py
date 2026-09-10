@@ -18,6 +18,8 @@ import json
 import sys
 import tempfile
 import unittest
+import ast
+import builtins
 from pathlib import Path
 from unittest import mock
 
@@ -189,40 +191,74 @@ class TheAuthorisedMergeRunsEndToEnd(unittest.TestCase):
         self.assertIsNone(rt._authority_cursor)
 
 
-class EveryNameInTheMethodResolves(unittest.TestCase):
-    def test_no_unresolved_global_in_merge_authorized(self):
-        """The generalisation of the NameError: a load with no import, global or local behind it.
+class NoUnresolvedNameAnywhereInTheTrustRoot(unittest.TestCase):
+    """The generalisation of the NameError: a load with no binding behind it, anywhere.
 
-        This is a source check and says so -- it is here as a net under the tests above, not in
-        place of them, which is the whole point of DFE-024.
-        """
-        import ast
-        import builtins
+    Written narrowly first -- it checked only `merge_authorized`, and its name collector missed
+    tuple unpacking, walrus and comprehension targets, so it would have failed spuriously the
+    next time someone wrote `a, b = ...` in that method. A brittle net is its own hazard, which
+    is DFE-024's point turned on the test that was written for DFE-024.
 
-        tree = ast.parse((ROOT / "factory_kernel" / "runtime.py").read_text(encoding="utf-8"))
-        fn = next(n for n in ast.walk(tree)
-                  if isinstance(n, ast.FunctionDef) and n.name == "merge_authorized")
-        known = {a.asname or a.name.split(".")[0]
-                 for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-        known |= {a.asname or a.name
-                  for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
-        known |= {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
-        known |= {t.id for n in tree.body if isinstance(n, ast.Assign)
-                  for t in n.targets if isinstance(t, ast.Name)}
-        local = {a.arg for a in fn.args.args}
-        local |= {t.id for n in ast.walk(fn) if isinstance(n, ast.Assign)
-                  for t in n.targets if isinstance(t, ast.Name)}
-        local |= {h.name for h in ast.walk(fn) if isinstance(h, ast.ExceptHandler) and h.name}
-        local |= {n.target.id for n in ast.walk(fn)
-                  if isinstance(n, (ast.For, ast.AsyncFor)) and isinstance(n.target, ast.Name)}
-        local |= {g.target.id for c in ast.walk(fn)
-                  if isinstance(c, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))
-                  for g in c.generators if isinstance(g.target, ast.Name)}
-        local |= {n.optional_vars.id for n in ast.walk(fn) if isinstance(n, ast.withitem)
-                  and isinstance(getattr(n, "optional_vars", None), ast.Name)}
-        loaded = {n.id for n in ast.walk(fn)
-                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
-        self.assertEqual(sorted(loaded - known - local - set(dir(builtins))), [])
+    It is a source check and says so. It sits under the tests above, not in place of them: it
+    proves a name resolves, never that the code does the right thing with it.
+    """
+
+    ROOTS = ("factory_kernel", "harness", "scripts")
+
+    @staticmethod
+    def _bound(node) -> set:
+        return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+    @classmethod
+    def _unresolved(cls, path: Path) -> dict:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        known = set(dir(builtins)) | {"__name__", "__file__", "__doc__", "__spec__", "__package__"}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Import):
+                known |= {a.asname or a.name.split(".")[0] for a in n.names}
+            elif isinstance(n, ast.ImportFrom):
+                known |= {a.asname or a.name for a in n.names}
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                known.add(n.name)
+                if not isinstance(n, ast.ClassDef):
+                    a = n.args
+                    known |= {x.arg for x in [*a.posonlyargs, *a.args, *a.kwonlyargs]}
+                    if a.vararg: known.add(a.vararg.arg)
+                    if a.kwarg: known.add(a.kwarg.arg)
+            elif isinstance(n, ast.Lambda):
+                a = n.args
+                known |= {x.arg for x in [*a.posonlyargs, *a.args, *a.kwonlyargs]}
+                if a.vararg: known.add(a.vararg.arg)
+                if a.kwarg: known.add(a.kwarg.arg)
+            elif isinstance(n, ast.Assign):
+                for t in n.targets: known |= cls._bound(t)
+            elif isinstance(n, (ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor,
+                                ast.comprehension, ast.NamedExpr)):
+                known |= cls._bound(n.target)
+            elif isinstance(n, ast.ExceptHandler) and n.name:
+                known.add(n.name)
+            elif isinstance(n, ast.withitem) and n.optional_vars is not None:
+                known |= cls._bound(n.optional_vars)
+            elif isinstance(n, (ast.Global, ast.Nonlocal)):
+                known |= set(n.names)
+        return {n.id: n.lineno for n in ast.walk(tree)
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in known}
+
+    def test_every_name_loaded_in_the_trust_root_has_a_binding(self):
+        """`merge_authorized` held `create(` where the import is `create_detached`. It raised
+        NameError on its first real invocation, 89 minutes into a lap that had gone green on
+        every rung. This costs milliseconds and covers the whole class."""
+        findings = []
+        for root in self.ROOTS:
+            base = ROOT / root
+            if not base.is_dir():
+                continue
+            for path in sorted(base.rglob("*.py")):
+                if "__pycache__" in str(path):
+                    continue
+                for name, line in sorted(self._unresolved(path).items(), key=lambda kv: kv[1]):
+                    findings.append(f"{path.relative_to(ROOT)}:{line} {name}")
+        self.assertEqual(findings, [], "unresolved name load(s)")
 
 
 if __name__ == "__main__":
