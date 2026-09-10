@@ -1,6 +1,6 @@
 # Dark Factory — Decision Register
 
-**414 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
+**416 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
 
 This exists to make one sentence operational: *these are well-reasoned claims at status PROPOSED, awaiting the evidence that promotes or rejects them.* Until now that was a posture. Now it is a file with IDs in it.
 
@@ -17,7 +17,7 @@ Run `python3 validate_register.py` in CI. A register that no longer validates is
 ## Current state
 
 ```
-414 decisions
+416 decisions
 
 DFA    49   Target architecture directive
 DFC    76   Canonical contracts / schema specification
@@ -26,18 +26,18 @@ DFF    87   Front Door algorithm directive
 DFM    67   Repository migration directive, Parts I-XV
 DFV    21   v3 claim-centric locked decisions
 DFG     9   Architecture governance / self-modification
-DFE    24   Amendments from the 2026-09-08 evaluation and after
+DFE    26   Amendments from the 2026-09-08 evaluation and after
 
 PROPOSED         243     awaiting evidence
 SETTLED           78     reopening needs evidence, not permission
 CONSTITUTIONAL    40     reopening needs an owner decision
 BUILT             10     merged and evidenced
-AMENDMENT         24     open, from the evaluation and after
+AMENDMENT         26     open, from the evaluation and after
 OPEN               9     deliberately undecided
 SUPERSEDED         6     replaced; superseded_by names the replacement
 PARTIAL            4     component exists, decision does not
 
-tier 0   37      tier 1  177      tier 2  157      tier 3   43
+tier 0   37      tier 1  177      tier 2  158      tier 3   44
 ```
 
 **118 decisions require an ACP to contradict. 243 have no evidence behind them at all.** That ratio is the honest picture of the corpus, and it is why adoption (DFE-001) matters more than implementation speed.
@@ -73,7 +73,7 @@ Generate the block with `python3 extract.py DFM-026 --markdown` and paste it int
 
 **A decision that cannot be falsified is not a decision.** Several entries carry a `falsifier` field. Most do not, and that is a gap worth closing opportunistically: when you touch a decision, write down what would prove it wrong.
 
-## The twenty-four open amendments
+## The twenty-six open amendments
 
 Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest do not.
 
@@ -100,6 +100,8 @@ Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest
 | **DFE-022** | A rung's observed measurement must survive a later rung's failure | DFA-003, DFE-015/017, DFM-026 | A scrubbed per-rung measurements file |
 | **DFE-023** | A defanged detector reports protection it is not providing | DFA-017, DFE-014/021, DFV-009 | Open — the decidable part is small |
 | **DFE-024** | A test that reads source is not a test that ran it | DFE-023, DFA-017, DFV-009, DFE-015 | The rule is cheap; the audit is unscoped |
+| **DFE-025** | A refusal must distinguish a verdict from an authority that never ran | DFE-014/020, DFA-032, DFV-016 | A reason code |
+| **DFE-026** | The only lane that proves the judge is the lane forbidden from changing it | DFE-021/023/024, DFA-018, DFV-002, DFM-001 | Tier 3 — the cheap end is hours |
 
 **DFE-018 and DFE-014 come first**, in that order: DFE-018 is the blocker (no autonomous PR can merge) and DFE-014 is why it took four days to find. **DFE-017 lands before DFE-012** — ACP-003's argument assumes the ratchet family works as a mechanism, and three misses in three weeks say it does not; adding a fourth dial to a mechanism nobody is turning is the wrong order.
 
@@ -144,6 +146,20 @@ The artifacts said *retry the merge*: `merge-authorization.json` written, the sp
 
 Six days, from one wrong word in a refusal that was otherwise right. **A wrong diagnosis is not a smaller defect than a wrong verdict — it is the same defect, pointed at whoever reads it next.**
 
+## The one finding underneath four of them — DFE-026
+
+Two lanes reach `main`. The **autonomous** lane pays 21 required claims, eleven independent authorities, 437 mutations, E2E, holdout, conformance, ratchet and post-merge tree verification — 89 minutes — and is *forbidden* from touching `factory_kernel/**`. The **maintenance** lane may change anything, and is proved by identity, provenance, hygiene, and `harness/ci.py --quick`: static, unit, `return 0`.
+
+Of the 428 factory mutation defects, **193 mutate `factory_kernel`.** They are reached at rung 5 of the full ladder. `--quick` returns at rung 2.
+
+> **The 193 mutations that prove the kernel's detectors work run only on pull requests that may not change the kernel.**
+
+That is not a coverage gap. It is a consequence of how the two lanes were defined — which is why DFE-021, DFE-023, DFE-024 and the lint gap, which look like four findings, are one. Each is a hole in the maintenance lane; none can bite the autonomous lane. **Every defect of 8–10 September entered through the maintenance lane** — four for four, all merged on static-plus-unit.
+
+And the daily `main-regression` is the only post-merge route to those 193. It has failed at rung 3 every day since 5 September, so **nothing has verified the kernel's own detectors against anything for five days** — while issue #119 sat at `factory:needs-human`, read as a stuck browser test.
+
+Two things to read before acting. This is a **proof** asymmetry, not an authorisation one: the trust-root veto works exactly as designed. And the fix is **not** the full ladder on the maintenance lane — that recreates audit finding B.1, the deadlock where nobody can safely maintain the judge. The cheap end (lint the trust root, oblige new trusted functions to be invoked, move millisecond checks to the static rung) would have caught **three of this week's four**; the fourth was a credential lifetime that no static check could see.
+
 ## Four gates, four different wrongnesses
 
 Filed within a day of each other, and easy to conflate. They are not the same defect and they do not share a fix.
@@ -155,6 +171,7 @@ Filed within a day of each other, and easy to conflate. They are not the same de
 | **DFE-022** | a measurement | it does not survive an unrelated later failure |
 | **DFE-023** | a green marker | it asserts more than the check behind it examined |
 | **DFE-024** | a passing test | it examined the code's spelling, never its behaviour |
+| **DFE-025** | a refusal | it credits an authority with a judgement it never made |
 
 The fourth is the one to be most careful about. The other three fail visibly — a stale floor, a late refusal, a lost number. `MUTATION_ANCHORS_OK` fails by **succeeding**.
 
@@ -176,6 +193,19 @@ The shape recurred the next day in an unrelated mechanism (**DFE-024**). Every t
 The exposure is enumerable rather than hypothetical: a defect can only be defanged by someone moving its anchor, so the population is every defect whose `find`/`replace` has ever changed. A git walk of both catalogues across all 82 commits that touched them gives **37** — 22 from PR #139, 7 from PR #155, 8 from six other commits. None has ever been checked for preserved meaning.
 
 The third was found the hard way. On 2026-09-09 run 34379226169 passed E2E for the first time under this kernel — provably, since the mutation rung runs after it and ran — and the number was lost, because mutations failed twenty minutes later for an unrelated reason and the bundle is assembled once at the end. `.factory/locks/floor.json` has waited months for exactly that value.
+
+## Evidence, and the absence of evidence, recorded as the same fact
+
+`REASON_CODES` has no `provider_failed`. So these two produce an identical code and an identical sentence in the permanent record:
+
+- the architecture holdout examined this change and rejected it
+- the architecture holdout could not be reached
+
+On 2026-09-10 the second happened — unparseable output after 2.023 s, no turns, no cost, no events — and the PR carries *"Refused by: independent architecture holdout"*. Nothing examined anything.
+
+This is not DFE-014 recurring. There the *wrong* authority was named; here the right one is credited with a judgement it never made, and DFE-014's field signature (`stage` and `stage_context` agreeing) correctly reports the cursor as open. The gap is one rung down, in the vocabulary rather than the attribution.
+
+It matters most where it compounds: **any calibration over refusal records reads provider flakiness as architectural rejection.** Flakiness is uncorrelated with the change, so it is noise labelled as signal, in the field a calibrator would treat as ground truth (DFE-025, affecting DFA-032).
 
 ## A class worth naming: detectable early, checked late
 
