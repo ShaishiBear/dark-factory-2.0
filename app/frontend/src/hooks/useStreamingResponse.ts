@@ -22,9 +22,23 @@ export function useStreamingResponse(conversationId: string | null) {
 
   const streamAbortRef = useRef<AbortController | null>(null);
 
+  // Tracks the conversationId seen by the previous effect run so the reset
+  // fires only on a genuine id change — including changes to/from null. A
+  // same-id effect pass (React.StrictMode's dev-only re-run on mount, or any
+  // rerender that doesn't change the id) must not abort the in-flight stream
+  // or clear streaming state. Issue #103.
+  const prevConversationIdRef = useRef<string | null | undefined>(undefined);
+
   // Reset all streaming state and abort any in-flight fetch when the
   // conversation changes. Mirrors the reset pattern in useMessages.ts.
   useEffect(() => {
+    if (prevConversationIdRef.current === conversationId) {
+      // First run with this id (StrictMode second pass, or any same-id rerender):
+      // stream and state must survive.
+      prevConversationIdRef.current = conversationId;
+      return;
+    }
+    prevConversationIdRef.current = conversationId;
     if (streamAbortRef.current) {
       streamAbortRef.current.abort();
       streamAbortRef.current = null;
