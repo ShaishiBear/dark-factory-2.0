@@ -2031,7 +2031,7 @@
     {
       "id": "currency-only-falls-through-to-the-bundle",
       "file": "scripts/factory_evidence.py",
-      "find": "    if args.currency_only:\n        print(f\"EVIDENCE_CURRENCY_OK head={head} base={base}\")\n        return\n\n",
+      "find": "    if args.currency_only:\n        print(f\"EVIDENCE_CURRENCY_OK head={head} base={base} main={current_main}\")\n        return\n\n",
       "replace": "",
       "why": "The early check would go on to parse the attached blocks and run the whole ladder, so the cheap pre-check would cost what it was added to save."
     },

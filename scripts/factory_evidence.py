@@ -642,8 +642,31 @@ def main() -> None:
     if drift:
         die("PR trust root is not current with origin/main; rebase required: " + ", ".join(drift))
 
+    # WHOLE-BASE MOVEMENT, ASKED HERE FIRST. `trust_root_drift` above compares TRUST-ROOT files
+    # only, so a base moved by a commit touching nothing under the trust root passes it. The
+    # comparison that catches that lives in harness/merge_verify.py -- `current_base != base` --
+    # and runs at merge pre-authorization, after the whole ladder.
+    #
+    # Two real runs, one day apart, show what that costs. On 2026-09-09 PR #134 was re-headed
+    # onto c19546e and then #157 merged, changing one line of a register JSON. Nothing early
+    # could see it; the staleness would have surfaced at merge pre-auth, ~83 minutes in. Later
+    # the same day #159 merged, touching .factory/holdout/immunity.json -- trust root -- and the
+    # currency check refused in 0.535 s. The same defect, two orders of magnitude apart in
+    # detection cost, decided only by which paths a commit happened to touch (DFE-021).
+    #
+    # merge_verify KEEPS its check. It is the authority and must re-ask at the moment it
+    # authorises; this only stops it being the first asker.
+    current_main = run(["git", "rev-parse", "origin/main"]).stdout.strip()
+    if current_main and current_main != base:
+        # The wording is load-bearing, not decorative. `factory_kernel/refusal.py`
+        # STALE_BASE_PATTERNS detects this class by text, and a refusal it does not recognise
+        # is not `stale_base`, so the model-free re-head never becomes eligible and the PR
+        # lands in a terminal state needing a human (DFE-020). This string is pinned to this
+        # file by test_every_stale_base_pattern_is_pinned_to_its_producer.
+        die(f"main moved under the PR before validation; base={base} origin/main={current_main}")
+
     if args.currency_only:
-        print(f"EVIDENCE_CURRENCY_OK head={head} base={base}")
+        print(f"EVIDENCE_CURRENCY_OK head={head} base={base} main={current_main}")
         return
 
     contract, contract_hash = extract(body, "contract")

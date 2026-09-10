@@ -72,6 +72,11 @@ STALE_BASE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("factory_kernel/runtime.py", "main moved under the PR"),
     ("harness/merge_verify.py", "main moved after evidence"),
     ("scripts/factory_evidence.py", "PR trust root is not current with origin/main"),
+    # The same program asks a second, wider question since DFE-021: trust-root drift is
+    # trust-root files only, and a base moved by a commit touching none of them passes it. This
+    # pair exists so that refusal is recognised as `stale_base` and the model-free re-head stays
+    # eligible; without it the check would trade an 83-minute discovery for a terminal state.
+    ("scripts/factory_evidence.py", "main moved under the PR before validation"),
 )
 
 # Non-stale reasons that the kernel decides from the stage it was in, not from a tool's text.
