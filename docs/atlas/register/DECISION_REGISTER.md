@@ -159,7 +159,11 @@ Concretely: of the 428 factory mutation defects, **193 mutate `factory_kernel`**
 
 That is not a coverage gap. It is a consequence of how the two lanes were defined — which is why DFE-021, DFE-023, DFE-024 and the lint gap, which look like four findings, are one. Each is a hole in the maintenance lane; none can bite the autonomous lane. Four for four, all merged on static-plus-unit.
 
-And the daily `main-regression` is the only post-merge route to those 193. It has failed at rung 3 every day since 5 September, so **nothing has verified the kernel's own detectors against anything for five days** — while issue #119 sat at `factory:needs-human`, read as a stuck browser test.
+And the daily `main-regression` is the only post-merge route to those 193.
+
+> **Half of this resolved on 2026-09-10, and only half.** Run 34505370936 reached `GATE_OK mode=full`, so the 193 were verified against `main` for the first time since 5 September. #119 was #103; PR #134 fixed it and the regression recovered untouched.
+>
+> The structural finding is untouched. The only post-merge route to those mutations is still a single daily job, and it was down for five days before anyone read its redness as more than a stuck browser test. That the cause turned out to be an ordinary product bug makes the fragility **worse**, not better: a StrictMode effect re-run in the chat UI took out the kernel's last post-merge proof, and nothing said so.
 
 Two things to read before acting. This is a **proof** asymmetry, not an authorisation one: the trust-root veto works exactly as designed. And the fix is **not** the full ladder on the maintenance lane — that recreates audit finding B.1, the deadlock where nobody can safely maintain the judge. The cheap end (lint the trust root, oblige new trusted functions to be invoked, move millisecond checks to the static rung) would have caught **three of this week's four**; the fourth was a credential lifetime that no static check could see.
 
@@ -205,6 +209,8 @@ The third was found the hard way. On 2026-09-09 run 34379226169 passed E2E for t
 Neither is a bug. Both checks do exactly what their code says. The gap in each is between what the check proves and what its **name** implies to whoever reads the bundle.
 
 `STATIC_OK` · `UNIT_PASSED` · `E2E_PASSED` · `HOLDOUT_PASSED` · `MUTATIONS_CAUGHT` · `IMMUNITY_OK` · `MUTATION_ANCHORS_OK` — every one is a name attached to a claim, produced by a specific program with specific passing conditions. **Nothing anywhere checks that a marker's name is not broader than the check behind it.** Two were found by accident; the rest are unexamined. Reading each name against its producer's passing condition is an afternoon, and cheaper than finding the third one the way the first two were found.
+
+**Demonstrated the day it was filed.** Run 34505370936 passed with `polls=43` and `stop-button` in `states` — the property route, not `arrived_at_once`. That green is readable as evidence about the streaming flag *only because both routes were written down beforehand*. Taken at face value, a green by either route reads identically, and the #119 prediction would have been recorded as confirmed without being tested. Knowing which route passed was the whole difference between a result and an assumption.
 
 ## Evidence, and the absence of evidence, recorded as the same fact
 
