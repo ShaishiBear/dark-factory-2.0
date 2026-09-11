@@ -1,6 +1,6 @@
 # Dark Factory — Decision Register
 
-**417 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
+**419 decisions.** Extracted from the 7 September architecture corpus and the surrounding record, given stable IDs, statuses and tiers, with the 2026-09-08 evaluation folded in as explicit amendments rather than as a separate opinion.
 
 This exists to make one sentence operational: *these are well-reasoned claims at status PROPOSED, awaiting the evidence that promotes or rejects them.* Until now that was a posture. Now it is a file with IDs in it.
 
@@ -17,7 +17,7 @@ Run `python3 validate_register.py` in CI. A register that no longer validates is
 ## Current state
 
 ```
-417 decisions
+419 decisions
 
 DFA    49   Target architecture directive
 DFC    76   Canonical contracts / schema specification
@@ -26,18 +26,18 @@ DFF    87   Front Door algorithm directive
 DFM    67   Repository migration directive, Parts I-XV
 DFV    21   v3 claim-centric locked decisions
 DFG     9   Architecture governance / self-modification
-DFE    27   Amendments from the 2026-09-08 evaluation and after
+DFE    29   Amendments from the 2026-09-08 evaluation and after
 
 PROPOSED         243     awaiting evidence
 SETTLED           78     reopening needs evidence, not permission
 CONSTITUTIONAL    40     reopening needs an owner decision
 BUILT             10     merged and evidenced
-AMENDMENT         27     open, from the evaluation and after
+AMENDMENT         29     open, from the evaluation and after
 OPEN               9     deliberately undecided
 SUPERSEDED         6     replaced; superseded_by names the replacement
 PARTIAL            4     component exists, decision does not
 
-tier 0   37      tier 1  177      tier 2  159      tier 3   44
+tier 0   37      tier 1  177      tier 2  161      tier 3   44
 ```
 
 **118 decisions require an ACP to contradict. 243 have no evidence behind them at all.** That ratio is the honest picture of the corpus, and it is why adoption (DFE-001) matters more than implementation speed.
@@ -73,7 +73,7 @@ Generate the block with `python3 extract.py DFM-026 --markdown` and paste it int
 
 **A decision that cannot be falsified is not a decision.** Several entries carry a `falsifier` field. Most do not, and that is a gap worth closing opportunistically: when you touch a decision, write down what would prove it wrong.
 
-## The twenty-seven open amendments
+## The twenty-nine open amendments
 
 Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest do not.
 
@@ -89,6 +89,9 @@ Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest
 | **DFE-009** | Specify attestation revocation and authority-disagreement resolution | DFC-031/032, DFV-008 | Genuinely new design work |
 | **DFE-007** | Runner-up sampling in Preflight calibration | DFA-032/045, DFP-044/077 | Cheap to specify, real compute to run |
 | **DFE-010** | Per-issue decision extracts rather than wholesale references | DFA-048, DFC-047 | Tooling, once — `extract.py` is the first cut |
+| **DFE-011** | Preflight self-optimisation loop — specify the mechanism for the four learned decisions | DFP-060/061/062/063, DFE-007, DFM-026 | Month-six; preconditions due now |
+| **DFE-012** | Complete the ratchet family with a conditional cost ceiling | DFA-003, DFM-026, DFE-011 | Instrumentation is the work — see `10-ACP-003` |
+| **DFE-013** | Unify the value-of-information rule and the search-worth test as one principle | DFP-018/060/061/062, DFE-005, DFE-012 | A paragraph; changes what gets built |
 | **DFE-016** | Raise `static_checks` 5 → 6, finishing the job PR #139 started | DFA-003 | One line |
 | **DFE-014** | Never attribute a refusal to an authority that did not produce it | DFA-017, DFV-005, DFM-015 | An hour, plus the constitutional paragraph |
 | **DFE-015** | Split the unit floor three ways — factory, backend, frontend | DFA-003, DFM-002 | Half a day across three files |
@@ -103,6 +106,8 @@ Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest
 | **DFE-025** | A refusal must distinguish a verdict from an authority that never ran | DFE-014/020, DFA-032, DFV-016 | A reason code |
 | **DFE-026** | The only lane that proves the judge is the lane forbidden from changing it | DFE-021/023/024, DFA-018, DFV-002, DFM-001 | Tier 3 — the cheap end is hours |
 | **DFE-027** | A marker must not name more than the check behind it proves | DFE-022/023/024, DFA-017 | Small instance; open general question |
+| **DFE-028** | The GitHub client is 19/20 faked, and it is where the identity is spent | DFE-024/018, DFV-005, DFM-015 | Open — how to prove a client you cannot call |
+| **DFE-029** | `test_author`'s output is most often wrong at its own core purpose | DFE-012, DFA-003, DFM-026, DFP-060 | Diagnosed; fix is open |
 
 **DFE-018 and DFE-014 come first**, in that order: DFE-018 is the blocker (no autonomous PR can merge) and DFE-014 is why it took four days to find. **DFE-017 lands before DFE-012** — ACP-003's argument assumes the ratchet family works as a mechanism, and three misses in three weeks say it does not; adding a fourth dial to a mechanism nobody is turning is the wrong order.
 
@@ -166,6 +171,33 @@ And the daily `main-regression` is the only post-merge route to those 193.
 > The structural finding is untouched. The only post-merge route to those mutations is still a single daily job, and it was down for five days before anyone read its redness as more than a stuck browser test. That the cause turned out to be an ordinary product bug makes the fragility **worse**, not better: a StrictMode effect re-run in the chat UI took out the kernel's last post-merge proof, and nothing said so.
 
 Two things to read before acting. This is a **proof** asymmetry, not an authorisation one: the trust-root veto works exactly as designed. And the fix is **not** the full ladder on the maintenance lane — that recreates audit finding B.1, the deadlock where nobody can safely maintain the judge. The cheap end (lint the trust root, oblige new trusted functions to be invoked, move millisecond checks to the static rung) would have caught **three of this week's four**; the fourth was a credential lifetime that no static check could see.
+
+## The stage whose output is most often wrong at its own core purpose
+
+Both hand-backs, two builds out of two, are `test_author` failing to produce a test that fails for the stated reason.
+
+- **#49** — `FACTORY_RED_HANDBACK acceptance_id=AC-2 reason='AC-2 RED command unexpectedly passed'`. The declared red checkpoint **passed on the unchanged tree**: it did not express the bug at all.
+- **#134** — the declared `expected_failure` was the message `getByRole` prints while the test's own query printed another.
+
+The gate and the stage do not disagree about what a valid RED proof is. **The gate is right both times.** A stage that must write a failing test wrote, twice, something that did not fail for the reason it declared — so the cost finding and the correctness finding are one finding.
+
+The mechanical half separates a healthy run from a runaway one by neither time nor turns:
+
+| run | secs | turns | events | ev/turn | outcome |
+|---|---|---|---|---|---|
+| #134 r1 | 789 | 31 | 136,017 | **4,387** | `cap_reached` |
+| #134 r2 | 97 | 19 | 1,266 | 66 | ok |
+| #49 r1 | 160 | 15 | 2,181 | 145 | ok, RED refused |
+| #49 r2 | 444 | 30 | 713 | 23 | ok |
+| #49 rebuild | 4,035 | 18 | 80,665 | **4,481** | **timed out** |
+
+`cap_reached` and `timed_out` are **the same failure caught by different limits** — one hit the turn cap, the other hit the wall first. The turn cap bounds turns; the wall bounds seconds; **nothing bounds how much a single turn may generate.**
+
+On the same build, `implement` took **18.4 seconds, 11 turns, 38 events, $0.64**.
+
+> **Once RED is right, GREEN is nearly free. The cost and the risk both live in specifying the fix, not in writing it.**
+
+Nothing in the directive corpus says this; it came from watching a lap rather than reasoning about one (DFE-029).
 
 ## The runner's failure mode is not one wrong number — it is every number
 

@@ -151,6 +151,39 @@ def report(doc: dict) -> None:
             print(f"            affects: {affects}")
 
 
+def prose_agrees(doc: dict, prose: Path) -> list[str]:
+    """DECISION_REGISTER.md must not disagree with the register it describes.
+
+    `Register valid.` was printed on a register whose markdown said 417 decisions and 27 open
+    amendments while decisions.json held 418 and 28, because this program validated the JSON
+    and never looked at the prose beside it. A green marker that examined less than its reader
+    assumes is DFE-027's species -- found here in the tooling built to police the register that
+    holds the entry about it.
+
+    Counts only. Whether the prose is *right* is not checkable; whether it contradicts the data
+    it summarises is, and that is the whole of the defect observed.
+    """
+    if not prose.exists():
+        return []
+    text = prose.read_text(encoding="utf-8")
+    decisions = doc["decisions"]
+    statuses = Counter(d["status"] for d in decisions)
+    tiers = Counter(d["tier"] for d in decisions)
+    expected = [
+        (f"{len(decisions)} decisions", "total decisions"),
+        (f"AMENDMENT         {statuses['AMENDMENT']:<5}", "open amendment count"),
+        (f"tier 0   {tiers[0]}      tier 1  {tiers[1]}      "
+         f"tier 2  {tiers[2]}      tier 3   {tiers[3]}", "tier counts"),
+    ]
+    problems = [f"{prose.name} does not carry the current {what} ({fragment.strip()!r})"
+                for fragment, what in expected if fragment.rstrip() not in text]
+    missing = sorted(d["id"] for d in decisions
+                     if d["status"] == "AMENDMENT" and d["id"] not in text)
+    if missing:
+        problems.append(f"{prose.name} does not mention open amendment(s): {', '.join(missing)}")
+    return problems
+
+
 def main() -> int:
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("decisions.json")
     if not path.exists():
@@ -159,6 +192,7 @@ def main() -> int:
 
     doc = load(path)
     errors, warnings = validate(doc)
+    errors.extend(prose_agrees(doc, path.with_name("DECISION_REGISTER.md")))
 
     for w in warnings:
         print(f"WARN   {w}")
