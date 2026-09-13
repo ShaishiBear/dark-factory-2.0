@@ -193,6 +193,16 @@ The mechanical half separates a healthy run from a runaway one by neither time n
 
 `cap_reached` and `timed_out` are **the same failure caught by different limits** — one hit the turn cap, the other hit the wall first. The turn cap bounds turns; the wall bounds seconds; **nothing bounds how much a single turn may generate.**
 
+### Corrected by the experiment the entry asked for
+
+Run 34596429955 returned **outcome D** — a clean first pass, no hand-back. Three claims withdrawn or weakened:
+
+- *"A hand-back is normal, two out of two"* → the sample is **three builds, one clean**. Hand-backs occur in a majority, not universally.
+- *"Once RED is right, GREEN is nearly free"* → drawn from one observation of `implement` at 18.4 s. The second is **128.5 s**. Direction holds; "nearly free" was n=1.
+- **The margin collapse.** Nine roles in one build give healthy ev/turn from 77 (`test_author`) to 495 (`contract`), and `review-spec` hit 686 the build before. Against runaway at ~4,400 the real headroom is **six- to nine-fold, not thirty**. That isn't "per-role is better" — it's the difference between a bound that catches runaway and one that refuses legitimate work.
+
+And **ev/turn is not a cost proxy**: `test_author` was the *lowest* ev/turn role in that build (77) and still the most expensive by 2.4×. DFE-029's mechanical half needs ev/turn; ACP-003's ceiling needs cost and turns. They are different fields for different purposes.
+
 On the same build, `implement` took **18.4 seconds, 11 turns, 38 events, $0.64**.
 
 > **Once RED is right, GREEN is nearly free. The cost and the risk both live in specifying the fix, not in writing it.**
