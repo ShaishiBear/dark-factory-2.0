@@ -172,6 +172,23 @@ And the daily `main-regression` is the only post-merge route to those 193.
 
 Two things to read before acting. This is a **proof** asymmetry, not an authorisation one: the trust-root veto works exactly as designed. And the fix is **not** the full ladder on the maintenance lane — that recreates audit finding B.1, the deadlock where nobody can safely maintain the judge. The cheap end (lint the trust root, oblige new trusted functions to be invoked, move millisecond checks to the static rung) would have caught **three of this week's four**; the fourth was a credential lifetime that no static check could see.
 
+## One lap, described by its events rather than by an adjective
+
+Issue #49 → PR #173 → merged `ca71347`. Opened and merged by `app/shaishibear-dark-factory`, **zero** `dark-factory` comments, no refusal or re-head, merge spending a 3-second-old token with `FACTORY_MERGED_VERIFIED`. No maintainer PR at any point.
+
+It was **not** unattended end to end, and an evidence review caught the overclaim:
+
+| run | event | what it did |
+|---|---|---|
+| 34596429955 | **`workflow_dispatch`** | build — human-triggered |
+| 34609884857 | `schedule` | validate + merge |
+
+Three human actions preceded it (relabel #49, close #170, dispatch the build), the branch is `a2` with an earlier `a1` series behind it, and `unattended-merge` reported `SKIPPED` — the kernel's own `merge_squash` did the merge.
+
+What survives is precise and still worth having: **within** build run 34596429955 the RED gate passed first try, and the resulting PR validated and merged with no human action inside the loop.
+
+Whether that counts as "unattended" is a definition the register does not yet state. Until it does, describe a lap by **which events triggered which runs**. It is unambiguous and costs one clause.
+
 ## The stage whose output is most often wrong at its own core purpose
 
 Both hand-backs, two builds out of two, are `test_author` failing to produce a test that fails for the stated reason.
@@ -197,7 +214,7 @@ The mechanical half separates a healthy run from a runaway one by neither time n
 
 Run 34596429955 returned **outcome D** — a clean first pass, no hand-back. Three claims withdrawn or weakened:
 
-- *"A hand-back is normal, two out of two"* → the sample is **three builds, one clean**. Hand-backs occur in a majority, not universally.
+- *"A hand-back is normal, two out of two"* → **four builds observed**: two handed back, one timed out before reaching a hand-back decision, one clean. Two of the three that reached that decision handed back; three of four produced a defective or failed RED proof. *(The first correction said "a majority of three", which dropped the timed-out build this same entry cites as evidence — the same defect, committed while correcting it.)*
 - *"Once RED is right, GREEN is nearly free"* → drawn from one observation of `implement` at 18.4 s. The second is **128.5 s**. Direction holds; "nearly free" was n=1.
 - **The margin collapse.** Nine roles in one build give healthy ev/turn from 77 (`test_author`) to 495 (`contract`), and `review-spec` hit 686 the build before. Against runaway at ~4,400 the real headroom is **six- to nine-fold, not thirty**. That isn't "per-role is better" — it's the difference between a bound that catches runaway and one that refuses legitimate work.
 
