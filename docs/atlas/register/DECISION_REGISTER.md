@@ -107,7 +107,7 @@ Ordered by cost. DFE-018 and DFE-014 are the two that block the canary; the rest
 | **DFE-026** | The only lane that proves the judge is the lane forbidden from changing it | DFE-021/023/024, DFA-018, DFV-002, DFM-001 | Tier 3 — the cheap end is hours |
 | **DFE-027** | A marker must not name more than the check behind it proves | DFE-022/023/024, DFA-017 | Small instance; open general question |
 | **DFE-028** | The GitHub client is 19/20 faked, and it is where the identity is spent | DFE-024/018, DFV-005, DFM-015 | Open — how to prove a client you cannot call |
-| **DFE-029** | `test_author`'s output is most often wrong at its own core purpose | DFE-012, DFA-003, DFM-026, DFP-060 | Diagnosed; fix is open |
+| **DFE-029** | `test_author` retries and high event volumes in four compared builds | DFE-012, DFA-003, DFM-026, DFP-060 | Evidence corrected; bound and repair remain open |
 
 **DFE-018 and DFE-014 come first**, in that order: DFE-018 is the blocker (no autonomous PR can merge) and DFE-014 is why it took four days to find. **DFE-017 lands before DFE-012** — ACP-003's argument assumes the ratchet family works as a mechanism, and three misses in three weeks say it does not; adding a fourth dial to a mechanism nobody is turning is the wrong order.
 
@@ -189,42 +189,19 @@ What survives is precise and still worth having: **within** build run 3459642995
 
 Whether that counts as "unattended" is a definition the register does not yet state. Until it does, describe a lap by **which events triggered which runs**. It is unambiguous and costs one clause.
 
-## The stage whose output is most often wrong at its own core purpose
+## `test_author`: four-build comparison, corrected from retained evidence
 
-Both hand-backs, two builds out of two, are `test_author` failing to produce a test that fails for the stated reason.
+The comparison is **four selected builds**, not all build history: `34061371205` (#134), `34541607090` (#170), `34562775449` (timeout rebuild), and `34596429955` (#173). Their six `test_author` marker rows include two rows in each of the first two builds, one timeout row, and one normal row in the last. The timeout marker also carries `attempts=2`; these rows are not a count of underlying model processes. The older #112 build, `33999901008`, is a fifth retained log outside the comparison.
 
-- **#49** — `FACTORY_RED_HANDBACK acceptance_id=AC-2 reason='AC-2 RED command unexpectedly passed'`. The declared red checkpoint **passed on the unchanged tree**: it did not express the bug at all.
-- **#134** — the declared `expected_failure` was the message `getByRole` prints while the test's own query printed another.
+**The two-hand-back attribution is withdrawn.** One explicit `FACTORY_RED_HANDBACK` marker is present, in `34541607090`. The #134 artifact instead records a failed import-order check, a successful static-check retry, then successful RED proof. It does not substantiate the register's claimed `getByRole`/`expected_failure` mismatch. Three comparison builds reached a successful RED gate; the timeout did not. Comparable logging coverage across revisions has not been independently established, so do not convert marker absence into an exact incidence rate. Agent return, cap flag, static retry, RED hand-back, build handoff and merged lap are different observations.
 
-The gate and the stage do not disagree about what a valid RED proof is. **The gate is right both times.** A stage that must write a failing test wrote, twice, something that did not fail for the reason it declared — so the cost finding and the correctness finding are one finding.
+**The headroom correction was also too broad.** The clean build's nine roles have a maximum derived ratio of 494.75 events/turn. The cited prior `review-spec` value is 686.17, but `contract` in that same prior run is 1,013. Across the four comparison builds the largest ratio on an `outcome=ok` marker without a limit flag is 1,219; including the older #112 log raises it to 2,251.67. Against the two high-volume markers (4,387.65 and 4,481.39), the derived separation is about **3.60-3.68x** or **1.95-1.99x**, respectively. This is not a healthy-work guarantee, a validated detector or evidence that no separating threshold exists. No bound is set.
 
-The mechanical half separates a healthy run from a runaway one by neither time nor turns:
+**Cost is a separate measurement.** In the clean build `test_author` is lowest at 76.61 events/turn yet has the largest reported agent cost: 3.6292255 versus `implement` at 1.501439, or 2.42x. Its 43.1% share is of that build's nine summed agent-cost fields, not a billed total. The timeout marker has no `cost_usd`; its dollar cost is unknown.
 
-| run | secs | turns | events | ev/turn | outcome |
-|---|---|---|---|---|---|
-| #134 r1 | 789 | 31 | 136,017 | **4,387** | `cap_reached` |
-| #134 r2 | 97 | 19 | 1,266 | 66 | ok |
-| #49 r1 | 160 | 15 | 2,181 | 145 | ok, RED refused |
-| #49 r2 | 444 | 30 | 713 | 23 | ok |
-| #49 rebuild | 4,035 | 18 | 80,665 | **4,481** | **timed out** |
+The requested `implement` pair is **18.353 s** in `34541607090` and **128.534 s** in `34596429955`, n=2 (7.00x longer). `implement` was cheaper than `test_author` in both of that pair; "nearly free" and population trends do not follow. Similar event ratios under different limits do not establish the same root cause.
 
-`cap_reached` and `timed_out` are **the same failure caught by different limits** — one hit the turn cap, the other hit the wall first. The turn cap bounds turns; the wall bounds seconds; **nothing bounds how much a single turn may generate.**
-
-### Corrected by the experiment the entry asked for
-
-Run 34596429955 returned **outcome D** — a clean first pass, no hand-back. Three claims withdrawn or weakened:
-
-- *"A hand-back is normal, two out of two"* → **four builds observed**: two handed back, one timed out before reaching a hand-back decision, one clean. Two of the three that reached that decision handed back; three of four produced a defective or failed RED proof. *(The first correction said "a majority of three", which dropped the timed-out build this same entry cites as evidence — the same defect, committed while correcting it.)*
-- *"Once RED is right, GREEN is nearly free"* → drawn from one observation of `implement` at 18.4 s. The second is **128.5 s**. Direction holds; "nearly free" was n=1.
-- **The margin collapse.** Nine roles in one build give healthy ev/turn from 77 (`test_author`) to 495 (`contract`), and `review-spec` hit 686 the build before. Against runaway at ~4,400 the real headroom is **six- to nine-fold, not thirty**. That isn't "per-role is better" — it's the difference between a bound that catches runaway and one that refuses legitimate work.
-
-And **ev/turn is not a cost proxy**: `test_author` was the *lowest* ev/turn role in that build (77) and still the most expensive by 2.4×. DFE-029's mechanical half needs ev/turn; ACP-003's ceiling needs cost and turns. They are different fields for different purposes.
-
-On the same build, `implement` took **18.4 seconds, 11 turns, 38 events, $0.64**.
-
-> **Once RED is right, GREEN is nearly free. The cost and the risk both live in specifying the fix, not in writing it.**
-
-Nothing in the directive corpus says this; it came from watching a lap rather than reasoning about one (DFE-029).
+See [DFE-029-EVIDENCE.md](DFE-029-EVIDENCE.md) for the nine-role table, raw-field provenance, ratios and limitations. Earlier two-of-two prevalence, "a majority of three", "least reliable" rankings, shared-cause assertions and unqualified cost percentages are withdrawn, not retained as current claims. No floor, limit or stage repair changes here; the historical preregistration remains untouched.
 
 ## The runner's failure mode is not one wrong number — it is every number
 
