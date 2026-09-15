@@ -84,8 +84,9 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
           </button>
         </div>
 
-        {/* Content: YouTube iframe. Modal is YouTube-only — Dynamous citations
-            go directly to lesson_url (handled in ChatArea before this modal opens). */}
+        {/* Content: YouTube iframe + Transcript Excerpt. Modal is YouTube-only —
+            Dynamous citations go directly to lesson_url (handled in ChatArea
+            before this modal opens). */}
         <div className="flex-1 min-h-0 flex flex-col gap-4 mb-4 overflow-y-auto">
           <div className="w-full aspect-video">
             {embedUrl ? (
@@ -102,6 +103,21 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
               </div>
             )}
           </div>
+
+          {/* Transcript Excerpt: caption snippet from the Citation payload, rendered
+              verbatim. pre-wrap preserves literal newlines so multi-line transcripts
+              stay one caption block rather than one collapsed paragraph. */}
+          <section aria-label="Transcript excerpt">
+            <h4 className="text-slate-300 text-xs font-semibold uppercase tracking-wide m-0">
+              Transcript Excerpt
+            </h4>
+            <p
+              className="text-slate-200 text-sm leading-relaxed font-sans m-0 mt-2"
+              style={{ whiteSpace: 'pre-wrap' }}
+            >
+              {citation.snippet}
+            </p>
+          </section>
         </div>
 
         {/* Footer: external link */}
