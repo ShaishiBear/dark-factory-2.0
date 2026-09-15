@@ -186,6 +186,51 @@ class ProgrammeQueue:
                 return
         raise ProgrammeRefused("created issue was not confirmed in the programme inventory")
 
+    def status(self, labels: Mapping[str, str]) -> dict:
+        """Read a progress projection; no scheduler or effect consumes this as authority.
+
+        A closed issue is completed only when the existing receipt verifier says so. GitHub
+        reads are not an atomic snapshot; consumers must re-observe before any action through
+        the normal admission path. This remains available while execution is stopped.
+        """
+        programme = self.current()
+        if programme is None:
+            return {"version": "1.0", "status": "no-programme", "programme": None, "items": []}
+        inventory = self.inventory(programme)
+        done = {item["id"] for item in programme.items if item["id"] in inventory
+                and self.completed(programme, item, inventory[item["id"]])}
+        items = []
+        for item in programme.items:
+            row = inventory.get(item["id"])
+            waiting = sorted(set(item["blocked_by"]) - done)
+            issue_labels = sorted({str(x.get("name", "")) if isinstance(x, dict) else str(x)
+                                   for x in row.get("labels", [])}) if row else []
+            if item["id"] in done:
+                state = "completed"
+            elif row and row.get("state") == "closed":
+                state = "closed-without-verified-completion"
+            elif waiting:
+                state = "blocked"
+            elif row is None:
+                state = "ready-for-candidate"
+            else:
+                state = "awaiting-triage"
+                for key, display in (("needs_human", "needs-human"), ("rejected", "rejected"),
+                                     ("rate_limited", "rate-limited"), ("in_progress", "in-progress"),
+                                     ("accepted", "accepted")):
+                    if labels[key] in issue_labels:
+                        state = display
+                        break
+            items.append({"id": item["id"], "acceptance": item["acceptance"], "status": state,
+                          "waiting_on": waiting, "completion_verified": item["id"] in done,
+                          "issue": row["number"] if row else None, "labels": issue_labels})
+        latest = self.current()
+        if latest is None or latest.sha256 != programme.sha256:
+            raise ProgrammeRefused("programme changed during status observation")
+        return {"version": "1.0", "status": "complete" if len(done) == len(items) else "incomplete",
+                "programme": programme.sha256, "spec": programme.spec["id"],
+                "revision": programme.spec["revision"], "items": items}
+
     def admit(self, issue: Mapping) -> tuple[Programme, dict] | None:
         """Mandatory check before model work and again before merge; stale bindings refuse."""
         author = str((issue.get("author") or {}).get("login") or "")

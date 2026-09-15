@@ -64,6 +64,7 @@ def main() -> int:
     pulse = sub.add_parser("programme-pulse", help="validate and record bounded continuation inputs")
     for field in ("programme", "remaining", "parent"):
         pulse.add_argument("--" + field, required=True)
+    sub.add_parser("programme-status", help="read programme progress without models or effects")
     for name in ("merge-export", "merge-import"):
         transfer = sub.add_parser(name, help="transport merge evidence within one Actions run")
         transfer.add_argument("--pr", type=int, required=True)
@@ -157,6 +158,17 @@ def main() -> int:
 
         print("FACTORY_PULSE " + json.dumps(pulse_context(
             programme=args.programme, remaining=args.remaining, parent=args.parent), sort_keys=True))
+        return 0
+
+    if args.command == "programme-status":
+        import json
+        from .github_cli import GitHubClient
+        from .programme_runtime import ProgrammeQueue
+
+        cfg = load_config(args.config)
+        github = GitHubClient(cfg.repository, cwd=ROOT)
+        print("FACTORY_PROGRAMME_STATUS " + json.dumps(
+            ProgrammeQueue(github, cfg.default_branch).status(cfg.labels), sort_keys=True))
         return 0
 
     rt = runtime(args.config)
