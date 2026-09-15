@@ -1,0 +1,53 @@
+# Render @PUBLIC_IPV4@ only after checking the verified existing host address.
+worker_processes 1;
+pid /run/dark-factory-frontdoor-proxy/nginx.pid;
+error_log /var/log/dark-factory-frontdoor-proxy/error.log warn;
+events { worker_connections 128; }
+http {
+    include /etc/nginx/mime.types;
+    access_log off;
+    client_body_temp_path /var/lib/dark-factory-frontdoor-proxy/body;
+    proxy_temp_path /var/lib/dark-factory-frontdoor-proxy/proxy;
+    fastcgi_temp_path /var/lib/dark-factory-frontdoor-proxy/fastcgi;
+    uwsgi_temp_path /var/lib/dark-factory-frontdoor-proxy/uwsgi;
+    scgi_temp_path /var/lib/dark-factory-frontdoor-proxy/scgi;
+    server_tokens off;
+    client_max_body_size 250000;
+    client_body_timeout 15s;
+    client_header_timeout 15s;
+    keepalive_timeout 15s;
+    limit_req_zone $binary_remote_addr zone=frontdoor_requests:1m rate=5r/s;
+    limit_conn_zone $binary_remote_addr zone=frontdoor_connections:1m;
+    server {
+        listen 80 default_server;
+        server_name @PUBLIC_IPV4@;
+        location ^~ /.well-known/acme-challenge/ {
+            root /var/lib/dark-factory-frontdoor/acme;
+            try_files $uri =404;
+        }
+        location / { return 308 https://@PUBLIC_IPV4@$request_uri; }
+    }
+    server {
+        listen 443 ssl default_server;
+        server_name @PUBLIC_IPV4@;
+        ssl_certificate /etc/letsencrypt/live/dark-factory-frontdoor/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/dark-factory-frontdoor/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        if ($host != "@PUBLIC_IPV4@") { return 421; }
+        location / {
+            limit_req zone=frontdoor_requests burst=10 nodelay;
+            limit_conn frontdoor_connections 8;
+            proxy_pass http://127.0.0.1:8765;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header Connection "";
+            proxy_http_version 1.1;
+            proxy_connect_timeout 5s;
+            proxy_send_timeout 15s;
+      # Two bounded Actions calls may include queue/setup time as well as API time.
+      proxy_read_timeout 1300s;
+            proxy_next_upstream off;
+            proxy_buffering off;
+        }
+    }
+}

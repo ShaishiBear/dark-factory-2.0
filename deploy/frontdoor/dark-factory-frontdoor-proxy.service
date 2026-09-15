@@ -1,0 +1,32 @@
+[Unit]
+Description=Dark Factory Front Door HTTPS proxy
+After=network-online.target dark-factory-frontdoor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+RuntimeDirectory=dark-factory-frontdoor-proxy
+LogsDirectory=dark-factory-frontdoor-proxy
+StateDirectory=dark-factory-frontdoor-proxy
+StateDirectoryMode=0755
+ExecStartPre=/usr/sbin/nginx -t -c /opt/dark-factory-frontdoor/nginx.conf
+ExecStart=/usr/sbin/nginx -c /opt/dark-factory-frontdoor/nginx.conf -g "daemon off;"
+ExecReload=/usr/sbin/nginx -t -c /opt/dark-factory-frontdoor/nginx.conf
+ExecReload=/usr/sbin/nginx -s reload -c /opt/dark-factory-frontdoor/nginx.conf
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=20
+KillSignal=SIGQUIT
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+MemoryMax=96M
+TasksMax=8
+
+[Install]
+WantedBy=multi-user.target

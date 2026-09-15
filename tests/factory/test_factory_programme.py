@@ -98,6 +98,104 @@ class FakeGitHub:
                               "created_at": "2026-09-15T10:00:00Z", "updated_at": "2026-09-15T10:00:00Z"})
 
 
+class StatusTests(unittest.TestCase):
+    def setUp(self):
+        self.gh = FakeGitHub()
+        self.queue = ProgrammeQueue(self.gh, "main")
+        self.labels = {key: "custom:" + key for key in
+                       ("needs_human", "rejected", "rate_limited", "in_progress", "accepted")}
+
+    def status(self):
+        before = deepcopy((self.gh.rows, self.gh.comments))
+        with patch.object(self.gh, "create_programme_issue", side_effect=AssertionError("write")), patch.object(self.gh, "comment_issue", side_effect=AssertionError("write")):
+            result = self.queue.status(self.labels)
+        self.assertEqual(before, (self.gh.rows, self.gh.comments))
+        return result
+
+    def test_empty_frontier_is_visible_without_creating_candidates(self):
+        result = self.status()
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["spec_sha256"], sha256_value(self.gh.source["spec"]))
+        first, second = result["items"]
+        self.assertEqual(first["status"], "ready-for-candidate")
+        self.assertEqual(second["status"], "blocked")
+        self.assertEqual(second["waiting_on"], ["open"])
+        self.assertIsNone(first["issue"])
+
+    def test_absent_programme_is_explicit(self):
+        self.gh.source = None
+        result = self.status()
+        self.assertEqual(result["status"], "no-programme")
+        self.assertEqual(result["items"], [])
+
+    def test_reports_configured_labels_without_accepting_or_reopening(self):
+        self.queue.sync(Mock())
+        for key, expected in ((None, "awaiting-triage"), ("accepted", "accepted"),
+                              ("in_progress", "in-progress"), ("rejected", "rejected"),
+                              ("rate_limited", "rate-limited"), ("needs_human", "needs-human")):
+            with self.subTest(label=key):
+                self.gh.rows[0]["labels"] = [{"name": self.labels[key]}] if key else []
+                first = self.status()["items"][0]
+                self.assertEqual(first["status"], expected)
+                self.assertEqual(first["issue"], 1)
+                self.assertFalse(first["completion_verified"])
+
+    def test_human_attention_wins_over_a_stale_accepted_label(self):
+        self.queue.sync(Mock())
+        self.gh.rows[0]["labels"] = [self.labels["accepted"], self.labels["needs_human"]]
+        self.assertEqual(self.status()["items"][0]["status"], "needs-human")
+
+    def test_closed_issue_does_not_report_completion_or_release_successor(self):
+        self.queue.sync(Mock())
+        self.gh.rows[0]["state"] = "closed"
+        first, second = self.status()["items"]
+        self.assertEqual(first["status"], "closed-without-verified-completion")
+        self.assertFalse(first["completion_verified"])
+        self.assertEqual(second["status"], "blocked")
+
+    def test_existing_receipt_verifier_controls_reported_completion(self):
+        self.queue.sync(Mock())
+        self.gh.rows[0]["state"] = "closed"
+        with patch.dict("os.environ", {"GITHUB_RUN_ID": "42", "GITHUB_RUN_ATTEMPT": "1"}):
+            self.queue.record_completion(self.gh.issue(1), 9,
+                                         {"head_sha": "a" * 40, "merge_sha": "b" * 40,
+                                          "verdict": "verified"})
+        first, second = self.status()["items"]
+        self.assertEqual(first["status"], "completed")
+        self.assertTrue(first["completion_verified"])
+        self.assertEqual(second["status"], "ready-for-candidate")
+        self.gh.run["conclusion"] = "failure"
+        self.assertFalse(self.status()["items"][0]["completion_verified"])
+
+    def test_invalid_inventory_or_unreachable_source_never_reports_partial_progress(self):
+        self.queue.sync(Mock())
+        self.gh.rows[0]["body"] += "edited"
+        with self.assertRaises(ProgrammeRefused):
+            self.status()
+        with patch.object(self.gh, "json", side_effect=TimeoutError("offline")):
+            with self.assertRaises(TimeoutError):
+                self.status()
+
+    def test_changing_programme_during_observation_refuses(self):
+        first = self.queue.current()
+        with patch.object(self.queue, "current", side_effect=[first, None]):
+            with self.assertRaisesRegex(ProgrammeRefused, "changed during status"):
+                self.status()
+
+    def test_cli_does_not_construct_execution_runtime(self):
+        import contextlib
+        import io
+        from factory_kernel import cli
+
+        cfg = SimpleNamespace(repository=REPO, default_branch="main", labels=self.labels)
+        output = io.StringIO()
+        with patch("sys.argv", ["factory_kernel", "programme-status"]), patch.object(cli, "load_config", return_value=cfg), patch.object(cli, "runtime", side_effect=AssertionError("execution runtime")), patch("factory_kernel.github_cli.GitHubClient", return_value=self.gh), contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(), 0)
+        value = json.loads(output.getvalue().removeprefix("FACTORY_PROGRAMME_STATUS "))
+        self.assertEqual(value["items"][0]["status"], "ready-for-candidate")
+        self.assertEqual(self.gh.rows, [])
+
+
 class CompilerTests(unittest.TestCase):
     def compile(self, raw):
         return compile_programme(raw, repository=REPO)

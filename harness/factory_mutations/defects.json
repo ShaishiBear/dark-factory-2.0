@@ -6,32 +6,46 @@
   ],
   "defects": [
     {
-      "id": "programme-early-validation-admission-skipped",
-      "file": "factory_kernel/runtime.py",
-      "find": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
-      "replace": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        self.check_stop()",
-      "why": "Retired or edited programme work would start repository and proof work before admission."
+      "id": "frontdoor-synthesis-owner-bypassed",
+      "find": "if principal.role != \"owner\":",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "if False:",
+      "why": "A proposal principal could request paid programme synthesis."
     },
     {
-      "id": "programme-early-validation-stop-skipped",
-      "file": "factory_kernel/runtime.py",
-      "find": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
-      "replace": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))",
-      "why": "A stop arriving during remote admission would be missed before repository and proof work."
+      "id": "frontdoor-synthesis-approval-bypassed",
+      "find": "if (type(command[\"approval_version\"]) is not int",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "if False and (type(command[\"approval_version\"]) is not int",
+      "why": "A wrong approval identity could spend API calls before eventual compilation refusal."
     },
     {
-      "id": "programme-early-rehead-admission-skipped",
-      "file": "factory_kernel/runtime.py",
-      "find": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
-      "replace": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        self.check_stop()",
-      "why": "Retired or edited programme work would start repository and proof work before admission."
+      "id": "frontdoor-synthesis-reservation-skipped",
+      "find": "            record = {\"identity\": identity, \"state\": \"pending\", \"stages\": []}\n            self._save(path, record)",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "            record = {\"identity\": identity, \"state\": \"pending\", \"stages\": []}",
+      "why": "An API call could start before a durable reservation, allowing repeated uncertain spend."
     },
     {
-      "id": "programme-early-rehead-stop-skipped",
-      "file": "factory_kernel/runtime.py",
-      "find": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
-      "replace": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))",
-      "why": "A stop arriving during remote admission would be missed before repository and proof work."
+      "id": "frontdoor-synthesis-freshness-bypassed",
+      "find": "\"expected_project_version\": version, \"approval_version\": command[\"approval_version\"],",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "\"expected_project_version\": self.store.snapshot(project, principal=principal)[\"project_version\"], \"approval_version\": command[\"approval_version\"],",
+      "why": "A new owner intent during synthesis could be hidden by silently rebinding the old review to a newer project version."
+    },
+    {
+      "id": "frontdoor-synthesis-tools-granted",
+      "find": "\"programme-proposer\": JUDGE_TOOLS,",
+      "file": "factory_kernel/worker_policy.py",
+      "replace": "\"programme-proposer\": READ_TOOLS,",
+      "why": "A programme proposer could inspect private host files beyond the committed facts provided."
+    },
+    {
+      "id": "frontdoor-synthesis-budget-raised",
+      "find": "\"programme-proposer\": 1.0,",
+      "file": "factory_kernel/worker_policy.py",
+      "replace": "\"programme-proposer\": 10.0,",
+      "why": "Programme synthesis could exceed its approved per-call limit."
     },
     {
       "id": "security-verdict-forced-pass",
@@ -2197,6 +2211,146 @@
       "why": "Confirmation must bind the acknowledged POST number, not accept a different matching issue."
     },
     {
+      "id": "frontdoor-http-stop-blocked-by-observation",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "class FrontDoorServer(ThreadingMixIn, WSGIServer):",
+      "replace": "class FrontDoorServer(WSGIServer):",
+      "why": "A slow observation must not prevent an authenticated stop request from being served; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-http-owner-auth-bypassed",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "return hmac.compare_digest(supplied, self.token_hash)",
+      "replace": "return True",
+      "why": "A forged bearer cannot read intent, approve scope or request stop; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-http-missing-origin-accepted",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "if method == \"POST\" and environ.get(\"HTTP_ORIGIN\") != self.origin:",
+      "replace": "if False:",
+      "why": "Owner commands require an explicit same-origin request; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-http-stop-dispatches-worker",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "\"workflow\", \"run\", \"dark-factory-owner-stop.yml\"",
+      "replace": "\"workflow\", \"run\", \"dark-factory-worker.yml\"",
+      "why": "A stop command must never dispatch product execution; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-http-read-failure-claims-clear",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "result.update(observation_available=False, execution=None, stop=None)",
+      "replace": "result.update(observation_available=True, execution=None, stop={\"state\": \"clear\", \"issues\": []})",
+      "why": "Missing remote evidence must remain unknown rather than claiming the stop is clear; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-stop-created-without-stop-label",
+      "file": "factory_kernel/frontdoor_control.py",
+      "find": "\"labels\": [\"factory:stop\"]",
+      "replace": "\"labels\": []",
+      "why": "A stop issue must carry the existing remote stop label in its initial atomic POST; caught by tests/factory/test_frontdoor_control.py."
+    },
+    {
+      "id": "frontdoor-stop-ignores-owner",
+      "file": "factory_kernel/frontdoor_control.py",
+      "find": "os.environ.get(\"GITHUB_ACTOR\") != owner",
+      "replace": "False",
+      "why": "Only the owner's protected-main workflow invocation may request this control effect; caught by tests/factory/test_frontdoor_control.py."
+    },
+    {
+      "id": "frontdoor-stop-ignores-changed-replay",
+      "file": "factory_kernel/frontdoor_control.py",
+      "find": "row.get(\"body\") != body",
+      "replace": "False",
+      "why": "A repeated stop request ID cannot silently bind different wording; caught by tests/factory/test_frontdoor_control.py."
+    },
+    {
+      "id": "frontdoor-stop-workflow-queues-behind-worker",
+      "file": ".github/workflows/dark-factory-owner-stop.yml",
+      "find": "group: dark-factory-owner-stop",
+      "replace": "group: dark-factory-worker",
+      "why": "Emergency stop must be able to reach the existing authority while a long worker proof is running; caught by tests/factory/test_frontdoor_control.py."
+    },
+    {
+      "id": "frontdoor-review-worker-prepares-activation",
+      "file": "factory_kernel/frontdoor_programme.py",
+      "find": "if principal.role != \"owner\":",
+      "replace": "if False:",
+      "why": "An untrusted proposal worker cannot prepare an owner-authorized activation review; caught by tests/factory/test_frontdoor_programme.py."
+    },
+    {
+      "id": "frontdoor-review-stale-project-accepted",
+      "file": "factory_kernel/frontdoor_programme.py",
+      "find": "request[\"expected_project_version\"] != state[\"project_version\"]",
+      "replace": "False",
+      "why": "A review based on stale intent state must refuse; caught by tests/factory/test_frontdoor_programme.py."
+    },
+    {
+      "id": "frontdoor-review-wrong-approval-hash-accepted",
+      "file": "factory_kernel/frontdoor_programme.py",
+      "find": "request[\"spec_sha256\"] != approval[\"spec_sha256\"]",
+      "replace": "False",
+      "why": "An owner review must name the exact approved scope hash; caught by tests/factory/test_frontdoor_programme.py."
+    },
+    {
+      "id": "frontdoor-review-uses-unapproved-draft",
+      "file": "factory_kernel/frontdoor_programme.py",
+      "find": "\"spec\": deepcopy(approval[\"spec\"])",
+      "replace": "\"spec\": deepcopy(state[\"draft\"][\"spec\"])",
+      "why": "Using an unapproved draft blocks a valid review against the approved hash even though the compiler still prevents scope escalation; caught by tests/factory/test_frontdoor_programme.py."
+    },
+    {
+      "id": "frontdoor-worker-approves-scope",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "if principal.role != \"owner\" and operation != \"propose-spec\":",
+      "replace": "if False:",
+      "why": "Proposal workers must not approve their own scope; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-stale-command-overwrites-intent",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "if expected != len(events):",
+      "replace": "if False:",
+      "why": "A stale browser or worker cannot overwrite newer intent; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-approval-ignores-spec-hash",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "or payload[\"spec_sha256\"] != draft[\"spec_sha256\"]",
+      "replace": "",
+      "why": "Explicit approval must bind the reviewed specification bytes; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-approves-unresolved-product-question",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "if draft[\"open_questions\"]:",
+      "replace": "if False:",
+      "why": "Blocking product questions prevent approval while technical uncertainty may remain deferred; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-reuses-command-key-for-different-content",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "if event[\"command\"] != command or event[\"actor\"] != actor:",
+      "replace": "if False:",
+      "why": "Retry identity binds the original command and authenticated actor; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-ignores-history-chain",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "event[\"previous\"] != previous",
+      "replace": "False",
+      "why": "A changed historical event must refuse replay instead of silently changing original wording; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-new-intent-keeps-obsolete-draft",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "                if operation == \"record-intent\":\n                    draft = None",
+      "replace": "",
+      "why": "New user intent requires a fresh draft before approval; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
       "id": "continuation-counter-not-decremented",
       "file": "factory_kernel/continuation.py",
       "find": "f\"continuation_remaining={count - 1}\"",
@@ -2260,11 +2414,137 @@
       "why": "Programme retirement during preparation must prevent publication."
     },
     {
+      "id": "frontdoor-prepare-owner-bypassed",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "if principal.role != \"owner\":",
+      "replace": "if False:",
+      "why": "A proposal principal must not spend the owner's intake API budget."
+    },
+    {
+      "id": "frontdoor-prepare-audit-binding-ignored",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "if value[\"draft_sha256\"] != sha256_value(draft) or value[\"decision\"] not in",
+      "replace": "if value[\"decision\"] not in",
+      "why": "An audit of a different draft cannot mark this scope ready for owner review."
+    },
+    {
+      "id": "frontdoor-prepare-readiness-ignored",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "if value[\"decision\"] == \"ready\" and check[\"status\"] != \"met\":",
+      "replace": "if False:",
+      "why": "Unresolved product readiness cannot be hidden behind a ready decision."
+    },
+    {
+      "id": "frontdoor-prepare-tools-granted",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "\"intent-proposer\": JUDGE_TOOLS,",
+      "replace": "\"intent-proposer\": READ_TOOLS,",
+      "why": "Intake model processes receive only supplied facts, never tools for private host state."
+    },
+    {
+      "id": "frontdoor-prepare-reservation-skipped",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "self._save(path, record)  # Durable before the first API call; crashes do not repeat it.",
+      "replace": "pass  # Missing durable reservation.",
+      "why": "An interrupted request must be recorded before any API spend, preventing silent repeats."
+    },
+    {
+      "id": "frontdoor-prepare-budget-raised",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "\"intent-proposer\": 1.0,",
+      "replace": "\"intent-proposer\": 10.0,",
+      "why": "One preparation stage may not silently exceed its bounded API budget."
+    },
+    {
+      "id": "frontdoor-hosted-reservation-skipped",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "self.records._save(path, record)  # No POST before this durable reservation.",
+      "replace": "pass  # Missing durable dispatch reservation.",
+      "why": "A remote paid call must be durably identified before its one-shot POST."
+    },
+    {
+      "id": "frontdoor-hosted-owner-ignored",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "or run.get(\"actor\", {}).get(\"login\") != owner",
+      "replace": "or False",
+      "why": "A successful run from another actor cannot supply this owner's result."
+    },
+    {
+      "id": "frontdoor-hosted-result-hash-ignored",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "result[\"request_sha256\"] != sha256_value(payload)",
+      "replace": "False",
+      "why": "Encrypted results still have to name the exact private request."
+    },
+    {
+      "id": "frontdoor-hosted-rerun-accepted",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "or run.get(\"run_attempt\") != 1",
+      "replace": "or False",
+      "why": "Rerunning a paid preparation is not an authorized retry of its recorded attempt."
+    },
+    {
+      "id": "frontdoor-hosted-duplicate-accepted",
+      "file": "factory_kernel/frontdoor_hosted_worker.py",
+      "find": "if len(matches) != 1 or matches[0].get(\"id\") != run_id or matches[0].get(\"run_attempt\") != 1:",
+      "replace": "if not matches:",
+      "why": "Concurrent or repeated dispatches with the same identity must not repeat API spending."
+    },
+    {
+      "id": "frontdoor-hosted-expiry-ignored",
+      "file": "factory_kernel/frontdoor_hosted_worker.py",
+      "find": "if not 0 <= now - payload[\"issued_at\"] <= 900:",
+      "replace": "if False:",
+      "why": "An old encrypted request cannot be replayed outside its bounded observation window."
+    },
+    {
+      "id": "frontdoor-hosted-payload-role-widened",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "or payload[\"role\"] not in INTAKE_ROLES",
+      "replace": "or False",
+      "why": "The encrypted proposal bridge must never grant implementation or qualification capabilities."
+    },
+    {
+      "id": "frontdoor-hosted-secret-step-main-guard-removed",
+      "file": ".github/workflows/dark-factory-frontdoor-prepare.yml",
+      "find": "github.ref == 'refs/heads/main' && github.run_attempt == 1",
+      "replace": "github.run_attempt == 1",
+      "why": "The workflow must reject candidate branches before any secret-bearing step starts."
+    },
+    {
       "id": "continuation-exempts-proof-job-errors",
       "file": ".github/workflows/dark-factory-worker.yml",
       "find": "    timeout-minutes: 360\n    outputs:",
       "replace": "    timeout-minutes: 360\n    continue-on-error: true\n    outputs:",
       "why": "Only the optional scheduling job may ignore errors; a proof failure must fail its run."
+    },
+    {
+      "id": "programme-early-validation-admission-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
+      "replace": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        self.check_stop()",
+      "why": "Retired or edited programme work would start repository and proof work before admission."
+    },
+    {
+      "id": "programme-early-validation-stop-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
+      "replace": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))",
+      "why": "A stop arriving during remote admission would be missed before repository and proof work."
+    },
+    {
+      "id": "programme-early-rehead-admission-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
+      "replace": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        self.check_stop()",
+      "why": "Retired or edited programme work would start repository and proof work before admission."
+    },
+    {
+      "id": "programme-early-rehead-stop-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
+      "replace": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))",
+      "why": "A stop arriving during remote admission would be missed before repository and proof work."
     }
   ]
 }
