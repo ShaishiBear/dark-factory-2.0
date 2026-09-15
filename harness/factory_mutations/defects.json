@@ -6,48 +6,6 @@
   ],
   "defects": [
     {
-      "id": "frontdoor-synthesis-owner-bypassed",
-      "find": "if principal.role != \"owner\":",
-      "file": "factory_kernel/frontdoor_synthesis.py",
-      "replace": "if False:",
-      "why": "A proposal principal could request paid programme synthesis."
-    },
-    {
-      "id": "frontdoor-synthesis-approval-bypassed",
-      "find": "if (type(command[\"approval_version\"]) is not int",
-      "file": "factory_kernel/frontdoor_synthesis.py",
-      "replace": "if False and (type(command[\"approval_version\"]) is not int",
-      "why": "A wrong approval identity could spend API calls before eventual compilation refusal."
-    },
-    {
-      "id": "frontdoor-synthesis-reservation-skipped",
-      "find": "            record = {\"identity\": identity, \"state\": \"pending\", \"stages\": []}\n            self._save(path, record)",
-      "file": "factory_kernel/frontdoor_synthesis.py",
-      "replace": "            record = {\"identity\": identity, \"state\": \"pending\", \"stages\": []}",
-      "why": "An API call could start before a durable reservation, allowing repeated uncertain spend."
-    },
-    {
-      "id": "frontdoor-synthesis-freshness-bypassed",
-      "find": "\"expected_project_version\": version, \"approval_version\": command[\"approval_version\"],",
-      "file": "factory_kernel/frontdoor_synthesis.py",
-      "replace": "\"expected_project_version\": self.store.snapshot(project, principal=principal)[\"project_version\"], \"approval_version\": command[\"approval_version\"],",
-      "why": "A new owner intent during synthesis could be hidden by silently rebinding the old review to a newer project version."
-    },
-    {
-      "id": "frontdoor-synthesis-tools-granted",
-      "find": "\"programme-proposer\": JUDGE_TOOLS,",
-      "file": "factory_kernel/worker_policy.py",
-      "replace": "\"programme-proposer\": READ_TOOLS,",
-      "why": "A programme proposer could inspect private host files beyond the committed facts provided."
-    },
-    {
-      "id": "frontdoor-synthesis-budget-raised",
-      "find": "\"programme-proposer\": 1.0,",
-      "file": "factory_kernel/worker_policy.py",
-      "replace": "\"programme-proposer\": 10.0,",
-      "why": "Programme synthesis could exceed its approved per-call limit."
-    },
-    {
       "id": "security-verdict-forced-pass",
       "file": "scripts/factory_security.py",
       "find": "    verdict = \"pass\" if not findings else \"fail\"\n",
@@ -2211,6 +2169,174 @@
       "why": "Confirmation must bind the acknowledged POST number, not accept a different matching issue."
     },
     {
+      "id": "continuation-counter-not-decremented",
+      "file": "factory_kernel/continuation.py",
+      "find": "f\"continuation_remaining={count - 1}\"",
+      "replace": "f\"continuation_remaining={count}\"",
+      "why": "A successful pulse must spend one of its remaining continuation slots."
+    },
+    {
+      "id": "continuation-ignores-failed-merge",
+      "file": "factory_kernel/continuation.py",
+      "find": "if dispatch_result != \"success\" or merge_result not in {\"success\", \"skipped\"}:",
+      "replace": "if dispatch_result != \"success\":",
+      "why": "A failed or cancelled merge/post-merge authority cannot schedule another paid attempt."
+    },
+    {
+      "id": "continuation-ignores-final-stop",
+      "file": "factory_kernel/continuation.py",
+      "find": "    check_stop()\n    queue.github.run([",
+      "replace": "    queue.github.run([",
+      "why": "Stop must be rechecked immediately before the continuation request."
+    },
+    {
+      "id": "continuation-admits-replaced-programme",
+      "file": "factory_kernel/programme_runtime.py",
+      "find": "if expected_programme and (programme is None or programme.sha256 != expected_programme):",
+      "replace": "if False and expected_programme and (programme is None or programme.sha256 != expected_programme):",
+      "why": "A continued pulse cannot materialize scope from a different approved programme."
+    },
+    {
+      "id": "publication-base-omitted",
+      "file": "factory_kernel/runtime.py",
+      "find": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"base\"])",
+      "replace": "env = self._run_env(paths, base_ref=value[\"base\"])",
+      "why": "A fresh publication process must preserve the captured branch base for the sole provenance publisher."
+    },
+    {
+      "id": "publication-base-substituted",
+      "file": "factory_kernel/runtime.py",
+      "find": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"base\"])",
+      "replace": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"kernel\"])",
+      "why": "The kernel checkout identity is not the certified branch base."
+    },
+    {
+      "id": "publication-malformed-base-accepted",
+      "file": "factory_kernel/runtime.py",
+      "find": "                or not isinstance(value.get(\"base\"), str)\n                or not re.fullmatch(r\"(?:[0-9a-f]{40}|[0-9a-f]{64})\", value[\"base\"])\n",
+      "replace": "",
+      "why": "An invalid prepared base must refuse before spending App authority on push or PR creation."
+    },
+    {
+      "id": "resume-programme-any-bot",
+      "file": "factory_kernel/runtime.py",
+      "find": "or author.get(\"login\") != factory_login:",
+      "replace": "or (not admission and author.get(\"login\") != factory_login):",
+      "why": "Admission of the linked issue cannot authorize a PR opened by a different Bot."
+    },
+    {
+      "id": "resume-programme-readmission-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "            if admission:\n                fresh = ProgrammeQueue",
+      "replace": "            if False and admission:\n                fresh = ProgrammeQueue",
+      "why": "Programme retirement during preparation must prevent publication."
+    },
+    {
+      "id": "trajectory-source-main-ignored",
+      "file": "factory_kernel/trajectory.py",
+      "find": "run.get(\"head_branch\") != \"main\" or ",
+      "replace": "",
+      "why": "Candidate-branch observations cannot be misattributed to canonical main execution."
+    },
+    {
+      "id": "trajectory-source-completion-ignored",
+      "file": "factory_kernel/trajectory.py",
+      "find": "or run.get(\"status\") != \"completed\"",
+      "replace": "or False",
+      "why": "An in-progress run does not have a final outcome to archive."
+    },
+    {
+      "id": "trajectory-model-privacy-bypassed",
+      "file": "factory_kernel/trajectory.py",
+      "find": "\"model\": model if model in models else None",
+      "replace": "\"model\": model",
+      "why": "Arbitrary artifact strings must not escape through model metadata."
+    },
+    {
+      "id": "trajectory-missing-cost-invented-as-zero",
+      "file": "factory_kernel/trajectory.py",
+      "find": "_number(row.get(\"cost_usd\"))",
+      "replace": "_number(row.get(\"cost_usd\") or 0)",
+      "why": "Unknown cost is missing evidence, not evidence of a free attempt."
+    },
+    {
+      "id": "trajectory-existing-record-replaced",
+      "file": "factory_kernel/trajectory_archive.py",
+      "find": "if entries[name] != blob:",
+      "replace": "if False:",
+      "why": "An altered observation must not replace the immutable record for an existing attempt."
+    },
+    {
+      "id": "trajectory-archive-force-update",
+      "file": "factory_kernel/trajectory_archive.py",
+      "find": "{\"sha\": new_commit, \"force\": False}",
+      "replace": "{\"sha\": new_commit, \"force\": True}",
+      "why": "A racing archive writer must not erase another completed append."
+    },
+    {
+      "id": "trajectory-existing-tree-dropped",
+      "file": "factory_kernel/trajectory_archive.py",
+      "find": "payload[\"base_tree\"] = tree",
+      "replace": "pass",
+      "why": "New archive commits must preserve previously recorded trajectories."
+    },
+    {
+      "id": "trajectory-app-age-exempted",
+      "file": "factory_kernel/github_cli.py",
+      "find": "\"archive_trajectory\",",
+      "replace": "",
+      "why": "Even a non-authoritative archive publication requires a fresh App capability."
+    },
+    {
+      "id": "continuation-exempts-proof-job-errors",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "    timeout-minutes: 360\n    outputs:",
+      "replace": "    timeout-minutes: 360\n    continue-on-error: true\n    outputs:",
+      "why": "Only the optional scheduling job may ignore errors; a proof failure must fail its run."
+    },
+    {
+      "id": "frontdoor-synthesis-owner-bypassed",
+      "find": "if principal.role != \"owner\":",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "if False:",
+      "why": "A proposal principal could request paid programme synthesis."
+    },
+    {
+      "id": "frontdoor-synthesis-approval-bypassed",
+      "find": "if (type(command[\"approval_version\"]) is not int",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "if False and (type(command[\"approval_version\"]) is not int",
+      "why": "A wrong approval identity could spend API calls before eventual compilation refusal."
+    },
+    {
+      "id": "frontdoor-synthesis-reservation-skipped",
+      "find": "            record = {\"identity\": identity, \"state\": \"pending\", \"stages\": []}\n            self._save(path, record)",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "            record = {\"identity\": identity, \"state\": \"pending\", \"stages\": []}",
+      "why": "An API call could start before a durable reservation, allowing repeated uncertain spend."
+    },
+    {
+      "id": "frontdoor-synthesis-freshness-bypassed",
+      "find": "\"expected_project_version\": version, \"approval_version\": command[\"approval_version\"],",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "\"expected_project_version\": self.store.snapshot(project, principal=principal)[\"project_version\"], \"approval_version\": command[\"approval_version\"],",
+      "why": "A new owner intent during synthesis could be hidden by silently rebinding the old review to a newer project version."
+    },
+    {
+      "id": "frontdoor-synthesis-tools-granted",
+      "find": "\"programme-proposer\": JUDGE_TOOLS,",
+      "file": "factory_kernel/worker_policy.py",
+      "replace": "\"programme-proposer\": READ_TOOLS,",
+      "why": "A programme proposer could inspect private host files beyond the committed facts provided."
+    },
+    {
+      "id": "frontdoor-synthesis-budget-raised",
+      "find": "\"programme-proposer\": 1.0,",
+      "file": "factory_kernel/worker_policy.py",
+      "replace": "\"programme-proposer\": 10.0,",
+      "why": "Programme synthesis could exceed its approved per-call limit."
+    },
+    {
       "id": "frontdoor-http-stop-blocked-by-observation",
       "file": "factory_kernel/frontdoor_http.py",
       "find": "class FrontDoorServer(ThreadingMixIn, WSGIServer):",
@@ -2351,69 +2477,6 @@
       "why": "New user intent requires a fresh draft before approval; caught by tests/factory/test_frontdoor_intent.py."
     },
     {
-      "id": "continuation-counter-not-decremented",
-      "file": "factory_kernel/continuation.py",
-      "find": "f\"continuation_remaining={count - 1}\"",
-      "replace": "f\"continuation_remaining={count}\"",
-      "why": "A successful pulse must spend one of its remaining continuation slots."
-    },
-    {
-      "id": "continuation-ignores-failed-merge",
-      "file": "factory_kernel/continuation.py",
-      "find": "if dispatch_result != \"success\" or merge_result not in {\"success\", \"skipped\"}:",
-      "replace": "if dispatch_result != \"success\":",
-      "why": "A failed or cancelled merge/post-merge authority cannot schedule another paid attempt."
-    },
-    {
-      "id": "continuation-ignores-final-stop",
-      "file": "factory_kernel/continuation.py",
-      "find": "    check_stop()\n    queue.github.run([",
-      "replace": "    queue.github.run([",
-      "why": "Stop must be rechecked immediately before the continuation request."
-    },
-    {
-      "id": "continuation-admits-replaced-programme",
-      "file": "factory_kernel/programme_runtime.py",
-      "find": "if expected_programme and (programme is None or programme.sha256 != expected_programme):",
-      "replace": "if False and expected_programme and (programme is None or programme.sha256 != expected_programme):",
-      "why": "A continued pulse cannot materialize scope from a different approved programme."
-    },
-    {
-      "id": "publication-base-omitted",
-      "file": "factory_kernel/runtime.py",
-      "find": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"base\"])",
-      "replace": "env = self._run_env(paths, base_ref=value[\"base\"])",
-      "why": "A fresh publication process must preserve the captured branch base for the sole provenance publisher."
-    },
-    {
-      "id": "publication-base-substituted",
-      "file": "factory_kernel/runtime.py",
-      "find": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"base\"])",
-      "replace": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"kernel\"])",
-      "why": "The kernel checkout identity is not the certified branch base."
-    },
-    {
-      "id": "publication-malformed-base-accepted",
-      "file": "factory_kernel/runtime.py",
-      "find": "                or not isinstance(value.get(\"base\"), str)\n                or not re.fullmatch(r\"(?:[0-9a-f]{40}|[0-9a-f]{64})\", value[\"base\"])\n",
-      "replace": "",
-      "why": "An invalid prepared base must refuse before spending App authority on push or PR creation."
-    },
-    {
-      "id": "resume-programme-any-bot",
-      "file": "factory_kernel/runtime.py",
-      "find": "or author.get(\"login\") != factory_login:",
-      "replace": "or (not admission and author.get(\"login\") != factory_login):",
-      "why": "Admission of the linked issue cannot authorize a PR opened by a different Bot."
-    },
-    {
-      "id": "resume-programme-readmission-skipped",
-      "file": "factory_kernel/runtime.py",
-      "find": "            if admission:\n                fresh = ProgrammeQueue",
-      "replace": "            if False and admission:\n                fresh = ProgrammeQueue",
-      "why": "Programme retirement during preparation must prevent publication."
-    },
-    {
       "id": "frontdoor-prepare-owner-bypassed",
       "file": "factory_kernel/frontdoor_prepare.py",
       "find": "if principal.role != \"owner\":",
@@ -2510,13 +2573,6 @@
       "find": "github.ref == 'refs/heads/main' && github.run_attempt == 1",
       "replace": "github.run_attempt == 1",
       "why": "The workflow must reject candidate branches before any secret-bearing step starts."
-    },
-    {
-      "id": "continuation-exempts-proof-job-errors",
-      "file": ".github/workflows/dark-factory-worker.yml",
-      "find": "    timeout-minutes: 360\n    outputs:",
-      "replace": "    timeout-minutes: 360\n    continue-on-error: true\n    outputs:",
-      "why": "Only the optional scheduling job may ignore errors; a proof failure must fail its run."
     },
     {
       "id": "programme-early-validation-admission-skipped",

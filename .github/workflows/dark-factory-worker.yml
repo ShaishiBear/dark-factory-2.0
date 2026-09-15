@@ -710,6 +710,7 @@ jobs:
           path: |
             ${{ runner.temp }}/dark-factory/runs/*/artifacts/*.json
             ${{ runner.temp }}/dark-factory/runs/*/artifacts/e2e-evidence/**
+            ${{ runner.temp }}/dark-factory/runs/*/transcripts/stage-timings.jsonl
 
   continuation:
     needs: [dispatch, merge]
