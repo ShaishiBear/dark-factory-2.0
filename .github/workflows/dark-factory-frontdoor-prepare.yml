@@ -1,0 +1,69 @@
+name: dark-factory-frontdoor-prepare
+run-name: frontdoor-${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Opaque private preparation request ID
+        required: true
+        type: string
+      ciphertext:
+        description: Encrypted bounded proposal request (never plaintext intent)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+# Duplicate requests serialize before the explicit first-run/replay check. Independent
+# owner requests may proceed without delaying emergency stop or product qualification.
+concurrency:
+  group: frontdoor-prepare-${{ inputs.request_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.repository == 'ShaishiBear/dark-factory-2.0' &&
+      github.actor == github.repository_owner && github.triggering_actor == github.repository_owner &&
+      github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Read the protected workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Setup Python 3.12.14
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          token: ''
+      - name: Install standard encryption and the pinned API worker
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends age
+          npm install -g @anthropic-ai/claude-code@2.1.245
+          test "$(claude --version)" = "2.1.245 (Claude Code)"
+      - name: Prepare only the encrypted bounded proposal
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python -m factory_kernel.frontdoor_hosted_worker
+      - name: Retain only the encrypted result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: frontdoor-${{ inputs.request_id }}
+          path: ${{ runner.temp }}/frontdoor-result/result.age.b64
+          if-no-files-found: error
+          retention-days: 7

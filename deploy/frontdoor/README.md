@@ -27,10 +27,13 @@ The ordinary Caddy IP default uses a local CA; it is not this public trust confi
 - `service.env`, mode `0600`, initially needs only
   `FRONT_DOOR_ORIGIN=https://108.131.113.253`. The service is loopback-only; Nginx preserves the
   exact Host/Origin contract, limits requests, and never retries uncertain backend commands.
-- The prepared unit leaves paid preparation disabled. Enable `--enable-preparation` only
-  after an explicit OpenRouter API token is securely provisioned as `ANTHROPIC_AUTH_TOKEN`,
-  with `ANTHROPIC_BASE_URL=https://openrouter.ai/api`. The host's existing Claude Max login is
-  never a fallback. GitHub Actions secrets cannot be read back as a provisioning mechanism.
+- The prepared unit leaves paid preparation disabled. The owner's API key is already in
+  GitHub Secrets. The hosted preparation adapter uses that key only inside the protected
+  `dark-factory-frontdoor-prepare.yml` workflow. After delivering that workflow, provision a
+  dedicated native age encryption identity in a private host file and `FRONTDOOR_AGE_IDENTITY`
+  repository secret, then add `--hosted-preparation-identity /private/path` to the unit.
+  This encryption key has no API or GitHub authority. Never export the API key or reuse the
+  host's retired Claude Max login. See [hosted preparation](../../docs/FRONT_DOOR_HOSTED_PREPARATION.md).
 - The service HOME/XDG directories are separate from the abandoned supervisor login. Only
   `GH_CONFIG_DIR` points to existing owner authentication; that variable is removed from
   model subprocess environments. The source and the rest of the home directory are read-only.

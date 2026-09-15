@@ -2456,6 +2456,62 @@
       "why": "One preparation stage may not silently exceed its bounded API budget."
     },
     {
+      "id": "frontdoor-hosted-reservation-skipped",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "self.records._save(path, record)  # No POST before this durable reservation.",
+      "replace": "pass  # Missing durable dispatch reservation.",
+      "why": "A remote paid call must be durably identified before its one-shot POST."
+    },
+    {
+      "id": "frontdoor-hosted-owner-ignored",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "or run.get(\"actor\", {}).get(\"login\") != owner",
+      "replace": "or False",
+      "why": "A successful run from another actor cannot supply this owner's result."
+    },
+    {
+      "id": "frontdoor-hosted-result-hash-ignored",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "result[\"request_sha256\"] != sha256_value(payload)",
+      "replace": "False",
+      "why": "Encrypted results still have to name the exact private request."
+    },
+    {
+      "id": "frontdoor-hosted-rerun-accepted",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "or run.get(\"run_attempt\") != 1",
+      "replace": "or False",
+      "why": "Rerunning a paid preparation is not an authorized retry of its recorded attempt."
+    },
+    {
+      "id": "frontdoor-hosted-duplicate-accepted",
+      "file": "factory_kernel/frontdoor_hosted_worker.py",
+      "find": "if len(matches) != 1 or matches[0].get(\"id\") != run_id or matches[0].get(\"run_attempt\") != 1:",
+      "replace": "if not matches:",
+      "why": "Concurrent or repeated dispatches with the same identity must not repeat API spending."
+    },
+    {
+      "id": "frontdoor-hosted-expiry-ignored",
+      "file": "factory_kernel/frontdoor_hosted_worker.py",
+      "find": "if not 0 <= now - payload[\"issued_at\"] <= 900:",
+      "replace": "if False:",
+      "why": "An old encrypted request cannot be replayed outside its bounded observation window."
+    },
+    {
+      "id": "frontdoor-hosted-payload-role-widened",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "or payload[\"role\"] not in INTAKE_ROLES",
+      "replace": "or False",
+      "why": "The encrypted proposal bridge must never grant implementation or qualification capabilities."
+    },
+    {
+      "id": "frontdoor-hosted-secret-step-main-guard-removed",
+      "file": ".github/workflows/dark-factory-frontdoor-prepare.yml",
+      "find": "github.ref == 'refs/heads/main' && github.run_attempt == 1",
+      "replace": "github.run_attempt == 1",
+      "why": "The workflow must reject candidate branches before any secret-bearing step starts."
+    },
+    {
       "id": "continuation-exempts-proof-job-errors",
       "file": ".github/workflows/dark-factory-worker.yml",
       "find": "    timeout-minutes: 360\n    outputs:",

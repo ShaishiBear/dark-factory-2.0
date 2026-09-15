@@ -21,6 +21,7 @@ from .frontdoor_intent import IntentRefused, IntentStore, Principal
 from .frontdoor_programme import prepare_programme
 from .frontdoor_prepare import IntentPreparation, api_provider, repository_context
 from .frontdoor_synthesis import ProgrammePreparation
+from .frontdoor_hosted import AgeCipher, HostedPreparationProvider
 from .github_cli import GitHubClient
 from .programme import ProgrammeRefused, parse_json
 from .programme_runtime import ProgrammeQueue
@@ -202,7 +203,10 @@ def main():
     parser.add_argument("--origin", required=True)
     parser.add_argument("--app-login", required=True)
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--enable-preparation", action="store_true")
+    preparation = parser.add_mutually_exclusive_group()
+    preparation.add_argument("--enable-preparation", action="store_true")
+    preparation.add_argument("--hosted-preparation-identity", type=Path,
+                             help="private age identity for proposal calls through protected GitHub Actions")
     args = parser.parse_args()
     if args.token_file.is_symlink() or args.token_file.stat().st_size > 100:
         raise ValueError("owner token must be a small private regular file")
@@ -217,9 +221,14 @@ def main():
     store = IntentStore(args.state_dir, repository=config.repository, owner=args.owner)
     if os.name != "nt" and args.state_dir.stat().st_mode & 0o077:
         raise ValueError("intent state directory must be private to its service account")
-    preparer = IntentPreparation(store, api_provider(config.provider), lambda: repository_context(Path.cwd())) if args.enable_preparation else None
-    synthesizer = ProgrammePreparation(store, api_provider(config.provider), lambda: repository_context(Path.cwd()),
-                                      app_login=args.app_login) if args.enable_preparation else None
+    provider = None
+    if args.hosted_preparation_identity:
+        provider = HostedPreparationProvider(store, github, AgeCipher(args.hosted_preparation_identity))
+    elif args.enable_preparation:
+        provider = api_provider(config.provider)
+    preparer = IntentPreparation(store, provider, lambda: repository_context(Path.cwd())) if provider else None
+    synthesizer = ProgrammePreparation(store, provider, lambda: repository_context(Path.cwd()),
+                                      app_login=args.app_login) if provider else None
     app = FrontDoorApplication(store=store, project=args.project, token=token, origin=args.origin,
                                github=github, labels=config.labels, app_login=args.app_login,
                                preparer=preparer, synthesizer=synthesizer)

@@ -57,9 +57,9 @@ retried automatically. There is no stop-clear, resume, merge or product-dispatch
    delivery; an old export is not a capability.
 3. Pass maintainer delivery checks after the real product cycle; observe the App stop workflow
    without interrupting useful qualification. No live stop test has been performed by this change.
-4. Prepare and authorize the concrete hosting payload/destination. The earlier rejected AWS
-   archive transfer remains unapproved. Reuse only the existing $7/month instance if authorized;
-   no new instance, upgrade or paid add-on is authorized by this document.
+4. Complete the prepared IP HTTPS hosting on the existing $7/month Lightsail instance after
+   cycle proof. An exact public source release has been staged independently of the earlier
+   rejected private archive. No new instance, upgrade or paid add-on is authorized by this document.
 5. Add durable trajectories, bounded replanning and governed self-maintenance through separately
    tested authority changes. None is implied by these UI controls.
 
