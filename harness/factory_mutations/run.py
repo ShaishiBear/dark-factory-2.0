@@ -185,6 +185,7 @@ COPY_FILES = (
     "tests/factory/test_factory_worker_authority.py",
     "tests/factory/test_factory_merge_handoff.py",
     "tests/factory/test_factory_programme.py",
+    "tests/factory/test_frontdoor_intent.py",
     "tests/factory/test_factory_continuation.py",
     "tests/factory/test_factory_github_e2e_bootstrap.py",
     "tests/factory/test_factory_merge_verify.py",
