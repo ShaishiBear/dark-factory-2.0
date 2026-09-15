@@ -12,7 +12,7 @@ import tempfile
 from .agents import AgentRequest
 from .canonical import canonical_bytes, sha256_value
 from .frontdoor_intent import IntentRefused, Principal, _shape, _text, _texts
-from .programme import compile_spec, parse_json
+from .programme import ProgrammeRefused, compile_spec, parse_json
 from .providers import ClaudeCliProvider
 from .worker_policy import allowed_tools, effort, max_turns, max_budget_usd, stage_timeout_seconds
 
@@ -136,20 +136,82 @@ class PreparationRecords:
 
 
 class IntentPreparation(PreparationRecords):
-    """At most two bounded calls per recorded intake version; replay never repeats a spend."""
+    """One preparation and one owner-requested format recovery; uncertain calls never repeat."""
+
+    def _recovery_directory(self):
+        path = self.directory / "recoveries"
+        if path.is_symlink():
+            raise IntentRefused("recovery directory cannot be a symlink")
+        path.mkdir(mode=0o700, exist_ok=True)
+        return path
+
+    @staticmethod
+    def _record(path):
+        if path.is_symlink() or path.stat().st_size > 1000000:
+            raise IntentRefused("invalid preparation record")
+        return parse_json(path.read_text(encoding="utf-8"))
+
+    def latest(self, project):
+        original = super().latest(project)
+        if original is None:
+            return None
+        version = original["identity"]["command"]["expected_project_version"]
+        path = self._recovery_directory() / f"{project}-{version}.json"
+        return self._record(path) if path.exists() else original
+
+    def _recoverable(self, record):
+        # A completed, retained proposal that fails the deterministic compiler is known
+        # work. A timeout, missing output, audit failure or interrupted call is not.
+        if (record.get("state") != "failed" or record.get("failure") != "ProgrammeRefused"
+                or len(record.get("stages", [])) != 1 or "proposal_output" not in record
+                or "audit_output" in record or "recovery_of" in record):
+            return False
+        try:
+            validate_draft(record["proposal_output"], self.store.repository)
+        except ProgrammeRefused:
+            return True
+        except (IntentRefused, KeyError, TypeError):
+            return False
+        return False
+
+    def recovery_offer(self, project):
+        with self.store._locked(project) as intent_path:
+            state = self.store._snapshot(self.store._read(intent_path))
+            version = state["project_version"]
+            path = self.directory / f"{project}-{version}.json"
+            recovery = self._recovery_directory() / f"{project}-{version}.json"
+            if not path.exists() or recovery.exists():
+                return None
+            parent = self._record(path)
+            if not self._recoverable(parent):
+                return None
+            return {"expected_project_version": version, "failed_preparation_sha256": sha256_value(parent),
+                    "max_calls": 2, "max_budget_usd": 2.0}
+
+    def recover(self, project, command, *, principal):
+        return self._prepare(project, command, principal=principal, recovery=True)
 
     def prepare(self, project, command, *, principal):
+        return self._prepare(project, command, principal=principal, recovery=False)
+
+    def _prepare(self, project, command, *, principal, recovery):
         self.store._authorize(principal)
         if principal.role != "owner":
             raise IntentRefused("only the authenticated owner may request preparation")
-        _shape(command, {"idempotency_key", "expected_project_version"})
+        fields = {"idempotency_key", "expected_project_version"}
+        if recovery:
+            fields |= {"failed_preparation_sha256", "reason"}
+        _shape(command, fields)
         _text(command["idempotency_key"], 100)
+        if recovery:
+            _text(command["reason"], 2000)
         version = command["expected_project_version"]
         if type(version) is not int or version < 1:
             raise IntentRefused("record intent before preparing a specification")
         identity = {"project": project, "command": command, "owner": principal.identity}
         with self.store._locked(project) as intent_path:
-            path = self.directory / f"{project}-{version}.json"
+            original_path = self.directory / f"{project}-{version}.json"
+            path = self._recovery_directory() / original_path.name if recovery else original_path
             if path.exists():
                 if path.is_symlink() or path.stat().st_size > 1000000:
                     raise IntentRefused("invalid preparation record")
@@ -161,6 +223,17 @@ class IntentPreparation(PreparationRecords):
             if state["project_version"] != version or not any(x["kind"] == "record-intent" for x in state["ledger"]):
                 raise IntentRefused("stale or missing original intent")
             record = {"identity": identity, "state": "pending", "stages": []}
+            if recovery:
+                if not original_path.exists():
+                    raise IntentRefused("no failed preparation exists for this intent")
+                parent = self._record(original_path)
+                if (sha256_value(parent) != command["failed_preparation_sha256"]
+                        or parent["identity"]["owner"] != principal.identity
+                        or parent["identity"]["project"] != project
+                        or parent["identity"]["command"]["expected_project_version"] != version
+                        or not self._recoverable(parent)):
+                    raise IntentRefused("recovery requires the exact completed compiler-refused proposal")
+                record["recovery_of"] = command["failed_preparation_sha256"]
             self._save(path, record)  # Durable before the first API call; crashes do not repeat it.
         try:
             source = {"repository": self.store.repository, "project": project,

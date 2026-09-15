@@ -71,6 +71,7 @@ class FrontDoorApplication:
         result = {"project": self.project, "repository": self.store.repository, "intent": state,
                   "observed_at": None, "preparation_available": self.preparer is not None,
                   "preparation": self.preparer.latest(self.project) if self.preparer else None,
+                  "preparation_recovery": self.preparer.recovery_offer(self.project) if self.preparer else None,
                   "synthesis_available": self.synthesizer is not None,
                   "synthesis": self.synthesizer.latest(self.project) if self.synthesizer else None}
         try:
@@ -116,10 +117,11 @@ class FrontDoorApplication:
             if method == "POST" and path == "/api/commands":
                 state = self.store.execute(self.project, self._body(environ), principal=self.principal)
                 return send("200 OK", state)
-            if method == "POST" and path == "/api/prepare":
+            if method == "POST" and path in {"/api/prepare", "/api/prepare-recovery"}:
                 if self.preparer is None:
                     return send("503 Service Unavailable", {"error": "specification preparation is not enabled"})
-                result = self.preparer.prepare(self.project, self._body(environ), principal=self.principal)
+                prepare = self.preparer.recover if path == "/api/prepare-recovery" else self.preparer.prepare
+                result = prepare(self.project, self._body(environ), principal=self.principal)
                 return send("200 OK", result)
             if method == "POST" and path == "/api/programme-review":
                 review = prepare_programme(self.store, self.project, self._body(environ),

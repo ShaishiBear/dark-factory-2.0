@@ -28,6 +28,7 @@
           </section>
           <section class="card"><span class="eyebrow">02 · SCOPE REVIEW</span><div id="draft"></div>
             <div id="preparation-status"></div><button id="prepare" hidden>Prepare scope for review</button>
+            <form id="recovery-form" hidden><p>The previous draft failed validation. Its record will be kept.</p><label class="check"><input type="checkbox" id="recover-check" required> Request one replacement draft and independent audit, up to $2 total. This does not approve scope.</label><button id="recover" type="submit">Prepare replacement draft</button></form>
             <form id="approval-form" hidden><label class="check"><input type="checkbox" id="approve-check" required> This scope represents what I want to build.</label><button class="primary" type="submit">Approve this scope</button></form>
             <div id="approvals"></div>
             <button id="synthesize" hidden>Prepare execution programme</button><div id="programme-review"></div>
