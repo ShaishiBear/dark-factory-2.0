@@ -1,6 +1,6 @@
 # Dark Factory
 
-**Autonomy level: 4.** A human supplies issues; the factory can triage, build, validate and merge them without a human reading the product diff. The factory does **not** invent its own roadmap or write its own issues. Level 5 is deliberately out of scope.
+The factory can triage, build, validate and merge accepted product work through its proof gates. A human can supply issues directly or approve a versioned programme on protected `main`. The programme compiler can project that approved scope into unaccepted App-authored issues; each still requires ordinary triage and independent qualification. Programme admission is implemented; a complete live programme execution cycle has not yet been observed.
 
 The orchestration authority is this repository. Archon is no longer a runtime dependency.
 
@@ -31,6 +31,25 @@ idle
 ```
 
 PR validation deliberately has priority over starting new build work.
+
+### Approved programme projection
+
+Before ordinary dispatch, the hosted worker reads `.factory/programmes/active.json` from an
+immutable blob on protected `main`, compiles its bounded dependency graph, and verifies the
+complete issue inventory. It creates at most one ready candidate using the GitHub App, without
+acceptance labels. A dependent becomes ready only after its predecessor has a verified
+post-merge completion receipt; closing an issue is insufficient.
+
+After an acknowledged creation response, confirmation makes at most three complete inventory
+reads, waiting two then five seconds if the new issue is absent. Stop and current scope are
+checked before each read. Edited, duplicate, conflicting or wrong-App objects refuse immediately.
+Creation is never retried within the invocation. A lost response or unconfirmed candidate
+refuses that pulse; the next invocation reconciles existing objects before proposing any effect.
+
+Successful progress may schedule one successor with the same programme hash and a decreasing
+allowance of at most eight continuations. This uses the existing workflow lock and proof path.
+An idle, stopped or failed pulse cannot extend the chain. See `docs/PROGRAMME_ADMISSION.md`
+for admission and receipt boundaries.
 
 ## Emergency stop
 
