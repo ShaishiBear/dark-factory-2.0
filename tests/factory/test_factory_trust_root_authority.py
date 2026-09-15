@@ -22,9 +22,12 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -352,15 +355,53 @@ class TrustRootWorkflowStructureTests(unittest.TestCase):
         self.assertIn("if: needs.trust-root-authority.outputs.unattended == 'true'", self.merge)
         self.assertIn("bash scripts/factory-stop.sh", self.authority)
         self.assertIn('[ "${{ steps.stop.outputs.stopped }}" = "false" ]', self.authority)
+        outputs = self.authority.split("    outputs:\n", 1)[1].split("    steps:", 1)[0]
+        self.assertIn("unattended: ${{ steps.decide.outputs.unattended }}", outputs)
+        self.assertNotIn("steps.judge.outputs.unattended", outputs)
 
     def test_unattended_merge_executes_no_code_and_binds_to_the_exact_head(self):
         self.assertNotIn("actions/checkout", self.merge)
         self.assertNotIn("uses:", self.merge)
         self.assertIn('test "$EXPECTED_HEAD" = "$EVENT_HEAD"', self.merge)
         self.assertIn("EXPECTED_HEAD: ${{ needs.trust-root-authority.outputs.head }}", self.merge)
-        self.assertIn("expectedHeadOid: $head, mergeMethod: SQUASH", self.merge)
-        self.assertIn("enablePullRequestAutoMerge", self.merge)
+        self.assertIn('--match-head-commit "$EXPECTED_HEAD"', self.merge)
+        self.assertIn('--auto --squash', self.merge)
+        self.assertNotIn('--admin', self.merge)
         self.assertIn("    permissions:\n      contents: write\n      pull-requests: write", self.merge)
+
+    @unittest.skipUnless(os.name != "nt" and shutil.which("bash"), "workflow executes on Linux")
+    def test_actual_merge_shell_refuses_stop_failed_read_changed_head_and_failed_merge(self):
+        shell = textwrap.dedent(self.merge.split("        run: |\n", 1)[1])
+        for scenario in ("clear", "stopped", "unreadable", "changed", "merge-refused"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                stub = root / "gh"
+                stub.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
+                    import json, os, pathlib, sys
+                    args = sys.argv[1:]
+                    with pathlib.Path(os.environ['CALLS']).open('a') as output:
+                        output.write(json.dumps(args)+'\\n')
+                    mode = os.environ['SCENARIO']
+                    if args[:2] == ['issue', 'list']:
+                        assert '--label' in args and 'factory:stop' in args and 'open' in args
+                        if mode == 'unreadable': sys.exit(1)
+                        print(1 if mode == 'stopped' else 0)
+                    elif args[:2] == ['pr', 'merge']:
+                        assert '--auto' in args and '--squash' in args and '--admin' not in args
+                        assert args[args.index('--match-head-commit')+1] == 'a'*40
+                        if mode == 'merge-refused': sys.exit(1)
+                    else: sys.exit(2)
+                    '''))
+                stub.chmod(0o700)
+                environment = {**os.environ, "PATH": str(root)+os.pathsep+os.environ["PATH"],
+                               "SCENARIO": scenario, "CALLS": str(root / "calls"),
+                               "EXPECTED_HEAD": "a"*40, "EVENT_HEAD": "b"*40 if scenario == "changed" else "a"*40,
+                               "PR_NUMBER": "187", "REPOSITORY": "owner/repo"}
+                result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", shell], env=environment,
+                                        capture_output=True, text=True, timeout=10)
+                calls = (root / "calls").read_text().splitlines() if (root / "calls").exists() else []
+                self.assertEqual(result.returncode == 0, scenario == "clear", result.stderr)
+                self.assertEqual(len(calls), 0 if scenario == "changed" else 2 if scenario in {"clear", "merge-refused"} else 1)
 
     def test_actions_are_pinned_by_commit(self):
         for line in self.text.splitlines():

@@ -91,8 +91,8 @@
     {
       "id": "unattended-merge-not-bound-to-judged-head",
       "file": ".github/workflows/dark-factory-trust-root.yml",
-      "find": "pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH",
-      "replace": "pullRequestId: $id, mergeMethod: SQUASH",
+      "find": " --match-head-commit \"$EXPECTED_HEAD\"",
+      "replace": "",
       "why": "Auto-merge would be armed without the expected head, so a head the authority never judged could merge."
     },
     {
@@ -227,6 +227,27 @@
       "find": "      - name: Upload harness log and browser evidence (observability)\n        if: always()\n",
       "replace": "      - name: Upload harness log and browser evidence (observability)\n        if: success()\n",
       "why": "The harness log and the browser evidence dump would be uploaded only when the gate passed, which is exactly when nobody needs them (D-049)."
+    },
+    {
+      "id": "unattended-stop-decision-not-exported",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "unattended: ${{ steps.decide.outputs.unattended }}",
+      "replace": "unattended: ${{ steps.judge.outputs.unattended }}",
+      "why": "A stop must remove the downstream merge capability, not just change a step-local value."
+    },
+    {
+      "id": "unattended-final-stop-ignored",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "          test \"$stops\" = 0\n",
+      "replace": "",
+      "why": "A stop arriving between jobs must refuse before the merge request."
+    },
+    {
+      "id": "unattended-admin-bypass-added",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "--auto --squash",
+      "replace": "--auto --squash --admin",
+      "why": "Required branch protections remain authoritative for the maintainer lane."
     }
   ]
 }
