@@ -174,6 +174,10 @@ def execute(*, merge_verification: Path, output: Path) -> dict:
         if status:
             raise RuntimeError("post-merge full harness left the worktree dirty")
 
+        # A full ladder may take hours. Its initial main observation cannot authorize a
+        # current-main claim after another commit lands during that proof.
+        run(["git", "fetch", "origin", "main", "--quiet"], cwd=ROOT, timeout=120)
+        current_main = git_oid("origin/main", cwd=ROOT)
         payload = result_payload(
             merge_sha=merge_sha,
             tree_sha=expected_tree,

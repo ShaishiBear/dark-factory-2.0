@@ -2517,6 +2517,34 @@
       "find": "    timeout-minutes: 360\n    outputs:",
       "replace": "    timeout-minutes: 360\n    continue-on-error: true\n    outputs:",
       "why": "Only the optional scheduling job may ignore errors; a proof failure must fail its run."
+    },
+    {
+      "id": "programme-early-validation-admission-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
+      "replace": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        self.check_stop()",
+      "why": "Retired or edited programme work would start repository and proof work before admission."
+    },
+    {
+      "id": "programme-early-validation-stop-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
+      "replace": "        # Admission is an early refusal, never a substitute for the fresh merge check.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))",
+      "why": "A stop arriving during remote admission would be missed before repository and proof work."
+    },
+    {
+      "id": "programme-early-rehead-admission-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
+      "replace": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        self.check_stop()",
+      "why": "Retired or edited programme work would start repository and proof work before admission."
+    },
+    {
+      "id": "programme-early-rehead-stop-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
+      "replace": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))",
+      "why": "A stop arriving during remote admission would be missed before repository and proof work."
     }
   ]
 }

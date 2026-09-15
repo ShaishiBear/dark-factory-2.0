@@ -506,6 +506,96 @@ class QueueTests(unittest.TestCase):
                 self.assertEqual(len(self.gh.rows), 1)
 
 
+class EarlyAdmissionTests(unittest.TestCase):
+    """Use real programme admission before the first checkout or proof operation."""
+
+    class WorkReached(Exception):
+        pass
+
+    def runtime(self, method, change=None):
+        from harness.rehearsal import HEAD, BASE
+        from tests.factory.test_factory_refusals import refusal_marker
+        gh = FakeGitHub()
+        ProgrammeQueue(gh, "main").sync(Mock())
+        if change == "retired":
+            gh.source = None
+        elif change == "changed-scope":
+            gh.source["spec"]["outcome"] = "An unapproved replacement outcome."
+        elif change == "edited-issue":
+            gh.rows[0]["body"] += "\nAdditional scope."
+        elif change == "missing-marker":
+            gh.rows[0]["body"] = "Marker removed from an App issue."
+        elif change == "closed":
+            gh.rows[0]["state"] = "closed"
+        elif change == "ordinary":
+            gh.rows[0].update(body="Ordinary issue", user={"login": "owner", "type": "User"})
+        runtime = object.__new__(KernelRuntime)
+        runtime.config = SimpleNamespace(default_branch="main", labels={
+            "needs_review": "factory:needs-review", "needs_fix": "factory:needs-fix"})
+        runtime.github = Mock(repository=REPO)
+        runtime.github.json.side_effect = gh.json
+        runtime.github.programme_issues.side_effect = gh.programme_issues
+        runtime.github.issue.side_effect = lambda number: {
+            **deepcopy(gh.rows[number - 1]), "author": deepcopy(gh.rows[number - 1]["user"])}
+        runtime.github.labels.side_effect = GitHubClient.labels
+        label = "factory:needs-review" if method == "validate_pr" else "factory:needs-fix"
+        runtime.github.pr.return_value = {"state": "OPEN", "headRefOid": HEAD,
+            "baseRefOid": BASE, "headRefName": "factory/candidate", "body": "Fixes #1",
+            "labels": [{"name": label}]}
+        runtime.github.pr_comments.return_value = [refusal_marker("stale_base")]
+        runtime.check_stop = Mock()
+        runtime._git = Mock(side_effect=self.WorkReached("first repository work"))
+        runtime._exec = Mock()
+        runtime._agent_stage = Mock()
+        return runtime
+
+    def outcome(self, runtime, method):
+        try:
+            getattr(runtime, method)(9)
+        except (ProgrammeRefused, FactoryStopped, self.WorkReached) as exc:
+            return exc
+        self.fail("expected refusal or first work boundary")
+
+    def test_current_programme_and_ordinary_issue_reach_existing_work(self):
+        for method in ("validate_pr", "rehead_pr"):
+            for change in (None, "ordinary"):
+                with self.subTest(method=method, change=change):
+                    runtime = self.runtime(method, change)
+                    self.assertIsInstance(self.outcome(runtime, method), self.WorkReached)
+                    runtime._git.assert_called_once()
+
+    def test_invalid_programme_refuses_before_checkout_or_paid_work(self):
+        for method in ("validate_pr", "rehead_pr"):
+            for change in ("retired", "changed-scope", "edited-issue", "missing-marker", "closed"):
+                with self.subTest(method=method, change=change):
+                    runtime = self.runtime(method, change)
+                    self.assertIsInstance(self.outcome(runtime, method), ProgrammeRefused)
+                    runtime._git.assert_not_called()
+                    runtime._exec.assert_not_called()
+                    runtime._agent_stage.assert_not_called()
+
+    def test_stop_arriving_during_remote_admission_refuses_before_work(self):
+        for method in ("validate_pr", "rehead_pr"):
+            with self.subTest(method=method):
+                runtime = self.runtime(method)
+                stopped = False
+                original = runtime.github.json.side_effect
+
+                def remote_read(args):
+                    nonlocal stopped
+                    stopped = True
+                    return original(args)
+
+                def check_stop():
+                    if stopped:
+                        raise FactoryStopped("stop arrived during admission")
+
+                runtime.github.json.side_effect = remote_read
+                runtime.check_stop.side_effect = check_stop
+                self.assertIsInstance(self.outcome(runtime, method), FactoryStopped)
+                runtime._git.assert_not_called()
+
+
 class PostMergeRoutingTests(unittest.TestCase):
     def runtime(self):
         runtime = object.__new__(WorkerControlledRuntime)
