@@ -5,6 +5,20 @@
   ],
   "defects": [
     {
+      "id": "post-merge-final-fetch-skipped",
+      "file": "harness/post_merge.py",
+      "find": "        run([\"git\", \"fetch\", \"origin\", \"main\", \"--quiet\"], cwd=ROOT, timeout=120)\n        current_main = git_oid(\"origin/main\", cwd=ROOT)",
+      "replace": "        current_main = git_oid(\"origin/main\", cwd=ROOT)",
+      "why": "A cached remote-tracking ref cannot prove that main stayed current during the long ladder."
+    },
+    {
+      "id": "post-merge-final-main-read-skipped",
+      "file": "harness/post_merge.py",
+      "find": "        current_main = git_oid(\"origin/main\", cwd=ROOT)\n        payload = result_payload(",
+      "replace": "        payload = result_payload(",
+      "why": "Fetching main without consuming the fresh identity still permits a stale verified result."
+    },
+    {
       "id": "post-merge-main-tip-check-disabled",
       "file": "harness/post_merge.py",
       "find": "    if main_sha != merge_sha:",
