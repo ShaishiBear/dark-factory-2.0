@@ -37,7 +37,7 @@ jobs:
       pull-requests: read
       issues: read
     outputs:
-      unattended: ${{ steps.judge.outputs.unattended }}
+      unattended: ${{ steps.decide.outputs.unattended }}
       head: ${{ steps.judge.outputs.head }}
     steps:
       - name: Checkout the trusted base (never the PR head)
@@ -150,25 +150,24 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: read
     steps:
-      # No checkout, no third-party action, no code from anywhere: one GraphQL mutation that
-      # arms GitHub's own auto-merge for this PR, squash only, bound to the exact head the
-      # authority judged. GitHub refuses if the head differs; it merges only when every
-      # required check is green on that head; a new push re-runs this workflow, which re-arms
-      # against the new head or leaves it unarmed if the new head fails.
-      - name: Arm exact-head auto-merge
+      # No checkout or candidate code. gh merges an immediately eligible PR or arms
+      # auto-merge while required checks are pending. Direct enablePullRequestAutoMerge
+      # refuses UNSTABLE even when only this non-required job is pending (PRs 186/187).
+      # Both paths enforce branch protection and the exact head; no administrator bypass.
+      - name: Merge or arm the exact checked head
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
           EXPECTED_HEAD: ${{ needs.trust-root-authority.outputs.head }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           test -n "$EXPECTED_HEAD"
           test "$EXPECTED_HEAD" = "$EVENT_HEAD"
-          gh api graphql \
-            -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
-            -f id="$PR_NODE_ID" >/dev/null 2>&1 || true
-          gh api graphql \
-            -f query='mutation($id: ID!, $head: GitObjectID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH}) { pullRequest { autoMergeRequest { enabledAt mergeMethod } } } }' \
-            -f id="$PR_NODE_ID" -f head="$EXPECTED_HEAD"
-          echo "UNATTENDED_MERGE_ARMED head=$EXPECTED_HEAD"
+          # Recheck after the job boundary. A failed read or any stop issue refuses.
+          stops=$(gh issue list --repo "$REPOSITORY" --label factory:stop --state open --limit 1 --json number --jq length)
+          test "$stops" = 0
+          gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --auto --squash --match-head-commit "$EXPECTED_HEAD"
+          echo "UNATTENDED_MERGE_REQUESTED head=$EXPECTED_HEAD"
