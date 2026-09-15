@@ -71,6 +71,24 @@ synthetic navigation scenario, not an approved live task list.
 ## Serialisation and recovery
 
 The existing worker workflow's `dark-factory-worker` concurrency group is the single writer.
+After a successful action on a bound programme, an optional control job may dispatch the same
+worker again. A pulse permits at most eight further continuations, decreasing the counter on
+each request and carrying the exact programme hash into the next admission. Idle, failed,
+cancelled, stopped, unbound or changed-scope work does not continue. No dispatch POST is retried
+after an uncertain response. The ordinary schedule remains the fallback after a stopped chain.
+
+Only that small control job has Actions write permission, with no App private key or model
+credentials. It holds the same workflow lock until it finishes, so the successor cannot start
+before its predecessor run's completion receipt becomes observable. Scheduling failure is
+visible but does not change the completed proof jobs' result: only the scheduling job uses
+`continue-on-error`. Dispatch and merge/post-merge failures still fail the whole run. Each
+successor repeats all existing admission, stop, lease, attempt, budget and proof checks.
+
+This bounds scheduling latency without a laptop supervisor or a second executable queue.
+It is not replanning, automatic repair of failed proof, a new spend budget or exactly-once
+dispatch. The bound limits continuations per pulse; existing per-role and per-issue limits
+still bound model attempts. A later scheduled pulse may continue unfinished approved work.
+
 The repository's App installation needs Issues write permission for the new projection effect;
 verify that permission before activation. No additional repositories or administrator scope
 are required, and a denied spend fails rather than switching identity.
