@@ -7,6 +7,7 @@ Structural coverage is not semantic qualification: generated issues still underg
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 import json
 import re
 from typing import Any, Mapping
@@ -89,11 +90,9 @@ class Programme:
         return f"{self.spec['title']} [{item['id']}]", body
 
 
-def compile_programme(raw: Any, *, repository: str) -> Programme:
-    root = _object(raw, {"version", "spec", "proposal", "app_login"}, "programme input")
-    if root["version"] != "1.0":
-        raise ProgrammeRefused("programme version must be 1.0")
-    spec = _object(root["spec"], {"id", "revision", "repository", "title", "outcome",
+def compile_spec(raw: Any, *, repository: str) -> dict:
+    """Validate specification structure; this never establishes user approval."""
+    spec = _object(raw, {"id", "revision", "repository", "title", "outcome",
                                       "requirements", "constraints", "non_goals"}, "spec")
     _id(spec["id"])
     if type(spec["revision"]) is not int or spec["revision"] < 1:
@@ -120,6 +119,15 @@ def compile_programme(raw: Any, *, repository: str) -> Programme:
             _text(ac["text"], "acceptance text")
     if len(acceptance) > MAX_ITEMS:
         raise ProgrammeRefused("spec has too many acceptance criteria")
+    return deepcopy(spec)
+
+
+def compile_programme(raw: Any, *, repository: str) -> Programme:
+    root = _object(raw, {"version", "spec", "proposal", "app_login"}, "programme input")
+    if root["version"] != "1.0":
+        raise ProgrammeRefused("programme version must be 1.0")
+    spec = compile_spec(root["spec"], repository=repository)
+    acceptance = {ac["id"] for req in spec["requirements"] for ac in req["acceptance"]}
     proposal = _object(root["proposal"], {"spec_sha256", "items"}, "proposal")
     if proposal["spec_sha256"] != sha256_value(spec):
         raise ProgrammeRefused("proposal is bound to a different spec hash")

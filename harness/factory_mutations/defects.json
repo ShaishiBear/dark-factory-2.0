@@ -2169,6 +2169,55 @@
       "why": "Confirmation must bind the acknowledged POST number, not accept a different matching issue."
     },
     {
+      "id": "frontdoor-worker-approves-scope",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "if principal.role != \"owner\" and operation != \"propose-spec\":",
+      "replace": "if False:",
+      "why": "Proposal workers must not approve their own scope; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-stale-command-overwrites-intent",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "if expected != len(events):",
+      "replace": "if False:",
+      "why": "A stale browser or worker cannot overwrite newer intent; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-approval-ignores-spec-hash",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "or payload[\"spec_sha256\"] != draft[\"spec_sha256\"]",
+      "replace": "",
+      "why": "Explicit approval must bind the reviewed specification bytes; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-approves-unresolved-product-question",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "if draft[\"open_questions\"]:",
+      "replace": "if False:",
+      "why": "Blocking product questions prevent approval while technical uncertainty may remain deferred; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-reuses-command-key-for-different-content",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "if event[\"command\"] != command or event[\"actor\"] != actor:",
+      "replace": "if False:",
+      "why": "Retry identity binds the original command and authenticated actor; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-ignores-history-chain",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "event[\"previous\"] != previous",
+      "replace": "False",
+      "why": "A changed historical event must refuse replay instead of silently changing original wording; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
+      "id": "frontdoor-new-intent-keeps-obsolete-draft",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "                if operation == \"record-intent\":\n                    draft = None",
+      "replace": "",
+      "why": "New user intent requires a fresh draft before approval; caught by tests/factory/test_frontdoor_intent.py."
+    },
+    {
       "id": "continuation-counter-not-decremented",
       "file": "factory_kernel/continuation.py",
       "find": "f\"continuation_remaining={count - 1}\"",
