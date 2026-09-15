@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "app_login": "shaishibear-dark-factory[bot]",
+  "spec": {
+    "id": "citation-inspection",
+    "revision": 1,
+    "repository": "ShaishiBear/dark-factory-2.0",
+    "title": "Citation inspection",
+    "outcome": "Viewers can read the cited transcript and use the citation modal with the keyboard.",
+    "requirements": [
+      {
+        "id": "transcript",
+        "acceptance": [
+          {
+            "id": "snippet",
+            "text": "Opening a video citation displays its supplied transcript snippet alongside the video player."
+          },
+          {
+            "id": "multiline",
+            "text": "A multiline transcript snippet remains readable with its line breaks preserved."
+          }
+        ]
+      },
+      {
+        "id": "keyboard",
+        "acceptance": [
+          {
+            "id": "focus-entry",
+            "text": "Opening the citation modal moves keyboard focus to a usable control inside it."
+          },
+          {
+            "id": "focus-return",
+            "text": "Closing the citation modal returns keyboard focus to the opener when it remains in the document."
+          }
+        ]
+      }
+    ],
+    "constraints": [
+      "Preserve existing video playback, timestamp links, Escape, close-button and backdrop close behavior.",
+      "Preserve authentication, owner-private conversations and the 25 messages per user per 24 hours limit.",
+      "All existing independent proof and permission rules remain mandatory."
+    ],
+    "non_goals": [
+      "No new content sources, sharing, auth changes, factory authority changes or external dependencies."
+    ]
+  },
+  "proposal": {
+    "spec_sha256": "2ebd0a37d772950d9364c1178f7c6330c6c0cd12367a479ef1eebc7a66f0bbb5",
+    "items": [
+      {
+        "id": "transcript",
+        "acceptance": [
+          "snippet",
+          "multiline"
+        ],
+        "blocked_by": []
+      },
+      {
+        "id": "keyboard",
+        "acceptance": [
+          "focus-entry",
+          "focus-return"
+        ],
+        "blocked_by": [
+          "transcript"
+        ]
+      }
+    ]
+  }
+}
