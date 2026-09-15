@@ -114,7 +114,7 @@ class EveryAppSpendRequiresFreshIdentity(unittest.TestCase):
         """The hosted build now publishes behind its own mint; no stale-spend exemption."""
         self.assertEqual(GitHubClient.SPLIT_OPERATIONS,
                          frozenset({"merge_squash", "create_programme_issue", "push_branch", "create_pr",
-                                    "request_emergency_stop"}))
+                                    "request_emergency_stop", "archive_trajectory"}))
 
     def test_publication_refuses_a_stale_identity(self):
         import contextlib

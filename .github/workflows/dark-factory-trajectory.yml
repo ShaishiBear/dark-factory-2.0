@@ -1,0 +1,58 @@
+name: dark-factory-trajectory
+
+on:
+  workflow_run:
+    workflows: [dark-factory-worker]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Completed canonical worker run to archive or recover
+        required: true
+        type: string
+      attempt:
+        description: Exact source run attempt
+        required: true
+        default: '1'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: trajectory-${{ github.event.workflow_run.id || inputs.run_id }}-${{ github.event.workflow_run.run_attempt || inputs.attempt }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    if: >-
+      github.repository == 'ShaishiBear/dark-factory-2.0' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_run' ||
+       (github.actor == github.repository_owner && github.triggering_actor == github.repository_owner))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout only the trusted archive implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Collect bounded metadata from the completed source attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m factory_kernel.trajectory_archive collect --record "$RUNNER_TEMP/trajectory.json"
+      - name: Mint only the archive publication capability
+        id: identity
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+          permission-contents: write
+      - name: Append the immutable observation to the separate archive branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.identity.outputs.token }}
+        run: |
+          export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
+          python -m factory_kernel.trajectory_archive publish --record "$RUNNER_TEMP/trajectory.json"
