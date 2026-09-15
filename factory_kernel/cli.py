@@ -57,12 +57,23 @@ def main() -> int:
     programme_check = sub.add_parser("programme-check", help="compile a proposal without effects")
     programme_check.add_argument("path", type=Path)
     sub.add_parser("programme-sync", help="materialize one ready programme candidate via the App")
+    for name in ("merge-export", "merge-import"):
+        transfer = sub.add_parser(name, help="transport merge evidence within one Actions run")
+        transfer.add_argument("--pr", type=int, required=True)
+        transfer.add_argument("--source", type=Path, required=True)
+        transfer.add_argument("--destination", type=Path, required=True)
+        if name == "merge-import":
+            transfer.add_argument("--sha256", required=True)
 
     dispatch = sub.add_parser("dispatch")
     dispatch.add_argument("--once", action="store_true", help="execute exactly one priority item")
     dispatch.add_argument("--no-merge", action="store_true")
     # Validate and authorise, but leave the merge to a step with a fresher identity.
     dispatch.add_argument("--defer-merge", action="store_true")
+    dispatch.add_argument("--defer-publication", action="store_true")
+    publish = sub.add_parser("publish", help="publish a prepared build behind a fresh App identity")
+    publish.add_argument("--handoff", type=Path, required=True)
+    publish.add_argument("--sha256", required=True)
 
     build = sub.add_parser("build")
     build.add_argument("--issue", type=int, required=True)
@@ -113,6 +124,26 @@ def main() -> int:
         print(f"PROGRAMME_STRUCTURALLY_VALID sha256={compiled.sha256} items={len(compiled.items)}")
         return 0
 
+    if args.command in {"merge-export", "merge-import"}:
+        import os
+        import subprocess
+        from .merge_handoff import export_handoff, import_handoff
+
+        cfg = load_config(args.config)
+        run, attempt = os.environ.get("GITHUB_RUN_ID", ""), os.environ.get("GITHUB_RUN_ATTEMPT", "")
+        if (not run.isdecimal() or not attempt.isdecimal() or args.pr <= 0
+                or os.environ.get("GITHUB_REPOSITORY") != cfg.repository):
+            raise ValueError("merge transport requires this repository's canonical Actions run")
+        kernel = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        subject = {"repository": cfg.repository, "run": run, "attempt": attempt,
+                   "kernel": kernel, "pr": args.pr}
+        if args.command == "merge-export":
+            digest = export_handoff(args.source, args.destination, subject=subject)
+            _emit_step_outputs(merge_handoff_sha256=digest, kernel_sha=kernel)
+        else:
+            import_handoff(args.source, args.destination, expected_sha256=args.sha256, subject=subject)
+        return 0
+
     rt = runtime(args.config)
     try:
         if args.command == "programme-sync":
@@ -137,6 +168,7 @@ def main() -> int:
         if args.command == "dispatch":
             if not args.once:
                 parser.error("dispatch currently requires --once; scheduling belongs outside kernel")
+            rt.defer_publication = args.defer_publication
             decision = rt.dispatch_once(
                 merge=not (args.no_merge or args.defer_merge)
             )
@@ -146,6 +178,10 @@ def main() -> int:
                     merge_pr=str(pr_number),
                     merge_authorization=str(authorization.parent),
                 )
+            prepared = getattr(rt, "pending_publication", None)
+            if prepared is not None:
+                from .canonical import sha256_file
+                _emit_step_outputs(publication_handoff=str(prepared), publication_sha256=sha256_file(prepared))
             if decision.kind == "idle":
                 count = TriageEngine(rt).run_once()
                 print(f"KERNEL_DISPATCH kind=triage decisions={count}")
@@ -159,6 +195,10 @@ def main() -> int:
         if args.command == "build":
             pr = rt.build_issue(args.issue)
             print(f"KERNEL_BUILD_OK issue={args.issue} pr={pr}")
+            return 0
+        if args.command == "publish":
+            pr = rt.publish_prepared(args.handoff, expected_sha256=args.sha256)
+            print(f"KERNEL_PUBLICATION_OK pr={pr}")
             return 0
         if args.command == "merge":
             output = rt.merge_authorized(args.pr, artifacts=Path(args.from_authorization))

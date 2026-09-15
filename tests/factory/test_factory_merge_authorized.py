@@ -183,6 +183,22 @@ class TheAuthorisedMergeRunsEndToEnd(unittest.TestCase):
         self.assertIn("merge-authorization.json", joined)
         self.assertIn("evidence-bundle.json", joined)
 
+    def test_currency_refusal_after_job_handoff_prevents_merge(self):
+        gh = FakeGitHub()
+        rt = runtime_with(self.tmp, gh)
+        d = artifacts_dir(self.tmp, auth=authorization())
+        tree = mock.Mock(path=self.tmp / "wt")
+        with mock.patch.object(rt, "check_stop"), mock.patch.object(rt, "_git"), \
+                mock.patch.object(rt, "_run_env", return_value={}), \
+                mock.patch.object(rt, "_record_validation_failure"), \
+                mock.patch("factory_kernel.runtime.create_detached", return_value=tree), \
+                mock.patch("factory_kernel.runtime.remove"), \
+                mock.patch.object(rt, "_exec", side_effect=RuntimeError("main moved after evidence")) as execute:
+            with self.assertRaisesRegex(RuntimeError, "main moved"):
+                rt.merge_authorized(134, artifacts=d)
+        self.assertIn("pre", execute.call_args.args[0])
+        self.assertEqual(gh.merged, [])
+
     def test_no_authority_is_open_while_the_merge_runs(self):
         """DFE-014: a failure here must not borrow the name of the last thing that passed."""
         gh = FakeGitHub()

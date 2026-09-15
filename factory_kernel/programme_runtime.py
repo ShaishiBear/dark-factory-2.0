@@ -125,6 +125,10 @@ class ProgrammeQueue:
                         and pr.get("head", {}).get("sha") == receipt.get("head_sha")
                         and pr.get("base", {}).get("ref") == self.default_branch
                         and pr.get("user", {}).get("login") == programme.app_login
+                        and pr.get("merged_by", {}).get("login") == programme.app_login
+                        and pr.get("merged_by", {}).get("type") == "Bot"
+                        and pr.get("base", {}).get("repo", {}).get("full_name") == repo
+                        and pr.get("head", {}).get("repo", {}).get("full_name") == repo
                         and re.search(rf"(?im)^\s*Fixes\s+#{number}\b", str(pr.get("body") or ""))
                         and run.get("conclusion") == "success"
                         and run.get("path") == ".github/workflows/dark-factory-worker.yml"

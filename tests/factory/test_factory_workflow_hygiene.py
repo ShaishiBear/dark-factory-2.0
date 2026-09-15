@@ -465,17 +465,18 @@ class AutonomousIdentityTests(unittest.TestCase):
                 # one minted before an 83-minute validation (ACP-004).
                 "Merge the PR the evidence authorised",
                 "Materialize a ready programme candidate",
+                "Publish the prepared build",
             },
             "the App token is a capability, not an ambient credential",
         )
 
     def test_the_app_token_comes_only_from_a_minting_step(self) -> None:
-        """Two mints now, and no other source. The kernel still cannot mint: the private key
+        """Separate creation, publication and merge mints. The private key
         never leaves `actions/create-github-app-token`, which is why the lifetime fix is a step
         boundary rather than a broker that holds a signing key."""
         values = re.findall(r"^\s*DARK_FACTORY_APP_TOKEN: (.+)$", self.text, re.M)
         self.assertTrue(values, "no step is granted the App token")
-        minted = {self.APP_TOKEN, self.MERGE_APP_TOKEN}
+        minted = {self.APP_TOKEN, self.MERGE_APP_TOKEN, "${{ steps.publication_identity.outputs.token }}"}
         for value in values:
             self.assertIn(value.strip(), minted, value)
         self.assertNotIn(

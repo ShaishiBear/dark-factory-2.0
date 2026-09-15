@@ -22,14 +22,13 @@ class GitHubClient:
     # than defaulting to unlimited. The kernel passes the configured value.
     DEFAULT_IDENTITY_MAX_AGE_SECONDS = 1200
 
-    # Which spends run behind their own mint. ACP-004 splits the merge into its own workflow
-    # step preceded by `create-github-app-token`, so a stale identity there is a caller bug with
-    # a fix available -- it refuses. The build's push/PR handoff is NOT split yet (ACP-004 item
-    # 2): it runs at the end of one long dispatch step, observed at 56m27s on the run that
-    # opened PR #134. Refusing there today would break builds that currently succeed, so it
-    # reports its age and proceeds. THIS IS NOT AN EXEMPTION -- it is the honest statement that
-    # item 2 is unbuilt, and the age line is the evidence that will size it.
-    SPLIT_OPERATIONS: frozenset[str] = frozenset({"merge_squash", "create_programme_issue"})
+    # All consequential App spends enforce freshness. Hosted builds now stop before push/PR
+    # publication, then publish in a separate step behind a fresh mint (ACP-004). Other callers
+    # such as re-head, resume and containment must likewise supply a sufficiently fresh token;
+    # none silently spends an expired identity or falls back to the personal/Actions token.
+    SPLIT_OPERATIONS: frozenset[str] = frozenset({
+        "merge_squash", "create_programme_issue", "push_branch", "create_pr",
+    })
 
     def __init__(
         self,

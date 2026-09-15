@@ -717,35 +717,21 @@ class KernelRuntime:
                 transcript=paths.transcripts / "quick-gate.log",
             )
             self._assert_clean(worktree.path)
-            self.github.cwd = str(worktree.path)
-            self.github.push_branch(branch)
-
-            body = paths.root / "pr-body.md"
-            body.write_text(
-                render_pr_body(
-                    issue_number, attempt, self._read_json(paths.artifacts / "task-contract.json")
-                ),
-                encoding="utf-8",
-            )
-            pr = self.github.create_pr(
-                head=branch,
-                base=self.config.default_branch,
-                title=f"factory: {str(issue.get('title') or '').strip()}",
-                body_file=body,
-            )
-            pr_number = int(pr["number"])
-            self._attach_and_publish(paths, worktree.path, env, pr_number)
-            self._lease_heartbeat(
-                "finish", issue_number, "pr-handoff", paths, cwd=worktree.path, pr=pr_number
-            )
-            self._hand_to_review(pr_number)
-            self.github.remove_issue_label(issue_number, self.config.labels["in_progress"])
+            if getattr(self, "defer_publication", False):
+                handoff = paths.root / "build-publication.json"
+                self._write_json(handoff, {
+                    "version": "1.0", "issue": issue_number, "attempt": attempt,
+                    "issue_sha256": self._json_sha({"title": issue["title"], "body": issue["body"]}),
+                    "branch": branch, "head": self._git("rev-parse", "HEAD", cwd=worktree.path),
+                    "base": base_sha, "kernel": self._git("rev-parse", "HEAD"),
+                    "worktree": str(worktree.path),
+                    "artifacts": self._publication_artifacts(paths.artifacts),
+                })
+                self.pending_publication = handoff
+                print(f"FACTORY_BUILD_PREPARED issue=#{issue_number} handoff={handoff}")
+                return 0  # no PR exists yet; the workflow publishes after a fresh mint
+            pr_number = self._publish_build(paths, worktree.path, env, issue, attempt, branch)
             handed_off = True
-            current_head = self._git("rev-parse", "HEAD", cwd=worktree.path)
-            print(
-                f"FACTORY_BUILD_OK issue=#{issue_number} attempt={attempt} "
-                f"pr=#{pr_number} head={current_head}"
-            )
             return pr_number
         except FactoryStopped as exc:
             self._release_stopped_build(
@@ -768,6 +754,89 @@ class KernelRuntime:
             self.github.cwd = str(self.repo_root)
             if handed_off:
                 remove(self.repo_root, worktree)
+
+    @staticmethod
+    def _publication_artifacts(directory: Path) -> dict[str, str]:
+        return {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(directory.glob("*.json")) if p.is_file()}
+
+    def publish_prepared(self, handoff: Path, *, expected_sha256: str) -> int:
+        """Finish this job's prepared build behind a fresh identity, without model work."""
+        handoff = handoff.resolve()
+        work_root = self.config.runtime.work_root.resolve()
+        if (not handoff.is_relative_to(work_root / "runs")
+                or hashlib.sha256(handoff.read_bytes()).hexdigest() != expected_sha256):
+            raise NeedsHuman("build publication handoff is outside this run or changed")
+        value = self._read_json(handoff)
+        paths = RunPaths(root=handoff.parent, artifacts=handoff.parent / "artifacts",
+                         transcripts=handoff.parent / "transcripts")
+        cwd = Path(value["worktree"]).resolve()
+        if (value.get("version") != "1.0" or not cwd.is_relative_to(work_root / "worktrees")
+                or self._git("rev-parse", "HEAD") != value["kernel"]
+                or self._git("rev-parse", "HEAD", cwd=cwd) != value["head"]
+                or self._git("branch", "--show-current", cwd=cwd) != value["branch"]
+                or self._publication_artifacts(paths.artifacts) != value["artifacts"]):
+            raise NeedsHuman("prepared build identity or evidence changed before publication")
+        try:
+            self.check_stop()
+        except FactoryStopped as exc:
+            self._release_stopped_build(value["issue"], exc, paths=paths, cwd=cwd)
+            raise
+        self._assert_clean(cwd)
+        issue = self.github.issue(value["issue"])
+        ProgrammeQueue(self.github, self.config.default_branch).admit(issue)
+        if (self._json_sha({"title": issue["title"], "body": issue["body"]}) != value["issue_sha256"]
+                or self.config.labels["accepted"] not in self.github.labels(issue)):
+            raise NeedsHuman("approved issue changed before publication")
+        env = self._run_env(paths, base_ref=value["base"])
+        self._lease_heartbeat("touch", value["issue"], "publication", paths, cwd=cwd)
+        try:
+            self.check_stop()
+            number = self._publish_build(paths, cwd, env, issue, value["attempt"], value["branch"])
+        except FactoryStopped as exc:
+            self._release_stopped_build(value["issue"], exc, paths=paths, cwd=cwd)
+            raise
+        except Exception as exc:
+            self._mark_issue_human(value["issue"], f"build publication failed closed: {exc}",
+                                   evidence=self._failure_evidence(paths, exc))
+            raise
+        finally:
+            self.github.cwd = str(self.repo_root)
+        remove(self.repo_root, Worktree(path=cwd, head_sha=value["head"]))
+        return number
+
+    def _publish_build(self, paths: RunPaths, cwd: Path, env: Mapping[str, str],
+                       issue: Mapping, attempt: int, branch: str) -> int:
+        issue_number = int(issue["number"])
+        self.github.cwd = str(cwd)
+        self.github.push_branch(branch)
+
+        body = paths.root / "pr-body.md"
+        body.write_text(
+            render_pr_body(
+                issue_number, attempt, self._read_json(paths.artifacts / "task-contract.json")
+            ),
+            encoding="utf-8",
+        )
+        pr = self.github.create_pr(
+            head=branch,
+            base=self.config.default_branch,
+            title=f"factory: {str(issue.get('title') or '').strip()}",
+            body_file=body,
+        )
+        pr_number = int(pr["number"])
+        self._attach_and_publish(paths, cwd, env, pr_number)
+        self._lease_heartbeat(
+            "finish", issue_number, "pr-handoff", paths, cwd=cwd, pr=pr_number
+        )
+        self._hand_to_review(pr_number)
+        self.github.remove_issue_label(issue_number, self.config.labels["in_progress"])
+        current_head = self._git("rev-parse", "HEAD", cwd=cwd)
+        print(
+            f"FACTORY_BUILD_OK issue=#{issue_number} attempt={attempt} "
+            f"pr=#{pr_number} head={current_head}"
+        )
+        return pr_number
 
     def _red_gate(
         self,
@@ -2054,6 +2123,17 @@ class KernelRuntime:
         )
         try:
             env = self._run_env(paths, base_ref=base)
+            # A job boundary may queue for minutes. Re-run the existing cheap exact-subject
+            # authority before spending, including base currency and evidence byte identity.
+            refreshed = paths.artifacts / "merge-authorization.json"
+            self._exec(
+                ["python", "harness/merge_verify.py", "pre", "--pr", str(pr_number),
+                 "--evidence", str(evidence), "--output", str(refreshed)],
+                cwd=worktree.path, env=env, credential_scope="github", timeout=180,
+                transcript=paths.transcripts / "merge-pre.log",
+            )
+            if self._read_json(refreshed) != authorized:
+                raise NeedsHuman("merge authorization changed during currency recheck")
             return self._merge_and_verify(
                 pr_number,
                 head=head,

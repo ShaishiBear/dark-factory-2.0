@@ -239,8 +239,8 @@
     {
       "id": "worker-scheduler-persists-checkout-token",
       "file": ".github/workflows/dark-factory-worker.yml",
-      "find": "          persist-credentials: false",
-      "replace": "          persist-credentials: true",
+      "find": "          ref: main\n          fetch-depth: 0\n          persist-credentials: false",
+      "replace": "          ref: main\n          fetch-depth: 0\n          persist-credentials: true",
       "why": "A write-capable GitHub token could be stored in Git config where PR-controlled subprocesses can read it."
     },
     {
@@ -253,8 +253,8 @@
     {
       "id": "worker-scheduler-claude-version-floats",
       "file": ".github/workflows/dark-factory-worker.yml",
-      "find": "          npm install -g @anthropic-ai/claude-code@2.1.245",
-      "replace": "          npm install -g @anthropic-ai/claude-code",
+      "find": "      - name: Install pinned worker and browser CLIs\n        run: |\n          npm install -g @anthropic-ai/claude-code@2.1.245",
+      "replace": "      - name: Install pinned worker and browser CLIs\n        run: |\n          npm install -g @anthropic-ai/claude-code",
       "why": "The reasoning-worker executable could drift between unattended runs without review or revalidation."
     },
     {
@@ -519,8 +519,8 @@
     {
       "id": "kernel-pr-body-ignores-contract",
       "file": "factory_kernel/runtime.py",
-      "find": "                    issue_number, attempt, self._read_json(paths.artifacts / \"task-contract.json\")\n",
-      "replace": "                    issue_number, attempt, {}\n",
+      "find": "                issue_number, attempt, self._read_json(paths.artifacts / \"task-contract.json\")\n",
+      "replace": "                issue_number, attempt, {}\n",
       "why": "The PR body would stop carrying the contract's declared dependencies and the guard would refuse the manifest change."
     },
     {
@@ -1387,8 +1387,8 @@
     {
       "id": "validation-db-without-pgvector",
       "file": ".github/workflows/dark-factory-worker.yml",
-      "find": "        image: pgvector/pgvector:pg16\n",
-      "replace": "        image: postgres:16\n",
+      "find": "      postgres:\n        image: pgvector/pgvector:pg16\n",
+      "replace": "      postgres:\n        image: postgres:16\n",
       "why": "The validation database would lack the vector extension, so every retrieval query would fail with `type \"vector\" does not exist` while ingestion succeeded, and the browser journey could never see a citation (D-053)."
     },
     {
@@ -2111,6 +2111,27 @@
       "find": "    \"harness/factory_mutations/defects.json\",\n",
       "replace": "",
       "why": "load_defects() requires all eight manifests, so a copy without them cannot load this runner at all: every test that asks it a question dies with `required factory mutation manifest missing`, the baseline goes red, and the whole family is REFUSED rather than run; caught by tests/factory/test_factory_mutation_anchors.py (the copy set carries every manifest the runner requires)."
+    },
+    {
+      "id": "merge-job-persists-checkout-token",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "          ref: ${{ needs.dispatch.outputs.kernel_sha }}\n          fetch-depth: 0\n          persist-credentials: false",
+      "replace": "          ref: ${{ needs.dispatch.outputs.kernel_sha }}\n          fetch-depth: 0\n          persist-credentials: true",
+      "why": "A write-capable GitHub token could be stored in Git config where PR-controlled subprocesses can read it."
+    },
+    {
+      "id": "merge-job-claude-version-floats",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "      - name: Merge job - Install pinned worker and browser CLIs\n        run: |\n          npm install -g @anthropic-ai/claude-code@2.1.245",
+      "replace": "      - name: Merge job - Install pinned worker and browser CLIs\n        run: |\n          npm install -g @anthropic-ai/claude-code",
+      "why": "The reasoning-worker executable could drift between unattended runs without review or revalidation."
+    },
+    {
+      "id": "merge-job-db-without-pgvector",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "      postgres:\n        # Fresh post-merge validation database.\n        image: pgvector/pgvector:pg16\n",
+      "replace": "      postgres:\n        # Fresh post-merge validation database.\n        image: postgres:16\n",
+      "why": "The validation database would lack the vector extension, so every retrieval query would fail with `type \"vector\" does not exist` while ingestion succeeded, and the browser journey could never see a citation (D-053)."
     }
   ]
 }

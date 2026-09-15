@@ -49,7 +49,9 @@ class FakeGitHub:
         self.truncated = False
         self.lose_response = False
         self.pr = {"merged": True, "merge_commit_sha": "b" * 40,
-                   "head": {"sha": "a" * 40}, "base": {"ref": "main"},
+                   "head": {"sha": "a" * 40, "repo": {"full_name": REPO}},
+                   "base": {"ref": "main", "repo": {"full_name": REPO}},
+                   "merged_by": {"login": BOT, "type": "Bot"},
                    "user": {"login": BOT}, "body": "Fixes #1"}
         self.run = {"conclusion": "success", "path": ".github/workflows/dark-factory-worker.yml",
                     "head_branch": "main", "event": "schedule", "run_attempt": 1}
@@ -289,7 +291,7 @@ class QueueTests(unittest.TestCase):
 
     def test_forged_failed_or_unrelated_outcome_does_not_unblock(self):
         for change in ("author", "edited", "wrong-issue", "failed-run", "wrong-workflow",
-                       "wrong-head", "unmerged", "attempt"):
+                       "wrong-head", "unmerged", "attempt", "human-merge", "fork"):
             self.setUp()
             self.sync()
             self.complete_first()
@@ -307,6 +309,10 @@ class QueueTests(unittest.TestCase):
                 self.gh.pr["head"]["sha"] = "c" * 40
             elif change == "unmerged":
                 self.gh.pr["merged"] = False
+            elif change == "human-merge":
+                self.gh.pr["merged_by"] = {"login": "maintainer", "type": "User"}
+            elif change == "fork":
+                self.gh.pr["head"]["repo"]["full_name"] = "attacker/product"
             else:
                 self.gh.run["run_attempt"] = 2
             with self.subTest(change=change):

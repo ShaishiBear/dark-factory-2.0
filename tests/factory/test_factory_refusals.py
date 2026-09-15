@@ -189,7 +189,8 @@ class PushLeaseTests(unittest.TestCase):
 
         # An autonomous branch push spends the App installation token, never the Actions token.
         with tempfile.TemporaryDirectory() as tmp, \
-             mock.patch.dict(os.environ, {"DARK_FACTORY_APP_TOKEN": FAKE_GH_TOKEN}), \
+             mock.patch.dict(os.environ, {"DARK_FACTORY_APP_TOKEN": FAKE_GH_TOKEN,
+                                         "DARK_FACTORY_APP_TOKEN_MINTED_AT": str(__import__("time").time())}), \
              mock.patch("factory_kernel.github_cli.subprocess.run", side_effect=fake_run):
             GitHubClient("owner/repo", cwd=tmp).push_branch("factory/x", **kwargs)
         return seen[-1]

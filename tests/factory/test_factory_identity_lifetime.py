@@ -109,15 +109,13 @@ class AStaleIdentityRefusesBeforeTheAPI(unittest.TestCase):
                 self.assertIn("limit=1200", line)
 
 
-class TheSplitIsNotClaimedWhereItDoesNotExist(unittest.TestCase):
-    def test_only_early_programme_creation_and_merge_require_fresh_identity(self):
-        """ACP-004 item 2 (the build's push/PR handoff) is unbuilt. Refusing there would break
-        builds that currently succeed, so those operations report and proceed. When item 2
-        lands, they join this set and this test changes with it."""
+class EveryAppSpendRequiresFreshIdentity(unittest.TestCase):
+    def test_publication_joins_the_enforced_operations(self):
+        """The hosted build now publishes behind its own mint; no stale-spend exemption."""
         self.assertEqual(GitHubClient.SPLIT_OPERATIONS,
-                         frozenset({"merge_squash", "create_programme_issue"}))
+                         frozenset({"merge_squash", "create_programme_issue", "push_branch", "create_pr"}))
 
-    def test_an_unsplit_operation_reports_a_stale_identity_without_refusing(self):
+    def test_publication_refuses_a_stale_identity(self):
         import contextlib
         import io
 
@@ -126,8 +124,9 @@ class TheSplitIsNotClaimedWhereItDoesNotExist(unittest.TestCase):
                 out = io.StringIO()
                 with mock.patch.dict(os.environ, env_at(5678), clear=True):
                     with contextlib.redirect_stdout(out):
-                        client()._autonomous_identity(operation)
-                self.assertIn("split=no verdict=proceeding", out.getvalue())
+                        with self.assertRaises(R.IdentityExpired):
+                            client()._autonomous_identity(operation)
+                self.assertIn("split=yes verdict=refused", out.getvalue())
 
 
 class TheRefusalNamesItself(unittest.TestCase):
@@ -155,7 +154,7 @@ class TheMergeRunsBehindItsOwnMint(unittest.TestCase):
         merge_step = text.index("Merge the PR the evidence authorised")
         self.assertLess(mint_again, merge_step, "the mint must precede the spend")
         self.assertEqual(
-            text.count("uses: actions/create-github-app-token@"), 2,
+            text.count("uses: actions/create-github-app-token@"), 3,
             "the merge needs its own mint, and the private key stays with the action",
         )
 

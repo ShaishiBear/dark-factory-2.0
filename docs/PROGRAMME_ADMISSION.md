@@ -87,8 +87,12 @@ waiting and requires a reasoned revision, not automatic relabeling or repeated m
 
 An API outage, expired/missing App token, stale programme or missing completion receipt stops
 that transition. No personal-token fallback exists. The new issue spend occurs early, before
-model work, and enforces the existing identity age limit. Existing push/PR handoff age debt is
-unchanged. A failure after merge but before receipt publication leaves dependents blocked;
+model work, and enforces the existing identity age limit. Builds prepare a byte-bound publication
+handoff after their gates; a separate step mints a fresh token, rechecks the exact clean revision,
+artifact hashes, current issue scope and lease, then pushes and publishes through the existing
+single provenance publisher. Push and PR creation now enforce identity age too. Other callers
+(re-head, resume and containment) must supply a fresh token or refuse. A failure after merge
+but before receipt publication leaves dependents blocked;
 this version has no evidence-backed receipt reconstruction command.
 
 ## Frontend sequence and remaining work
@@ -108,6 +112,17 @@ replanning from observed failures, resource-scoped leases, general durable traje
 lesson admission, a CLI-free provider adapter, and the governed self-maintenance lane. The
 existing Claude executable still hosts the API worker tool loop; no Max session is required.
 
-The documented hosted-job worst-case duration still exceeds GitHub's job limit. Restoring the
-missing post-merge gate makes its cost real; it does not resolve that budget/decomposition
-problem. Do not reduce proof, inflate timeouts or call this an unlimited autonomous factory.
+Qualification and merge/post-merge now use separate hosted jobs within the existing workflow
+concurrency lock. The dispatch job has a 360-minute ceiling; merge/post-merge has 210 minutes.
+The existing proof budgets remain unchanged. These are execution ceilings, not measured run
+durations or a guarantee that every possible build path fits.
+
+The producer exports the original evidence and authorization bytes in one bounded envelope.
+Its job output binds the envelope digest and kernel revision. The consumer downloads only that
+run/attempt's named artifact, checks its digest and repository/run/attempt/kernel/PR identity,
+then re-runs the existing pre-merge authority before any merge. A missing artifact, changed
+base, changed evidence or changed head refuses. Artifact transport is not a new proof authority.
+The full post-merge ladder still runs and completion requires the whole workflow to succeed.
+
+Completion also checks that the dedicated App actually merged the PR and that both PR branches
+belong to this repository. App authorship alone no longer qualifies a human-merged PR.

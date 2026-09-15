@@ -213,7 +213,7 @@ class CredentialScopeTests(unittest.TestCase):
         run.return_value = Mock(returncode=0, stdout="", stderr="")
         with tempfile.TemporaryDirectory() as tmp:
             client = GitHubClient("owner/repo", cwd=tmp)
-            with patch.dict(os.environ, self.source(), clear=True):
+            with patch.dict(os.environ, {**self.source(), "DARK_FACTORY_APP_TOKEN_MINTED_AT": str(__import__("time").time())}, clear=True):
                 client.push_branch("factory/issue-7")
         argv = run.call_args.args[0]
         env = run.call_args.kwargs["env"]
@@ -257,7 +257,8 @@ class GitHubWorkerWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request_target:", self.workflow)
         self.assertNotIn("\n  pull_request:\n", self.workflow)
         self.assertIn("cancel-in-progress: false", self.workflow)
-        self.assertIn("timeout-minutes: 300", self.workflow)
+        self.assertIn("timeout-minutes: 360", self.workflow)
+        self.assertIn("timeout-minutes: 210", self.workflow)
 
     def test_scheduler_does_not_persist_write_token_into_checkout(self):
         self.assertIn("persist-credentials: false", self.workflow)
