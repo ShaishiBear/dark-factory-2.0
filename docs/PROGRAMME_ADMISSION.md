@@ -144,3 +144,16 @@ The full post-merge ladder still runs and completion requires the whole workflow
 
 Completion also checks that the dedicated App actually merged the PR and that both PR branches
 belong to this repository. App authorship alone no longer qualifies a human-merged PR.
+
+## Early validation and rehead admission
+
+Both entry points read the linked issue and use the current protected programme admission
+before fetching a candidate or creating a worktree. Retired programmes, changed scope, edited
+App issues, removed bindings and closed items refuse before proof or model work starts. A
+fresh stop read follows admission so a stop arriving during its remote reads is honored.
+Ordinary issue admission remains unchanged. These early refusals grant no proof authority;
+the existing independent qualification and fresh final merge admission still run in full.
+
+Focused tests exercise real programme admission against an in-memory GitHub service, with
+current-programme and ordinary-issue controls reaching the original work boundary. Four
+causal mutations cover removing either admission or its subsequent stop check.
