@@ -98,6 +98,104 @@ class FakeGitHub:
                               "created_at": "2026-09-15T10:00:00Z", "updated_at": "2026-09-15T10:00:00Z"})
 
 
+class StatusTests(unittest.TestCase):
+    def setUp(self):
+        self.gh = FakeGitHub()
+        self.queue = ProgrammeQueue(self.gh, "main")
+        self.labels = {key: "custom:" + key for key in
+                       ("needs_human", "rejected", "rate_limited", "in_progress", "accepted")}
+
+    def status(self):
+        before = deepcopy((self.gh.rows, self.gh.comments))
+        with patch.object(self.gh, "create_programme_issue", side_effect=AssertionError("write")), patch.object(self.gh, "comment_issue", side_effect=AssertionError("write")):
+            result = self.queue.status(self.labels)
+        self.assertEqual(before, (self.gh.rows, self.gh.comments))
+        return result
+
+    def test_empty_frontier_is_visible_without_creating_candidates(self):
+        result = self.status()
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["spec_sha256"], sha256_value(self.gh.source["spec"]))
+        first, second = result["items"]
+        self.assertEqual(first["status"], "ready-for-candidate")
+        self.assertEqual(second["status"], "blocked")
+        self.assertEqual(second["waiting_on"], ["open"])
+        self.assertIsNone(first["issue"])
+
+    def test_absent_programme_is_explicit(self):
+        self.gh.source = None
+        result = self.status()
+        self.assertEqual(result["status"], "no-programme")
+        self.assertEqual(result["items"], [])
+
+    def test_reports_configured_labels_without_accepting_or_reopening(self):
+        self.queue.sync(Mock())
+        for key, expected in ((None, "awaiting-triage"), ("accepted", "accepted"),
+                              ("in_progress", "in-progress"), ("rejected", "rejected"),
+                              ("rate_limited", "rate-limited"), ("needs_human", "needs-human")):
+            with self.subTest(label=key):
+                self.gh.rows[0]["labels"] = [{"name": self.labels[key]}] if key else []
+                first = self.status()["items"][0]
+                self.assertEqual(first["status"], expected)
+                self.assertEqual(first["issue"], 1)
+                self.assertFalse(first["completion_verified"])
+
+    def test_human_attention_wins_over_a_stale_accepted_label(self):
+        self.queue.sync(Mock())
+        self.gh.rows[0]["labels"] = [self.labels["accepted"], self.labels["needs_human"]]
+        self.assertEqual(self.status()["items"][0]["status"], "needs-human")
+
+    def test_closed_issue_does_not_report_completion_or_release_successor(self):
+        self.queue.sync(Mock())
+        self.gh.rows[0]["state"] = "closed"
+        first, second = self.status()["items"]
+        self.assertEqual(first["status"], "closed-without-verified-completion")
+        self.assertFalse(first["completion_verified"])
+        self.assertEqual(second["status"], "blocked")
+
+    def test_existing_receipt_verifier_controls_reported_completion(self):
+        self.queue.sync(Mock())
+        self.gh.rows[0]["state"] = "closed"
+        with patch.dict("os.environ", {"GITHUB_RUN_ID": "42", "GITHUB_RUN_ATTEMPT": "1"}):
+            self.queue.record_completion(self.gh.issue(1), 9,
+                                         {"head_sha": "a" * 40, "merge_sha": "b" * 40,
+                                          "verdict": "verified"})
+        first, second = self.status()["items"]
+        self.assertEqual(first["status"], "completed")
+        self.assertTrue(first["completion_verified"])
+        self.assertEqual(second["status"], "ready-for-candidate")
+        self.gh.run["conclusion"] = "failure"
+        self.assertFalse(self.status()["items"][0]["completion_verified"])
+
+    def test_invalid_inventory_or_unreachable_source_never_reports_partial_progress(self):
+        self.queue.sync(Mock())
+        self.gh.rows[0]["body"] += "edited"
+        with self.assertRaises(ProgrammeRefused):
+            self.status()
+        with patch.object(self.gh, "json", side_effect=TimeoutError("offline")):
+            with self.assertRaises(TimeoutError):
+                self.status()
+
+    def test_changing_programme_during_observation_refuses(self):
+        first = self.queue.current()
+        with patch.object(self.queue, "current", side_effect=[first, None]):
+            with self.assertRaisesRegex(ProgrammeRefused, "changed during status"):
+                self.status()
+
+    def test_cli_does_not_construct_execution_runtime(self):
+        import contextlib
+        import io
+        from factory_kernel import cli
+
+        cfg = SimpleNamespace(repository=REPO, default_branch="main", labels=self.labels)
+        output = io.StringIO()
+        with patch("sys.argv", ["factory_kernel", "programme-status"]), patch.object(cli, "load_config", return_value=cfg), patch.object(cli, "runtime", side_effect=AssertionError("execution runtime")), patch("factory_kernel.github_cli.GitHubClient", return_value=self.gh), contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(), 0)
+        value = json.loads(output.getvalue().removeprefix("FACTORY_PROGRAMME_STATUS "))
+        self.assertEqual(value["items"][0]["status"], "ready-for-candidate")
+        self.assertEqual(self.gh.rows, [])
+
+
 class CompilerTests(unittest.TestCase):
     def compile(self, raw):
         return compile_programme(raw, repository=REPO)
@@ -406,6 +504,96 @@ class QueueTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.assertEqual(self.sync()["status"], "waiting")
                 self.assertEqual(len(self.gh.rows), 1)
+
+
+class EarlyAdmissionTests(unittest.TestCase):
+    """Use real programme admission before the first checkout or proof operation."""
+
+    class WorkReached(Exception):
+        pass
+
+    def runtime(self, method, change=None):
+        from harness.rehearsal import HEAD, BASE
+        from tests.factory.test_factory_refusals import refusal_marker
+        gh = FakeGitHub()
+        ProgrammeQueue(gh, "main").sync(Mock())
+        if change == "retired":
+            gh.source = None
+        elif change == "changed-scope":
+            gh.source["spec"]["outcome"] = "An unapproved replacement outcome."
+        elif change == "edited-issue":
+            gh.rows[0]["body"] += "\nAdditional scope."
+        elif change == "missing-marker":
+            gh.rows[0]["body"] = "Marker removed from an App issue."
+        elif change == "closed":
+            gh.rows[0]["state"] = "closed"
+        elif change == "ordinary":
+            gh.rows[0].update(body="Ordinary issue", user={"login": "owner", "type": "User"})
+        runtime = object.__new__(KernelRuntime)
+        runtime.config = SimpleNamespace(default_branch="main", labels={
+            "needs_review": "factory:needs-review", "needs_fix": "factory:needs-fix"})
+        runtime.github = Mock(repository=REPO)
+        runtime.github.json.side_effect = gh.json
+        runtime.github.programme_issues.side_effect = gh.programme_issues
+        runtime.github.issue.side_effect = lambda number: {
+            **deepcopy(gh.rows[number - 1]), "author": deepcopy(gh.rows[number - 1]["user"])}
+        runtime.github.labels.side_effect = GitHubClient.labels
+        label = "factory:needs-review" if method == "validate_pr" else "factory:needs-fix"
+        runtime.github.pr.return_value = {"state": "OPEN", "headRefOid": HEAD,
+            "baseRefOid": BASE, "headRefName": "factory/candidate", "body": "Fixes #1",
+            "labels": [{"name": label}]}
+        runtime.github.pr_comments.return_value = [refusal_marker("stale_base")]
+        runtime.check_stop = Mock()
+        runtime._git = Mock(side_effect=self.WorkReached("first repository work"))
+        runtime._exec = Mock()
+        runtime._agent_stage = Mock()
+        return runtime
+
+    def outcome(self, runtime, method):
+        try:
+            getattr(runtime, method)(9)
+        except (ProgrammeRefused, FactoryStopped, self.WorkReached) as exc:
+            return exc
+        self.fail("expected refusal or first work boundary")
+
+    def test_current_programme_and_ordinary_issue_reach_existing_work(self):
+        for method in ("validate_pr", "rehead_pr"):
+            for change in (None, "ordinary"):
+                with self.subTest(method=method, change=change):
+                    runtime = self.runtime(method, change)
+                    self.assertIsInstance(self.outcome(runtime, method), self.WorkReached)
+                    runtime._git.assert_called_once()
+
+    def test_invalid_programme_refuses_before_checkout_or_paid_work(self):
+        for method in ("validate_pr", "rehead_pr"):
+            for change in ("retired", "changed-scope", "edited-issue", "missing-marker", "closed"):
+                with self.subTest(method=method, change=change):
+                    runtime = self.runtime(method, change)
+                    self.assertIsInstance(self.outcome(runtime, method), ProgrammeRefused)
+                    runtime._git.assert_not_called()
+                    runtime._exec.assert_not_called()
+                    runtime._agent_stage.assert_not_called()
+
+    def test_stop_arriving_during_remote_admission_refuses_before_work(self):
+        for method in ("validate_pr", "rehead_pr"):
+            with self.subTest(method=method):
+                runtime = self.runtime(method)
+                stopped = False
+                original = runtime.github.json.side_effect
+
+                def remote_read(args):
+                    nonlocal stopped
+                    stopped = True
+                    return original(args)
+
+                def check_stop():
+                    if stopped:
+                        raise FactoryStopped("stop arrived during admission")
+
+                runtime.github.json.side_effect = remote_read
+                runtime.check_stop.side_effect = check_stop
+                self.assertIsInstance(self.outcome(runtime, method), FactoryStopped)
+                runtime._git.assert_not_called()
 
 
 class PostMergeRoutingTests(unittest.TestCase):

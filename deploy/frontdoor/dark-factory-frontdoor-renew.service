@@ -1,0 +1,12 @@
+[Unit]
+Description=Renew Dark Factory Front Door IP certificate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dark-factory-frontdoor/certbot/bin/certbot renew --cert-name dark-factory-frontdoor --quiet --deploy-hook "/usr/bin/systemctl reload dark-factory-frontdoor-proxy.service"
+TimeoutStartSec=300
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

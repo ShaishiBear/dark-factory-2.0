@@ -1,0 +1,52 @@
+name: dark-factory-owner-stop
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Unique 32-character lowercase hex stop request ID
+        required: true
+        type: string
+      reason:
+        description: Owner's reason for stopping factory execution
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+
+# Separate from the worker lock: emergency stop must not queue behind a long proof job.
+concurrency:
+  group: dark-factory-owner-stop
+  cancel-in-progress: false
+
+jobs:
+  stop:
+    if: >-
+      github.repository == 'ShaishiBear/dark-factory-2.0' &&
+      github.actor == github.repository_owner && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Read the protected workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Mint only the stop effect capability
+        id: stop_identity
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+          permission-issues: write
+      - name: Request the existing remote stop authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.stop_identity.outputs.token }}
+          STOP_REQUEST_ID: ${{ inputs.request_id }}
+          STOP_REASON: ${{ inputs.reason }}
+        run: |
+          export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
+          python -m factory_kernel.frontdoor_control

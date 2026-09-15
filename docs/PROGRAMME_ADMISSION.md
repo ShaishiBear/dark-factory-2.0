@@ -68,6 +68,18 @@ not measured capacity claims. Changing the programme changes its canonical ident
 `tests/factory/test_factory_programme.py` supplies a complete two-item example. It is a
 synthetic navigation scenario, not an approved live task list.
 
+`programme-status` reads the current protected input and verified issue inventory without
+constructing an execution runtime, making model calls, creating issues or changing labels.
+It reports each item's acceptance IDs, issue number, labels, unmet predecessors and observed
+state. `completion_verified` uses the same receipt verifier as successor admission; a closed
+issue without that proof remains explicitly unverified. Edited bindings, unreadable evidence
+and a programme that changes during observation refuse instead of returning partial progress.
+
+This command remains available while execution is stopped. Its output is a progress view,
+not permission to execute: `ready-for-candidate` describes dependency readiness only. GitHub
+reads are not atomic, and every effect still enters through current admission and stop checks.
+Use the reported issue's comments to inspect its retained completion receipt and run evidence.
+
 ## Serialisation and recovery
 
 The existing worker workflow's `dark-factory-worker` concurrency group is the single writer.
@@ -144,3 +156,16 @@ The full post-merge ladder still runs and completion requires the whole workflow
 
 Completion also checks that the dedicated App actually merged the PR and that both PR branches
 belong to this repository. App authorship alone no longer qualifies a human-merged PR.
+
+## Early validation and rehead admission
+
+Both entry points read the linked issue and use the current protected programme admission
+before fetching a candidate or creating a worktree. Retired programmes, changed scope, edited
+App issues, removed bindings and closed items refuse before proof or model work starts. A
+fresh stop read follows admission so a stop arriving during its remote reads is honored.
+Ordinary issue admission remains unchanged. These early refusals grant no proof authority;
+the existing independent qualification and fresh final merge admission still run in full.
+
+Focused tests exercise real programme admission against an in-memory GitHub service, with
+current-programme and ordinary-issue controls reaching the original work boundary. Four
+causal mutations cover removing either admission or its subsequent stop check.
