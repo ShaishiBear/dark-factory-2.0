@@ -197,6 +197,87 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.sync()["status"], "waiting")
         self.assertEqual(len(self.gh.rows), 1)
 
+    def test_delayed_creation_visibility_retries_reads_without_another_post(self):
+        read = self.gh.programme_issues
+        with patch.object(self.gh, "programme_issues") as reads:
+            reads.side_effect = lambda: read() if reads.call_count == 4 else []
+            with patch.object(self.gh, "create_programme_issue", wraps=self.gh.create_programme_issue) as create:
+                with patch("factory_kernel.programme_runtime.time.sleep") as sleep:
+                    try:
+                        result = self.sync()
+                    except ProgrammeRefused as exc:
+                        self.fail(f"acknowledged issue became visible but confirmation refused: {exc}")
+                    self.assertEqual(result["created"], 1)
+        self.assertEqual(create.call_count, 1)
+        self.assertEqual(reads.call_count, 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 5])
+        self.assertEqual(self.gh.rows[0]["labels"], [])
+        self.assertIsNotNone(self.queue.admit(self.gh.issue(1)))
+
+    def test_absent_confirmation_is_bounded_and_next_sync_reconciles(self):
+        with patch.object(self.gh, "programme_issues", return_value=[]) as reads:
+            with patch("factory_kernel.programme_runtime.time.sleep") as sleep:
+                with self.assertRaisesRegex(ProgrammeRefused, "not confirmed"):
+                    self.sync()
+        self.assertEqual(reads.call_count, 4)  # initial inventory plus three confirmations
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(self.sync()["status"], "waiting")
+        self.assertEqual(len(self.gh.rows), 1)
+
+    def test_confirmation_refuses_edits_duplicates_and_conflicting_post_identity(self):
+        for defect in ("edit", "duplicate", "identity"):
+            self.setUp()
+            create = self.gh.create_programme_issue
+
+            def corrupt(**kwargs):
+                result = create(**kwargs)
+                if defect == "edit":
+                    self.gh.rows[0]["body"] += " altered"
+                elif defect == "duplicate":
+                    self.gh.rows.append({**self.gh.rows[0], "number": 2})
+                else:
+                    result["number"] = 2
+                return result
+
+            with self.subTest(defect=defect), patch.object(self.gh, "create_programme_issue", side_effect=corrupt):
+                with patch("factory_kernel.programme_runtime.time.sleep") as sleep:
+                    with self.assertRaises(ProgrammeRefused):
+                        self.sync()
+                sleep.assert_not_called()
+
+    def test_stop_or_scope_change_during_confirmation_wait_refuses(self):
+        for change in ("stop", "scope"):
+            self.setUp()
+
+            def change_authority(_):
+                if change == "stop":
+                    self.stop.side_effect = FactoryStopped("stopped during confirmation")
+                else:
+                    self.gh.source = None
+
+            with self.subTest(change=change), patch.object(self.gh, "programme_issues", return_value=[]) as reads:
+                with patch("factory_kernel.programme_runtime.time.sleep", side_effect=change_authority):
+                    with self.assertRaises((FactoryStopped, ProgrammeRefused)):
+                        self.sync()
+            self.assertEqual(reads.call_count, 2)  # no read after authority changed
+            self.assertEqual(len(self.gh.rows), 1)
+
+    def test_uncertain_post_or_failed_confirmation_read_is_not_retried(self):
+        self.gh.lose_response = True
+        with patch("factory_kernel.programme_runtime.time.sleep") as sleep:
+            with self.assertRaises(TimeoutError):
+                self.sync()
+        sleep.assert_not_called()
+        self.assertEqual(len(self.gh.rows), 1)
+        self.setUp()
+        with patch.object(self.gh, "programme_issues", side_effect=[[], RuntimeError("read unavailable")]) as reads:
+            with patch("factory_kernel.programme_runtime.time.sleep") as sleep:
+                with self.assertRaisesRegex(RuntimeError, "read unavailable"):
+                    self.sync()
+        self.assertEqual(reads.call_count, 2)
+        sleep.assert_not_called()
+        self.assertEqual(len(self.gh.rows), 1)
+
     def test_continuation_cannot_materialize_a_changed_or_retired_programme(self):
         for source in (self.gh.source, None):
             self.gh.source = source

@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import re
+import time
 from typing import Mapping
 
 from .programme import ACTIVE_PATH, MARKER, Programme, ProgrammeRefused, compile_programme, parse_json
@@ -160,14 +161,30 @@ class ProgrammeQueue:
                 raise ProgrammeRefused("programme changed before materialization")
             title, body = programme.render(item, {k: v["number"] for k, v in inventory.items()})
             row = self.github.create_programme_issue(title=title, body=body)
-            # Use the POST's identity, then read it back through the same full verifier.
-            after = self.inventory(programme)
-            if after.get(item["id"], {}).get("number") != row["number"]:
-                raise ProgrammeRefused("created issue was not confirmed in the programme inventory")
+            self._confirm_created(programme, item, row["number"], check_stop)
             return {"status": "candidate-created", "created": row["number"],
                     "programme": programme.sha256}
         return {"status": "complete" if len(done) == len(programme.items) else "waiting",
                 "created": None, "programme": programme.sha256, "completed": sorted(done)}
+
+    def _confirm_created(self, programme, item, number, check_stop) -> None:
+        """Bounded read confirmation after an acknowledged POST; never repeat the effect."""
+        for delay in (0, 2, 5):
+            if delay:
+                time.sleep(delay)
+            check_stop()
+            latest = self.current()
+            if latest is None or latest.sha256 != programme.sha256:
+                raise ProgrammeRefused("programme changed during candidate confirmation")
+            # A missing row may become visible later. Every read still uses the complete
+            # verifier: edited, duplicate, wrong-App and conflicting identities fail now.
+            after = self.inventory(programme)
+            confirmed = after.get(item["id"])
+            if confirmed is not None:
+                if confirmed["number"] != number:
+                    raise ProgrammeRefused("created issue identity conflicts with programme inventory")
+                return
+        raise ProgrammeRefused("created issue was not confirmed in the programme inventory")
 
     def admit(self, issue: Mapping) -> tuple[Programme, dict] | None:
         """Mandatory check before model work and again before merge; stale bindings refuse."""

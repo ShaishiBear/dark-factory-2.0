@@ -2141,6 +2141,34 @@
       "why": "The validation database would lack the vector extension, so every retrieval query would fail with `type \"vector\" does not exist` while ingestion succeeded, and the browser journey could never see a citation (D-053)."
     },
     {
+      "id": "programme-confirmation-does-not-retry-missing-read",
+      "file": "factory_kernel/programme_runtime.py",
+      "find": "for delay in (0, 2, 5):",
+      "replace": "for delay in (0,):",
+      "why": "An acknowledged candidate that appears on a later inventory read must be confirmed without another POST."
+    },
+    {
+      "id": "programme-confirmation-ignores-stop",
+      "file": "factory_kernel/programme_runtime.py",
+      "find": "                time.sleep(delay)\n            check_stop()\n",
+      "replace": "                time.sleep(delay)\n",
+      "why": "A stop arriving during confirmation wait must refuse the remaining reads."
+    },
+    {
+      "id": "programme-confirmation-ignores-scope-replacement",
+      "file": "factory_kernel/programme_runtime.py",
+      "find": "            if latest is None or latest.sha256 != programme.sha256:\n                raise ProgrammeRefused(\"programme changed during candidate confirmation\")",
+      "replace": "            if False:\n                raise ProgrammeRefused(\"programme changed during candidate confirmation\")",
+      "why": "A retired or replaced scope cannot be confirmed while waiting for candidate visibility."
+    },
+    {
+      "id": "programme-confirmation-ignores-post-identity",
+      "file": "factory_kernel/programme_runtime.py",
+      "find": "if confirmed[\"number\"] != number:",
+      "replace": "if False:",
+      "why": "Confirmation must bind the acknowledged POST number, not accept a different matching issue."
+    },
+    {
       "id": "continuation-counter-not-decremented",
       "file": "factory_kernel/continuation.py",
       "find": "f\"continuation_remaining={count - 1}\"",
