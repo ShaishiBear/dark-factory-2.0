@@ -464,6 +464,7 @@ class AutonomousIdentityTests(unittest.TestCase):
                 # Its own step so it can spend an identity minted seconds earlier rather than
                 # one minted before an 83-minute validation (ACP-004).
                 "Merge the PR the evidence authorised",
+                "Materialize a ready programme candidate",
             },
             "the App token is a capability, not an ambient credential",
         )
@@ -554,9 +555,8 @@ class AutonomousIdentityCapabilityTests(unittest.TestCase):
         self.assertNotIn("GH_TOKEN", env)
         self.assertNotIn("GITHUB_TOKEN", env)
 
-    def test_exactly_the_three_autonomous_mutations_spend_the_app_identity(self) -> None:
-        """Requirement 5 names three operations. `run_as_app` is how they are spent, so the set
-        of methods that reach it is the set of operations that hold the capability."""
+    def test_only_declared_autonomous_mutations_spend_the_app_identity(self) -> None:
+        """Programme issue creation joins push/PR/merge as an explicit kernel capability."""
         import ast
         source = (ROOT / "factory_kernel" / "github_cli.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -567,7 +567,8 @@ class AutonomousIdentityCapabilityTests(unittest.TestCase):
             for inner in ast.walk(node):
                 if isinstance(inner, ast.Attribute) and inner.attr in {"run_as_app", "_autonomous_identity"}:
                     spenders.add(node.name)
-        self.assertEqual(spenders, {"create_pr", "push_branch", "merge_squash", "run_as_app"})
+        self.assertEqual(spenders, {"create_programme_issue", "create_pr", "push_branch",
+                                    "merge_squash", "run_as_app"})
 
     def test_the_merge_stays_bound_to_the_exact_authorized_head(self) -> None:
         source = (ROOT / "factory_kernel" / "github_cli.py").read_text(encoding="utf-8")

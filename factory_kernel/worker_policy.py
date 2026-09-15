@@ -316,6 +316,7 @@ TRUST_ROOT_DENY_PATHS: tuple[str, ...] = (
     ".factory/decisions.md",
     ".factory/locks/**",
     ".factory/prompts/**",
+    ".factory/programmes/**",
     ".factory/methods/**",
     ".factory/holdout/**",
     ".factory/benchmark/**",

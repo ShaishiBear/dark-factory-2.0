@@ -108,6 +108,9 @@ class FakeGitHub:
         self.calls.append(("issues", label))
         return self.issues
 
+    def issue(self, number):
+        return next(row for row in self.issues if row["number"] == number)
+
     @staticmethod
     def labels(value):
         return {item["name"] for item in value.get("labels", [])}

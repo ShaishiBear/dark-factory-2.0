@@ -110,11 +110,12 @@ class AStaleIdentityRefusesBeforeTheAPI(unittest.TestCase):
 
 
 class TheSplitIsNotClaimedWhereItDoesNotExist(unittest.TestCase):
-    def test_only_the_merge_is_declared_split_today(self):
+    def test_only_early_programme_creation_and_merge_require_fresh_identity(self):
         """ACP-004 item 2 (the build's push/PR handoff) is unbuilt. Refusing there would break
         builds that currently succeed, so those operations report and proceed. When item 2
         lands, they join this set and this test changes with it."""
-        self.assertEqual(GitHubClient.SPLIT_OPERATIONS, frozenset({"merge_squash"}))
+        self.assertEqual(GitHubClient.SPLIT_OPERATIONS,
+                         frozenset({"merge_squash", "create_programme_issue"}))
 
     def test_an_unsplit_operation_reports_a_stale_identity_without_refusing(self):
         import contextlib

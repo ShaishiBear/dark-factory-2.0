@@ -50,6 +50,9 @@ class FakeGitHub:
     def pr(self, number, *, holdout_safe=False):
         return self._pr
 
+    def issue(self, number):
+        return {"number": number, "body": "ordinary accepted issue"}
+
     def merge_squash(self, number, *, expected_head):
         self.merged.append((number, expected_head))
 

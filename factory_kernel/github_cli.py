@@ -29,7 +29,7 @@ class GitHubClient:
     # opened PR #134. Refusing there today would break builds that currently succeed, so it
     # reports its age and proceeds. THIS IS NOT AN EXEMPTION -- it is the honest statement that
     # item 2 is unbuilt, and the age line is the evidence that will size it.
-    SPLIT_OPERATIONS: frozenset[str] = frozenset({"merge_squash"})
+    SPLIT_OPERATIONS: frozenset[str] = frozenset({"merge_squash", "create_programme_issue"})
 
     def __init__(
         self,
@@ -67,8 +67,8 @@ class GitHubClient:
     def _autonomous_identity(self, operation: str = "unnamed") -> dict[str, str]:
         """The environment a GitHub *mutation* runs in: the App installation token, alone.
 
-        Three operations need this and nothing else does -- pushing an autonomous branch, opening
-        or updating an autonomous PR, and the exact-head merge. They need it because GitHub
+        Programme issue creation, branch push, PR publication and exact-head merge use this
+        identity. Programme candidates stay unaccepted. PR mutations need it because GitHub
         delivers no `pull_request` or `pull_request_target` event for anything GITHUB_TOKEN
         caused, and both required contexts on `main` are produced by those events.
 
@@ -158,9 +158,37 @@ class GitHubClient:
         return self.json(
             [
                 "issue", "view", str(number), "-R", self.repository,
-                "--json", "number,title,body,labels,state,url,updatedAt",
+                "--json", "number,title,body,labels,state,url,updatedAt,author",
             ]
         )
+
+    def programme_issues(self) -> list[dict]:
+        """Complete, bounded REST inventory; search indexing is not an idempotency store."""
+        rows = []
+        for page in range(1, 21):
+            batch = self.json([
+                "api", f"repos/{self.repository}/issues?state=all&per_page=100&page={page}"
+            ])
+            if not isinstance(batch, list):
+                raise RuntimeError("programme issue inventory is not an array")
+            rows.extend(row for row in batch if "pull_request" not in row)
+            if len(batch) < 100:
+                return rows
+        raise RuntimeError("programme inventory exceeds 2000 records; refusing partial inventory")
+
+    def create_programme_issue(self, *, title: str, body: str) -> dict:
+        """One App spend, no acceptance label and no implicit retry of an uncertain POST."""
+        with tempfile.TemporaryDirectory(prefix="factory-programme-") as directory:
+            source = Path(directory) / "issue.json"
+            source.write_text(json.dumps({"title": title, "body": body}), encoding="utf-8")
+            raw = self.run_as_app([
+                "api", f"repos/{self.repository}/issues", "--method", "POST",
+                "--input", str(source),
+            ], operation="create_programme_issue")
+        result = json.loads(raw)
+        if not isinstance(result, dict) or type(result.get("number")) is not int:
+            raise RuntimeError("programme issue creation returned no issue identity")
+        return result
 
     def pr(self, number: int, *, holdout_safe: bool = False) -> Mapping[str, Any]:
         self._number(number, "PR")

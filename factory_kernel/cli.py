@@ -54,6 +54,9 @@ def main() -> int:
     sub.add_parser("stop-check")
     sub.add_parser("reap")
     sub.add_parser("triage")
+    programme_check = sub.add_parser("programme-check", help="compile a proposal without effects")
+    programme_check.add_argument("path", type=Path)
+    sub.add_parser("programme-sync", help="materialize one ready programme candidate via the App")
 
     dispatch = sub.add_parser("dispatch")
     dispatch.add_argument("--once", action="store_true", help="execute exactly one priority item")
@@ -102,9 +105,22 @@ def main() -> int:
             f"prompts={len(cfg.prompts)}"
         )
         return 0
+    if args.command == "programme-check":
+        from .programme import compile_programme, parse_json
+        cfg = load_config(args.config)
+        compiled = compile_programme(parse_json(args.path.read_text(encoding="utf-8")),
+                                     repository=cfg.repository)
+        print(f"PROGRAMME_STRUCTURALLY_VALID sha256={compiled.sha256} items={len(compiled.items)}")
+        return 0
 
     rt = runtime(args.config)
     try:
+        if args.command == "programme-sync":
+            import json
+            from .programme_runtime import ProgrammeQueue
+            status = ProgrammeQueue(rt.github, rt.config.default_branch).sync(rt.check_stop)
+            print("FACTORY_PROGRAMME " + json.dumps(status, sort_keys=True))
+            return 0
         if args.command == "stop-check":
             rt.check_stop()
             print("KERNEL_STOP_CHECK_OK")

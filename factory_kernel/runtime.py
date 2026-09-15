@@ -38,6 +38,7 @@ from .config import KernelConfig
 from .credential_env import scoped_environment
 from .github_cli import GitHubClient
 from .providers import ClaudeCliProvider, prompt_text
+from .programme_runtime import ProgrammeQueue
 from .independence import (
     authority_inputs,
     build_certificate,
@@ -409,6 +410,20 @@ class KernelRuntime:
             for issue in accepted
             if self.config.labels["in_progress"] not in self.github.labels(issue)
         ]
+        # Programme candidates cannot consume model budget until their current binding and
+        # predecessor outcomes are checked. Ordinary accepted issues keep their existing route.
+        queue = ProgrammeQueue(self.github, self.config.default_branch)
+        from .programme import ProgrammeRefused
+        admitted = []
+        for candidate in idle:
+            issue = self.github.issue(int(candidate["number"]))
+            try:
+                queue.admit(issue)
+            except ProgrammeRefused as exc:
+                print(f"FACTORY_PROGRAMME_WAIT issue={issue['number']} reason={exc}", flush=True)
+                continue
+            admitted.append(candidate)
+        idle = admitted
         if idle:
             issue = min(idle, key=self._issue_dispatch_key)
             return DispatchDecision(
@@ -483,6 +498,7 @@ class KernelRuntime:
         """
         self.check_stop()
         issue = self.github.issue(issue_number)
+        ProgrammeQueue(self.github, self.config.default_branch).admit(issue)
         labels = self.github.labels(issue)
         if self.config.labels["accepted"] not in labels:
             raise NeedsHuman(f"issue #{issue_number} is not {self.config.labels['accepted']}")
@@ -1944,6 +1960,11 @@ class KernelRuntime:
         change that duplicated it: three anchors into this block reported `occurs 2x, must occur
         once`, which is exactly a detector telling you a property now has two homes.
         """
+        if linked_issue is not None:
+            ProgrammeQueue(self.github, self.config.default_branch).admit(
+                self.github.issue(linked_issue)
+            )
+        self.check_stop()
         self.github.cwd = str(cwd)
         self.github.merge_squash(pr_number, expected_head=head)
         try:

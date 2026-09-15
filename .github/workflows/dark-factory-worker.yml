@@ -211,6 +211,16 @@ jobs:
           python-version: '3.12.14'
           token: ''
 
+      # The programme source is protected main data. This kernel step creates at most one
+      # unaccepted issue using the App; it runs under the workflow's single-writer lock.
+      # No model provider credential is present, and no model is called by this command.
+      - name: Materialize a ready programme candidate
+        if: inputs.resume_pr == '' && inputs.resume_run_id == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.factory_identity.outputs.token }}
+        run: python -m factory_kernel programme-sync
+
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -477,6 +487,9 @@ jobs:
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
           MERGE_PR: ${{ steps.dispatch.outputs.merge_pr }}
           MERGE_AUTHORIZATION: ${{ steps.dispatch.outputs.merge_authorization }}
+          # The production merge command also runs the post-merge application gate.
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
         # Nothing is re-decided here. merge-authorization.json binds base, head, tree and the
         # evidence hash; the kernel re-reads it, refuses if the PR head moved, and hands the
         # same artifact to the same post-merge verifier the inline path used.
