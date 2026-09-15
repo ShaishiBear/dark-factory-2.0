@@ -772,6 +772,8 @@ class KernelRuntime:
                          transcripts=handoff.parent / "transcripts")
         cwd = Path(value["worktree"]).resolve()
         if (value.get("version") != "1.0" or not cwd.is_relative_to(work_root / "worktrees")
+                or not isinstance(value.get("base"), str)
+                or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value["base"])
                 or self._git("rev-parse", "HEAD") != value["kernel"]
                 or self._git("rev-parse", "HEAD", cwd=cwd) != value["head"]
                 or self._git("branch", "--show-current", cwd=cwd) != value["branch"]
@@ -788,7 +790,7 @@ class KernelRuntime:
         if (self._json_sha({"title": issue["title"], "body": issue["body"]}) != value["issue_sha256"]
                 or self.config.labels["accepted"] not in self.github.labels(issue)):
             raise NeedsHuman("approved issue changed before publication")
-        env = self._run_env(paths, base_ref=value["base"])
+        env = self._run_env(paths, base_ref=value["base"], base_sha=value["base"])
         self._lease_heartbeat("touch", value["issue"], "publication", paths, cwd=cwd)
         try:
             self.check_stop()
@@ -2349,13 +2351,6 @@ class KernelRuntime:
         info = self.github.pr(pr_number, holdout_safe=True)
         if info.get("state") != "OPEN":
             raise NeedsHuman(f"PR #{pr_number} is not open")
-        author = self.github.pr_author(pr_number)
-        if author.get("type") != self.FACTORY_PR_AUTHOR["type"] or author.get("login") != self.FACTORY_PR_AUTHOR["login"]:
-            raise NeedsHuman(
-                f"PR #{pr_number} was not opened by the factory "
-                f"(author {author.get('login')!r}, type {author.get('type')!r}); "
-                "only an autonomous PR can be resumed"
-            )
         head = str(info.get("headRefOid") or "")
         base = str(info.get("baseRefOid") or "")
         branch = str(info.get("headRefName") or "")
@@ -2370,6 +2365,17 @@ class KernelRuntime:
         if not isinstance(linked_issue, int):
             raise NeedsHuman(f"PR #{pr_number} does not link an issue")
         issue = self.github.issue(linked_issue)
+        # A programme's App authority is inseparable from admission of this exact issue.
+        # Ordinary historical Actions builds keep their existing identity and recovery lane.
+        admission = ProgrammeQueue(self.github, self.config.default_branch).admit(issue)
+        factory_login = admission[0].app_login if admission else self.FACTORY_PR_AUTHOR["login"]
+        author = self.github.pr_author(pr_number)
+        if author.get("type") != self.FACTORY_PR_AUTHOR["type"] or author.get("login") != factory_login:
+            raise NeedsHuman(
+                f"PR #{pr_number} was not opened by the factory "
+                f"(author {author.get('login')!r}, type {author.get('type')!r}); "
+                "only an autonomous PR can be resumed"
+            )
         issue_labels = self.github.labels(issue)
         if not issue_labels & {self.config.labels["needs_human"], self.config.labels["accepted"]}:
             raise NeedsHuman(
@@ -2413,6 +2419,14 @@ class KernelRuntime:
             env = self._run_env(
                 paths, base_ref=f"origin/{self.config.default_branch}", base_sha=cut_base
             )
+            self.check_stop()
+            if admission:
+                fresh = ProgrammeQueue(self.github, self.config.default_branch).admit(
+                    self.github.issue(linked_issue)
+                )
+                if (fresh is None or fresh[0].sha256 != admission[0].sha256
+                        or fresh[1]["id"] != admission[1]["id"]):
+                    raise NeedsHuman("programme changed before resume publication")
             self.github.cwd = str(worktree.path)
             self._attach_and_publish(paths, worktree.path, env, pr_number)
             self._lease_heartbeat(

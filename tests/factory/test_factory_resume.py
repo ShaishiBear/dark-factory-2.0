@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).parents[2]
 if str(ROOT) not in sys.path:
@@ -25,6 +26,9 @@ if str(ROOT) not in sys.path:
 from factory_kernel import refusal as R  # noqa: E402
 from factory_kernel.provenance import BUILDER_ARTIFACTS  # noqa: E402
 from harness.rehearsal import HEAD, PR_NUMBER, Scenario, rehearse  # noqa: E402
+from harness.rehearsal import FakeGitHub as RehearsalGitHub  # noqa: E402
+from tests.factory.test_factory_programme import BOT, REPO, FakeGitHub as ProgrammeGitHub  # noqa: E402
+from factory_kernel.programme_runtime import ProgrammeQueue  # noqa: E402
 
 
 def sha(text: str) -> str:
@@ -196,6 +200,80 @@ class RefusalTests(unittest.TestCase):
         t = rehearse(resume_scenario("closed", state="MERGED"))
         self.assertEqual(t.outcome, "NeedsHuman")
         self.assertIn("not open", t.error)
+
+
+class ProgrammeResumeTests(unittest.TestCase):
+    """Real admission of an App issue, with only GitHub transport and execution faked."""
+
+    def setUp(self):
+        self.gh = ProgrammeGitHub()
+        programme = ProgrammeQueue(self.gh, "main").current()
+        title, body = programme.render(programme.items[0], {})
+        self.gh.rows = [{"number": 42, "title": title, "body": body, "state": "open",
+                         "user": {"login": BOT, "type": "Bot"},
+                         "labels": [{"name": "factory:needs-human"}]}]
+
+    def run_resume(self, *, author=BOT, author_type="Bot", issue_reader=None, **scenario):
+        with patch.object(RehearsalGitHub, "repository", REPO, create=True), patch.object(RehearsalGitHub, "json", side_effect=self.gh.json, create=True), patch.object(RehearsalGitHub, "programme_issues", side_effect=self.gh.programme_issues, create=True), patch.object(RehearsalGitHub, "issue", side_effect=issue_reader or self.gh.issue):
+            return rehearse(resume_scenario("programme-resume", author=author, author_type=author_type, **scenario))
+
+    def assert_refused(self, trace):
+        self.assertIn(trace.outcome, {"NeedsHuman", "ProgrammeRefused"}, trace.error)
+        self.assertEqual(trace.execs("factory_provenance.py", "publish"), [])
+        self.assertNotIn("add_pr_label:factory:needs-review", trace.names())
+
+    def test_current_programme_app_resumes_without_models_or_rebuild(self):
+        trace = self.run_resume()
+        self.assertEqual(trace.outcome, "returned", trace.error)
+        self.assertEqual(len(trace.execs("factory_provenance.py", "publish")), 1)
+        self.assertEqual(trace.names("agent"), [])
+        self.assertEqual(trace.execs("factory_proof.py", "green"), [])
+        self.assertEqual(R.resume_count(trace.pr_comments), 1)
+
+    def test_other_bot_graphql_login_and_user_cannot_borrow_programme_authority(self):
+        for login, kind in (("other[bot]", "Bot"), ("app/example-factory", "Bot"), (BOT, "User"), ("github-actions[bot]", "Bot")):
+            with self.subTest(login=login, kind=kind):
+                self.assert_refused(self.run_resume(author=login, author_type=kind))
+
+    def test_app_cannot_resume_an_ordinary_unbound_issue(self):
+        self.assert_refused(self.run_resume(issue_reader=lambda n: {
+            "number": n, "title": "ordinary", "body": "unbound",
+            "labels": [{"name": "factory:accepted"}],
+        }))
+
+    def test_app_admission_keeps_exact_head_frozen_tests_and_single_resume_gates(self):
+        for scenario in (
+            {"artifacts": artifacts(head="9" * 40)},
+            {"worktree_files": {"tests/red_test.py": "assert False\n"}},
+            {"comments": (R.render_resume_marker({"version": "1.0", "pr": PR_NUMBER, "head": HEAD}),)},
+        ):
+            with self.subTest(scenario=scenario):
+                self.assert_refused(self.run_resume(**scenario))
+
+    def test_edited_issue_retired_programme_and_unprotected_source_refuse(self):
+        self.gh.rows[0]["body"] += "\nAdditional scope"
+        self.assert_refused(self.run_resume())
+        self.setUp()
+        self.gh.source = None
+        self.assert_refused(self.run_resume())
+        self.setUp()
+        self.gh.protected = False
+        self.assert_refused(self.run_resume())
+
+    def test_programme_retirement_during_worktree_preparation_refuses_before_attach(self):
+        reads = 0
+
+        def issue_reader(number):
+            nonlocal reads
+            reads += 1
+            if reads == 2:
+                self.gh.source = None
+            return self.gh.issue(number)
+
+        trace = self.run_resume(issue_reader=issue_reader)
+        self.assert_refused(trace)
+        self.assertEqual(trace.execs("factory_protocol.py", "attach"), [])
+        self.assertTrue(trace.happened("worktree_removed"))
 
 
 class AttachIdempotenceTests(unittest.TestCase):
