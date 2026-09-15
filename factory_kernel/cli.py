@@ -57,6 +57,7 @@ def main() -> int:
     programme_check = sub.add_parser("programme-check", help="compile a proposal without effects")
     programme_check.add_argument("path", type=Path)
     sub.add_parser("programme-sync", help="materialize one ready programme candidate via the App")
+    sub.add_parser("programme-status", help="read programme progress without models or effects")
     for name in ("merge-export", "merge-import"):
         transfer = sub.add_parser(name, help="transport merge evidence within one Actions run")
         transfer.add_argument("--pr", type=int, required=True)
@@ -142,6 +143,17 @@ def main() -> int:
             _emit_step_outputs(merge_handoff_sha256=digest, kernel_sha=kernel)
         else:
             import_handoff(args.source, args.destination, expected_sha256=args.sha256, subject=subject)
+        return 0
+
+    if args.command == "programme-status":
+        import json
+        from .github_cli import GitHubClient
+        from .programme_runtime import ProgrammeQueue
+
+        cfg = load_config(args.config)
+        github = GitHubClient(cfg.repository, cwd=ROOT)
+        print("FACTORY_PROGRAMME_STATUS " + json.dumps(
+            ProgrammeQueue(github, cfg.default_branch).status(cfg.labels), sort_keys=True))
         return 0
 
     rt = runtime(args.config)
