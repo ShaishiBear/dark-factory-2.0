@@ -11,6 +11,7 @@ from .git_authority import commit_acceptance_tests, commit_planned_changes, dirt
 from .methods import method_block
 from .prompt_render import literal_artifacts_dir_entries, render_prompt
 from .providers import CAP_SUBTYPE, prompt_text
+from .programme_runtime import ProgrammeQueue
 from .runtime import KernelRuntime as BaseKernelRuntime, NeedsHuman, RunPaths
 from .static_gate import check_files
 from .worker_policy import (
@@ -80,6 +81,14 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         result = super().validate_pr(pr_number, merge=merge)
         if not merge:
             return result
+        return self._post_merge(pr_number, result)
+
+    def merge_authorized(self, pr_number: int, *, artifacts: Path) -> Path:
+        result = super().merge_authorized(pr_number, artifacts=artifacts)
+        return self._post_merge(pr_number, result)
+
+    def _post_merge(self, pr_number: int, result: Path) -> Path:
+        """Inline and deferred merges must both finish the production post-merge gate."""
 
         post_output = result.with_name("post-merge.json")
         transcript = result.parent.parent / "transcripts" / "post-merge.log"
@@ -108,6 +117,12 @@ class WorkerControlledRuntime(BaseKernelRuntime):
             raise NeedsHuman(f"post-merge validation failed{suffix}") from exc
 
         print(f"FACTORY_POST_MERGE_VERIFIED pr=#{pr_number} output={post_output}")
+        info = self.github.pr(pr_number, holdout_safe=True)
+        linked = self._linked_issue_number(str(info.get("body") or ""))
+        if linked is not None:
+            ProgrammeQueue(self.github, self.config.default_branch).record_completion(
+                self.github.issue(linked), pr_number, self._read_json(result)
+            )
         return post_output
 
     def _create_safe_revert_pr(

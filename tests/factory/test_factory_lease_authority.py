@@ -139,6 +139,8 @@ class BuilderCallSiteTests(unittest.TestCase):
         # The handoff (attach, attach, publish) is shared by the build and the stale-base
         # re-head, and the re-head's GREEN replays live in their own helper (D-023).
         cls.handoff = _function(cls.tree, "KernelRuntime", "_attach_and_publish")
+        cls.publication = _function(cls.tree, "KernelRuntime", "_publish_build")
+        cls.prepared = _function(cls.tree, "KernelRuntime", "publish_prepared")
         cls.rehead = _function(cls.tree, "KernelRuntime", "rehead_pr")
         cls.rehead_green = _function(cls.tree, "KernelRuntime", "_rehead_green")
         # The build's RED gate lives in its own helper since D-069, because a refusal may be
@@ -187,8 +189,10 @@ class BuilderCallSiteTests(unittest.TestCase):
             ("scripts/factory_proof.py", "attach"),
         ]))
         # Both handoff callers go through the one helper, so the attach calls are counted once.
-        for func, name in ((self.build, "build_issue"), (self.rehead, "rehead_pr")):
+        for func, name in ((self.publication, "_publish_build"), (self.rehead, "rehead_pr")):
             self.assertEqual(len(_method_calls(func, "_attach_and_publish")), 1, name)
+        for func in (self.build, self.prepared):
+            self.assertEqual(len(_method_calls(func, "_publish_build")), 1)
         self.assertEqual(len(_method_calls(self.rehead, "_rehead_green")), 2)
         for program, command, scope in calls:
             with self.subTest(program=program, command=command):
@@ -199,7 +203,8 @@ class BuilderCallSiteTests(unittest.TestCase):
                     self.assertEqual(scope, "none", f"{program} {command} must not hold GitHub credentials")
 
     def test_kernel_heartbeats_every_stage_in_order(self):
-        calls = _method_calls(self.build, "_lease_heartbeat")
+        calls = (_method_calls(self.build, "_lease_heartbeat")
+                 + _method_calls(self.publication, "_lease_heartbeat"))
         sequence = [(_str(c.args[0]), _str(c.args[2])) for c in calls]
         self.assertEqual(sequence, EXPECTED_HEARTBEATS)
         handoff = calls[-1]

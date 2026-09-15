@@ -272,7 +272,7 @@ class LockfileRefreshTests(unittest.TestCase):
 class KernelWiringTests(unittest.TestCase):
     def test_build_issue_renders_the_pr_body_from_the_compiled_contract(self):
         tree = ast.parse((ROOT / "factory_kernel" / "runtime.py").read_text(encoding="utf-8"))
-        build = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "build_issue")
+        build = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_publish_build")
         calls = [n for n in ast.walk(build)
                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "render_pr_body"]
         self.assertEqual(len(calls), 1)

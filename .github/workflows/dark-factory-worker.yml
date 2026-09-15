@@ -45,16 +45,14 @@ jobs:
   dispatch:
     if: github.repository == 'ShaishiBear/dark-factory-2.0'
     runs-on: ubuntu-24.04
-    # THE ONE WRAPPER THE BUDGET RECORD CANNOT CLOSE, and it is left honest rather than
-    # papered over. A validate-and-merge dispatch contains the evidence spine (15540 s) and
-    # then post-merge validation (11400 s), plus the five judge and certifier stages at their
-    # worker-policy walls (5 x 675 s) and about 900 s of setup: a 31665 s / 528-minute floor.
-    # GitHub caps a hosted job at 360 minutes, so NO value here bounds it, and raising 300 to
-    # 340 would buy the appearance of a bound without one. 8580 s of the ladder's 10020 s is
-    # the mutation rung, which is a projection with no observation behind it; measuring it is
-    # what closes this, not a bigger number here. Recorded in harness/budgets.json under
-    # `_the_one_wrapper_this_record_cannot_close` and in .factory/decisions.md D-075.
-    timeout-minutes: 300
+    # Qualification and post-merge validation have separate hosted job clocks.
+    # The existing 15540s spine + five 675s judges + setup fit within this job;
+    # the 11400s post-merge authority runs in merge below. No proof is omitted.
+    timeout-minutes: 360
+    outputs:
+      merge_pr: ${{ steps.dispatch.outputs.merge_pr }}
+      handoff_sha256: ${{ steps.export_merge.outputs.merge_handoff_sha256 }}
+      kernel_sha: ${{ steps.export_merge.outputs.kernel_sha }}
     env:
       # Model calls are routed to OpenRouter's Anthropic-compatible Messages endpoint rather than
       # Anthropic's first-party API. The Anthropic SDK inside Claude Code appends `/v1/messages`
@@ -99,6 +97,11 @@ jobs:
           # defaults false), so it cannot outlive the run that minted it.
           client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
           private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+          # Request the complete effect set explicitly. GitHub refuses this mint if the
+          # installation lacks Issues write, before programme creation or model work.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
 
       # An installation token lives 60 minutes and carries no readable expiry, so the kernel
       # cannot tell a fresh one from a dead one. Recording the mint time is what turns a 401
@@ -210,6 +213,16 @@ jobs:
         with:
           python-version: '3.12.14'
           token: ''
+
+      # The programme source is protected main data. This kernel step creates at most one
+      # unaccepted issue using the App; it runs under the workflow's single-writer lock.
+      # No model provider credential is present, and no model is called by this command.
+      - name: Materialize a ready programme candidate
+        if: inputs.resume_pr == '' && inputs.resume_run_id == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.factory_identity.outputs.token }}
+        run: python -m factory_kernel programme-sync
 
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -456,35 +469,46 @@ jobs:
         # --defer-merge stops after merge pre-authorization and prints the authorization path.
         # The merge is a separate step below so it can spend an identity minted seconds earlier
         # rather than one minted before a validation that takes 83 minutes (ACP-004).
-        run: python -m factory_kernel dispatch --once --defer-merge
+        run: python -m factory_kernel dispatch --once --defer-merge --defer-publication
 
-      # A second mint, for the one operation that is always last. `create-github-app-token`
-      # stays the only holder of the private key -- the kernel never gains the ability to mint,
-      # which is the whole reason the fix is a step boundary and not a broker change.
-      - name: Mint a fresh identity for the merge
-        id: merge_identity
-        if: steps.dispatch.outputs.merge_authorization != ''
+      - name: Mint a fresh identity for build publication
+        id: publication_identity
+        if: steps.dispatch.outputs.publication_handoff != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
           private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
 
-      - name: Merge the PR the evidence authorised
-        if: steps.dispatch.outputs.merge_authorization != ''
+      - name: Publish the prepared build
+        if: steps.dispatch.outputs.publication_handoff != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          DARK_FACTORY_APP_TOKEN: ${{ steps.merge_identity.outputs.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.publication_identity.outputs.token }}
           FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
+          PUBLICATION_HANDOFF: ${{ steps.dispatch.outputs.publication_handoff }}
+          PUBLICATION_SHA256: ${{ steps.dispatch.outputs.publication_sha256 }}
+        run: |
+          export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
+          python -m factory_kernel publish --handoff "$PUBLICATION_HANDOFF" --sha256 "$PUBLICATION_SHA256"
+
+      - name: Export the authorised merge for this run
+        id: export_merge
+        if: steps.dispatch.outputs.merge_authorization != ''
+        env:
           MERGE_PR: ${{ steps.dispatch.outputs.merge_pr }}
           MERGE_AUTHORIZATION: ${{ steps.dispatch.outputs.merge_authorization }}
-        # Nothing is re-decided here. merge-authorization.json binds base, head, tree and the
-        # evidence hash; the kernel re-reads it, refuses if the PR head moved, and hands the
-        # same artifact to the same post-merge verifier the inline path used.
         run: |
-          # This step's identity, not the job's: the age the kernel checks is seconds, not the
-          # 95 minutes that killed run 34151427980.
-          export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
-          python -m factory_kernel merge --pr "$MERGE_PR"             --from-authorization "$MERGE_AUTHORIZATION"
+          python -m factory_kernel merge-export --pr "$MERGE_PR" \
+            --source "$MERGE_AUTHORIZATION" --destination "$RUNNER_TEMP/merge-handoff.json"
+
+      - name: Upload the bound merge handoff
+        if: steps.export_merge.outputs.merge_handoff_sha256 != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: merge-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/merge-handoff.json
+          retention-days: 1
+          if-no-files-found: error
 
       # Observability only: nothing reads these to decide anything. Model transcripts, the
       # per-stage telemetry and timings, the deterministic gates' logs and the run's JSON
@@ -509,3 +533,154 @@ jobs:
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/merge-*.log
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/post-merge.log
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/security.log
+
+  merge:
+    needs: dispatch
+    if: needs.dispatch.outputs.handoff_sha256 != ''
+    runs-on: ubuntu-24.04
+    # 190 minutes for the unchanged full post-merge authority, plus setup and
+    # fresh pre/post merge observation. This job makes no model worker calls.
+    timeout-minutes: 210
+    services:
+      postgres:
+        # Fresh post-merge validation database.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dark_factory_validation
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dark_factory_validation"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout the kernel that produced the handoff
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.dispatch.outputs.kernel_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Merge job - Setup Python 3.12.14
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+
+
+      - name: Merge job - Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          token: ''
+
+
+      - name: Merge job - Setup uv 0.12.5
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.5'
+          github-token: ''
+          # The wheel cache only avoids re-downloading hash-verified artifacts; every install
+          # still runs `uv sync --frozen`, so the lockfile stays the sole resolution (D-020).
+          enable-cache: true
+          cache-dependency-glob: app/backend/uv.lock
+
+
+      - name: Merge job - Setup Bun 1.4.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.0'
+          token: ''
+
+
+      - name: Merge job - Cache the Bun package store
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('app/frontend/bun.lock') }}
+
+
+      - name: Merge job - Install pinned worker and browser CLIs
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.245
+          test "$(claude --version)" = "2.1.245 (Claude Code)"
+          npm install -g agent-browser@0.35.0
+          agent-browser install --with-deps
+          agent-browser --help >/dev/null
+
+
+      - name: Merge job - Create disposable validation environment
+        shell: bash
+        run: |
+          database_url="$(python -c 'print("postgresql://" + "postgres:postgres" + "@127.0.0.1:5432/dark_factory_validation")')"
+          jwt_secret="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          e2e_password="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$jwt_secret"
+          echo "::add-mask::$e2e_password"
+          {
+            echo "DATABASE_URL=$database_url"
+            echo "JWT_SECRET=$jwt_secret"
+            echo "DARK_FACTORY_E2E_EMAIL=dark-factory-e2e@example.com"
+            echo "DARK_FACTORY_E2E_PASSWORD=$e2e_password"
+            echo "DARK_FACTORY_E2E_BOOTSTRAP=1"
+            echo "SEED_ENABLE=false"
+          } >> "$GITHUB_ENV"
+          # YOUTUBE_CHANNEL_ID is intentionally unnecessary here: the locked E2E
+          # bootstraps one exact real video rather than synchronizing a channel.
+
+
+      - name: Download and verify this run's merge handoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_PR: ${{ needs.dispatch.outputs.merge_pr }}
+          HANDOFF_SHA256: ${{ needs.dispatch.outputs.handoff_sha256 }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" \
+            -n "merge-handoff-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" -D "$RUNNER_TEMP/handoff"
+          python -m factory_kernel merge-import --pr "$MERGE_PR" \
+            --source "$RUNNER_TEMP/handoff/merge-handoff.json" --sha256 "$HANDOFF_SHA256" \
+            --destination "$RUNNER_TEMP/merge-input"
+
+      # A second mint, for the one operation that is always last. `create-github-app-token`
+      # stays the only holder of the private key -- the kernel never gains the ability to mint,
+      # which is the whole reason the fix is a step boundary and not a broker change.
+      - name: Mint a fresh identity for the merge
+        id: merge_identity
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+
+      - name: Merge the PR the evidence authorised
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.merge_identity.outputs.token }}
+          FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
+          MERGE_PR: ${{ needs.dispatch.outputs.merge_pr }}
+          MERGE_AUTHORIZATION: ${{ runner.temp }}/merge-input
+          # The production merge command also runs the post-merge application gate.
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+        # Nothing is re-decided here. merge-authorization.json binds base, head, tree and the
+        # evidence hash; the kernel re-reads it, refuses if the PR head moved, and hands the
+        # same artifact to the same post-merge verifier the inline path used.
+        run: |
+          # This step's identity, not the job's: the age the kernel checks is seconds, not the
+          # 95 minutes that killed run 34151427980.
+          export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
+          python -m factory_kernel merge --pr "$MERGE_PR"             --from-authorization "$MERGE_AUTHORIZATION"
+
+      - name: Upload merge and post-merge outcomes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-merge-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/dark-factory/runs/*/artifacts/*.json
+            ${{ runner.temp }}/dark-factory/runs/*/artifacts/e2e-evidence/**
