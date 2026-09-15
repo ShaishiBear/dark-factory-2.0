@@ -1,7 +1,13 @@
 import hashlib
+import json
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from harness.post_merge import assert_exact_main, result_payload, verified_merge
+from harness import post_merge
 
 
 MERGE = "a" * 40
@@ -65,6 +71,49 @@ class PostMergeAuthorityTests(unittest.TestCase):
                 transcript="GATE_OK mode=full\n",
                 observed={"e2e_steps": 0},
             )
+
+    def test_main_is_fetched_again_after_the_long_proof_before_any_result_is_written(self):
+        for change in ("unchanged", "moved", "unreadable"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                verification, output = root / "merge.json", root / "post.json"
+                verification.write_text(json.dumps({"version": "1.0", "verdict": "verified",
+                                                    "merge_sha": MERGE, "tree_sha": TREE}))
+                remote, tracking, proof_ran, fetches = MERGE, MERGE, False, 0
+
+                def run(argv, **kwargs):
+                    nonlocal remote, tracking, proof_ran, fetches
+                    if argv[:2] == ["git", "fetch"]:
+                        fetches += 1
+                        if proof_ran and change == "unreadable":
+                            raise RuntimeError("main fetch unavailable")
+                        tracking = remote
+                    if "harness/ci.py" in argv:
+                        proof_ran = True
+                        if change == "moved":
+                            remote = "c" * 40
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+                def git_oid(revision, **kwargs):
+                    if revision == "origin/main":
+                        return tracking
+                    return TREE if revision.endswith("^{tree}") else MERGE
+
+                with patch.object(post_merge, "run", side_effect=run), \
+                        patch.object(post_merge, "git_oid", side_effect=git_oid), \
+                        patch.object(post_merge, "create_detached", return_value=SimpleNamespace(path=root)), \
+                        patch.object(post_merge, "remove") as remove, \
+                        patch.object(post_merge, "parse_transcript", return_value={"e2e_steps": 21}):
+                    if change == "unchanged":
+                        result = post_merge.execute(merge_verification=verification, output=output)
+                        self.assertEqual(result["origin_main_sha"], MERGE)
+                        self.assertTrue(output.exists())
+                    else:
+                        with self.assertRaises((RuntimeError, ValueError)):
+                            post_merge.execute(merge_verification=verification, output=output)
+                        self.assertFalse(output.exists(), "stale or unreadable main cannot produce verified proof")
+                    self.assertEqual(fetches, 2)
+                    remove.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -1811,6 +1811,11 @@ class KernelRuntime:
         ):
             raise NeedsHuman("PR lacks exact Git object identities")
 
+        linked_issue = self._linked_issue_number(str(info.get("body") or ""))
+        # Admission is an early refusal, never a substitute for the fresh merge check.
+        if linked_issue is not None:
+            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))
+        self.check_stop()
         self._git("fetch", "origin", str(info["headRefName"]), self.config.default_branch)
         run_id = f"pr-{pr_number}-{uuid.uuid4().hex[:12]}"
         paths = RunPaths.create(self.config.runtime.work_root, run_id)
@@ -1819,7 +1824,6 @@ class KernelRuntime:
             head,
             base_dir=self.config.runtime.work_root / "validator-worktrees",
         )
-        linked_issue = self._linked_issue_number(str(info.get("body") or ""))
         # The stage the validator is in when it refuses is what turns a refusal into a reason
         # code (factory_kernel/refusal.py); a bare exception class never could. The cursor names
         # the authority CURRENTLY EXECUTING and is closed by `_exec` the moment that authority
@@ -2205,6 +2209,10 @@ class KernelRuntime:
         linked_issue = self._linked_issue_number(str(info.get("body") or ""))
         default = self.config.default_branch
 
+        # Reheading also spends proof/conformance work; retired scope must refuse first.
+        if linked_issue is not None:
+            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))
+        self.check_stop()
         self._git("fetch", "origin", branch, default)
         run_id = f"rehead-{pr_number}-{uuid.uuid4().hex[:12]}"
         paths = RunPaths.create(self.config.runtime.work_root, run_id)
