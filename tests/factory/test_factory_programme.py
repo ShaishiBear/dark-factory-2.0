@@ -13,7 +13,7 @@ from factory_kernel.programme import (
     ACTIVE_PATH, MARKER, ProgrammeRefused, compile_programme, parse_json,
 )
 from factory_kernel.programme_runtime import ProgrammeQueue
-from factory_kernel.runtime import KernelRuntime, NeedsHuman
+from factory_kernel.runtime import FactoryStopped, KernelRuntime, NeedsHuman
 from factory_kernel.worker_runtime import WorkerControlledRuntime
 
 REPO = "owner/product"
@@ -381,6 +381,49 @@ class PostMergeRoutingTests(unittest.TestCase):
                                           env={}, paths=Mock(), evidence=Path("evidence.json"),
                                           authorization=Path("authorization.json"), linked_issue=1)
             runtime.github.merge_squash.assert_not_called()
+
+    def test_stop_arriving_during_admission_prevents_the_merge(self):
+        """An earlier clear check cannot authorize spending after an API read.
+
+        Exercise the real shared merge boundary, including a happy control. Both inline
+        validation and the deferred merge job enter this method before spending the App.
+        """
+        for stop_during_admission in (False, True):
+            with self.subTest(stopped=stop_during_admission):
+                runtime = self.runtime()
+                runtime._carry_drop = Mock()
+                stopped = False
+
+                def check_stop():
+                    if stopped:
+                        raise FactoryStopped("stop arrived during programme admission")
+
+                def admit(_issue):
+                    nonlocal stopped
+                    stopped = stop_during_admission
+
+                runtime.check_stop = check_stop
+                runtime.check_stop()  # Dispatch/validation saw a clear stop state earlier.
+                paths = SimpleNamespace(artifacts=Path("artifacts"), transcripts=Path("logs"))
+                with patch.object(ProgrammeQueue, "admit", side_effect=admit):
+                    def merge():
+                        return runtime._merge_and_verify(
+                            9, head="a" * 40, cwd=runtime.repo_root, env={}, paths=paths,
+                            evidence=Path("evidence.json"),
+                            authorization=Path("authorization.json"), linked_issue=1,
+                        )
+
+                    if stop_during_admission:
+                        with self.assertRaisesRegex(FactoryStopped, "during programme admission"):
+                            merge()
+                        runtime.github.merge_squash.assert_not_called()
+                        runtime._exec.assert_not_called()
+                    else:
+                        self.assertEqual(merge(), Path("artifacts/merge-verification.json"))
+                        runtime.github.merge_squash.assert_called_once_with(
+                            9, expected_head="a" * 40,
+                        )
+                        runtime._exec.assert_called_once()
 
 
 class GitHubProjectionTests(unittest.TestCase):

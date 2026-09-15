@@ -57,7 +57,19 @@ uncertain dispatch and separation of scheduler errors from proof failures. Five 
 mutations pass a copied green baseline and then fail the intended assertions. No model call
 or cloud continuation has been exercised by these tests.
 
-Keep this change isolated while main regression 34979054098 runs on 0937041. Deliver through
-normal base-anchored maintainer and exact-head quick checks before using it for the approved
-citation programme. Observe actual parent/child run IDs and decreasing inputs before claiming
-the continuation works in production.
+Main regression 34979054098 on 0937041 passed application E2E, holdouts and all nine application
+mutations, then refused one escaped factory mutation out of 431. That mutation removed the
+earlier inline stop check; the shared merge boundary still checked stop after programme
+admission, so the injection no longer represented its claimed defect.
+
+The correction targets removal of the final shared check and adds a second defect moving it
+before admission. A behavioral test makes stop arrive during that remote read, after an earlier
+clear check, and proves no merge or post-merge command runs. Its unstopped control actually
+merges. Both final-check defects fail the intended assertion in isolated copies after a green
+baseline; removing the redundant earlier check leaves this test green. Production stop checks
+remain unchanged. This corrects detector drift; it is not a passing full regression result.
+
+Deliver the continuation and detector correction through normal base-anchored maintainer and
+exact-head quick checks. Then run the full regression on the integrated main before activating
+the approved citation programme. Observe actual parent/child run IDs and decreasing inputs
+before claiming the continuation works in production.
