@@ -346,6 +346,13 @@ Every run first proves its prerequisites and refuses otherwise: Issues enabled, 
 
 ### Dispatch priority order
 
+Approved programme work may request at most eight successive runs after a successful action,
+with a decreasing counter and exact programme hash. The optional continuation job uses the same
+workflow lock and cannot skip admission or proof. Failure, idle, stop, changed scope or exhausted
+counter ends the chain; the scheduled pulse remains the fallback. Scheduling errors are visible
+but do not invalidate completed proof; dispatch and merge/post-merge errors are never ignored.
+See `docs/PROGRAMME_CONTINUATION.md` for the control boundary and observed scheduler gaps.
+
 `choose_dispatch` picks exactly one action:
 
 1. **Emergency stop** (below) — if stopped, do nothing.

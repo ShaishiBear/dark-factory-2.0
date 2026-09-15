@@ -56,7 +56,11 @@ def main() -> int:
     sub.add_parser("triage")
     programme_check = sub.add_parser("programme-check", help="compile a proposal without effects")
     programme_check.add_argument("path", type=Path)
-    sub.add_parser("programme-sync", help="materialize one ready programme candidate via the App")
+    programme_sync = sub.add_parser("programme-sync", help="materialize one ready programme candidate via the App")
+    programme_sync.add_argument("--expected-programme", default="")
+    continuation = sub.add_parser("programme-continue", help="continue successful approved work within a fixed limit")
+    for field in ("programme", "remaining", "advanced", "dispatch-result", "merge-result"):
+        continuation.add_argument("--" + field, required=True)
     for name in ("merge-export", "merge-import"):
         transfer = sub.add_parser(name, help="transport merge evidence within one Actions run")
         transfer.add_argument("--pr", type=int, required=True)
@@ -149,8 +153,23 @@ def main() -> int:
         if args.command == "programme-sync":
             import json
             from .programme_runtime import ProgrammeQueue
-            status = ProgrammeQueue(rt.github, rt.config.default_branch).sync(rt.check_stop)
+            status = ProgrammeQueue(rt.github, rt.config.default_branch).sync(
+                rt.check_stop, expected_programme=args.expected_programme)
             print("FACTORY_PROGRAMME " + json.dumps(status, sort_keys=True))
+            _emit_step_outputs(programme_sha256=status.get("programme", ""))
+            return 0
+        if args.command == "programme-continue":
+            import json
+            import os
+            from .continuation import continue_programme
+            from .programme_runtime import ProgrammeQueue
+
+            result = continue_programme(
+                ProgrammeQueue(rt.github, rt.config.default_branch), rt.check_stop,
+                programme=args.programme, remaining=args.remaining, advanced=args.advanced,
+                dispatch_result=args.dispatch_result, merge_result=args.merge_result,
+                context=os.environ)
+            print("FACTORY_CONTINUATION " + json.dumps(result, sort_keys=True))
             return 0
         if args.command == "stop-check":
             rt.check_stop()
@@ -182,8 +201,10 @@ def main() -> int:
             if prepared is not None:
                 from .canonical import sha256_file
                 _emit_step_outputs(publication_handoff=str(prepared), publication_sha256=sha256_file(prepared))
+            advanced = decision.kind in {"build-issue", "validate-pr", "rehead-pr"}
             if decision.kind == "idle":
                 count = TriageEngine(rt).run_once()
+                advanced = count > 0
                 print(f"KERNEL_DISPATCH kind=triage decisions={count}")
             else:
                 print(
@@ -191,6 +212,7 @@ def main() -> int:
                     f"number={decision.number if decision.number is not None else '-'} "
                     f"reason={decision.reason!r}"
                 )
+            _emit_step_outputs(action_advanced="true" if advanced else "false")
             return 0
         if args.command == "build":
             pr = rt.build_issue(args.issue)

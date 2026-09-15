@@ -5,6 +5,18 @@ on:
     - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
+      continuation_programme:
+        description: Exact programme hash for a bounded continuation (empty starts a new pulse)
+        required: false
+        default: ''
+      continuation_remaining:
+        description: Maximum further successful-action continuations (0 through 8)
+        required: false
+        default: '8'
+      continuation_parent:
+        description: Previous canonical worker run ID (observation only)
+        required: false
+        default: ''
       # Operator recovery (D-034): finish a build that pushed its branch and opened its PR but
       # died before publish/handoff, from the artifacts that run uploaded. Both or neither.
       resume_pr:
@@ -50,6 +62,8 @@ jobs:
     # the 11400s post-merge authority runs in merge below. No proof is omitted.
     timeout-minutes: 360
     outputs:
+      programme_sha256: ${{ steps.programme.outputs.programme_sha256 }}
+      action_advanced: ${{ steps.dispatch.outputs.action_advanced }}
       merge_pr: ${{ steps.dispatch.outputs.merge_pr }}
       handoff_sha256: ${{ steps.export_merge.outputs.merge_handoff_sha256 }}
       kernel_sha: ${{ steps.export_merge.outputs.kernel_sha }}
@@ -218,11 +232,13 @@ jobs:
       # unaccepted issue using the App; it runs under the workflow's single-writer lock.
       # No model provider credential is present, and no model is called by this command.
       - name: Materialize a ready programme candidate
+        id: programme
         if: inputs.resume_pr == '' && inputs.resume_run_id == ''
         env:
           GH_TOKEN: ${{ github.token }}
           DARK_FACTORY_APP_TOKEN: ${{ steps.factory_identity.outputs.token }}
-        run: python -m factory_kernel programme-sync
+          EXPECTED_PROGRAMME: ${{ inputs.continuation_programme }}
+        run: python -m factory_kernel programme-sync --expected-programme "$EXPECTED_PROGRAMME"
 
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -529,6 +545,7 @@ jobs:
             ${{ runner.temp }}/dark-factory/runs/*/transcripts/*-gate.log
             ${{ runner.temp }}/dark-factory/runs/*/artifacts/*.json
             ${{ runner.temp }}/dark-factory/runs/*/artifacts/e2e-evidence/**
+
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/evidence.log
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/merge-*.log
             !${{ runner.temp }}/dark-factory/runs/*/transcripts/post-merge.log
@@ -684,3 +701,45 @@ jobs:
           path: |
             ${{ runner.temp }}/dark-factory/runs/*/artifacts/*.json
             ${{ runner.temp }}/dark-factory/runs/*/artifacts/e2e-evidence/**
+
+  continuation:
+    needs: [dispatch, merge]
+    if: >-
+      always() && needs.dispatch.result == 'success' &&
+      (needs.merge.result == 'success' || needs.merge.result == 'skipped') &&
+      needs.dispatch.outputs.action_advanced == 'true' &&
+      needs.dispatch.outputs.programme_sha256 != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # This is a scheduling convenience, outside proof. A scheduling outage must not turn
+    # a proved merge's successful run/receipt into a failed qualification. Its own failure
+    # remains visible; the existing schedule is the fallback. No proof job ignores errors.
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: read
+      actions: write
+    steps:
+      - name: Checkout protected main for bounded continuation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Setup Python for bounded continuation
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - name: Continue the same approved programme once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROGRAMME_SHA256: ${{ needs.dispatch.outputs.programme_sha256 }}
+          REMAINING: ${{ inputs.continuation_remaining || '8' }}
+          ADVANCED: ${{ needs.dispatch.outputs.action_advanced }}
+          DISPATCH_RESULT: ${{ needs.dispatch.result }}
+          MERGE_RESULT: ${{ needs.merge.result }}
+        run: |
+          python -m factory_kernel programme-continue --programme "$PROGRAMME_SHA256" \
+            --remaining "$REMAINING" --advanced "$ADVANCED" \
+            --dispatch-result "$DISPATCH_RESULT" --merge-result "$MERGE_RESULT"

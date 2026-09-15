@@ -346,7 +346,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION �10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION \u00ef\u00bf\u00bd10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -2132,6 +2132,41 @@
       "find": "      postgres:\n        # Fresh post-merge validation database.\n        image: pgvector/pgvector:pg16\n",
       "replace": "      postgres:\n        # Fresh post-merge validation database.\n        image: postgres:16\n",
       "why": "The validation database would lack the vector extension, so every retrieval query would fail with `type \"vector\" does not exist` while ingestion succeeded, and the browser journey could never see a citation (D-053)."
+    },
+    {
+      "id": "continuation-counter-not-decremented",
+      "file": "factory_kernel/continuation.py",
+      "find": "f\"continuation_remaining={count - 1}\"",
+      "replace": "f\"continuation_remaining={count}\"",
+      "why": "A successful pulse must spend one of its remaining continuation slots."
+    },
+    {
+      "id": "continuation-ignores-failed-merge",
+      "file": "factory_kernel/continuation.py",
+      "find": "if dispatch_result != \"success\" or merge_result not in {\"success\", \"skipped\"}:",
+      "replace": "if dispatch_result != \"success\":",
+      "why": "A failed or cancelled merge/post-merge authority cannot schedule another paid attempt."
+    },
+    {
+      "id": "continuation-ignores-final-stop",
+      "file": "factory_kernel/continuation.py",
+      "find": "    check_stop()\n    queue.github.run([",
+      "replace": "    queue.github.run([",
+      "why": "Stop must be rechecked immediately before the continuation request."
+    },
+    {
+      "id": "continuation-admits-replaced-programme",
+      "file": "factory_kernel/programme_runtime.py",
+      "find": "if expected_programme and (programme is None or programme.sha256 != expected_programme):",
+      "replace": "if False and expected_programme and (programme is None or programme.sha256 != expected_programme):",
+      "why": "A continued pulse cannot materialize scope from a different approved programme."
+    },
+    {
+      "id": "continuation-exempts-proof-job-errors",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "    timeout-minutes: 360\n    outputs:",
+      "replace": "    timeout-minutes: 360\n    continue-on-error: true\n    outputs:",
+      "why": "Only the optional scheduling job may ignore errors; a proof failure must fail its run."
     }
   ]
 }

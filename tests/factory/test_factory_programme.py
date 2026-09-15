@@ -197,6 +197,13 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.sync()["status"], "waiting")
         self.assertEqual(len(self.gh.rows), 1)
 
+    def test_continuation_cannot_materialize_a_changed_or_retired_programme(self):
+        for source in (self.gh.source, None):
+            self.gh.source = source
+            with self.assertRaisesRegex(ProgrammeRefused, "no longer matches"):
+                self.queue.sync(self.stop, expected_programme="f" * 64)
+            self.assertEqual(self.gh.rows, [])
+
     def test_duplicate_objects_fail_closed(self):
         self.sync()
         self.gh.rows.append({**self.gh.rows[0], "number": 2})

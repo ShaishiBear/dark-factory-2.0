@@ -140,10 +140,12 @@ class ProgrammeQueue:
                 return False
         raise ProgrammeRefused("outcome comments exceed bounded inventory")
 
-    def sync(self, check_stop) -> dict:
+    def sync(self, check_stop, *, expected_programme: str = "") -> dict:
         """Create at most one ready candidate per invocation; never relabel/reopen rejected work."""
         check_stop()
         programme = self.current()
+        if expected_programme and (programme is None or programme.sha256 != expected_programme):
+            raise ProgrammeRefused("continuation programme no longer matches approved scope")
         if programme is None:
             return {"status": "no-programme", "created": None}
         inventory = self.inventory(programme)
