@@ -2232,6 +2232,62 @@
       "why": "Programme retirement during preparation must prevent publication."
     },
     {
+      "id": "trajectory-source-main-ignored",
+      "file": "factory_kernel/trajectory.py",
+      "find": "run.get(\"head_branch\") != \"main\" or ",
+      "replace": "",
+      "why": "Candidate-branch observations cannot be misattributed to canonical main execution."
+    },
+    {
+      "id": "trajectory-source-completion-ignored",
+      "file": "factory_kernel/trajectory.py",
+      "find": "or run.get(\"status\") != \"completed\"",
+      "replace": "or False",
+      "why": "An in-progress run does not have a final outcome to archive."
+    },
+    {
+      "id": "trajectory-model-privacy-bypassed",
+      "file": "factory_kernel/trajectory.py",
+      "find": "\"model\": model if model in models else None",
+      "replace": "\"model\": model",
+      "why": "Arbitrary artifact strings must not escape through model metadata."
+    },
+    {
+      "id": "trajectory-missing-cost-invented-as-zero",
+      "file": "factory_kernel/trajectory.py",
+      "find": "_number(row.get(\"cost_usd\"))",
+      "replace": "_number(row.get(\"cost_usd\") or 0)",
+      "why": "Unknown cost is missing evidence, not evidence of a free attempt."
+    },
+    {
+      "id": "trajectory-existing-record-replaced",
+      "file": "factory_kernel/trajectory_archive.py",
+      "find": "if entries[name] != blob:",
+      "replace": "if False:",
+      "why": "An altered observation must not replace the immutable record for an existing attempt."
+    },
+    {
+      "id": "trajectory-archive-force-update",
+      "file": "factory_kernel/trajectory_archive.py",
+      "find": "{\"sha\": new_commit, \"force\": False}",
+      "replace": "{\"sha\": new_commit, \"force\": True}",
+      "why": "A racing archive writer must not erase another completed append."
+    },
+    {
+      "id": "trajectory-existing-tree-dropped",
+      "file": "factory_kernel/trajectory_archive.py",
+      "find": "payload[\"base_tree\"] = tree",
+      "replace": "pass",
+      "why": "New archive commits must preserve previously recorded trajectories."
+    },
+    {
+      "id": "trajectory-app-age-exempted",
+      "file": "factory_kernel/github_cli.py",
+      "find": "\"archive_trajectory\",",
+      "replace": "",
+      "why": "Even a non-authoritative archive publication requires a fresh App capability."
+    },
+    {
       "id": "continuation-exempts-proof-job-errors",
       "file": ".github/workflows/dark-factory-worker.yml",
       "find": "    timeout-minutes: 360\n    outputs:",

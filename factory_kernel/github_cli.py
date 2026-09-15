@@ -27,7 +27,7 @@ class GitHubClient:
     # such as re-head, resume and containment must likewise supply a sufficiently fresh token;
     # none silently spends an expired identity or falls back to the personal/Actions token.
     SPLIT_OPERATIONS: frozenset[str] = frozenset({
-        "merge_squash", "create_programme_issue", "push_branch", "create_pr",
+        "merge_squash", "create_programme_issue", "push_branch", "create_pr", "archive_trajectory",
     })
 
     def __init__(
