@@ -115,6 +115,7 @@ class StatusTests(unittest.TestCase):
     def test_empty_frontier_is_visible_without_creating_candidates(self):
         result = self.status()
         self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["spec_sha256"], sha256_value(self.gh.source["spec"]))
         first, second = result["items"]
         self.assertEqual(first["status"], "ready-for-candidate")
         self.assertEqual(second["status"], "blocked")

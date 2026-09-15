@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
@@ -62,11 +63,13 @@ class FrontDoorApplication:
 
     def _snapshot(self):
         state = self.store.snapshot(self.project, principal=self.principal)
-        result = {"project": self.project, "repository": self.store.repository, "intent": state}
+        result = {"project": self.project, "repository": self.store.repository, "intent": state,
+                  "observed_at": None}
         try:
             result["execution"] = ProgrammeQueue(self.github, "main").status(self.labels)
             result["stop"] = stop_status(self.github)
             result["observation_available"] = True
+            result["observed_at"] = datetime.now(timezone.utc).isoformat()
         except (RuntimeError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
             # Read failure must not render a clear stop or complete programme. Intake remains
             # available; no runtime effect consumes this observation as authority.

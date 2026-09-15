@@ -72,8 +72,21 @@ function render() {
     $("approvals").append(text("p", `Scope revision ${approval.spec.revision} approved`, "badge verified"), text("p", "Scope approval records intent. Execution requires a reviewed programme on the protected branch.", "muted"));
   }
   $("progress").replaceChildren();
-  $("observation").textContent = snapshot.observation_available ? "Latest GitHub observation. Refresh to check for changes." : "GitHub observation is unavailable. Completion and stop state are unknown.";
+  $("observation").textContent = snapshot.observation_available ? `GitHub observed ${snapshot.observed_at ? new Date(snapshot.observed_at).toLocaleString() : "just now"}. Refresh to check for changes.` : "GitHub observation is unavailable. Completion and stop state are unknown.";
   if (snapshot.execution) {
+    const execution = snapshot.execution;
+    if (execution.programme) {
+      $("progress").append(text("p", `Active scope: ${execution.spec} · revision ${execution.revision}`, "muted"));
+      const approval = state.approvals.at(-1);
+      if (approval) {
+        const matches = execution.spec_sha256 === approval.spec_sha256;
+        $("progress").append(text("p", matches ? "The active programme uses your latest approved scope." : "The active programme uses a different scope from your latest approval. The latest approval has not replaced it.", matches ? "muted" : "badge blocked"));
+      }
+      const identity = document.createElement("details");
+      identity.append(text("summary", "Active programme identity"), text("p", execution.programme, "hash"));
+      if (execution.spec_sha256) identity.append(text("p", `Scope: ${execution.spec_sha256}`, "hash"));
+      $("progress").append(identity);
+    }
     if (!snapshot.execution.items.length) $("progress").append(text("p", "No active programme."));
     for (const item of snapshot.execution.items) {
       const row = text("div", "", "work-item");

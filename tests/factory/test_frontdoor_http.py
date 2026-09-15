@@ -1,5 +1,6 @@
 """Exercise the real transport, owner store and closed command boundary without live effects."""
 from io import BytesIO
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import http.client
 import json
@@ -98,6 +99,7 @@ class FrontDoorHTTPTests(unittest.TestCase):
                 result = self.call("/api/snapshot")
             self.assertEqual(result["status"], "200 OK")
             self.assertFalse(result["json"]["observation_available"])
+            self.assertIsNone(result["json"]["observed_at"])
             self.assertIsNone(result["json"]["stop"])
             self.assertIsNone(result["json"]["execution"])
             self.assertNotIn(b"credential-shaped", result["body"])
@@ -111,6 +113,13 @@ class FrontDoorHTTPTests(unittest.TestCase):
         self.assertEqual(result["json"]["execution"], status)
         self.assertTrue(result["json"]["observation_available"])
         self.github.run.assert_not_called()
+
+    def test_successful_observation_records_a_timezone_aware_timestamp(self):
+        with patch("factory_kernel.frontdoor_http.ProgrammeQueue") as queue:
+            queue.return_value.status.return_value = {"programme": None, "items": []}
+            result = self.call("/api/snapshot")["json"]
+        self.assertTrue(result["observation_available"])
+        self.assertIsNotNone(datetime.fromisoformat(result["observed_at"]).utcoffset())
 
     def test_stop_only_dispatches_fixed_owner_workflow_and_never_claims_observed_stop(self):
         payload = {"request_id": "c" * 32, "reason": "Pause before more work."}

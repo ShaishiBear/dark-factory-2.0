@@ -14,6 +14,7 @@ import re
 import time
 from typing import Mapping
 
+from .canonical import sha256_value
 from .programme import ACTIVE_PATH, MARKER, Programme, ProgrammeRefused, compile_programme, parse_json
 
 OUTCOME_MARKER = "<!-- dark-factory-programme-outcome:"
@@ -229,7 +230,8 @@ class ProgrammeQueue:
             raise ProgrammeRefused("programme changed during status observation")
         return {"version": "1.0", "status": "complete" if len(done) == len(items) else "incomplete",
                 "programme": programme.sha256, "spec": programme.spec["id"],
-                "revision": programme.spec["revision"], "items": items}
+                "revision": programme.spec["revision"], "spec_sha256": sha256_value(programme.spec),
+                "items": items}
 
     def admit(self, issue: Mapping) -> tuple[Programme, dict] | None:
         """Mandatory check before model work and again before merge; stale bindings refuse."""

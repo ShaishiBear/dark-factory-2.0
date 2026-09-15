@@ -73,3 +73,11 @@ python -m factory_kernel.frontdoor_http --state-dir /private/frontdoor/state \
 ```
 
 Do not expose the loopback development service directly or display fixture progress as live proof.
+
+## Scope shown beside execution
+
+The progress view names the active specification and revision, with programme and scope
+hashes in expandable details. It compares that scope hash to the latest local owner approval
+so approving a newer scope cannot make older running work look newly activated. A successful
+GitHub observation carries a UTC timestamp; failed reads retain unknown completion/stop state
+and no observation timestamp. Observations remain read-only and are not atomic authority.
