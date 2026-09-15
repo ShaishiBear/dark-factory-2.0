@@ -1,0 +1,43 @@
+[Unit]
+Description=Dark Factory owner Front Door
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/dark-factory-frontdoor/current
+Environment=HOME=/home/ubuntu/.local/state/dark-factory-frontdoor/home
+Environment=XDG_CONFIG_HOME=/home/ubuntu/.local/state/dark-factory-frontdoor/config
+Environment=GH_CONFIG_DIR=/home/ubuntu/.config/gh
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/ubuntu/.local/state/dark-factory-frontdoor/service.env
+ExecStart=/usr/bin/python3 -m factory_kernel.frontdoor_http --state-dir /home/ubuntu/.local/state/dark-factory-frontdoor/intents --token-file /home/ubuntu/.local/state/dark-factory-frontdoor/owner-token --owner ShaishiBear --project citation-inspection --origin ${FRONT_DOOR_ORIGIN} --app-login shaishibear-dark-factory[bot] --port 8765
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/.local/state/dark-factory-frontdoor
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryHigh=384M
+MemoryMax=512M
+TasksMax=48
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target
