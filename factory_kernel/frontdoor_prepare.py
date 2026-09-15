@@ -177,6 +177,16 @@ class IntentPreparation(PreparationRecords):
                 "Return JSON only: {spec,assumptions:[],open_questions:[],technical_questions:[]}. "
                 "spec has exactly {id,revision,repository,title,outcome,requirements:[{id,acceptance:[{id,text}]}],"
                 "constraints:[],non_goals:[]}. Acceptance criteria describe observable scenarios. "
+                "Compiler limits: title is nonempty and at most 100 characters; outcome, acceptance text, "
+                "each constraint and each non-goal are nonempty and at most 2000 characters. "
+                "All spec, requirement and acceptance IDs match [A-Za-z][A-Za-z0-9_-]{0,63}; "
+                "use IDs such as citation-inspection, transcript and snippet-visible, never R1.1. "
+                "Requirement IDs are unique and acceptance IDs are unique across the whole spec. "
+                "Requirements, acceptance, constraints and non_goals are nonempty lists, each at most "
+                "50 entries, with at most 50 acceptance criteria total. Revision is a positive integer "
+                "and repository is exactly the supplied repository. No HTML comment markers or lines "
+                "starting Blocked by, Part of, Fixes or Closes. Each assumptions/open_questions/"
+                "technical_questions list has at most 50 strings of at most 2000 characters. "
                 "Use the existing spec id and next approved revision, otherwise a stable id and revision1.\n"
                 + json.dumps(source, ensure_ascii=False)
             )

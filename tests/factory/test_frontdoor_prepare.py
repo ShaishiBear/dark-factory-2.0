@@ -76,6 +76,25 @@ class PreparationTests(unittest.TestCase):
             self.prepare()
         self.assertEqual(self.provider.run.call_count, 2)
 
+    def test_real_draft_format_failure_is_explained_in_prompt_and_never_retried(self):
+        # First hosted draft used an oversized title and dotted IDs. Preserve refusal;
+        # make the compiler contract available before another model ever drafts.
+        bad = proposal()
+        bad["spec"]["title"] = "x" * 101
+        bad["spec"]["requirements"][0]["acceptance"][0]["id"] = "R1.1"
+        self.outputs = [bad]
+        result = self.prepare()
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["failure"], "ProgrammeRefused")
+        self.assertEqual(result["proposal_output"], bad)
+        self.assertEqual(self.prepare(), result)
+        self.assertEqual(self.provider.run.call_count, 1)
+        self.assertIsNone(self.snapshot()["draft"])
+        prompt = self.requests[0].prompt
+        self.assertIn("at most 100 characters", prompt)
+        self.assertIn("[A-Za-z][A-Za-z0-9_-]{0,63}", prompt)
+        self.assertIn("never R1.1", prompt)
+
     def test_pending_and_failed_calls_survive_restarts_without_retry(self):
         self.provider.run.side_effect = TimeoutError("private credential detail")
         result = self.prepare()
