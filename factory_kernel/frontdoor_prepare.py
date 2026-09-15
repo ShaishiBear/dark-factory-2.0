@@ -83,12 +83,12 @@ def validate_audit(value, draft):
     return value
 
 
-class IntentPreparation:
-    """At most two bounded calls per recorded intake version; replay never repeats a spend."""
+class PreparationRecords:
+    """Private bounded proposal calls and durable records, without execution authority."""
 
-    def __init__(self, store, provider, context):
+    def __init__(self, store, provider, context, *, directory="preparations"):
         self.store, self.provider, self.context = store, provider, context
-        self.directory = store.directory / "preparations"
+        self.directory = store.directory / directory
         if self.directory.is_symlink():
             raise IntentRefused("preparation directory cannot be a symlink")
         self.directory.mkdir(mode=0o700, exist_ok=True)
@@ -133,6 +133,10 @@ class IntentPreparation:
         if len(raw) > MAX_RESPONSE:
             raise IntentRefused("preparation response exceeded its bound")
         return parse_json(raw.decode()), {"model": result.model, "cost_usd": result.cost_usd}
+
+
+class IntentPreparation(PreparationRecords):
+    """At most two bounded calls per recorded intake version; replay never repeats a spend."""
 
     def prepare(self, project, command, *, principal):
         self.store._authorize(principal)

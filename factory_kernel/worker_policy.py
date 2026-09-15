@@ -39,7 +39,7 @@ AUTHORITY_ROLES = frozenset({
 })
 
 # Intake may propose scope and audit clarity, but cannot certify product execution.
-INTAKE_ROLES = frozenset({"intent-proposer", "intent-auditor"})
+INTAKE_ROLES = frozenset({"intent-proposer", "intent-auditor", "programme-proposer"})
 TOOLLESS_ROLES = AUTHORITY_ROLES | INTAKE_ROLES | {"triage"}
 
 # Every role invoked against a repository checkout writes either run artifacts or, for the three
@@ -48,6 +48,7 @@ TOOLLESS_ROLES = AUTHORITY_ROLES | INTAKE_ROLES | {"triage"}
 ROLE_TOOLS: dict[str, tuple[str, ...]] = {
     "intent-proposer": JUDGE_TOOLS,
     "intent-auditor": JUDGE_TOOLS,
+    "programme-proposer": JUDGE_TOOLS,
     "triage": JUDGE_TOOLS,
     "plan": WRITE_TOOLS,
     "investigate": WRITE_TOOLS,
@@ -100,6 +101,7 @@ STAGE_WALL_HEADROOM = 1.5
 ROLE_MAX_TURNS: dict[str, int] = {
     "intent-proposer": 5,
     "intent-auditor": 5,
+    "programme-proposer": 5,
     "triage": 20,
     "plan": 30,
     "investigate": 30,
@@ -128,6 +130,7 @@ ROLE_MAX_TURNS: dict[str, int] = {
 ROLE_MAX_BUDGET_USD: dict[str, float] = {
     "intent-proposer": 1.0,
     "intent-auditor": 1.0,
+    "programme-proposer": 1.0,
     "triage": 2.0,
     "plan": 12.0,
     "investigate": 12.0,
@@ -195,6 +198,7 @@ JUDGE_EFFORT = "high"
 ROLE_EFFORT: dict[str, str] = {
     "intent-proposer": "medium",
     "intent-auditor": "medium",
+    "programme-proposer": "medium",
     "triage": JUDGE_EFFORT,
     "plan": WORKER_EFFORT,
     "investigate": WORKER_EFFORT,
@@ -242,6 +246,7 @@ THINKING_CAP_DISABLED = 0
 ROLE_THINKING_CAP: dict[str, int | None] = {
     "intent-proposer": None,
     "intent-auditor": None,
+    "programme-proposer": None,
     "triage": None,
     "plan": None,
     "investigate": None,
@@ -352,6 +357,7 @@ JUDGE_SCOPE = PathScope()
 ROLE_PATH_SCOPE: dict[str, PathScope] = {
     "intent-proposer": JUDGE_SCOPE,
     "intent-auditor": JUDGE_SCOPE,
+    "programme-proposer": JUDGE_SCOPE,
     "triage": JUDGE_SCOPE,
     "plan": DRAFTING_SCOPE,
     "investigate": DRAFTING_SCOPE,

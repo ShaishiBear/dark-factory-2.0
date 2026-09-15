@@ -113,3 +113,22 @@ provider: clarification saved during preparation, stop remained available, refre
 the synthetic stop, and an old preparation could not overwrite or represent the newer intent.
 The fixture uses no model API or GitHub effects. Refresh and intent editing remain available
 throughout preparation. No live deployment or preparation cycle is claimed.
+
+## API programme synthesis
+
+With preparation enabled, `POST /api/programme-prepare` takes an explicit request bound to the
+latest stored approval and project version. One tool-free API process proposes acceptance
+ownership and dependency edges under five turns, $1 and 338 seconds. A private durable request
+precedes the call; exact replay returns its record and uncertain failures are not retried.
+The deterministic programme compiler checks the proposal, rereading approval and project
+version after the call. A changed project refuses the stale review. The endpoint writes no
+intent, issue, repository branch or activation state. Its UI shows actual acceptance text and
+dependencies, with the review artifact available in an expandable section.
+
+Local validation: 2,554 tests and seven static checks passed; 148 focused checks passed; six
+new synthesis mutations caught with a green baseline, and the six earlier intent preparation
+mutations still caught. All 478 factory and nine application mutation anchors pass. A browser
+fixture exercised intent, audited draft, explicit approval and compiled programme review;
+new intent then marked the earlier programme review stale. Layout was visually checked. No
+real model API, GitHub effect or deployment was involved. Programme delivery still requires
+the protected-main maintenance/admission process.

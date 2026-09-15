@@ -3,6 +3,7 @@ let token = "";
 let snapshot = null;
 let busy = false;
 let preparationBusy = false;
+let synthesisBusy = false;
 let stopBusy = false;
 let stopRequested = false;
 const $ = (id) => document.getElementById(id);
@@ -88,6 +89,25 @@ function render() {
     const approval = state.approvals.at(-1);
     $("approvals").append(text("p", `Scope revision ${approval.spec.revision} approved`, "badge verified"), text("p", "Scope approval records intent. Execution requires a reviewed programme on the protected branch.", "muted"));
   }
+  const synthesis = snapshot.synthesis;
+  const currentSynthesis = synthesis?.identity.command.expected_project_version === state.project_version;
+  $("synthesize").hidden = !snapshot.synthesis_available || !state.approvals.length || currentSynthesis;
+  $("programme-review").replaceChildren();
+  if (synthesis) {
+    const review = synthesis.review;
+    if (!currentSynthesis) $("programme-review").append(text("p", "The recorded programme proposal belongs to an earlier project version. Prepare the current approved scope for review.", "muted"));
+    else if (review) {
+      $("programme-review").append(text("h3", "Proposed execution programme"), text("p", "Compiled for your approved scope. Protected-branch review and delivery are still required before execution.", "muted"));
+      for (const item of review.items) {
+        const criteria = review.input.spec.requirements.flatMap((r) => r.acceptance).filter((a) => item.acceptance.includes(a.id));
+        list($("programme-review"), item.id.replaceAll("-", " "), criteria.map((a) => a.text));
+        if (item.blocked_by.length) $("programme-review").append(text("p", `After: ${item.blocked_by.join(", ")}`, "muted"));
+      }
+      const details = document.createElement("details");
+      details.append(text("summary", "Programme review artifact"), text("pre", JSON.stringify(review, null, 2), "hash"));
+      $("programme-review").append(details);
+    } else $("programme-review").append(text("p", synthesis.state === "pending" ? "Programme preparation is running or was interrupted. Refresh to observe its recorded result." : "Programme preparation failed. No executable programme was delivered; the attempt is recorded for inspection.", "muted"));
+  }
   $("progress").replaceChildren();
   $("observation").textContent = snapshot.observation_available ? `GitHub observed ${snapshot.observed_at ? new Date(snapshot.observed_at).toLocaleString() : "just now"}. Refresh to check for changes.` : "GitHub observation is unavailable. Completion and stop state are unknown.";
   if (snapshot.execution) {
@@ -138,7 +158,7 @@ async function perform(action) {
 }
 function setButtons() {
   document.querySelectorAll("button").forEach((button) => {
-    button.disabled = button.closest("#stop-form") ? stopBusy : button.id === "logout" ? false : button.id === "prepare" ? busy || preparationBusy : busy;
+    button.disabled = button.closest("#stop-form") ? stopBusy : button.id === "logout" ? false : button.id === "prepare" ? busy || preparationBusy : button.id === "synthesize" ? busy || synthesisBusy : busy;
   });
 }
 async function performStop(action) {
@@ -165,6 +185,18 @@ $("prepare").addEventListener("click", async () => {
   finally { preparationBusy = false; setButtons(); }
 });
 $("intent-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { await command("record-intent", { wording: $("intent").value }); $("intent").value = ""; message("Original intent saved. No scope has been approved by saving it."); }); });
+$("synthesize").addEventListener("click", async () => {
+  if (busy || synthesisBusy) return;
+  const version = snapshot.intent.project_version;
+  const approval = snapshot.intent.approvals.at(-1);
+  synthesisBusy = true; setButtons();
+  message("Preparing an execution programme for the approved scope. Refresh, clarification and stop remain available.");
+  try {
+    await api("/api/programme-prepare", { idempotency_key: crypto.randomUUID(), expected_project_version: version, approval_version: approval.project_version, spec_sha256: approval.spec_sha256 });
+    await refresh(); message("Programme preparation recorded. Delivery and execution still require protected-branch review.");
+  } catch (error) { message(error.message, true); }
+  finally { synthesisBusy = false; setButtons(); }
+});
 $("exploration-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { await command("add-exploration", { wording: $("exploration").value }); $("exploration").value = ""; message("Exploration saved outside approved scope."); }); });
 $("approval-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { const draft = snapshot.intent.draft; await command("approve-spec", { draft_version: draft.draft_version, spec_sha256: draft.spec_sha256, wording: "This scope represents what I want to build." }); message("This exact scope is approved. Programme delivery and execution evidence remain separate."); }); });
 $("stop-form").addEventListener("submit", (event) => { event.preventDefault(); performStop(async () => { await api("/api/stop", { request_id: crypto.randomUUID().replaceAll("-", ""), reason: $("stop-reason").value }); stopRequested = true; message("Stop requested. Refresh evidence to confirm the remote stop is active."); }); });

@@ -6,6 +6,48 @@
   ],
   "defects": [
     {
+      "id": "frontdoor-synthesis-owner-bypassed",
+      "find": "if principal.role != \"owner\":",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "if False:",
+      "why": "A proposal principal could request paid programme synthesis."
+    },
+    {
+      "id": "frontdoor-synthesis-approval-bypassed",
+      "find": "if (type(command[\"approval_version\"]) is not int",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "if False and (type(command[\"approval_version\"]) is not int",
+      "why": "A wrong approval identity could spend API calls before eventual compilation refusal."
+    },
+    {
+      "id": "frontdoor-synthesis-reservation-skipped",
+      "find": "            record = {\"identity\": identity, \"state\": \"pending\", \"stages\": []}\n            self._save(path, record)",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "            record = {\"identity\": identity, \"state\": \"pending\", \"stages\": []}",
+      "why": "An API call could start before a durable reservation, allowing repeated uncertain spend."
+    },
+    {
+      "id": "frontdoor-synthesis-freshness-bypassed",
+      "find": "\"expected_project_version\": version, \"approval_version\": command[\"approval_version\"],",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "replace": "\"expected_project_version\": self.store.snapshot(project, principal=principal)[\"project_version\"], \"approval_version\": command[\"approval_version\"],",
+      "why": "A new owner intent during synthesis could be hidden by silently rebinding the old review to a newer project version."
+    },
+    {
+      "id": "frontdoor-synthesis-tools-granted",
+      "find": "\"programme-proposer\": JUDGE_TOOLS,",
+      "file": "factory_kernel/worker_policy.py",
+      "replace": "\"programme-proposer\": READ_TOOLS,",
+      "why": "A programme proposer could inspect private host files beyond the committed facts provided."
+    },
+    {
+      "id": "frontdoor-synthesis-budget-raised",
+      "find": "\"programme-proposer\": 1.0,",
+      "file": "factory_kernel/worker_policy.py",
+      "replace": "\"programme-proposer\": 10.0,",
+      "why": "Programme synthesis could exceed its approved per-call limit."
+    },
+    {
       "id": "security-verdict-forced-pass",
       "file": "scripts/factory_security.py",
       "find": "    verdict = \"pass\" if not findings else \"fail\"\n",

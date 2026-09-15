@@ -131,6 +131,17 @@ class FrontDoorHTTPTests(unittest.TestCase):
         self.assertEqual(self.call("/api/prepare", body=body)["json"]["state"], "pending")
         preparer.prepare.assert_called_once_with("citations", body, principal=OWNER)
 
+    def test_synthesis_uses_authenticated_owner_and_is_disabled_by_default(self):
+        body = {"idempotency_key": "programme", "expected_project_version": 3,
+                "approval_version": 3, "spec_sha256": "a" * 64}
+        self.assertEqual(self.call("/api/programme-prepare", body=body)["status"], "503 Service Unavailable")
+        synthesizer = self.app.synthesizer = Mock()
+        synthesizer.prepare.return_value = {"state": "pending"}
+        self.assertEqual(self.call("/api/programme-prepare", body=body, HTTP_AUTHORIZATION="")["status"], "401 Unauthorized")
+        synthesizer.prepare.assert_not_called()
+        self.assertEqual(self.call("/api/programme-prepare", body=body)["json"]["state"], "pending")
+        synthesizer.prepare.assert_called_once_with("citations", body, principal=OWNER)
+
     def test_stop_only_dispatches_fixed_owner_workflow_and_never_claims_observed_stop(self):
         payload = {"request_id": "c" * 32, "reason": "Pause before more work."}
         response = self.call("/api/stop", body=payload)
