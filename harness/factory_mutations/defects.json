@@ -1051,15 +1051,15 @@
     {
       "id": "resume-accepts-human-authored-pr",
       "file": "factory_kernel/runtime.py",
-      "find": "        if author.get(\"type\") != self.FACTORY_PR_AUTHOR[\"type\"] or author.get(\"login\") != self.FACTORY_PR_AUTHOR[\"login\"]:",
+      "find": "        if author.get(\"type\") != self.FACTORY_PR_AUTHOR[\"type\"] or author.get(\"login\") != factory_login:",
       "replace": "        if False:",
       "why": "A human-authored PR could be resumed as if the factory had built it; resume must only finish the factory's own PRs."
     },
     {
       "id": "resume-author-type-ignored",
       "file": "factory_kernel/runtime.py",
-      "find": "        if author.get(\"type\") != self.FACTORY_PR_AUTHOR[\"type\"] or author.get(\"login\") != self.FACTORY_PR_AUTHOR[\"login\"]:",
-      "replace": "        if author.get(\"login\") != self.FACTORY_PR_AUTHOR[\"login\"]:",
+      "find": "        if author.get(\"type\") != self.FACTORY_PR_AUTHOR[\"type\"] or author.get(\"login\") != factory_login:",
+      "replace": "        if author.get(\"login\") != factory_login:",
       "why": "Identity would be a login string alone; a User account named like the bot would pass as the factory."
     },
     {
@@ -2335,6 +2335,41 @@
       "find": "if expected_programme and (programme is None or programme.sha256 != expected_programme):",
       "replace": "if False and expected_programme and (programme is None or programme.sha256 != expected_programme):",
       "why": "A continued pulse cannot materialize scope from a different approved programme."
+    },
+    {
+      "id": "publication-base-omitted",
+      "file": "factory_kernel/runtime.py",
+      "find": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"base\"])",
+      "replace": "env = self._run_env(paths, base_ref=value[\"base\"])",
+      "why": "A fresh publication process must preserve the captured branch base for the sole provenance publisher."
+    },
+    {
+      "id": "publication-base-substituted",
+      "file": "factory_kernel/runtime.py",
+      "find": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"base\"])",
+      "replace": "env = self._run_env(paths, base_ref=value[\"base\"], base_sha=value[\"kernel\"])",
+      "why": "The kernel checkout identity is not the certified branch base."
+    },
+    {
+      "id": "publication-malformed-base-accepted",
+      "file": "factory_kernel/runtime.py",
+      "find": "                or not isinstance(value.get(\"base\"), str)\n                or not re.fullmatch(r\"(?:[0-9a-f]{40}|[0-9a-f]{64})\", value[\"base\"])\n",
+      "replace": "",
+      "why": "An invalid prepared base must refuse before spending App authority on push or PR creation."
+    },
+    {
+      "id": "resume-programme-any-bot",
+      "file": "factory_kernel/runtime.py",
+      "find": "or author.get(\"login\") != factory_login:",
+      "replace": "or (not admission and author.get(\"login\") != factory_login):",
+      "why": "Admission of the linked issue cannot authorize a PR opened by a different Bot."
+    },
+    {
+      "id": "resume-programme-readmission-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "            if admission:\n                fresh = ProgrammeQueue",
+      "replace": "            if False and admission:\n                fresh = ProgrammeQueue",
+      "why": "Programme retirement during preparation must prevent publication."
     },
     {
       "id": "continuation-exempts-proof-job-errors",
