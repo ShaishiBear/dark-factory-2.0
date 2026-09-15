@@ -131,6 +131,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Validate and record bounded pulse inputs
+        env:
+          EXPECTED_PROGRAMME: ${{ inputs.continuation_programme }}
+          REMAINING: ${{ inputs.continuation_remaining || '8' }}
+          PARENT_RUN: ${{ inputs.continuation_parent }}
+        run: |
+          python3 -m factory_kernel programme-pulse --programme "$EXPECTED_PROGRAMME" \
+            --remaining "$REMAINING" --parent "$PARENT_RUN"
+
       - name: Check operational prerequisites
         shell: bash
         env:

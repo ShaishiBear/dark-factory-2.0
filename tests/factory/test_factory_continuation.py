@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from factory_kernel.continuation import continue_programme
+from factory_kernel.continuation import continue_programme, pulse_context
 from factory_kernel.programme import ProgrammeRefused
 
 
@@ -108,9 +108,27 @@ class ContinuationTests(unittest.TestCase):
         self.assertIn('REMAINING: ${{ inputs.continuation_remaining', continuation)
         self.assertIn('programme-sync --expected-programme "$EXPECTED_PROGRAMME"', proof)
         self.assertIn('cancel-in-progress: false', proof)
+        self.assertLess(proof.index('Validate and record bounded pulse inputs'),
+                        proof.index('Check operational prerequisites'))
         for forbidden in ("DARK_FACTORY_APP", "OPENROUTER_API_KEY", "ANTHROPIC_AUTH_TOKEN",
                           "services:", "persist-credentials: true"):
             self.assertNotIn(forbidden, continuation)
+
+    def test_pulse_inputs_are_bounded_and_retain_parent_identity(self):
+        self.assertEqual(pulse_context(programme="a" * 64, remaining="7", parent="42"),
+                         {"programme": "a" * 64, "remaining": 7, "parent_run": "42"})
+        valid = dict(programme="", remaining="8", parent="")
+        for key, value in (("programme", "bad"), ("remaining", "99"), ("remaining", "-1"),
+                           ("parent", "0"), ("parent", "42\n::error::injected")):
+            with self.subTest(key=key, value=value), self.assertRaises(ProgrammeRefused):
+                pulse_context(**{**valid, key: value})
+
+    def test_pulse_cli_does_not_construct_execution_runtime(self):
+        from factory_kernel import cli
+
+        with patch("sys.argv", ["factory_kernel", "programme-pulse", "--programme", "", "--remaining", "8", "--parent", ""]), patch.object(cli, "runtime", side_effect=AssertionError("execution runtime")), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(cli.main(), 0)
+        self.assertIn('"parent_run": null', output.getvalue())
 
     def test_cli_idle_with_no_triage_progress_does_not_start_a_chain(self):
         from factory_kernel import cli

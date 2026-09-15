@@ -10,6 +10,17 @@ WORKFLOW = "dark-factory-worker.yml"
 MAX_CONTINUATIONS = 8
 
 
+def pulse_context(*, programme: str, remaining: str, parent: str) -> dict:
+    """Validate and record inputs before candidate creation or paid worker setup."""
+    if not re.fullmatch(r"[0-8]", remaining):
+        raise ProgrammeRefused("continuation remaining must be an integer from 0 through 8")
+    if programme and not re.fullmatch(r"[0-9a-f]{64}", programme):
+        raise ProgrammeRefused("continuation programme must be a canonical hash")
+    if parent and not re.fullmatch(r"[1-9][0-9]{0,19}", parent):
+        raise ProgrammeRefused("continuation parent must be a positive run ID")
+    return {"programme": programme or None, "remaining": int(remaining), "parent_run": parent or None}
+
+
 def continue_programme(queue, check_stop, *, programme: str, remaining: str,
                        advanced: str, dispatch_result: str, merge_result: str,
                        context: Mapping[str, str]) -> dict:

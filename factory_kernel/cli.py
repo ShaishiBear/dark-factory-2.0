@@ -61,6 +61,9 @@ def main() -> int:
     continuation = sub.add_parser("programme-continue", help="continue successful approved work within a fixed limit")
     for field in ("programme", "remaining", "advanced", "dispatch-result", "merge-result"):
         continuation.add_argument("--" + field, required=True)
+    pulse = sub.add_parser("programme-pulse", help="validate and record bounded continuation inputs")
+    for field in ("programme", "remaining", "parent"):
+        pulse.add_argument("--" + field, required=True)
     for name in ("merge-export", "merge-import"):
         transfer = sub.add_parser(name, help="transport merge evidence within one Actions run")
         transfer.add_argument("--pr", type=int, required=True)
@@ -146,6 +149,14 @@ def main() -> int:
             _emit_step_outputs(merge_handoff_sha256=digest, kernel_sha=kernel)
         else:
             import_handoff(args.source, args.destination, expected_sha256=args.sha256, subject=subject)
+        return 0
+
+    if args.command == "programme-pulse":
+        import json
+        from .continuation import pulse_context
+
+        print("FACTORY_PULSE " + json.dumps(pulse_context(
+            programme=args.programme, remaining=args.remaining, parent=args.parent), sort_keys=True))
         return 0
 
     rt = runtime(args.config)

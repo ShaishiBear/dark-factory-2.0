@@ -203,7 +203,8 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             declaration = _input_declaration(inputs, name)
             self.assertIn("required: false", declaration)
             self.assertIn("default: ''", declaration)
-        self.assertEqual(inputs.count("default: ''"), 2)
+        self.assertEqual(sum(_input_declaration(inputs, name).count("default: ''")
+                             for name in ("resume_pr:", "resume_run_id:")), 2)
         self.assertIn("actions: read", workflow.split("permissions:", 1)[1].split("concurrency:", 1)[0])
         # Lone input refuses, in the preflight, before any toolchain is installed.
         prerequisites = workflow.split("- name: Check operational prerequisites", 1)[1]

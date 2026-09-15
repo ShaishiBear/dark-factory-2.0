@@ -16,6 +16,8 @@ Each run still performs one canonical factory action. After successful dispatch 
 or skipped merge/post-merge, a small control job can request one successor run when the action
 advanced a bound programme. A pulse starts with at most eight further continuations. Every
 request decreases the counter and includes the exact programme hash and parent run ID.
+Before candidate creation or model preflight, `programme-pulse` validates and logs those inputs
+as one JSON record, so parent/child runs and their decreasing limits can be traced directly.
 
 The next run checks that hash before materializing a candidate. It repeats normal triage,
 admission, stop, lease, attempt, credential and proof checks. The whole workflow retains its
