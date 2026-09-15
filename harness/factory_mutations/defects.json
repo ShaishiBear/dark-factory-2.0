@@ -2372,6 +2372,48 @@
       "why": "Programme retirement during preparation must prevent publication."
     },
     {
+      "id": "frontdoor-prepare-owner-bypassed",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "if principal.role != \"owner\":",
+      "replace": "if False:",
+      "why": "A proposal principal must not spend the owner's intake API budget."
+    },
+    {
+      "id": "frontdoor-prepare-audit-binding-ignored",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "if value[\"draft_sha256\"] != sha256_value(draft) or value[\"decision\"] not in",
+      "replace": "if value[\"decision\"] not in",
+      "why": "An audit of a different draft cannot mark this scope ready for owner review."
+    },
+    {
+      "id": "frontdoor-prepare-readiness-ignored",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "if value[\"decision\"] == \"ready\" and check[\"status\"] != \"met\":",
+      "replace": "if False:",
+      "why": "Unresolved product readiness cannot be hidden behind a ready decision."
+    },
+    {
+      "id": "frontdoor-prepare-tools-granted",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "\"intent-proposer\": JUDGE_TOOLS,",
+      "replace": "\"intent-proposer\": READ_TOOLS,",
+      "why": "Intake model processes receive only supplied facts, never tools for private host state."
+    },
+    {
+      "id": "frontdoor-prepare-reservation-skipped",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "self._save(path, record)  # Durable before the first API call; crashes do not repeat it.",
+      "replace": "pass  # Missing durable reservation.",
+      "why": "An interrupted request must be recorded before any API spend, preventing silent repeats."
+    },
+    {
+      "id": "frontdoor-prepare-budget-raised",
+      "file": "factory_kernel/worker_policy.py",
+      "find": "\"intent-proposer\": 1.0,",
+      "replace": "\"intent-proposer\": 10.0,",
+      "why": "One preparation stage may not silently exceed its bounded API budget."
+    },
+    {
       "id": "continuation-exempts-proof-job-errors",
       "file": ".github/workflows/dark-factory-worker.yml",
       "find": "    timeout-minutes: 360\n    outputs:",

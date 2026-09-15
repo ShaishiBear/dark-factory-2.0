@@ -19,6 +19,7 @@ from .config import load_config
 from .frontdoor_control import stop_status
 from .frontdoor_intent import IntentRefused, IntentStore, Principal
 from .frontdoor_programme import prepare_programme
+from .frontdoor_prepare import IntentPreparation, api_provider, repository_context
 from .github_cli import GitHubClient
 from .programme import ProgrammeRefused, parse_json
 from .programme_runtime import ProgrammeQueue
@@ -28,7 +29,7 @@ MAX_BODY = 250000
 
 
 class FrontDoorApplication:
-    def __init__(self, *, store, project, token, origin, github, labels, app_login):
+    def __init__(self, *, store, project, token, origin, github, labels, app_login, preparer=None):
         parsed = urlsplit(origin)
         if (parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password
                 or not parsed.hostname or parsed.scheme not in {"http", "https"}
@@ -38,6 +39,7 @@ class FrontDoorApplication:
             raise ValueError("owner token must be 32 random bytes encoded as lowercase hex")
         self.store, self.project, self.github = store, project, github
         self.labels, self.app_login = labels, app_login
+        self.preparer = preparer
         self.origin, self.host = origin, parsed.netloc
         self.token_hash = hashlib.sha256(token.encode()).digest()
         self.principal = Principal(store.owner, "owner")
@@ -64,7 +66,8 @@ class FrontDoorApplication:
     def _snapshot(self):
         state = self.store.snapshot(self.project, principal=self.principal)
         result = {"project": self.project, "repository": self.store.repository, "intent": state,
-                  "observed_at": None}
+                  "observed_at": None, "preparation_available": self.preparer is not None,
+                  "preparation": self.preparer.latest(self.project) if self.preparer else None}
         try:
             result["execution"] = ProgrammeQueue(self.github, "main").status(self.labels)
             result["stop"] = stop_status(self.github)
@@ -108,6 +111,11 @@ class FrontDoorApplication:
             if method == "POST" and path == "/api/commands":
                 state = self.store.execute(self.project, self._body(environ), principal=self.principal)
                 return send("200 OK", state)
+            if method == "POST" and path == "/api/prepare":
+                if self.preparer is None:
+                    return send("503 Service Unavailable", {"error": "specification preparation is not enabled"})
+                result = self.preparer.prepare(self.project, self._body(environ), principal=self.principal)
+                return send("200 OK", result)
             if method == "POST" and path == "/api/programme-review":
                 review = prepare_programme(self.store, self.project, self._body(environ),
                                            principal=self.principal, app_login=self.app_login)
@@ -185,6 +193,7 @@ def main():
     parser.add_argument("--origin", required=True)
     parser.add_argument("--app-login", required=True)
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--enable-preparation", action="store_true")
     args = parser.parse_args()
     if args.token_file.is_symlink() or args.token_file.stat().st_size > 100:
         raise ValueError("owner token must be a small private regular file")
@@ -199,8 +208,9 @@ def main():
     store = IntentStore(args.state_dir, repository=config.repository, owner=args.owner)
     if os.name != "nt" and args.state_dir.stat().st_mode & 0o077:
         raise ValueError("intent state directory must be private to its service account")
+    preparer = IntentPreparation(store, api_provider(config.provider), lambda: repository_context(Path.cwd())) if args.enable_preparation else None
     app = FrontDoorApplication(store=store, project=args.project, token=token, origin=args.origin,
-                               github=github, labels=config.labels, app_login=args.app_login)
+                               github=github, labels=config.labels, app_login=args.app_login, preparer=preparer)
     # Single-host, bounded request timeout, loopback only. Hosting must enforce HTTPS and keep
     # state/token files outside all worker sandboxes. This is not a distributed service.
     with make_server("127.0.0.1", args.port, app, server_class=FrontDoorServer, handler_class=QuietHandler) as server:

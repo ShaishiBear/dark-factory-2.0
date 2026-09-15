@@ -2,6 +2,7 @@
 let token = "";
 let snapshot = null;
 let busy = false;
+let preparationBusy = false;
 let stopBusy = false;
 let stopRequested = false;
 const $ = (id) => document.getElementById(id);
@@ -52,7 +53,7 @@ function render() {
   if (!proposal) {
     const recorded = state.ledger.some((row) => row.kind === "record-intent");
     draft.append(text("h2", "Your specification review"), text("p", recorded ? "Your original intent is saved. A prepared specification will appear here for explicit review." : "Save your intent first. A prepared specification will appear here for explicit review."));
-    draft.append(text("p", "Specification preparation is not connected in this version.", "muted"));
+    if (!snapshot.preparation_available) draft.append(text("p", "Specification preparation is not enabled on this host.", "muted"));
   } else {
     const spec = proposal.spec;
     draft.append(text("h2", spec.title), text("p", spec.outcome));
@@ -65,6 +66,22 @@ function render() {
     draft.append(text("p", `Scope revision ${spec.revision} · draft ${proposal.draft_version}`, "muted"), text("p", proposal.spec_sha256, "hash"));
   }
   $("approval-form").hidden = !proposal || alreadyApproved || proposal.open_questions.length > 0;
+  const preparation = snapshot.preparation;
+  const attempted = preparation?.identity.command.expected_project_version === state.project_version;
+  const currentPreparation = preparation && (attempted || (proposal && proposal.draft_version === preparation.draft_version));
+  $("prepare").hidden = !snapshot.preparation_available || !state.ledger.some((row) => row.kind === "record-intent") || attempted || Boolean(proposal);
+  $("preparation-status").replaceChildren();
+  if (preparation && !currentPreparation) $("preparation-status").append(text("p", "The recorded preparation applies to earlier intent. Prepare the current intent for a new review.", "muted"));
+  if (currentPreparation) {
+    const statuses = { pending: "Preparation is running or was interrupted. Refresh to observe its recorded result; it will not restart automatically.", failed: "Preparation could not produce a current, validated draft. Its attempt is recorded for inspection.", "needs-revision": "The intent audit found that the draft needs revision. It is not ready for approval.", question: "Answer the product question above by saving a clarification in your intent, then prepare scope again.", "ready-for-review": "Drafting and intent audit are complete. Review the scope before approving." };
+    $("preparation-status").append(text("p", alreadyApproved ? "Intent audit completed for this approved scope." : statuses[preparation.state] || "Preparation state is unknown.", "muted"));
+    if (preparation.audit) {
+      const details = document.createElement("details"); details.append(text("summary", "Intent audit"));
+      for (const [name, check] of Object.entries(preparation.audit.checks)) details.append(text("p", `${name.replaceAll("_", " ")}: ${check.basis}`));
+      for (const [name, scenario] of Object.entries(preparation.audit.scenarios)) details.append(text("p", `${name.replaceAll("_", " ")}: ${scenario}`));
+      $("preparation-status").append(details);
+    }
+  }
   $("approve-check").checked = false;
   $("approvals").replaceChildren();
   if (state.approvals.length) {
@@ -121,7 +138,7 @@ async function perform(action) {
 }
 function setButtons() {
   document.querySelectorAll("button").forEach((button) => {
-    button.disabled = button.closest("#stop-form") ? stopBusy : button.id === "logout" ? false : busy;
+    button.disabled = button.closest("#stop-form") ? stopBusy : button.id === "logout" ? false : button.id === "prepare" ? busy || preparationBusy : busy;
   });
 }
 async function performStop(action) {
@@ -134,6 +151,19 @@ async function performStop(action) {
 $("login-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { token = $("owner-token").value.trim(); $("owner-token").value = ""; await refresh(); message(""); }); });
 $("logout").addEventListener("click", () => { token = ""; snapshot = null; location.reload(); });
 $("refresh").addEventListener("click", () => perform(refresh));
+$("prepare").addEventListener("click", async () => {
+  if (busy || preparationBusy) return;
+  const version = snapshot.intent.project_version;
+  preparationBusy = true;
+  setButtons();
+  message("Preparing scope and auditing intent. You can refresh, save a clarification or request a stop.");
+  try {
+    await api("/api/prepare", { idempotency_key: crypto.randomUUID(), expected_project_version: version });
+    await refresh();
+    message("Preparation result recorded. Review the current intent and draft before approving.");
+  } catch (error) { message(error.message, true); }
+  finally { preparationBusy = false; setButtons(); }
+});
 $("intent-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { await command("record-intent", { wording: $("intent").value }); $("intent").value = ""; message("Original intent saved. No scope has been approved by saving it."); }); });
 $("exploration-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { await command("add-exploration", { wording: $("exploration").value }); $("exploration").value = ""; message("Exploration saved outside approved scope."); }); });
 $("approval-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { const draft = snapshot.intent.draft; await command("approve-spec", { draft_version: draft.draft_version, spec_sha256: draft.spec_sha256, wording: "This scope represents what I want to build." }); message("This exact scope is approved. Programme delivery and execution evidence remain separate."); }); });

@@ -49,10 +49,9 @@ retried automatically. There is no stop-clear, resume, merge or product-dispatch
 
 ## Still required before calling this an operating Front Door
 
-1. Connect bounded API intent auditing/preparation, ownership routing and the architecture's
-   scenario/feasibility audit. The UI currently states that specification preparation is not
-   connected. Prepared drafts can be supplied through the tested proposal boundary; this is not
-   a working conversational intake engine yet.
+1. Observe the optional API preparation adapter on its deployed host with real owner intent.
+   Local tests use deterministic responses. Deployment and a live API preparation cycle are
+   still required before calling the conversational intake path operational.
 2. Connect reviewed programme delivery to the protected-main authority. Stored approval and an
    exported JSON object cannot bypass current trust-root governance. Re-read exact approval at
    delivery; an old export is not a capability.
@@ -74,6 +73,29 @@ python -m factory_kernel.frontdoor_http --state-dir /private/frontdoor/state \
 
 Do not expose the loopback development service directly or display fixture progress as live proof.
 
+## Bounded specification preparation
+
+`--enable-preparation` connects the UI to two separate API processes: intent drafting and
+intent auditing. The host must explicitly configure `ANTHROPIC_BASE_URL=https://openrouter.ai/api`
+and `ANTHROPIC_AUTH_TOKEN`; interactive subscription fallback is refused. Each process has no
+tools, an empty temporary working directory, five turns, a $1 cap and a 338-second wall.
+Provider retries are disabled. These are operational limits, not proof or approval criteria.
+
+The drafter receives original wording, exploration, the previous approved specification and
+bounded committed MISSION/README/API facts. It cannot read the host's private state. The auditor
+binds the exact draft and covers all fourteen architectural readiness topics and seven scenario
+categories. An unresolved product decision yields one justified question; technical uncertainty
+is deferred. Missing, inconsistent or failed audits cannot publish a ready draft. Semantic
+correctness still requires owner review; an intent audit is not product qualification.
+
+A durable private record precedes the first API call. Replaying its exact request returns that
+record; another request key cannot repeat preparation for that intake version. A crash leaves
+pending evidence for inspection. There is no automatic retry. Newer owner intent causes the
+final draft write to refuse rather than overwrite it. The proposal principal can propose scope,
+but cannot approve it. Explicit owner approval and protected-main programme admission remain
+separate. A failed/revise result currently needs inspection or clarified intent; bounded automatic
+draft repair is not yet connected.
+
 ## Scope shown beside execution
 
 The progress view names the active specification and revision, with programme and scope
@@ -81,3 +103,13 @@ hashes in expandable details. It compares that scope hash to the latest local ow
 so approving a newer scope cannot make older running work look newly activated. A successful
 GitHub observation carries a UTC timestamp; failed reads retain unknown completion/stop state
 and no observation timestamp. Observations remain read-only and are not atomic authority.
+
+## Preparation validation (15 September 2026)
+
+Local canonical quick passed 2,547 tests and seven static checks, with 141 focused
+preparation/transport/worker-policy checks and six causal preparation mutations caught.
+The final JavaScript-only changes were then browser-verified against a disposable slow
+provider: clarification saved during preparation, stop remained available, refresh observed
+the synthetic stop, and an old preparation could not overwrite or represent the newer intent.
+The fixture uses no model API or GitHub effects. Refresh and intent editing remain available
+throughout preparation. No live deployment or preparation cycle is claimed.

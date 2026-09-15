@@ -88,7 +88,7 @@ from factory_kernel.runtime import (  # noqa: E402
 from factory_kernel.worker_policy import (  # noqa: E402
     ARCHITECTURE_POLICY_PATH,
     ARCHITECTURE_SCOPE,
-    AUTHORITY_ROLES,
+    TOOLLESS_ROLES,
     DRAFT_DEADLINE_FRACTION,
     DRAFTING_SCOPE,
     JUDGE_SCOPE,
@@ -113,7 +113,7 @@ from factory_kernel.worker_runtime import (  # noqa: E402
 
 PROMPT_DIR = ROOT / ".factory" / "prompts"
 WORKER_WORKFLOW = ROOT / ".github" / "workflows" / "dark-factory-worker.yml"
-JUDGE_ROLES = AUTHORITY_ROLES | {"triage"}
+JUDGE_ROLES = TOOLLESS_ROLES
 TOOL_ROLES = sorted(set(ROLE_TOOLS) - JUDGE_ROLES)
 # The roots the brief names, every one of which must be denied to every tool-bearing role.
 TRUST_ROOTS = ("factory_kernel/**", "harness/**", "scripts/**", "tests/factory/**", ".github/**")

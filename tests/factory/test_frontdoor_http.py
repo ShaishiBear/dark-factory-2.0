@@ -121,6 +121,16 @@ class FrontDoorHTTPTests(unittest.TestCase):
         self.assertTrue(result["observation_available"])
         self.assertIsNotNone(datetime.fromisoformat(result["observed_at"]).utcoffset())
 
+    def test_preparation_is_explicit_and_uses_the_server_owner_principal(self):
+        body = {"idempotency_key": "prepare", "expected_project_version": 1}
+        self.assertEqual(self.call("/api/prepare", body=body)["status"], "503 Service Unavailable")
+        preparer = self.app.preparer = Mock()
+        preparer.prepare.return_value = {"state": "pending"}
+        self.assertEqual(self.call("/api/prepare", body=body, HTTP_AUTHORIZATION="")["status"], "401 Unauthorized")
+        preparer.prepare.assert_not_called()
+        self.assertEqual(self.call("/api/prepare", body=body)["json"]["state"], "pending")
+        preparer.prepare.assert_called_once_with("citations", body, principal=OWNER)
+
     def test_stop_only_dispatches_fixed_owner_workflow_and_never_claims_observed_stop(self):
         payload = {"request_id": "c" * 32, "reason": "Pause before more work."}
         response = self.call("/api/stop", body=payload)

@@ -84,7 +84,7 @@ from factory_kernel.runtime import (  # noqa: E402
     stage_line,
 )
 from factory_kernel.worker_policy import (  # noqa: E402
-    AUTHORITY_ROLES,
+    TOOLLESS_ROLES,
     READ_TOOLS,
     REPO_MUTATION_ROLES,
     ROLE_MAX_TURNS,
@@ -104,7 +104,7 @@ from factory_kernel.worker_runtime import (  # noqa: E402
 
 PROMPT_DIR = ROOT / ".factory" / "prompts"
 RULES = ROOT / "FACTORY_RULES.md"
-JUDGE_ROLES = AUTHORITY_ROLES | {"triage"}
+JUDGE_ROLES = TOOLLESS_ROLES
 TOOL_ROLES = sorted(set(ROLE_TOOLS) - JUDGE_ROLES)
 TOOL_SENTENCE = (
     "Your tools are Read, Glob, Grep, Write and Edit (Glob to find files, Grep to search "

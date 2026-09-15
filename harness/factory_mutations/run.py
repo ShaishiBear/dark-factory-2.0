@@ -190,6 +190,7 @@ COPY_FILES = (
     "tests/factory/test_frontdoor_programme.py",
     "tests/factory/test_frontdoor_control.py",
     "tests/factory/test_frontdoor_http.py",
+    "tests/factory/test_frontdoor_prepare.py",
     "tests/factory/test_factory_continuation.py",
     "tests/factory/test_factory_github_e2e_bootstrap.py",
     "tests/factory/test_factory_merge_verify.py",

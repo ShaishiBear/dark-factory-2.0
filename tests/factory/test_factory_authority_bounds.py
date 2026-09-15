@@ -42,6 +42,8 @@ from factory_kernel.runtime import STAGE_TIMINGS, KernelRuntime, RunPaths  # noq
 from factory_kernel.triage import TriageEngine  # noqa: E402
 from factory_kernel.worker_policy import (  # noqa: E402
     AUTHORITY_ROLES,
+    INTAKE_ROLES,
+    TOOLLESS_ROLES,
     JUDGE_TOOLS,
     READ_TOOLS,
     ROLE_MAX_BUDGET_USD,
@@ -70,7 +72,7 @@ BOUND_SOURCES = {
 BOUNDS = tuple(BOUND_SOURCES)
 # Every place the kernel constructs a request, with the number of sites each file holds. A
 # refactor that adds a site must add it here; a file that is not listed may construct none.
-REQUEST_SITES = {"runtime.py": 4, "worker_runtime.py": 1, "triage.py": 1}
+REQUEST_SITES = {"runtime.py": 4, "worker_runtime.py": 1, "triage.py": 1, "frontdoor_prepare.py": 1}
 # Anything a judge could use to change the tree or run a process. Not a tool list the policy
 # reads; the assertion is that a judge's surface contains none of it, whatever the policy says.
 MUTATING_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Task", "Agent"})
@@ -215,7 +217,7 @@ class JudgePolicyTests(unittest.TestCase):
 
     def test_a_judge_has_no_tools(self):
         self.assertEqual(JUDGE_TOOLS, ())
-        for role in sorted(AUTHORITY_ROLES | {"triage"}):
+        for role in sorted(TOOLLESS_ROLES):
             with self.subTest(role):
                 tools = allowed_tools(role)
                 self.assertEqual(tools, JUDGE_TOOLS)
@@ -227,7 +229,7 @@ class JudgePolicyTests(unittest.TestCase):
         for role in sorted(AUTHORITY_ROLES):
             with self.subTest(role):
                 self.assertEqual(max_budget_usd(role), max_budget_usd("triage"))
-                self.assertLessEqual(max_budget_usd(role), min(ROLE_MAX_BUDGET_USD.values()))
+                self.assertLessEqual(max_budget_usd(role), min(cap for role, cap in ROLE_MAX_BUDGET_USD.items() if role not in INTAKE_ROLES))
                 self.assertLessEqual(max_turns(role), max_turns("triage"))
 
 
