@@ -178,6 +178,42 @@ class BuildPublicationTests(unittest.TestCase):
             self.runtime.publish_prepared(self.handoff, expected_sha256=self.digest)
         self.runtime._publish_build.assert_not_called()
 
+    def test_fresh_publication_passes_captured_base_to_the_real_publisher(self):
+        rt = self.runtime
+        rt.config.repository = "owner/repo"
+        rt.config.labels["in_progress"] = "factory:in-progress"
+        rt._run_env = KernelRuntime._run_env.__get__(rt)
+        rt._publish_build = KernelRuntime._publish_build.__get__(rt)
+        rt._exec = Mock()
+        rt._hand_to_review = Mock()
+        rt.github.create_pr.return_value = {"number": 17}
+        (self.handoff.parent / "artifacts" / "task-contract.json").write_text('{}')
+        value = json.loads(self.handoff.read_text())
+        value["artifacts"] = rt._publication_artifacts(self.handoff.parent / "artifacts")
+        self.handoff.write_text(json.dumps(value))
+        digest = hashlib.sha256(self.handoff.read_bytes()).hexdigest()
+        with patch("factory_kernel.runtime.remove"), patch("factory_kernel.runtime.render_pr_body", return_value="body"), patch.dict("os.environ", {"FACTORY_BASE_SHA": "c" * 40}):
+            try:
+                result = rt.publish_prepared(self.handoff, expected_sha256=digest)
+            except Exception as exc:
+                self.fail(f"valid prepared build must publish its captured base: {exc}")
+        self.assertEqual(result, 17)
+        publish = next(c for c in rt._exec.call_args_list if "publish" in c.args[0])
+        argv = publish.args[0]
+        self.assertEqual(argv[argv.index("--base") + 1], "b" * 40)
+        self.assertEqual(publish.kwargs["env"]["FACTORY_BASE_SHA"], "b" * 40)
+
+    def test_malformed_captured_base_refuses_before_any_publication_effect(self):
+        value = json.loads(self.handoff.read_text())
+        for base in (None, "main", "a" * 41, "a" * 63, 123):
+            value["base"] = base
+            self.handoff.write_text(json.dumps(value))
+            digest = hashlib.sha256(self.handoff.read_bytes()).hexdigest()
+            with self.subTest(base=base), patch("factory_kernel.runtime.remove"), self.assertRaisesRegex(NeedsHuman, "identity or evidence"):
+                self.runtime.publish_prepared(self.handoff, expected_sha256=digest)
+            self.runtime._publish_build.assert_not_called()
+            self.runtime._lease_heartbeat.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

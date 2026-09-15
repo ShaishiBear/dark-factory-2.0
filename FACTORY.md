@@ -324,3 +324,14 @@ gh workflow run dark-factory-worker.yml -f resume_pr=<PR> -f resume_run_id=<run 
 ```
 
 The run downloads that run's artifact (`actions: read`), requires exactly one build inside it, runs `python -m factory_kernel resume` in place of `dispatch --once` (never both), and then the hourly dispatch validates the PR like any other. One input without the other refuses at preflight.
+
+Programme recovery admits the exact linked issue against the current protected programme,
+then requires the PR's REST author to be that programme's App login with type `Bot`.
+Admission is repeated immediately before publication; retired, edited or replaced scope
+refuses. Historical ordinary Actions builds retain their existing recovery identity.
+Exact-head evidence, immutable RED files and the one-resume limit still apply.
+
+Prepared build publication carries the captured branch base across the process boundary
+as both `FACTORY_BASE_REF` and `FACTORY_BASE_SHA`. It rejects malformed base identities
+before push or PR creation. Neither the ambient environment nor the current kernel/main
+tip supplies a replacement base to the provenance publisher.
