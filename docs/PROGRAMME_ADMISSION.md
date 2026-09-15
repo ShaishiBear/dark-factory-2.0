@@ -68,6 +68,18 @@ not measured capacity claims. Changing the programme changes its canonical ident
 `tests/factory/test_factory_programme.py` supplies a complete two-item example. It is a
 synthetic navigation scenario, not an approved live task list.
 
+`programme-status` reads the current protected input and verified issue inventory without
+constructing an execution runtime, making model calls, creating issues or changing labels.
+It reports each item's acceptance IDs, issue number, labels, unmet predecessors and observed
+state. `completion_verified` uses the same receipt verifier as successor admission; a closed
+issue without that proof remains explicitly unverified. Edited bindings, unreadable evidence
+and a programme that changes during observation refuse instead of returning partial progress.
+
+This command remains available while execution is stopped. Its output is a progress view,
+not permission to execute: `ready-for-candidate` describes dependency readiness only. GitHub
+reads are not atomic, and every effect still enters through current admission and stop checks.
+Use the reported issue's comments to inspect its retained completion receipt and run evidence.
+
 ## Serialisation and recovery
 
 The existing worker workflow's `dark-factory-worker` concurrency group is the single writer.
