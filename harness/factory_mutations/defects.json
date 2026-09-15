@@ -2169,6 +2169,97 @@
       "why": "Confirmation must bind the acknowledged POST number, not accept a different matching issue."
     },
     {
+      "id": "frontdoor-http-stop-blocked-by-observation",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "class FrontDoorServer(ThreadingMixIn, WSGIServer):",
+      "replace": "class FrontDoorServer(WSGIServer):",
+      "why": "A slow observation must not prevent an authenticated stop request from being served; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-http-owner-auth-bypassed",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "return hmac.compare_digest(supplied, self.token_hash)",
+      "replace": "return True",
+      "why": "A forged bearer cannot read intent, approve scope or request stop; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-http-missing-origin-accepted",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "if method == \"POST\" and environ.get(\"HTTP_ORIGIN\") != self.origin:",
+      "replace": "if False:",
+      "why": "Owner commands require an explicit same-origin request; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-http-stop-dispatches-worker",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "\"workflow\", \"run\", \"dark-factory-owner-stop.yml\"",
+      "replace": "\"workflow\", \"run\", \"dark-factory-worker.yml\"",
+      "why": "A stop command must never dispatch product execution; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-http-read-failure-claims-clear",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "result.update(observation_available=False, execution=None, stop=None)",
+      "replace": "result.update(observation_available=True, execution=None, stop={\"state\": \"clear\", \"issues\": []})",
+      "why": "Missing remote evidence must remain unknown rather than claiming the stop is clear; caught by tests/factory/test_frontdoor_http.py."
+    },
+    {
+      "id": "frontdoor-stop-created-without-stop-label",
+      "file": "factory_kernel/frontdoor_control.py",
+      "find": "\"labels\": [\"factory:stop\"]",
+      "replace": "\"labels\": []",
+      "why": "A stop issue must carry the existing remote stop label in its initial atomic POST; caught by tests/factory/test_frontdoor_control.py."
+    },
+    {
+      "id": "frontdoor-stop-ignores-owner",
+      "file": "factory_kernel/frontdoor_control.py",
+      "find": "os.environ.get(\"GITHUB_ACTOR\") != owner",
+      "replace": "False",
+      "why": "Only the owner's protected-main workflow invocation may request this control effect; caught by tests/factory/test_frontdoor_control.py."
+    },
+    {
+      "id": "frontdoor-stop-ignores-changed-replay",
+      "file": "factory_kernel/frontdoor_control.py",
+      "find": "row.get(\"body\") != body",
+      "replace": "False",
+      "why": "A repeated stop request ID cannot silently bind different wording; caught by tests/factory/test_frontdoor_control.py."
+    },
+    {
+      "id": "frontdoor-stop-workflow-queues-behind-worker",
+      "file": ".github/workflows/dark-factory-owner-stop.yml",
+      "find": "group: dark-factory-owner-stop",
+      "replace": "group: dark-factory-worker",
+      "why": "Emergency stop must be able to reach the existing authority while a long worker proof is running; caught by tests/factory/test_frontdoor_control.py."
+    },
+    {
+      "id": "frontdoor-review-worker-prepares-activation",
+      "file": "factory_kernel/frontdoor_programme.py",
+      "find": "if principal.role != \"owner\":",
+      "replace": "if False:",
+      "why": "An untrusted proposal worker cannot prepare an owner-authorized activation review; caught by tests/factory/test_frontdoor_programme.py."
+    },
+    {
+      "id": "frontdoor-review-stale-project-accepted",
+      "file": "factory_kernel/frontdoor_programme.py",
+      "find": "request[\"expected_project_version\"] != state[\"project_version\"]",
+      "replace": "False",
+      "why": "A review based on stale intent state must refuse; caught by tests/factory/test_frontdoor_programme.py."
+    },
+    {
+      "id": "frontdoor-review-wrong-approval-hash-accepted",
+      "file": "factory_kernel/frontdoor_programme.py",
+      "find": "request[\"spec_sha256\"] != approval[\"spec_sha256\"]",
+      "replace": "False",
+      "why": "An owner review must name the exact approved scope hash; caught by tests/factory/test_frontdoor_programme.py."
+    },
+    {
+      "id": "frontdoor-review-uses-unapproved-draft",
+      "file": "factory_kernel/frontdoor_programme.py",
+      "find": "\"spec\": deepcopy(approval[\"spec\"])",
+      "replace": "\"spec\": deepcopy(state[\"draft\"][\"spec\"])",
+      "why": "Using an unapproved draft blocks a valid review against the approved hash even though the compiler still prevents scope escalation; caught by tests/factory/test_frontdoor_programme.py."
+    },
+    {
       "id": "frontdoor-worker-approves-scope",
       "file": "factory_kernel/frontdoor_intent.py",
       "find": "if principal.role != \"owner\" and operation != \"propose-spec\":",

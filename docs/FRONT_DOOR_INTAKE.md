@@ -1,7 +1,8 @@
 # Front Door intent foundation
 
-This is the local domain/storage foundation for a thin factory Front Door. It does not yet
-provide a browser, HTTP authentication, hosted service, programme synthesis or activation.
+This is the domain/storage foundation for a thin factory Front Door. The isolated browser and
+owner-authenticated transport are described in `FRONT_DOOR_SERVICE.md`; hosted service,
+API intent preparation, programme synthesis delivery and activation are not connected yet.
 The existing programme execution must finish its real proof cycle before Front Door activation.
 
 ## Contract
@@ -53,3 +54,19 @@ The synthesis/activation adapter must bind the approved specification hash and p
 main admission. It cannot turn these stored drafts directly into executable issues or grant
 the App authority to rewrite its judges. Hosting/authentication and this adapter remain unwired.
 No new cloud resource, credential, transfer or budget allowance is created by this foundation.
+
+## Preparing a programme for review
+
+`frontdoor_programme.prepare_programme` now joins the stored approval to an untrusted proposed
+decomposition. An authenticated owner names the current project version, latest approval event
+and exact specification hash. The adapter obtains scope from the private store; callers cannot
+supply a replacement specification, actor or App identity. The existing programme compiler
+checks hash binding, acceptance coverage, dependency structure and the closed proposal shape.
+
+The returned review artifact preserves original intent, exact approval wording and actor, input
+and programme hashes, and dependency order. It does not append history, create issues, publish
+files or activate execution. An unapproved new draft does not alter existing approved scope;
+once a newer approval exists, an older approval reference refuses. The protected-main delivery
+adapter must re-read approval before publishing. An exported JSON object is not a capability
+or evidence that the programme has run. HTTP owner authentication is implemented in the isolated
+service; delivery remains unwired.

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dark Factory · Front Door</title>
+  <link rel="stylesheet" href="/frontdoor.css">
+  <script src="/frontdoor.js" defer></script>
+</head>
+<body>
+  <header><div><span class="eyebrow">DARK FACTORY</span><h1>From intent to evidence.</h1></div><button id="logout" hidden>Lock workspace</button></header>
+  <main>
+    <section id="login" class="card narrow">
+      <span class="eyebrow">OWNER ACCESS</span><h2>Your factory workspace</h2>
+      <p>Review scope, follow approved work and request a stop.</p>
+      <form id="login-form"><label for="owner-token">Access token</label><input id="owner-token" type="password" autocomplete="off" required><button class="primary" type="submit">Unlock workspace</button></form>
+      <p class="muted">Your access token stays in this tab’s memory.</p>
+    </section>
+    <p id="message" role="status" aria-live="polite"></p>
+    <div id="workspace" hidden>
+      <div class="toolbar"><div><span class="eyebrow" id="repository"></span><h2 id="project"></h2></div><button id="refresh">Refresh evidence</button></div>
+      <div class="columns">
+        <div>
+          <section class="card"><span class="eyebrow">01 · INTENT</span><h2>What should change?</h2>
+            <form id="intent-form"><label for="intent">Describe the outcome you want</label><textarea id="intent" rows="5" maxlength="10000" required placeholder="Who is this for, and what should they be able to do?"></textarea><button class="primary" type="submit">Save intent</button></form>
+            <details><summary>Original wording and exploration</summary><div id="ledger"></div>
+              <form id="exploration-form"><label for="exploration">An idea to explore later</label><textarea id="exploration" rows="2" maxlength="10000" required></textarea><button type="submit">Keep as exploration</button></form>
+            </details>
+          </section>
+          <section class="card"><span class="eyebrow">02 · SCOPE REVIEW</span><div id="draft"></div>
+            <form id="approval-form" hidden><label class="check"><input type="checkbox" id="approve-check" required> This scope represents what I want to build.</label><button class="primary" type="submit">Approve this scope</button></form>
+            <div id="approvals"></div>
+          </section>
+        </div>
+        <aside>
+          <section class="card"><span class="eyebrow">03 · EXECUTION</span><h2>Progress &amp; evidence</h2><p id="observation"></p><div id="progress"></div></section>
+          <section class="card stop"><span class="eyebrow">OWNER CONTROL</span><h2>Stop the factory</h2><p id="stop-state">Read the current stop state before acting.</p>
+            <form id="stop-form"><label for="stop-reason">Reason</label><input id="stop-reason" maxlength="2000" required placeholder="Why should execution pause?"><button class="danger" type="submit">Request stop</button></form>
+            <p class="muted">A request is pending until GitHub confirms an open stop. Running work observes stop at its next checkpoint.</p>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
