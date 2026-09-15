@@ -142,6 +142,18 @@ class FrontDoorHTTPTests(unittest.TestCase):
         self.assertEqual(self.call("/api/programme-prepare", body=body)["json"]["state"], "pending")
         synthesizer.prepare.assert_called_once_with("citations", body, principal=OWNER)
 
+    def test_recovery_requires_owner_same_origin_and_fixed_preparer(self):
+        body = {"idempotency_key": "recover", "expected_project_version": 1,
+                "failed_preparation_sha256": "a" * 64, "reason": "One replacement draft, up to $2."}
+        self.assertEqual(self.call("/api/prepare-recovery", body=body)["status"], "503 Service Unavailable")
+        preparer = self.app.preparer = Mock()
+        preparer.recover.return_value = {"state": "pending"}
+        self.assertEqual(self.call("/api/prepare-recovery", body=body, HTTP_AUTHORIZATION="")["status"], "401 Unauthorized")
+        self.assertEqual(self.call("/api/prepare-recovery", body=body, absent=("HTTP_ORIGIN",))["status"], "403 Forbidden")
+        preparer.recover.assert_not_called()
+        self.assertEqual(self.call("/api/prepare-recovery", body=body)["json"]["state"], "pending")
+        preparer.recover.assert_called_once_with("citations", body, principal=OWNER)
+
     def test_stop_only_dispatches_fixed_owner_workflow_and_never_claims_observed_stop(self):
         payload = {"request_id": "c" * 32, "reason": "Pause before more work."}
         response = self.call("/api/stop", body=payload)

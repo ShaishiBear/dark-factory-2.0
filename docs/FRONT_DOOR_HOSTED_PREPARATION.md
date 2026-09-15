@@ -1,6 +1,8 @@
 # Front Door preparation through GitHub Actions
 
-Status: implemented locally for review; not activated or observed with real model calls.
+Status: encrypted hosted preparation is deployed on the existing Lightsail host. One real
+proposer call completed and its result was decrypted; the compiler refused its invalid draft.
+Independent audit, scope approval and synthesis have not yet completed as a real Front Door flow.
 
 The owner keeps `OPENROUTER_API_KEY` in GitHub Secrets. The Lightsail Front Door dispatches
 one protected-main Actions job per proposal stage. It holds the existing owner GitHub
@@ -45,6 +47,21 @@ inspection and future bounded recovery. A queued job may finish after local obse
 times out; that result is not silently treated as a draft. This initial adapter does not yet
 reconcile such late results after restart. Product programme continuation remains the separate
 canonical factory workflow and does not depend on the Front Door process or the owner's laptop.
+
+### One bounded format recovery
+
+An authenticated owner can request one replacement for a completed proposal that was retained
+and refused by the deterministic programme compiler, before any audit ran. The request names
+the current intent version, exact failed-record hash, reason and idempotency key. Its separate
+durable reservation precedes all calls and retains the original record unchanged. The UI shows
+the maximum additional spend: two fixed $1 calls, one proposer and one independent auditor.
+The replacement uses the original intake history and current committed repository context.
+It receives the same validation, audit and stale-intent checks as the first preparation.
+
+This operation never runs automatically. A pending call, timeout, missing result, audit failure
+or previous replacement does not qualify. Replaying the request observes its record; a different
+request key cannot create a second replacement. Scope approval is still a separate owner action.
+The recovery endpoint is `/api/prepare-recovery`, with the same bearer and same-origin checks.
 
 ## Activation sequence
 

@@ -71,6 +71,8 @@ function render() {
   const attempted = preparation?.identity.command.expected_project_version === state.project_version;
   const currentPreparation = preparation && (attempted || (proposal && proposal.draft_version === preparation.draft_version));
   $("prepare").hidden = !snapshot.preparation_available || !state.ledger.some((row) => row.kind === "record-intent") || attempted || Boolean(proposal);
+  $("recovery-form").hidden = !snapshot.preparation_recovery;
+  $("recover-check").checked = false;
   $("preparation-status").replaceChildren();
   if (preparation && !currentPreparation) $("preparation-status").append(text("p", "The recorded preparation applies to earlier intent. Prepare the current intent for a new review.", "muted"));
   if (currentPreparation) {
@@ -158,7 +160,7 @@ async function perform(action) {
 }
 function setButtons() {
   document.querySelectorAll("button").forEach((button) => {
-    button.disabled = button.closest("#stop-form") ? stopBusy : button.id === "logout" ? false : button.id === "prepare" ? busy || preparationBusy : button.id === "synthesize" ? busy || synthesisBusy : busy;
+    button.disabled = button.closest("#stop-form") ? stopBusy : button.id === "logout" ? false : ["prepare", "recover"].includes(button.id) ? busy || preparationBusy : button.id === "synthesize" ? busy || synthesisBusy : busy;
   });
 }
 async function performStop(action) {
@@ -185,6 +187,18 @@ $("prepare").addEventListener("click", async () => {
   finally { preparationBusy = false; setButtons(); }
 });
 $("intent-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { await command("record-intent", { wording: $("intent").value }); $("intent").value = ""; message("Original intent saved. No scope has been approved by saving it."); }); });
+$("recovery-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (busy || preparationBusy || !snapshot.preparation_recovery) return;
+  const offer = snapshot.preparation_recovery;
+  preparationBusy = true; setButtons();
+  message("Preparing one replacement draft. The previous attempt is retained; refresh and stop remain available.");
+  try {
+    await api("/api/prepare-recovery", { idempotency_key: crypto.randomUUID(), expected_project_version: offer.expected_project_version, failed_preparation_sha256: offer.failed_preparation_sha256, reason: "Owner requested one replacement draft and independent audit, up to $2 total." });
+    await refresh(); message("Replacement attempt recorded. Review the current draft before approving scope.");
+  } catch (error) { message(error.message, true); }
+  finally { preparationBusy = false; setButtons(); }
+});
 $("synthesize").addEventListener("click", async () => {
   if (busy || synthesisBusy) return;
   const version = snapshot.intent.project_version;

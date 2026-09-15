@@ -2601,6 +2601,41 @@
       "find": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))\n        self.check_stop()",
       "replace": "        # Reheading also spends proof/conformance work; retired scope must refuse first.\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(self.github.issue(linked_issue))",
       "why": "A stop arriving during remote admission would be missed before repository and proof work."
+    },
+    {
+      "id": "frontdoor-recovery-parent-binding-ignored",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "sha256_value(parent) != command[\"failed_preparation_sha256\"]",
+      "replace": "False",
+      "why": "A recovery must bind the exact retained failed proposal."
+    },
+    {
+      "id": "frontdoor-recovery-uncertain-call-accepted",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "record.get(\"failure\") != \"ProgrammeRefused\"",
+      "replace": "False",
+      "why": "An uncertain timeout cannot authorize another paid attempt."
+    },
+    {
+      "id": "frontdoor-recovery-pending-call-accepted",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "record.get(\"state\") != \"failed\"",
+      "replace": "False",
+      "why": "A running or interrupted preparation cannot be retried."
+    },
+    {
+      "id": "frontdoor-recovery-audited-call-accepted",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "or \"audit_output\" in record",
+      "replace": "or False",
+      "why": "Recovery is limited to a completed proposal compiler refusal, before any audit."
+    },
+    {
+      "id": "frontdoor-recovery-result-hidden",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "return self._record(path) if path.exists() else original",
+      "replace": "return original",
+      "why": "The owner must see the durable replacement result after recovery."
     }
   ]
 }
