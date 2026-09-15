@@ -32,12 +32,36 @@ describe('CitationModal', () => {
     expect(iframe.src).toContain('autoplay=1');
   });
 
-  it('does not render a transcript snippet section', () => {
+  it('renders the Transcript Excerpt section with the supplied snippet beside the YouTube player', () => {
     const onClose = vi.fn();
     render(<CitationModal citation={mockCitation} onClose={onClose} />);
 
-    expect(screen.queryByText('Transcript Excerpt')).not.toBeInTheDocument();
-    expect(screen.queryByText(mockCitation.snippet)).not.toBeInTheDocument();
+    // YouTube player iframe still rendered alongside the snippet section.
+    expect(screen.getByTitle('YouTube video player')).toBeInTheDocument();
+    // The Transcript Excerpt heading appears inside the citation dialog.
+    expect(screen.getByText('Transcript Excerpt')).toBeInTheDocument();
+    // The citation's supplied snippet text appears verbatim.
+    expect(screen.getByText(mockCitation.snippet)).toBeInTheDocument();
+  });
+
+  it('preserves literal line breaks in a multi-line snippet and applies pre-wrap inline style', () => {
+    const multilineSnippet =
+      'First line of the transcript.\nSecond line of the transcript.\nThird line ends it.';
+    const citation: Citation = { ...mockCitation, snippet: multilineSnippet };
+    const onClose = vi.fn();
+    render(<CitationModal citation={citation} onClose={onClose} />);
+
+    // Transcript Excerpt heading is present.
+    expect(screen.getByText('Transcript Excerpt')).toBeInTheDocument();
+
+    // Whitespace-preserving query: no-op normalizer keeps literal newlines so
+    // an exact match against the supplied snippet string is possible.
+    const snippetEl = screen.getByText(multilineSnippet, {
+      normalizer: (text) => text,
+    });
+    expect(snippetEl.textContent).toBe(multilineSnippet);
+    // Inline pre-wrap so literal line breaks render as separate lines.
+    expect(window.getComputedStyle(snippetEl).whiteSpace).toBe('pre-wrap');
   });
 
   it('shows external link with correct t param', () => {
