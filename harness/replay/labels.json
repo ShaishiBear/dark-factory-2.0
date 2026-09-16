@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "suite_id": "harness-replay-development",
+  "visibility": "public",
+  "cases": [
+    {
+      "id": "contract-valid",
+      "expected": "wait",
+      "description": "A complete contract advances without implying implementation."
+    },
+    {
+      "id": "contract-ambiguous",
+      "expected": "stop",
+      "description": "Material ambiguity stops compilation."
+    },
+    {
+      "id": "repro-observed",
+      "expected": "wait",
+      "description": "Recorded failing reproduction is checked by the real rule."
+    },
+    {
+      "id": "repro-passes",
+      "expected": "do-not-guess",
+      "description": "Passing reproduction must not authorise speculative coding."
+    },
+    {
+      "id": "lease-fresh",
+      "expected": "wait",
+      "description": "A fresh lease is kept."
+    },
+    {
+      "id": "lease-expired",
+      "expected": "recover",
+      "description": "An expired lease without handoff becomes reclaimable; this is not a dispatch."
+    },
+    {
+      "id": "validation-happy",
+      "expected": "merge",
+      "description": "Complete simulated validation must reach the fake merge and return."
+    },
+    {
+      "id": "validation-architecture",
+      "expected": "reject",
+      "description": "An architecture rejection stops the simulated merge."
+    },
+    {
+      "id": "validation-bad-ancestry",
+      "expected": "reject",
+      "description": "A provenance base not ancestral to the candidate is rejected."
+    },
+    {
+      "id": "validation-post-merge",
+      "expected": "needs-human",
+      "description": "A failed post-merge verification is not successful completion."
+    }
+  ]
+}
