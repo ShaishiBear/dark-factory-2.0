@@ -13,6 +13,8 @@ from .exploration_policy import comparison, number
 from .worker_policy import allowed_tools, effort, max_turns, max_budget_usd, stage_timeout_seconds
 
 ACTION_SHAPES = {
+    "register-rules": {"rules": [{"id": "new-dependency-permission", "kind": "new-architecture-dependency-v1",
+        "claim_id": "existing-assumption", "from_layer": "existing-source-layer", "to_layer": "existing-target-layer"}]},
     "assess": {"candidates": {"every-existing-candidate-id": {
         "every-registered-criterion-id": {"low": 0, "high": 1, "basis": "revised reasoning"}}},
         "basis": "Challenge all strategies against the same constraints and repository observations."},
@@ -87,6 +89,7 @@ class ExplorationReasoner:
                                     for row in session["observations"][-12:]]
             view["assessments"] = session["assessments"][-1:]
             view["recommendations"] = session["recommendations"][-1:]
+            view["rejection_rules"] = session["rejection_rules"]
             needed = {key for candidate in session["candidates"].values() for key in candidate["claim_ids"]}
             frontier = list(needed)
             while frontier:
@@ -117,6 +120,10 @@ class ExplorationReasoner:
                 "Criteria and cumulative budgets are frozen. A judgment criterion uses {assessment,basis}, "
                 "where assessment is favourable, mixed, adverse or unknown; it is never measurement or proof. "
                 "Policy excerpts may be incomplete; source identities bind the full retained policies. "
+                "Before the first recommendation, register rejection rules only for assumptions whose operational "
+                "meaning is that this strategy requires a NEW dependency between two named architecture layers. "
+                "The rule tests permission in protected policy; it is not evidence of a build failure's cause. "
+                "Do not map unrelated quality, performance or implementation claims to this predicate. "
                 "Do not assume a missing excerpt grants permission; report a material policy evidence gap. "
                 "Do not invent measurements. Investigate only "
                 "uncertainties that could change the decision. The only executable experiment currently available "
@@ -179,6 +186,8 @@ class ExplorationReasoner:
             "request": output["request"]}
         methods = {"add-candidates": engine.add_candidates, "assess": engine.assess, "experiment": engine.experiment,
                    "recommend": engine.recommend, "handoff": engine.handoff}
+        from .strategy_rules import register
+        methods["register-rules"] = lambda *args, **kwargs: register(engine, *args, **kwargs)
         try:
             state = methods[output["action"]](project, action, principal=principal)
         except (IntentRefused, ValueError, TypeError, KeyError) as exc:

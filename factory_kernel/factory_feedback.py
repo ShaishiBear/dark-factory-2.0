@@ -71,4 +71,6 @@ class FactoryFeedback:
         # The shared writer checks owner identity, CAS, exact replay and payload size under
         # its lock. No invalidation, budget reset, programme activation or proof reuse occurs.
         state, _, _ = engine.records.append(project, principal, command, transition, replay_guard)
-        return {"project_version": state["project_version"], "outcome": deepcopy(state["factory_outcomes"][data["id"]])}
+        result = {"project_version": state["project_version"], "outcome": deepcopy(state["factory_outcomes"][data["id"]])}
+        from .strategy_rejection import after_import
+        return after_import(engine, self.github, project, result, principal=principal)

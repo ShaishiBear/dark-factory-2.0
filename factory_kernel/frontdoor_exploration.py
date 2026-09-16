@@ -77,6 +77,8 @@ class FrontDoorExploration:
         return {"ready": True, "project_version": state["project_version"], "sessions": sessions,
                 "runs": runs, "budget": deepcopy(budget), "default_policy": policy,
                 "factory_outcomes": list(state["factory_outcomes"].values()),
+                "strategy_assessments": list(state["strategy_assessments"].values()),
+                "claims": {key: row for key, row in state["claims"].items() if row["spec_sha256"] == approval["spec_sha256"]},
                 "qualification_status": "UNPROVEN", "proof_reuse_allowed": False}
 
     def open(self, project, command, *, principal):

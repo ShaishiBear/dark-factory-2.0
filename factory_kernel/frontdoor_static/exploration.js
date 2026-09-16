@@ -63,12 +63,24 @@ function renderExploration() {
     const card = document.createElement("section");
     card.append(text("h3", session.question), text("p", `${session.status} · round ${session.round}`, "badge"));
     list(card, "Frozen comparison priorities", session.policy.priorities.map((id) => session.policy.criteria.find((row) => row.id === id).question));
+    renderRejectionRules(card, session, state);
     for (const outcome of (state.factory_outcomes || []).filter((row) => row.session_id === session.id)) {
       const observed = outcome.observation;
       card.append(text("h4", "Authenticated factory refusal"),
         text("p", `PR #${observed.receipt.pr}, run ${observed.receipt.run_id}, attempt ${observed.receipt.run_attempt}: ${observed.refusal.reason_code}.`),
-        text("p", "The factory reported a refusal. Its cause is unresolved; this does not reject the strategy or qualify a replacement.", "muted"));
+        text("p", "The factory reported a refusal. Its cause is unresolved. The assumption assessment below is a separate decision; fresh qualification is still required.", "muted"));
       const details = document.createElement("details"); details.append(text("summary", "Exact revision and evidence bindings"), text("pre", JSON.stringify(outcome, null, 2))); card.append(details);
+      const assessments = (state.strategy_assessments || []).filter((row) => row.outcome_id === outcome.id);
+      const assessment = assessments[assessments.length - 1];
+      if (assessment) {
+        card.append(text("h4", "Registered assumption assessment"), text("p", assessment.decision));
+        for (const finding of assessment.independent_findings?.findings || []) card.append(text("p", `${finding.claim_id}: ${finding.status}. ${finding.explanation}`));
+        if (assessment.invalidated_claim_ids.length) card.append(text("p", `Reconsideration required for: ${assessment.invalidated_claim_ids.join(", ")}. Other alternatives remain unqualified.`));
+      }
+      if (session.rejection_rules.length && (!assessment || assessment.decision === "unresolved")) {
+        card.append(text("p", "The independent assessment is missing or unresolved. A fresh check will reverify the factory receipt and current policy; it cannot repair code or reset a budget."));
+        explorationButton(card, "Check registered assumptions", "assess-feedback", session.id, {outcome_id: outcome.id});
+      }
     }
     if (session.handoffs.length) {
       const form = document.createElement("form");
@@ -136,6 +148,43 @@ function renderExploration() {
       "Close interrupted job without restarting", "recover", run.session_id, {run_id: run.id});
   }
   setButtons();
+}
+function renderRejectionRules(card, session, state) {
+  const rules = session.rejection_rules || [];
+  if (rules.length) {
+    list(card, "Registered before selection", rules.map((rule) => `${rule.claim_id}: this strategy requires a new dependency from ${rule.from_layer} to ${rule.to_layer}, permitted by protected policy.`));
+    return;
+  }
+  if (session.recommendations.length || !Object.keys(session.candidates).length) return;
+  let layers;
+  try { layers = JSON.parse(session.context.policies[".factory/architecture.json"].text).layers; } catch (_) { return; }
+  if (!Array.isArray(layers) || layers.length < 2) return;
+  const roots = new Set(Object.values(session.candidates).flatMap((row) => row.claim_ids));
+  let previousSize;
+  do {
+    previousSize = roots.size;
+    for (const key of [...roots]) for (const dep of state.claims[key]?.depends_on || []) roots.add(dep);
+  } while (roots.size !== previousSize);
+  const claims = [...roots].filter((key) => state.claims[key]?.kind === "assumption" && state.claims[key].status === "active");
+  if (!claims.length) return;
+  const details = document.createElement("details"); details.append(text("summary", "Register a falsifiable dependency assumption"));
+  details.append(text("p", "Use this only when an assumption means that a strategy requires a new dependency between two architecture layers. An independently verified policy conflict will invalidate that assumption. Freeze this before selection; missing facts and build failures alone cannot do so."));
+  const form = document.createElement("form");
+  function select(title, options) {
+    const label = text("label", title); const input = document.createElement("select");
+    for (const [value, caption] of options) { const option = text("option", caption); option.value = value; input.append(option); }
+    label.append(input); form.append(label); return input;
+  }
+  const claim = select("Assumption", claims.map((key) => [key, state.claims[key].statement]));
+  const choices = layers.map((row) => [row.id, row.id]);
+  const source = select("New dependency from", choices); const target = select("New dependency to", choices);
+  target.value = choices[1][0];
+  const confirm = text("label", " This assumption has the precise meaning above; freeze it before selection.");
+  const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.required = true; confirm.prepend(checkbox); form.append(confirm);
+  const submit = text("button", "Freeze rejection rule"); submit.type = "submit"; form.append(submit);
+  form.addEventListener("submit", (event) => { event.preventDefault(); perform(() => explorationAction("register-rules", session.id,
+    {rules: [{id: "rule-" + crypto.randomUUID(), kind: "new-architecture-dependency-v1", claim_id: claim.value, from_layer: source.value, to_layer: target.value}]})); });
+  details.append(form); card.append(details);
 }
 $("adaptive-open").addEventListener("submit", (event) => {
   event.preventDefault();

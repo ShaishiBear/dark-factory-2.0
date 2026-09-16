@@ -25,6 +25,8 @@ from .frontdoor_synthesis import ProgrammePreparation
 from .frontdoor_hosted import AgeCipher, HostedPreparationProvider
 from .frontdoor_exploration import FrontDoorExploration, require_clear_stop
 from .factory_feedback import FactoryFeedback
+from .strategy_rules import register as register_strategy_rules
+from .strategy_rejection import StrategyRejection
 from .github_cli import GitHubClient
 from .programme import ProgrammeRefused, parse_json
 from .programme_runtime import ProgrammeQueue
@@ -175,6 +177,15 @@ class FrontDoorApplication:
                     return send("503 Service Unavailable", {"error": "hosted exploration is not enabled"})
                 result = FactoryFeedback(self.explorer.engine, self.github).import_outcome(
                     self.project, self._body(environ), principal=self.principal)
+                return send("200 OK", result)
+            if method == "POST" and path in {"/api/exploration/register-rules", "/api/exploration/assess-feedback"}:
+                if self.explorer is None:
+                    return send("503 Service Unavailable", {"error": "hosted exploration is not enabled"})
+                command = self._body(environ)
+                if path.endswith("register-rules"):
+                    result = register_strategy_rules(self.explorer.engine, self.project, command, principal=self.principal)
+                else:
+                    result = StrategyRejection(self.explorer.engine, self.github).assess(self.project, command, principal=self.principal)
                 return send("200 OK", result)
             if method == "POST" and path in {"/api/exploration/open", "/api/exploration/start",
                     "/api/exploration/recover", "/api/exploration/reopen", "/api/exploration/abandon"}:
