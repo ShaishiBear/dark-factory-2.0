@@ -72,7 +72,8 @@ BOUND_SOURCES = {
 BOUNDS = tuple(BOUND_SOURCES)
 # Every place the kernel constructs a request, with the number of sites each file holds. A
 # refactor that adds a site must add it here; a file that is not listed may construct none.
-REQUEST_SITES = {"runtime.py": 4, "worker_runtime.py": 1, "triage.py": 1, "frontdoor_prepare.py": 1}
+REQUEST_SITES = {"runtime.py": 4, "worker_runtime.py": 1, "triage.py": 1, "frontdoor_prepare.py": 1,
+                 "preflight_prepare.py": 1}
 # Anything a judge could use to change the tree or run a process. Not a tool list the policy
 # reads; the assertion is that a judge's surface contains none of it, whatever the policy says.
 MUTATING_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Task", "Agent"})

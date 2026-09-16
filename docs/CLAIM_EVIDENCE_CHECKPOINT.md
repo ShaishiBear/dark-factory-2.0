@@ -112,3 +112,49 @@ Logs and receipt: this worktree's ignored `.validation/{focused,mutants,quick}.l
 `/home/yisha/.cache/dark-factory-evidence-retention-20260916/repo`, with the foundation tools
 and locked dependency directories reused read-only. Final PR/merge receipt remains in the
 separate main-checkout `docs/atlas/reviews/CLAIM-EVIDENCE-HANDOFF.md`, never `NEXT-CHAT-HANDOFF.md`.
+
+## Follow-on delivery: reasoning Preflight — 2026-09-16
+
+The owner asked to start Preflight and how to know whether an alternative solution would have
+been better. The delivered comparison contract is deliberately bounded: best-supported among
+the considered strategies, with no claim of global optimality or qualification. Required
+criteria are registered before generation; unknowns, tradeoffs and reversal conditions remain
+explicit. A selected strategy passing qualification cannot establish an unobserved alternative's
+counterfactual outcome.
+
+Worktree `.worktrees/preflight-foundation`, branch `codex/preflight-foundation`, started from
+retention main `b5ceb64d6f3b67f3bb237ea15d36917335e5cf74` and was rebased onto
+`9d8baa4a9cdfc056c3aac0fb453ea288466181c1`, preserving coordinating PRs 203–205.
+Target architecture reference remains `c1f7ef0187870d82d69b1b3fa7941ee266fa133b`, especially
+`DARK_FACTORY_2_PROGRAMME_AND_PREFLIGHT.md` sections 9–40.
+
+New modules: `preflight.py` (frozen policy, equal assessment, plan facts, conservative comparison),
+`preflight_context.py` (fixed committed policy and inventory reads), `preflight_prepare.py`
+(owner-scoped derived records, bounded generator/challenger, fresh currency/stop and UNPROVEN
+advisory handoff). Separate tool-less roles do not gain existing hosted intake transport.
+`docs/PREFLIGHT_FOUNDATION.md` defines the callable integration and remaining limitations.
+
+Direct mode uses zero model calls. Light mode has 2–4 strategy slots and at most two bounded
+worker invocations with $2 total reservation and 676 seconds. Deep signals stop explicitly.
+Each invocation receives the protected role limits, then is narrowed to the decision's remaining
+budget/time. The new construction site is registered in the existing authority-boundary tests;
+no existing assertion is bypassed. Unknown spend and pending/failed requests are never retried.
+
+Final validation on rebased implementation: 67 focused tests, 15 registered causal mutants
+caught after a green copied baseline, canonical quick gate passes 2,748 unit tests and eight
+static checks. The initial full run caught the unregistered AgentRequest construction site;
+that site is now governed by the same AST policy checks and additional cumulative-budget tests.
+All model responses in these tests are fixtures: live decision quality is not calibrated here.
+
+No paid call, disposable probe, factory dispatch, deployment, publication/admission activation,
+issue 189 action, or Front Door/UI modification. Front Door integration remains with the
+coordinating task; preserve its ownership. No reconsideration loop or proof reuse is enabled.
+Existing scope, independent qualification, budgets, stop and exact-head merge remain authoritative.
+
+Receipts in `.worktrees/preflight-foundation/.validation/`: `focused.log`, `mutants.log`,
+`quick.log`, `pre-sync-quick.log`. Isolated Linux checkout:
+`/home/yisha/.cache/dark-factory-preflight-20260916/repo`, reusing the foundation tools and
+locked dependency directories read-only. Final PR/merge receipt is in the separate shared
+`CLAIM-EVIDENCE-HANDOFF.md`. Next: authenticated presentation/admission integration, then
+probe isolation, cumulative cross-decision budgets, measured comparisons and affected-only
+reconsideration under fresh qualification.
