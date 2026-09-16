@@ -26,13 +26,17 @@ from .frontdoor_hosted import AgeCipher, HostedPreparationProvider
 from .github_cli import GitHubClient
 from .programme import ProgrammeRefused, parse_json
 from .programme_runtime import ProgrammeQueue
+from .publication_currency import CurrencyProtocol, key_from_identity
+from .publication_request import PublicationRequests
+from .publication_source import observe_publication_source
 
 ASSETS = Path(__file__).with_name("frontdoor_static")
 MAX_BODY = 250000
 
 
 class FrontDoorApplication:
-    def __init__(self, *, store, project, token, origin, github, labels, app_login, preparer=None, synthesizer=None):
+    def __init__(self, *, store, project, token, origin, github, labels, app_login, preparer=None, synthesizer=None,
+                 publication_key=None):
         parsed = urlsplit(origin)
         if (parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password
                 or not parsed.hostname or parsed.scheme not in {"http", "https"}
@@ -44,6 +48,9 @@ class FrontDoorApplication:
         self.labels, self.app_login = labels, app_login
         self.preparer = preparer
         self.synthesizer = synthesizer
+        self.publications = PublicationRequests(store, app_login=app_login) if publication_key is not None else None
+        self.currency = (CurrencyProtocol(publication_key, repository=store.repository, project=project)
+                         if publication_key is not None else None)
         self.origin, self.host = origin, parsed.netloc
         self.token_hash = hashlib.sha256(token.encode()).digest()
         self.principal = Principal(store.owner, "owner")
@@ -114,6 +121,18 @@ class FrontDoorApplication:
         if method == "GET" and path in assets:
             name, mime = assets[path]
             return send("200 OK", (ASSETS / name).read_bytes(), mime)
+        if method == "POST" and path == "/api/publication-currency" and self.currency is not None:
+            try:
+                # Read-only shared-key route: it cannot create owner requests. Authenticate
+                # its bounded, nonce-bound envelope before any remote observation or disk read.
+                result = self.currency.answer(self._body(environ), requests=self.publications,
+                                              principal=self.principal,
+                                              observe=lambda: observe_publication_source(self.github))
+                return send("200 OK", result)
+            except (IntentRefused, ProgrammeRefused, UnicodeError, ValueError):
+                return send("409 Conflict", {"error": "publication currency refused"})
+            except (RuntimeError, OSError, KeyError, TypeError, subprocess.SubprocessError):
+                return send("503 Service Unavailable", {"error": "publication currency unavailable"})
         if not self._authenticated(environ):
             return send("401 Unauthorized", {"error": "owner authentication required"})
         if method == "POST" and environ.get("HTTP_ORIGIN") != self.origin:
@@ -136,6 +155,13 @@ class FrontDoorApplication:
                 review = prepare_programme(self.store, self.project, self._body(environ),
                                            principal=self.principal, app_login=self.app_login)
                 return send("200 OK", review)
+            if method == "POST" and path == "/api/programme-publication":
+                if self.publications is None:
+                    return send("503 Service Unavailable", {"error": "publication requests are not enabled"})
+                request = self._body(environ)
+                result = self.publications.reserve(self.project, request, principal=self.principal,
+                                                   observation=observe_publication_source(self.github))
+                return send("200 OK", result)
             if method == "POST" and path == "/api/programme-prepare":
                 if self.synthesizer is None:
                     return send("503 Service Unavailable", {"error": "programme preparation is not enabled"})
@@ -218,7 +244,11 @@ def main():
     preparation.add_argument("--enable-preparation", action="store_true")
     preparation.add_argument("--hosted-preparation-identity", type=Path,
                              help="private age identity for proposal calls through protected GitHub Actions")
+    parser.add_argument("--enable-publication-requests", action="store_true",
+                        help="enable private owner reservations and read-only publisher currency; no dispatch")
     args = parser.parse_args()
+    if args.enable_publication_requests and not args.hosted_preparation_identity:
+        parser.error("publication requests require the existing hosted preparation identity")
     if args.token_file.is_symlink() or args.token_file.stat().st_size > 100:
         raise ValueError("owner token must be a small private regular file")
     token = args.token_file.read_text(encoding="utf-8").strip()
@@ -242,7 +272,9 @@ def main():
                                       app_login=args.app_login) if provider else None
     app = FrontDoorApplication(store=store, project=args.project, token=token, origin=args.origin,
                                github=github, labels=config.labels, app_login=args.app_login,
-                               preparer=preparer, synthesizer=synthesizer)
+                               preparer=preparer, synthesizer=synthesizer,
+                               publication_key=(key_from_identity(args.hosted_preparation_identity)
+                                                if args.enable_publication_requests else None))
     # Single-host, bounded request timeout, loopback only. Hosting must enforce HTTPS and keep
     # state/token files outside all worker sandboxes. This is not a distributed service.
     with make_server("127.0.0.1", args.port, app, server_class=FrontDoorServer, handler_class=QuietHandler) as server:

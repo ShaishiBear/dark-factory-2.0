@@ -1,7 +1,8 @@
 # Programme publication boundary
 
-Status: local request and observation foundation. No HTTP publication route, publisher
-workflow, App write capability or trust-root admission exception is enabled by these modules.
+Status: private request and authenticated observation foundation. The HTTP routes are disabled
+by default. No publisher workflow, App write capability or trust-root admission exception is
+enabled by these modules.
 
 `PublicationRequests.reserve` accepts an authenticated owner, a compiler review request and
 consent naming the exact programme input hash, repository and repository visibility. Private
@@ -27,9 +28,29 @@ both terminal dispositions. Its response contains identities only, without scope
 A change in owner decisions, including exploration, invalidates the reservation. A historical
 request returned by an idempotent retry is not fresh authorization.
 
+## Authenticated currency transport
+
+`--enable-publication-requests` requires the existing `--hosted-preparation-identity`. A
+domain-separated HMAC key is derived from that private native age identity. No new credential
+is created, and the original identity never appears in a request, response or log. The key
+belongs to trusted host/protected workflow code only; it is never supplied to a model.
+
+Owner-bearer `POST /api/programme-publication` reserves exact consent without dispatching any
+workflow. `POST /api/publication-currency` accepts only an authenticated bounded challenge,
+then re-reads private owner currency and protected GitHub state. The latter route cannot
+create a reservation, change scope, stop/start work or obtain an App capability. A bearer
+alone cannot impersonate that publisher, and a publisher message cannot authorize owner writes.
+
+Challenges bind repository, configured project, request hash, main SHA, effect phase and a
+random128-bit nonce. Request and response MACs use different domains. Both sides enforce a
+60-second freshness bound, and consumption refuses a reservation that expired in transit.
+The caller must use a new challenge immediately before each effect and retain its own durable
+effect/idempotency record. This read-only protocol is not a one-use capability or an atomic
+transaction with GitHub; a response alone grants no merge authority.
+
 ## Remaining activation work
 
-- Authenticate and nonce-bind the private request currency exchange to protected workflows.
+- Connect the authenticated currency exchange to the protected publisher and old-base guard.
 - Recompile encrypted approved payloads under protected main and verify owner dispatch,
   first attempt, source revision and durable artifact identity before minting App effects.
 - Admit only an exact active-programme data diff through an old-base-judged publication lane;

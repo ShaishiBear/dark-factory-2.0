@@ -2741,6 +2741,55 @@
       "find": "or latest_branch[\"commit\"][\"sha\"] != branch[\"commit\"][\"sha\"]",
       "replace": "or False",
       "why": "A programme read spanning different main revisions cannot establish publication prerequisites."
+    },
+    {
+      "id": "publication-currency-mac-bypassed",
+      "file": "factory_kernel/publication_currency.py",
+      "find": "if not hmac.compare_digest(mac, expected):",
+      "replace": "if False:",
+      "why": "An altered or foreign message cannot become authenticated owner-request currency."
+    },
+    {
+      "id": "publication-currency-old-challenge-accepted",
+      "file": "factory_kernel/publication_currency.py",
+      "find": "or not -5 <= self.clock() - challenge[\"issued_at\"] <= MAX_AGE_SECONDS",
+      "replace": "or False",
+      "why": "An old authenticated request must not generate a fresh publication response."
+    },
+    {
+      "id": "publication-currency-wrong-nonce-accepted",
+      "file": "factory_kernel/publication_currency.py",
+      "find": "result[\"challenge\"] != challenge",
+      "replace": "False",
+      "why": "A valid response to another nonce or effect phase cannot be replayed."
+    },
+    {
+      "id": "publication-currency-wrong-source-accepted",
+      "file": "factory_kernel/publication_currency.py",
+      "find": "if (current[\"request_sha256\"] != challenge[\"request_sha256\"]\n                or current[\"main_sha\"] != challenge[\"main_sha\"]):",
+      "replace": "if False:",
+      "why": "The host must authenticate the exact reserved request and workflow source revision."
+    },
+    {
+      "id": "publication-currency-expired-consumption",
+      "file": "factory_kernel/publication_currency.py",
+      "find": "if expires.tzinfo is None or expires <= datetime.fromtimestamp(self.clock(), timezone.utc):",
+      "replace": "if False:",
+      "why": "A request expiring in transit must be refused before the publisher consumes the response."
+    },
+    {
+      "id": "publication-currency-wrong-owner-decision",
+      "file": "factory_kernel/publication_currency.py",
+      "find": "or current[\"decision\"] != \"current-owner-request\"",
+      "replace": "or False",
+      "why": "Authentication of a message is not a replacement for its required owner-decision semantics."
+    },
+    {
+      "id": "publication-currency-slow-observation-accepted",
+      "file": "factory_kernel/publication_currency.py",
+      "find": "        self._challenge(challenge)  # remote reads must not silently outlive the challenge\n",
+      "replace": "",
+      "why": "Slow remote reads must not stretch the freshness window after authentication."
     }
   ]
 }
