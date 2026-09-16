@@ -269,6 +269,13 @@
       "find": "          timeout 22m gh pr checks \"$PR_NUMBER\" --repo \"$REPOSITORY\" --required --watch --interval 10 --fail-fast\n",
       "replace": "",
       "why": "The helper must observe the required-check outcome before its final stop and merge."
+    },
+    {
+      "id": "immunity-static-check-skipped",
+      "file": "harness/static.py",
+      "find": "    (\"immunity\", ROOT, [sys.executable, str(HERE / \"immunity.py\")]),\n",
+      "replace": "",
+      "why": "A maintainer change that invalidates a live immunity detector must fail before a full proof reaches mutations."
     }
   ]
 }

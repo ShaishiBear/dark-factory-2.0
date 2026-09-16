@@ -46,6 +46,9 @@ CHECKS = [
     # the full harness, fifty minutes into a validation, and the defect it names has had no
     # detector since the refactor that moved it (D-076).
     ("mutation-anchors", ROOT, [sys.executable, str(HERE / "mutation_anchors.py")]),
+    # Check live immunity outside mutation copies: stale text detectors must fail the
+    # maintainer quick gate, before a later full proof reaches its mutation prerequisite.
+    ("immunity", ROOT, [sys.executable, str(HERE / "immunity.py")]),
     # Second, and for the same reason as the first: milliseconds, and invisible everywhere else.
     # The four checks below lint app/backend and app/frontend. NOTHING linted the trust root --
     # the kernel that judges every product PR received less static analysis than the product it
