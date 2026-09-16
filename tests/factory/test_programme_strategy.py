@@ -138,6 +138,8 @@ class StrategyTests(unittest.TestCase):
         self.assertIn("STRATEGY_SENTINEL", contexts["plan"])
         self.assertIn("STRATEGY_SENTINEL", contexts["context"])
         self.assertTrue(contexts["context"].startswith("Validated contract sha256:"))
+        self.assertIn("VALIDATED CONTRACT (task-contract.json", contexts["context"])
+        self.assertIn("ORIGINAL ISSUE (source of truth)", contexts["context"])
         for role in ("contract", "architecture", "test_author"):
             self.assertNotIn("STRATEGY_SENTINEL", contexts[role], role)
         self.assertIn("architecture-gate", recorder.events)
