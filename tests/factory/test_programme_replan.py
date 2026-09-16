@@ -33,7 +33,7 @@ class ReplanReviewTests(unittest.TestCase):
     def test_new_input_versions_require_explicit_review_adapter_even_if_compiler_can_accept_them(self):
         compiled = compile_programme(self.current, repository=REPO)
         for value in (self.current, self.proposed):
-            value["version"] = "1.1"
+            value["version"] = "1.2"
             with patch("factory_kernel.programme_replan.compile_programme", return_value=compiled) as compiler:
                 with self.assertRaisesRegex(ProgrammeRefused, "input v1.0"):
                     self.review()
@@ -116,6 +116,70 @@ class ReplanReviewTests(unittest.TestCase):
         self.assertEqual(list(fixture.service.requests.directory.glob("*.json")), [])
         fixture.github.run.assert_not_called()
         fixture.github.run_as_app.assert_not_called()
+
+
+class StrategyReplanTests(unittest.TestCase):
+    def setUp(self):
+        from tests.factory.test_programme_strategy import example
+        self.current = example()
+        self.proposed = deepcopy(self.current)
+
+    def review(self):
+        return review_replan(self.current, self.proposed, repository=self.current["spec"]["repository"], source_sha="b" * 40)
+
+    def test_all_strategy_fields_change_review_identity_without_changing_coverage(self):
+        mutations = [lambda s: s["candidate"].update(mechanism="A different mechanism."),
+                     lambda s: s["source"].update(context_identity="c" * 64),
+                     lambda s: s.update(remaining_uncertainty=["Different unresolved risk."]),
+                     lambda s: s["claims"][0].update(statement="Different assumption."),
+                     lambda s: s.update(rationale="Different rationale.")]
+        for change in mutations:
+            self.proposed = deepcopy(self.current)
+            change(self.proposed["strategy"])
+            with self.subTest(proposed=self.proposed):
+                result = self.review()
+                self.assertEqual(result["disposition"], "strategy-change")
+                self.assertEqual(result["changed_items"], [])
+                self.assertTrue(result["strategy"]["changed"])
+                self.assertNotEqual(result["strategy"]["current"]["sha256"], result["strategy"]["proposed"]["sha256"])
+                self.assertEqual(result["strategy"]["qualification_status"], "UNPROVEN")
+                self.assertIs(result["strategy"]["proof_reuse_allowed"], False)
+
+    def test_add_remove_and_equal_strategy_are_explicit(self):
+        self.assertEqual(self.review()["disposition"], "unchanged")
+        self.assertFalse(self.review()["strategy"]["changed"])
+        self.proposed.pop("strategy")
+        self.proposed["version"] = "1.0"
+        result = self.review()
+        self.assertEqual(result["disposition"], "strategy-change")
+        self.assertIsNone(result["strategy"]["proposed"])
+        self.current, self.proposed = self.proposed, self.current
+        result = self.review()
+        self.assertIsNone(result["strategy"]["current"])
+        self.assertEqual(result["activation"], "requires-governed-transition")
+
+    def test_graph_and_strategy_changes_are_both_exposed(self):
+        self.proposed["proposal"]["items"][0]["id"] = "new-item"
+        previous = self.current["proposal"]["items"][0]["id"]
+        for item in self.proposed["proposal"]["items"]:
+            item["blocked_by"] = ["new-item" if key == previous else key for key in item["blocked_by"]]
+        self.proposed["strategy"]["candidate"]["mechanism"] = "New approach."
+        result = self.review()
+        self.assertEqual(result["disposition"], "decomposition-and-strategy-change")
+        self.assertIn(previous, result["retired_items"])
+        self.assertIn("new-item", result["added_items"])
+        self.assertTrue(result["strategy"]["changed"])
+
+    def test_invalid_advice_and_scope_still_refuse(self):
+        self.proposed["strategy"]["proof_reuse_allowed"] = True
+        with self.assertRaises(ProgrammeRefused):
+            self.review()
+        self.proposed = deepcopy(self.current)
+        self.proposed["spec"]["revision"] += 1
+        self.proposed["proposal"]["spec_sha256"] = sha256_value(self.proposed["spec"])
+        self.proposed["strategy"]["spec_sha256"] = sha256_value(self.proposed["spec"])
+        with self.assertRaisesRegex(ProgrammeRefused, "approved scope"):
+            self.review()
 
 
 if __name__ == "__main__":

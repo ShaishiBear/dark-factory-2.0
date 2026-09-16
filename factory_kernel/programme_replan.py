@@ -12,9 +12,9 @@ from .programme import ProgrammeRefused, compile_programme
 
 
 def review_replan(current_input, proposed_input, *, repository, source_sha):
-    if any(not isinstance(value, dict) or value.get("version") != "1.0"
+    if any(not isinstance(value, dict) or value.get("version") not in ("1.0", "1.1")
            for value in (current_input, proposed_input)):
-        raise ProgrammeRefused("replanning review currently requires programme input v1.0")
+        raise ProgrammeRefused("replanning review requires supported programme input v1.0 or v1.1")
     if not isinstance(source_sha, str) or not re.fullmatch(r"[a-f0-9]{40}", source_sha):
         raise ProgrammeRefused("replanning review requires an exact protected source")
     current = compile_programme(current_input, repository=repository)
@@ -30,11 +30,15 @@ def review_replan(current_input, proposed_input, *, repository, source_sha):
     # Both compilers independently enforce total, unique coverage and an acyclic DAG.
     # A stable item name alone is not unchanged scope or unchanged dependency ordering.
     changed = sorted(key for key in old.keys() & new.keys() if old[key] != new[key])
-    return {
+    graph_changed = old != new
+    strategy_changed = current.strategy != proposed.strategy
+    disposition = ("decomposition-and-strategy-change" if graph_changed and strategy_changed else
+                   "decomposition-change" if graph_changed else "strategy-change" if strategy_changed else "unchanged")
+    result = {
         "schema": "dark-factory/programme-replan-review", "schema_version": "1.0",
         "source_sha": source_sha, "spec_sha256": sha256_value(current.spec),
         "current_programme_sha256": current.sha256, "proposed_programme_sha256": proposed.sha256,
-        "disposition": "unchanged" if current.sha256 == proposed.sha256 else "decomposition-change",
+        "disposition": disposition,
         "added_items": sorted(new.keys() - old.keys()), "retired_items": sorted(old.keys() - new.keys()),
         "changed_items": changed,
         "coverage": [{"acceptance": ac, "current_item": old_owners[ac], "proposed_item": new_owners[ac]}
@@ -45,3 +49,11 @@ def review_replan(current_input, proposed_input, *, repository, source_sha):
         "authority": "review-only", "activation": "requires-governed-transition",
         "evidence": "historical-outcomes-remain-bound-to-original-programme",
     }
+    if current.strategy is not None or proposed.strategy is not None:
+        def identity(strategy):
+            return None if strategy is None else {"sha256": sha256_value(strategy),
+                "candidate_id": strategy["candidate"]["id"], "mechanism": strategy["candidate"]["mechanism"]}
+        result["strategy"] = {"changed": strategy_changed, "current": identity(current.strategy),
+                              "proposed": identity(proposed.strategy), "qualification_status": "UNPROVEN",
+                              "proof_reuse_allowed": False}
+    return result

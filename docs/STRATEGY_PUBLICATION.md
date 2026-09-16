@@ -23,6 +23,13 @@ for the same specification. This change does not implement governed replacement,
 automatic reactivation or a budget reset. It creates no model calls, experiments, history
 events, API credentials or cloud resources during review/regeneration.
 
+The same-scope replanning view explicitly supports v1.0 and v1.1; future formats refuse
+even if a future general compiler accepts them. It distinguishes decomposition changes,
+strategy changes, and both together. Strategy identity covers assumptions, uncertainty,
+rationale and source references as well as the mechanism. Adding or removing advice is
+visible. This comparison grants no transition authority, and both versions retain total,
+unique acceptance coverage under the same scope and execution identity.
+
 Protected-context reads retain their existing limits. The 60-second currency challenge and
 30-second HTTPS client timeout are unchanged. An inspection that does not fit fails closed;
 one successful latency sample is not a service guarantee. Hosted exploration authoring and

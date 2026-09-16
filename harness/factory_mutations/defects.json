@@ -3032,9 +3032,23 @@
     {
       "id": "programme-replan-unsupported-version",
       "file": "factory_kernel/programme_replan.py",
-      "find": "if any(not isinstance(value, dict) or value.get(\"version\") != \"1.0\"\n           for value in (current_input, proposed_input)):",
+      "find": "if any(not isinstance(value, dict) or value.get(\"version\") not in (\"1.0\", \"1.1\")\n           for value in (current_input, proposed_input)):",
       "replace": "if False:",
-      "why": "A future strategy-bearing input requires deliberate comparison support, independently of general compiler support."
+      "why": "Future programme versions require explicit comparison support independently of compiler support."
+    },
+    {
+      "id": "programme-replan-strategy-hidden",
+      "file": "factory_kernel/programme_replan.py",
+      "find": "strategy_changed = current.strategy != proposed.strategy",
+      "replace": "strategy_changed = False",
+      "why": "Advice changes must remain visible with unchanged decomposition."
+    },
+    {
+      "id": "programme-replan-strategy-identity-incomplete",
+      "file": "factory_kernel/programme_replan.py",
+      "find": "\"sha256\": sha256_value(strategy),",
+      "replace": "\"sha256\": sha256_value(strategy[\"candidate\"]),",
+      "why": "Assumptions, uncertainty and source references are part of strategy review identity."
     }
   ]
 }

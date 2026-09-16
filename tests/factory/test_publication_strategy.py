@@ -163,6 +163,10 @@ class StrategyPublicationTests(unittest.TestCase):
     def test_existing_active_scope_cannot_be_replaced_with_new_advice(self):
         self.f.observation["active_input"] = deepcopy(self.preview["input"])
         self.f.observation["active_input"]["strategy"]["candidate"]["mechanism"] = "Different advice."
+        preview = self.f.service.preview(policy.PROJECT, self.reference, principal=self.f.owner)
+        self.assertEqual(preview["state"], "already-active")
+        self.assertEqual(preview["replanning"]["disposition"], "strategy-change")
+        self.assertTrue(preview["replanning"]["strategy"]["changed"])
         self.assertEqual(self.f.service.publish(policy.PROJECT, self.command, principal=self.f.owner)["state"], "already-active")
         self.f.github.run.assert_not_called()
 
