@@ -95,9 +95,10 @@ tests and this document. It changes no runtime, worker tools, judge configuratio
 trajectory schema, proof reuse, budgets, scheduler or live services.
 
 Use this foundation to validate future experiment adapters before spending on
-model trials. The next capability experiment remains bounded worker feedback:
+model trials. The next capability experiment is [bounded worker feedback](HARNESS_FEEDBACK.md):
 frozen task/acceptance fixtures, container/VM execution with no private judge
-material, task-wide shared budget, and actual checks between drafts. Neither that
-live adapter nor prompt optimisation, learned-memory injection or persistent
-workers is enabled here. They require evidence of benefit before production
+material, task-wide shared budget, and actual checks between drafts. The separate
+feedback lab now implements an opt-in tool-less provider adapter and disposable
+function checks. Production feedback, prompt optimisation, learned-memory
+injection and persistent workers require evidence of benefit before production
 integration, as the existing programme and evaluation plan specify.

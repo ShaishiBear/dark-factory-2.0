@@ -1,0 +1,52 @@
+name: harness-feedback-experiment
+
+on:
+  pull_request:
+    paths:
+      - 'factory_kernel/feedback_lab*.py'
+      - 'factory_kernel/feedback_sandbox.py'
+      - 'harness/feedback/**'
+      - 'tests/factory/test_feedback_*.py'
+      - '.github/workflows/harness-feedback-experiment.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  container-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Resolve an official Python image for this recorded experiment
+        run: |
+          docker pull python:3.12-slim
+          echo "FEEDBACK_IMAGE=$(docker image inspect python:3.12-slim --format '{{.Id}}')" >> "$GITHUB_ENV"
+      - name: Prove the actual execution boundary and bounded feedback loop
+        env:
+          FEEDBACK_HOST_SECRET: synthetic-host-canary
+        run: python3 harness/feedback/verify.py --image "$FEEDBACK_IMAGE"
+      - name: Run the six-case overfit control
+        run: |
+          python3 -m factory_kernel.feedback_lab_cli --image "$FEEDBACK_IMAGE" --output "$RUNNER_TEMP/feedback-control"
+          python3 - "$RUNNER_TEMP/feedback-control/report.json" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          assert r['source_unchanged'] and not r['model_quality_measured']
+          assert len(r['attempts']) == 12
+          assert all(a['status'] == 'observed' and not a['accepted'] for a in r['attempts'])
+          assert all(a['rounds'][-1]['public']['passed'] for a in r['attempts'] if a['arm'] == 'feedback')
+          print('FEEDBACK_OVERFIT_REJECTED arms=12 public_green_feedback_arms=6')
+          PY
+      - name: Preserve experiment observations, including incomplete journals
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: feedback-control
+          path: ${{ runner.temp }}/feedback-control
+          retention-days: 30
+          if-no-files-found: warn

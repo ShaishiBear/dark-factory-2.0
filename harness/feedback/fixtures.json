@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "tasks": [
+    {
+      "id": "stable-unique", "group": "ordered-values", "split": "development",
+      "instruction": "Return the unique integers from the input list, preserving first occurrence order. Empty input returns [].",
+      "public": [{"input": [3, 1, 3, 2], "expected": [3, 1, 2]}, {"input": [], "expected": []}],
+      "acceptance": [{"input": [0, -1, 0, -1, 2], "expected": [0, -1, 2]}, {"input": [4, 4, 4], "expected": [4]}]
+    },
+    {
+      "id": "duration-seconds", "group": "duration-parsing", "split": "development",
+      "instruction": "Input is a duration string MM:SS or HH:MM:SS. Components must be nonnegative ASCII digits; seconds and minutes must be less than 60. Return total seconds or null for invalid input. Hours may exceed 23. Whitespace and signs are invalid.",
+      "public": [{"input": "02:03", "expected": 123}, {"input": "1:02:03", "expected": 3723}, {"input": "1:60", "expected": null}],
+      "acceptance": [{"input": "25:00:00", "expected": 90000}, {"input": "-1:20", "expected": null}, {"input": " 1:20", "expected": null}, {"input": "00:00", "expected": 0}]
+    },
+    {
+      "id": "merge-intervals", "group": "interval-union", "split": "development",
+      "instruction": "Input is a list of closed integer intervals [start,end], each start <= end. Return their sorted union merging intervals that overlap or share an endpoint. Do not merge merely adjacent integers with different endpoints. Empty input returns [].",
+      "public": [{"input": [[3, 5], [1, 3], [8, 9]], "expected": [[1, 5], [8, 9]]}, {"input": [], "expected": []}],
+      "acceptance": [{"input": [[1, 2], [3, 4]], "expected": [[1, 2], [3, 4]]}, {"input": [[-3, 7], [0, 1], [7, 8]], "expected": [[-3, 8]]}]
+    },
+    {
+      "id": "slug-ascii", "group": "slug-normalization", "split": "development",
+      "instruction": "Convert the input string to a slug: lowercase ASCII letters A-Z; retain ASCII letters a-z and digits; replace each run of other characters with one hyphen; trim leading/trailing hyphens. Unicode letters are separators, not transliterated.",
+      "public": [{"input": " Hello, WORLD! ", "expected": "hello-world"}, {"input": "a___b", "expected": "a-b"}],
+      "acceptance": [{"input": "café déjà", "expected": "caf-d-j"}, {"input": "--", "expected": ""}, {"input": "A12Z", "expected": "a12z"}]
+    },
+    {
+      "id": "balanced-brackets", "group": "bracket-validation", "split": "development",
+      "instruction": "Return whether (), [] and {} are properly balanced and nested in an input string. Ignore all other characters. Empty string is balanced.",
+      "public": [{"input": "a([])", "expected": true}, {"input": "([)]", "expected": false}],
+      "acceptance": [{"input": "", "expected": true}, {"input": "]", "expected": false}, {"input": "{x}[()()]", "expected": true}, {"input": "(()", "expected": false}]
+    },
+    {
+      "id": "moving-average", "group": "window-aggregation", "split": "development",
+      "instruction": "Input is {values: list of numbers, window: positive integer}. Return averages of complete consecutive windows, in order. Return [] when window exceeds list length. Do not round.",
+      "public": [{"input": {"values": [1, 2, 3, 4], "window": 2}, "expected": [1.5, 2.5, 3.5]}, {"input": {"values": [], "window": 1}, "expected": []}],
+      "acceptance": [{"input": {"values": [-2, 0, 8], "window": 3}, "expected": [2.0]}, {"input": {"values": [1, 2], "window": 4}, "expected": []}]
+    }
+  ]
+}
