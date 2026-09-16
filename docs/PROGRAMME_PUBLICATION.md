@@ -1,8 +1,8 @@
 # Programme publication boundary
 
-Status: private request, authenticated observation and protected admission foundation. The HTTP
-routes are disabled by default. The guard recognizes a separate exact-data publication lane,
-but no publisher workflow or App write capability exists yet to produce its required provenance.
+Status: private request, authenticated observation, protected admission and publisher workflow
+implemented. The HTTP routes remain disabled by default. Host dispatch and the Front Door
+publication control are not yet connected. No real programme has used this publication workflow.
 
 `PublicationRequests.reserve` accepts an authenticated owner, a compiler review request and
 consent naming the exact programme input hash, repository and repository visibility. Private
@@ -50,13 +50,13 @@ transaction with GitHub; a response alone grants no merge authority.
 
 ## Remaining activation work
 
-- Connect the authenticated currency exchange to the protected publisher.
-- Recompile encrypted approved payloads under protected main and verify owner dispatch,
-  first attempt, source revision and durable artifact identity before minting App effects.
-- Observe idempotency before every effect; persist uncertain outcomes and reconcile them
-  without blindly retrying branch creation, PR creation or merge.
-- Require normal checks, fresh stop and fresh owner currency immediately before exact-head
-  merge. Record the resulting main identity; do not treat publication as product completion.
+- Connect the owner's private reservation to a durable host dispatch journal and explicit UI
+  consent for the exact public payload, repository and visibility.
+- Deploy and enable the currency endpoint only with the protected workflow delivered.
+- Observe the first appropriate real App publication, including the platform's resolved
+  contents-API commit author/committer, normal required checks and exact merged-tree receipt.
+- Add separately governed replacement/replanning before a different active programme can be
+  published. An existing active programme cannot be cleared to make the initial path usable.
 
 The current citation programme is already active. Its synthesized review is not permission
 to publish it again. Issue #189's human hold and the existing continuation counter remain.
@@ -80,4 +80,30 @@ The old-base guard also calls the fixed HTTPS currency endpoint and verifies non
 phase, expiry and payload identities. Redirects, oversized responses and unreadable currency fail
 closed. Only the active-programme path veto is discharged; every secret, dependency, ratchet and
 other path finding survives. A guard pass is an observation, not a durable publication capability:
-the eventual publisher must still recheck stop/currency and exact head immediately before merge.
+the publisher still rechecks stop/currency and exact head immediately before merge.
+
+## Protected publication effects
+
+The owner-only workflow runs four jobs from the same protected-main source. Validation decrypts
+only the approved public input, recompiles it, checks current consent, screens for high-confidence
+secrets, and uploads the manifest before any App write. Subsequent jobs independently verify the
+artifact digest and completed validation job. A complete bounded run inventory refuses duplicate
+dispatches across the full request lifetime; reruns are refused.
+
+The publication job mints an installation token restricted to this repository and contents/PR
+writes. Each branch, single-file commit and PR POST has a fresh source/stop/currency observation.
+Existing branches or PRs require reconciliation, never reset or reuse. A private local journal
+fsyncs pending state before each POST, records only bounded outcome identities, and treats a lost
+response as uncertain. No POST is retried. The host journal must separately prevent dispatch replay
+if a runner disappears before uploading its local journal; that host connection is not yet enabled.
+
+A separate read-only job waits at most 22 minutes for required checks. The merge job then mints
+a fresh installation identity and requires both named authorities, all required checks passing,
+current owner consent, clear stop, unchanged main and exact PR head. It makes an immediate squash
+merge without native auto-merge or bypass flags. The receipt independently checks the merged tree,
+single approved parent and current main. It explicitly says publication is not product completion.
+An uncertain or unverified merge requests the existing App stop control once. If containment cannot
+be confirmed, the workflow fails and reports that uncertainty; it never claims a successful stop.
+
+This remains a sequence of fresh observations and conditional GitHub effects, not an atomic
+transaction across the host and GitHub. Owner decisions can change after the last observation.

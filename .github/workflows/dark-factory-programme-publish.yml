@@ -1,0 +1,164 @@
+name: dark-factory-programme-publish
+run-name: programme-${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Opaque exact owner publication request
+        required: true
+        type: string
+      ciphertext:
+        description: Encrypted approved programme input
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: dark-factory-programme-publication
+  cancel-in-progress: false
+
+jobs:
+  validate-publication:
+    if: >-
+      github.repository == 'ShaishiBear/dark-factory-2.0' &&
+      github.actor == github.repository_owner && github.triggering_actor == github.repository_owner &&
+      github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - name: Install standard encryption
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends age
+      - name: Recompile and check current owner consent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
+        run: python -m factory_kernel.publication_worker validate
+      - name: Retain validated public input before any App effect
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: programme-publication-validated
+          path: ${{ runner.temp }}/publication-validated/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: validate-publication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      pr: ${{ steps.publish.outputs.pr }}
+      head: ${{ steps.publish.outputs.head }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - name: Mint only the publication App permissions
+        id: identity
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+          owner: ShaishiBear
+          repositories: dark-factory-2.0
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Publish one exact data PR
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.identity.outputs.token }}
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
+        run: |
+          export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
+          python -m factory_kernel.publication_worker publish
+      - name: Retain effect outcomes including uncertainty
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: programme-publication-publish-outcome
+          path: ${{ runner.temp }}/publication-outcome/*.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  wait-required-checks:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - name: Wait without an App or encryption credential
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLICATION_PR: ${{ needs.publish.outputs.pr }}
+        run: python -m factory_kernel.publication_worker wait
+
+  merge:
+    needs: [publish, wait-required-checks]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - name: Mint a fresh merge and containment identity after waiting
+        id: identity
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.DARK_FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_APP_PRIVATE_KEY }}
+          owner: ShaishiBear
+          repositories: dark-factory-2.0
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Recheck consent and stop then merge the exact judged head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARK_FACTORY_APP_TOKEN: ${{ steps.identity.outputs.token }}
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
+          PUBLICATION_PR: ${{ needs.publish.outputs.pr }}
+          PUBLICATION_HEAD: ${{ needs.publish.outputs.head }}
+        run: |
+          export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
+          python -m factory_kernel.publication_worker merge
+      - name: Retain merge observation or uncertain effect
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: programme-publication-merge-outcome
+          path: ${{ runner.temp }}/publication-outcome/*.json
+          if-no-files-found: warn
+          retention-days: 90
