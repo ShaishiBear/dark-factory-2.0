@@ -121,6 +121,15 @@ class ReasonerTests(unittest.TestCase):
             with self.assertRaises(IntentRefused):
                 self.reasoner.run("citations", "lookup", principal=OWNER, max_steps=bound)
 
+    def test_reasoner_receives_causal_ancestors_but_not_unrelated_project_claims(self):
+        self.engine.add_candidates("citations", self.fixture.command({"claims": [claim("root"),
+            claim("leaf", ["root"]), claim("separate"), claim("unrelated")], "candidates": [
+                candidate("scan", "linear", 1, 2, ["leaf"]), candidate("index", "hash", 3, 4, ["separate"])]}), principal=OWNER)
+        self.outputs = [self.proposal("stop", {"reason": "Need more evidence about the root assumption."})]
+        self.reasoner.advance("citations", self.command(), principal=OWNER)
+        prompt = json.loads(self.requests[-1].prompt.split("\n", 1)[1])
+        self.assertEqual(set(prompt["context"]["claims"]), {"root", "leaf", "separate"})
+
 
 if __name__ == "__main__":
     unittest.main()

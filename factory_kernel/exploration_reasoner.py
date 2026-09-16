@@ -87,10 +87,17 @@ class ExplorationReasoner:
                                     for row in session["observations"][-12:]]
             view["assessments"] = session["assessments"][-1:]
             view["recommendations"] = session["recommendations"][-1:]
+            needed = {key for candidate in session["candidates"].values() for key in candidate["claim_ids"]}
+            frontier = list(needed)
+            while frontier:
+                key = frontier.pop()
+                for dependency in state["claims"][key]["depends_on"]:
+                    if dependency not in needed:
+                        needed.add(dependency)
+                        frontier.append(dependency)
             payload = {"spec": approval["spec"], "spec_sha256": approval["spec_sha256"],
                        "session": view, "comparison": comparison(state, session),
-                       "claims": {key: state["claims"][key] for candidate in
-                           session["candidates"].values() for key in candidate["claim_ids"]}, "budget": budget}
+                       "claims": {key: state["claims"][key] for key in sorted(needed)}, "budget": budget}
             if len(canonical_bytes(payload)) > 100000:
                 raise IntentRefused("reasoning context exceeds bound")
             return "reserved", {"id": identity, "calls": 1, "usd": cap, "probe_units": 0,
