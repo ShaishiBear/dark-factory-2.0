@@ -1,0 +1,51 @@
+name: dark-factory-test-author-probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-author-route-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: >-
+      github.repository == 'ShaishiBear/dark-factory-2.0' &&
+      github.actor == github.repository_owner && github.triggering_actor == github.repository_owner &&
+      github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Read the protected workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Setup Python 3.12.14
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          token: ''
+      - name: Install pinned API client
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.245
+          test "$(claude --version)" = "2.1.245 (Claude Code)"
+      - name: Measure three fixed tool-free calls on the actual test-author route
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        run: timeout 600 python scripts/factory_test_author_probe.py
+      - name: Retain bounded diagnostic observation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: test-author-route-diagnostic
+          path: ${{ runner.temp }}/test-author-route-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30

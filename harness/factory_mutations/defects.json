@@ -6,6 +6,27 @@
   ],
   "defects": [
     {
+      "id": "test-author-probe-wrong-role-route",
+      "file": "scripts/factory_test_author_probe.py",
+      "find": "model_for_role(\"test_author\", policy)",
+      "replace": "model_for_role(\"context\", policy)",
+      "why": "Measuring a different default route cannot establish the test-author route's thinking behavior."
+    },
+    {
+      "id": "test-author-probe-inherited-secrets",
+      "file": "scripts/factory_test_author_probe.py",
+      "find": "environment = {\"PATH\": source[\"PATH\"],",
+      "replace": "environment = {**source, \"PATH\": source[\"PATH\"],",
+      "why": "A tools-free diagnostic must not inherit repository credentials or retired login configuration."
+    },
+    {
+      "id": "test-author-probe-repeated-attempt",
+      "file": "scripts/factory_test_author_probe.py",
+      "find": "source.get(\"GITHUB_RUN_ATTEMPT\") != \"1\"",
+      "replace": "False",
+      "why": "A rerun is not the authorized first attempt of the bounded measurement."
+    },
+    {
       "id": "security-verdict-forced-pass",
       "file": "scripts/factory_security.py",
       "find": "    verdict = \"pass\" if not findings else \"fail\"\n",
