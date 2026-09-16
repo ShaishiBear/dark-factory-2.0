@@ -214,20 +214,8 @@ jobs:
               echo "FACTORY_PREFLIGHT_PR_PERMISSION_UNVERIFIED token cannot read actions/permissions/workflow; a run will fail at gh pr create if the setting is off"
               ;;
           esac
-          # Cheap early signal only: a raw request built the way the SDK builds it
-          # (base URL + /v1/messages). The authority for the route is the CLI probe below,
-          # which runs the pinned worker binary exactly as the kernel launches it.
-          routing_model="$(python3 -c 'import json;print(json.load(open(".factory/kernel.json"))["provider"]["model"])')"
-          routing_code="$(curl -sS -o /tmp/routing-preflight.json -w '%{http_code}' \
-            -X POST "${ANTHROPIC_BASE_URL}/v1/messages" \
-            -H "x-api-key: $OPENROUTER_API_KEY" \
-            -H 'anthropic-version: 2023-06-01' \
-            -H 'content-type: application/json' \
-            -d "{\"model\":\"$routing_model\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}")"
-          test "$routing_code" = "200" || {
-            echo "FACTORY_PREFLIGHT_REFUSED OpenRouter messages endpoint returned $routing_code for $routing_model"
-            exit 1
-          }
+          # The authenticated, reserved CLI probe below establishes routing. No separate
+          # unaccounted raw paid request is needed before it.
 
           echo "FACTORY_PREFLIGHT_OK"
 
@@ -277,6 +265,9 @@ jobs:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('app/frontend/bun.lock') }}
 
+      - name: Install the host authentication reader
+        run: sudo apt-get install -y --no-install-recommends age
+
       - name: Install pinned worker and browser CLIs
         run: |
           npm install -g @anthropic-ai/claude-code@2.1.245
@@ -288,6 +279,8 @@ jobs:
       - name: Prove the worker's model route with the pinned CLI
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           # The preflight must prove the request the worker actually makes, not a lookalike.
@@ -309,7 +302,7 @@ jobs:
           test -n "$route_models" || { echo "FACTORY_PREFLIGHT_REFUSED scripts/factory_models.py listed no model"; exit 1; }
           for model in $route_models; do
             set +e
-            timeout 180 claude --bare -p "Reply with exactly the word OK and nothing else." \
+            python -m factory_kernel.execution_probe -- timeout 180 claude --bare -p "Reply with exactly the word OK and nothing else." \
               --model "$model" --permission-mode dontAsk --tools "" \
               --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands \
               --output-format json --max-turns 2 --max-budget-usd 1 --effort high > /tmp/route-probe.json 2>/tmp/route-probe.err
@@ -349,6 +342,8 @@ jobs:
         if: ${{ inputs.run_answered_probes == true || inputs.run_answered_probes == 'true' }}
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           # Whether the route honours the level is measured, not assumed: the worker model
@@ -366,6 +361,8 @@ jobs:
         if: ${{ inputs.run_answered_probes == true || inputs.run_answered_probes == 'true' }}
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           # `--effort` is not a bound on this route: the effort probe read honoured=false,
@@ -391,6 +388,8 @@ jobs:
         if: ${{ inputs.run_answered_probes == true || inputs.run_answered_probes == 'true' }}
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           # Every tool-bearing worker runs inside a file boundary the kernel renders as CLI
@@ -487,6 +486,7 @@ jobs:
           # CLI picks up the job-level ANTHROPIC_BASE_URL and this token without any provider-code
           # change. OPENROUTER_API_KEY is kept separately because application validation uses it
           # directly for embeddings/inference.
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}

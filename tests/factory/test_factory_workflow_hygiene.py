@@ -74,11 +74,11 @@ class MainRegressionWorkflowTests(unittest.TestCase):
         self.assertIn("npm install -g agent-browser@0.35.0", self.text)
         # D-070: the regression runs the four preflight probes, which launch the pinned worker
         # CLI, so it pins the CLI at exactly the version the worker pins. It still dispatches
-        # no factory action: no `python -m factory_kernel` anywhere in this file.
+        # no factory action: the diagnostic submodule is not the kernel command dispatcher.
         pin = re.search(r"npm install -g @anthropic-ai/claude-code@\S+", self.worker).group(0)
         self.assertIn(pin, self.text)
         self.assertEqual(self.text.count("claude-code@"), 1)
-        self.assertNotIn("python -m factory_kernel", self.text, "the regression never dispatches")
+        self.assertNotRegex(self.text, r"python -m factory_kernel(?:\s|$)", "the regression never dispatches")
 
     def test_service_block_is_the_workers_verbatim(self) -> None:
         block_start, block_end = "    services:\n      postgres:\n", "          --health-retries 5\n"

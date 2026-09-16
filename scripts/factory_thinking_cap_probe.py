@@ -62,6 +62,7 @@ from factory_kernel.worker_policy import (  # noqa: E402
     THINKING_CAP_MIN_BUDGET,
     WORKER_EFFORT,
 )
+from factory_kernel.execution_probe import ProbeRunner  # noqa: E402
 
 LINE_PREFIX = "FACTORY_PREFLIGHT_THINKING_CAP_PROBE"
 # The three ways the prompt is run, in order: no cap, the smallest budget the CLI sends as
@@ -228,7 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=TIMEOUT_SECONDS)
     args = parser.parse_args(argv)
     print(
-        run_probe(args.model or configured_model(), binary=args.binary, timeout=args.timeout),
+        run_probe(args.model or configured_model(), binary=args.binary, timeout=args.timeout,
+                  runner=ProbeRunner.from_environment("diagnostic-thinking")),
         flush=True,
     )
     return 0

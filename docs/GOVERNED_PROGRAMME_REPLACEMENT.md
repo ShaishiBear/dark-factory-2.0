@@ -97,11 +97,10 @@ unresolved; another attempt must pass the ledger independently. Replaying a rese
 returns history, never permission to execute it again. No reservation or settlement route is
 exposed to owner/model JSON. The store directory remains a trusted service boundary.
 
-The owner view and replacement review show the ledger and its limitations. **The hosted
-execution worker is not yet connected.** This is local enforcement, not evidence that all
-historical or hosted spending has been covered. The protected worker still needs an
-authenticated reservation exchange, exact worker/run/generation bindings, and coverage of
-every paid path (including diagnostics). Unknown historical/failed spending also needs an
+The owner view and replacement review show the ledger and its limitations. Canonical
+worker model calls and diagnostics now use the authenticated exchange described below.
+This is not evidence that all historical or hosted spending has been covered. Application
+validation uses provider APIs separately and still needs accounting. Unknown historical/failed spending also needs an
 independent reconciliation mechanism before it can resume. Until these are connected and
 verified, replacement continues to require a cumulative execution ledger and stays blocked.
 
@@ -135,9 +134,35 @@ retry spending refuses; crashes or lost responses retain charges. Host authentic
 removed from the parent environment before source reads and stripped from all deterministic
 and model child environments. No prompt or owner wording crosses this exchange.
 
-This adds the transport and client adapter. **Canonical worker and diagnostic invocation
-wiring remains outstanding; deploying the endpoint alone does not establish total coverage.**
+Deploying the endpoint alone does not establish total coverage.
 Reported CLI cost also remains worker telemetry, not independently reconciled provider
 billing. Protected role dollar flags are existing backstops; a hard billed-spend guarantee
 needs provider-side limits and/or independently verified metering. The exchange does not
 upgrade estimates into billing authority or historical spending into zero.
+
+## Canonical worker and diagnostic invocation
+
+`KernelRuntime` wraps its real model provider with `ExecutionWorker`. Triage, drafting,
+repair and independent model authorities consequently consume the same project allowance.
+Read-only kernel construction needs no spending capability, but reaching a model call
+requires the canonical first-attempt workflow and authenticated host exchange. There is
+no missing-key or local-command fallback. Internal retries with unresolved spending refuse.
+
+Each worker route, effort, thinking-cap and read-scope probe process also reserves and
+consumes its own one-dollar CLI backstop before launch. Unknown, ambiguous, failed or
+overrun telemetry blocks later reservations. Captured output remains diagnostic evidence;
+it cannot refund capacity. Host, GitHub and application credentials are stripped even from
+the thinking probe's explicit environment. The redundant raw paid routing ping is removed.
+The existing daily main-regression diagnostics remain a separate maintenance spending
+scope; this change neither increases their bounds nor claims them as project execution.
+
+The workflow supplies the existing host identity only to the four protected diagnostics
+and dispatch, and installs the existing age key reader. No secret is created or changed.
+An unapproved or historically unknown ledger refuses before the first worker probe.
+The existing completed programme remains historically unknown, not retroactively free.
+
+**Remaining limits:** application end-to-end validation still uses OpenRouter/Supadata
+outside this model adapter; independent billed-cost reconciliation and provider-side
+hard limits are still missing. Do not describe this as total project spending coverage
+or authorize a paid acceptance run on that basis. Replacement remains blocked. All
+integration validation for this change uses recorded providers and disposable intent logs.

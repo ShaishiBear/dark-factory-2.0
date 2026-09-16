@@ -1095,11 +1095,11 @@ class ProbeScriptTests(unittest.TestCase):
 
     def test_main_prints_the_line(self):
         out = io.StringIO()
-        with mock.patch.object(probe, "subprocess") as sp, contextlib.redirect_stdout(out):
-            sp.run = _FakeRunner(_probe_stream(outside="denied"))
-            sp.TimeoutExpired = subprocess.TimeoutExpired
-            sp.CompletedProcess = subprocess.CompletedProcess
+        runner = _FakeRunner(_probe_stream(outside="denied"))
+        with mock.patch("factory_kernel.execution_probe.ProbeRunner.from_environment", return_value=runner) as connect, contextlib.redirect_stdout(out):
             rc = probe.main(["--model", "m"])
+        connect.assert_called_once_with("diagnostic-scope")
+        self.assertEqual(len(runner.calls), 1)
         self.assertEqual(rc, 0)
         self.assertRegex(out.getvalue().strip(), PROBE_LINE)
 

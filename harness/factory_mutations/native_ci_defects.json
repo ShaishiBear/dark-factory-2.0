@@ -124,13 +124,6 @@
       "why": "A dead model route would be logged and the dispatch would proceed to burn a validation ladder discovering it."
     },
     {
-      "id": "worker-curl-probe-hardcoded-url",
-      "file": ".github/workflows/dark-factory-worker.yml",
-      "find": "-X POST \"${ANTHROPIC_BASE_URL}/v1/messages\"",
-      "replace": "-X POST \"https://openrouter.ai/api/v1/messages\"",
-      "why": "The raw probe would again prove a different request than the one the worker makes."
-    },
-    {
       "id": "worker-preflight-labels-hand-typed",
       "file": ".github/workflows/dark-factory-worker.yml",
       "find": "          required_labels=\"$(python3 -c 'import json; from factory_kernel.triage import label_vocabulary; print(\"\\n\".join(label_vocabulary(json.load(open(\".factory/kernel.json\"))[\"labels\"])))')\"\n",

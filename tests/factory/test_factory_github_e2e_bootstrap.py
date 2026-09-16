@@ -183,8 +183,8 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
             prerequisites.index("actions/permissions/workflow"),
         )
         self.assertLess(
-            prerequisites.index("actions/permissions/workflow"),
-            prerequisites.index("routing_model="),
+            workflow.index("actions/permissions/workflow"),
+            workflow.index("Prove the worker's model route with the pinned CLI"),
         )
 
     def test_worker_can_resume_a_pushed_pr_from_its_artifacts(self) -> None:
@@ -248,8 +248,8 @@ class GitHubE2EBootstrapTests(unittest.TestCase):
         self.assertEqual(workflow.count("ANTHROPIC_BASE_URL: https://openrouter.ai/api\n"), 1,
                          "base URL must be defined exactly once, at job level")
         self.assertNotIn("openrouter.ai/api/v1", workflow, "a versioned base doubles /v1")
-        self.assertIn('-X POST "${ANTHROPIC_BASE_URL}/v1/messages"', workflow,
-                      "the curl probe must build its URL the way the SDK does")
+        self.assertNotIn('routing_code="$(curl', workflow,
+                         "the reserved CLI probe replaces the unaccounted raw model ping")
         self.assertIn('ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}', workflow)
 
     def test_worker_preflight_proves_the_route_with_the_pinned_cli(self) -> None:

@@ -47,7 +47,7 @@ def projection(events):
               "reserved_microusd": 0, "calls": 0, "reservations": {},
               "uncertain": False, "overrun": False, "reset_allowed": False,
               "refund_allowed": False, "project_version": len(events),
-              "enforcement": "local-executor-only-hosted-worker-not-connected"}
+              "enforcement": "worker-model-and-diagnostics-only"}
     for event in events:
         if event["command"]["operation"] != OPERATION:
             continue
@@ -273,7 +273,7 @@ class ExecutionBudget:
 
         A provider retry has unknown spend until its first attempt's telemetry returns,
         so this adapter refuses internal retry. A later explicitly new attempt must pass
-        the ledger again. Existing hosted factory workers do not yet use this adapter.
+        the ledger again. Hosted workers use the authenticated exchange and client adapter.
         """
         bound = microusd(request.max_budget_usd)
         command = {"idempotency_key": reservation_id,

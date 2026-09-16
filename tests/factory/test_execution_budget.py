@@ -328,7 +328,7 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(status, "200 OK")
         self.assertEqual(result["status"], "historical-spend-unknown")
         self.assertEqual(call("/api/execution-budget/reserve")[0], "404 Not Found")
-        self.assertEqual(result["enforcement"], "local-executor-only-hosted-worker-not-connected")
+        self.assertEqual(result["enforcement"], "worker-model-and-diagnostics-only")
 
 
 if __name__ == "__main__":
