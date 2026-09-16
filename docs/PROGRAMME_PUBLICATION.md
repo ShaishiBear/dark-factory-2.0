@@ -27,6 +27,8 @@ also returns a deterministic replanning review. Both graphs are recompiled again
 same exact specification and App identity. The review shows added, retired and changed
 item IDs, each acceptance criterion's owner, and dependency changes. It binds the observed
 protected source and both programme hashes. Input ordering alone is not a plan change.
+This adapter explicitly accepts programme input v1.0 only. Future strategy-bearing inputs
+require a deliberate comparison adapter, even if the general programme compiler supports them.
 
 This comparison carries review authority only. It neither retires active work nor changes
 continuation budgets. Historical completion stays attached to its original programme and

@@ -1,6 +1,7 @@
 """A replanning review exposes changes in HOW without approving WHAT or spending effects."""
 from copy import deepcopy
 import unittest
+from unittest.mock import patch
 
 from factory_kernel.canonical import sha256_value
 from factory_kernel.programme import ProgrammeRefused
@@ -28,6 +29,15 @@ class ReplanReviewTests(unittest.TestCase):
         result = self.review()
         self.assertEqual(result["disposition"], "unchanged")
         self.assertEqual(result["current_programme_sha256"], result["proposed_programme_sha256"])
+
+    def test_new_input_versions_require_explicit_review_adapter_even_if_compiler_can_accept_them(self):
+        for value in (self.current, self.proposed):
+            value["version"] = "1.1"
+            with patch("factory_kernel.programme_replan.compile_programme") as compiler:
+                with self.assertRaisesRegex(ProgrammeRefused, "input v1.0"):
+                    self.review()
+                compiler.assert_not_called()
+            value["version"] = "1.0"
 
     def test_merge_exposes_each_acceptance_owner_and_preserves_input_and_historical_proof(self):
         self.proposed["proposal"]["items"] = [{"id": "inspection", "acceptance": ["AC1", "AC2"], "blocked_by": []}]
