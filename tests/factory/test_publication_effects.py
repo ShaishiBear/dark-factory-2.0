@@ -70,7 +70,10 @@ class PublicationEffectsTests(unittest.TestCase):
         raise AssertionError(args)
 
     def test_publish_has_three_separate_fresh_app_spends_and_durable_observations(self):
-        result = self.publisher.publish()
+        try:
+            result = self.publisher.publish()
+        except IntentRefused as exc:
+            self.fail(f"valid publication was refused: {exc}")
         self.assertEqual(result, {"pr": 12, "head_sha": "b" * 40})
         self.assertEqual([operation for _, operation in self.effects], ["push_branch", "push_branch", "create_pr"])
         self.assertEqual([call.args[1] for call in self.currency.call_args_list], ["branch", "branch", "pull-request"])
@@ -82,7 +85,7 @@ class PublicationEffectsTests(unittest.TestCase):
             with self.subTest(changed=changed):
                 self.setUp()
                 original = deepcopy(self.source.return_value)
-                self.source.side_effect = [original, {**original, **changed}]
+                self.source.side_effect = lambda _github: original if self.source.call_count == 1 else {**original, **changed}
                 with self.assertRaisesRegex(IntentRefused, "source or stop"):
                     self.publisher.publish()
                 self.assertEqual(len(self.effects), 1)
