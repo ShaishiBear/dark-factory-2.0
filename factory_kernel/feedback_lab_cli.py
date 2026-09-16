@@ -2,21 +2,18 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, replace
+from dataclasses import asdict
 import json
 import math
 import os
 from pathlib import Path
 import signal
-import tempfile
 
-from .agents import AgentRequest
 from .benchmark import canonical, digest
-from .config import load_config
 from .feedback_lab import Limits, run_experiment, validate_tasks
 from .feedback_sandbox import DockerSandbox, SandboxError
-from .providers import ClaudeCliProvider
 from .task_replay import source_identity, strict_json
+from harness.feedback.provider import LiveWorker
 
 
 class RecordedWorker:
@@ -35,25 +32,6 @@ class RecordedWorker:
                     "            return example['expected']\n"
                     "    return None\n")
         return {"code": code, "cost_usd": 0}
-
-
-class LiveWorker:
-    def __init__(self, config_path):
-        # No automatic retries: a missing response retains the full reservation.
-        config = replace(load_config(config_path).provider, transient_retries=0)
-        self.provider = ClaudeCliProvider(config)
-        self.model = self.provider.model_for(AgentRequest(role="implement", prompt="identity", cwd="."))
-
-    def __call__(self, prompt, *, turns, dollars, seconds):
-        with tempfile.TemporaryDirectory(prefix="feedback-worker-") as cwd:
-            reply = self.provider.run(AgentRequest(
-                role="implement", prompt=prompt, cwd=cwd, allowed_tools=(), environment={},
-                max_turns=turns, max_budget_usd=dollars, timeout_seconds=max(1, math.floor(seconds)),
-                effort="low", structured_schema={"type": "object"}))
-        value = reply.structured_output
-        if not isinstance(value, dict) or set(value) != {"code"}:
-            raise ValueError("worker must return exactly one code field")
-        return {"code": value["code"], "cost_usd": reply.cost_usd}
 
 
 def run(args):

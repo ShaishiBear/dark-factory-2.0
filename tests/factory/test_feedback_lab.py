@@ -160,12 +160,12 @@ class FeedbackTests(unittest.TestCase):
     def test_live_adapter_has_no_tools_or_automatic_retries(self):
         from factory_kernel.config import ProviderConfig
         configured = ProviderConfig("claude-cli", "claude", "fixture-model", 2700, transient_retries=2)
-        with patch("factory_kernel.feedback_lab_cli.load_config", return_value=Mock(provider=configured)):
+        with patch("harness.feedback.provider.load_config", return_value=Mock(provider=configured)):
             worker = LiveWorker("fixture-config")
         self.assertEqual(worker.provider.config.transient_retries, 0)
         with patch.object(worker.provider, "run", return_value=Mock(
                 structured_output={"code": "def solve(x): return x"}, cost_usd=.01)) as run:
-            with patch("factory_kernel.feedback_lab_cli.tempfile.TemporaryDirectory") as directory:
+            with patch("harness.feedback.provider.tempfile.TemporaryDirectory") as directory:
                 directory.return_value.__enter__.return_value = "."
                 worker("instruction", turns=2, dollars=.05, seconds=30)
         request = run.call_args.args[0]
@@ -174,6 +174,11 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(request.max_turns, 2)
         self.assertEqual(request.max_budget_usd, .05)
         self.assertEqual(request.timeout_seconds, 30)
+        for kwargs in ({"turns": True, "dollars": .05, "seconds": 30},
+                       {"turns": 2, "dollars": float("nan"), "seconds": 30},
+                       {"turns": 2, "dollars": .05, "seconds": 0}):
+            with self.assertRaises(ValueError):
+                worker("instruction", **kwargs)
 
 
 if __name__ == "__main__":
