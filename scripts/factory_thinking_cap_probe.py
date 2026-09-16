@@ -19,7 +19,8 @@ cap, with `MAX_THINKING_TOKENS=1024` (the smallest budget the CLI sends as given
         honoured=true|false cap1024_honoured=true|false cap0_honoured=true|false
         effort=<level> uncapped_events=<n> cap1024_events=<n> cap0_events=<n> [error=<what>]
 
-on one line and exits 0 whatever it found. A cap is honoured when its run returned, thought no
+on one line and exits 0 whatever it found. A cap is honoured when its run returned, the uncapped
+sample exceeded the cap's allowed range, and the capped sample thought no
 more than `CAP_SLACK` times the cap (so at most 1536 for the budget and nothing at all with
 thinking disabled) and clearly less than the uncapped run: at least `MARGIN_RATIO` times less
 and at least `MARGIN_TOKENS` fewer, the effort probe's own margins. `honoured` is both caps at
@@ -110,10 +111,13 @@ def clearly_below(thinking: int, uncapped: int) -> bool:
 
 
 def cap_honoured(thinking: int, cap: int, uncapped: int) -> bool:
-    """One cap is honoured when its run stayed inside the cap and clearly below the
-    uncapped run; a route that ignores the variable fails the first, and a prompt that
-    never needed thinking fails the second."""
-    return within_cap(thinking, cap) and clearly_below(thinking, uncapped)
+    """A cap is only exercised when uncapped demand exceeds its allowed range.
+
+    Samples that both fit below the cap cannot distinguish enforcement from ordinary
+    variation, even if their relative reduction is large. This remains a measurement,
+    never proof of enforcement on every future turn.
+    """
+    return not within_cap(uncapped, cap) and within_cap(thinking, cap) and clearly_below(thinking, uncapped)
 
 
 @dataclass(frozen=True)

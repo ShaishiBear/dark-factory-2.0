@@ -13,7 +13,7 @@ ROOT = Path.cwd().resolve()
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from factory_models import model_for_role  # noqa: E402
-from factory_thinking_cap_probe import CAPS, honoured, run_one  # noqa: E402
+from factory_thinking_cap_probe import CAPS, honoured, run_one, within_cap  # noqa: E402
 
 WORKFLOW = "dark-factory-test-author-probe.yml"
 
@@ -39,6 +39,7 @@ def diagnostic(policy, *, source, runner=subprocess.run):
     return {"schema": "dark-factory/test-author-route-diagnostic", "schema_version": "1.0",
             "role": "test_author", "model": model,
             "measurements": [asdict(row) for row in results],
+            "cap1024_exercised": results[0].returned and not within_cap(results[0].thinking, 1024),
             "cap1024_honoured": honoured(results[0], results[1]),
             "cap0_honoured": honoured(results[0], results[2]),
             "calls": 3, "max_budget_usd_per_call": 1, "actual_cost_usd": None,
