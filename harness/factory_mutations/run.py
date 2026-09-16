@@ -229,6 +229,7 @@ COPY_FILES = (
     "tests/factory/test_preflight_prepare.py",
     "tests/factory/test_exploration.py",
     "tests/factory/test_exploration_reasoner.py",
+    "tests/factory/test_exploration_repository.py",
     "tests/factory/test_programme_strategy.py",
     "tests/factory/test_decision_history.py",
     "tests/factory/test_factory_independence.py",
