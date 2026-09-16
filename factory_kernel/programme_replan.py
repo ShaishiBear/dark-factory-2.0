@@ -12,6 +12,9 @@ from .programme import ProgrammeRefused, compile_programme
 
 
 def review_replan(current_input, proposed_input, *, repository, source_sha):
+    if any(not isinstance(value, dict) or value.get("version") != "1.0"
+           for value in (current_input, proposed_input)):
+        raise ProgrammeRefused("replanning review currently requires programme input v1.0")
     if not isinstance(source_sha, str) or not re.fullmatch(r"[a-f0-9]{40}", source_sha):
         raise ProgrammeRefused("replanning review requires an exact protected source")
     current = compile_programme(current_input, repository=repository)

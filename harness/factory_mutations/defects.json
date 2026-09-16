@@ -3028,6 +3028,13 @@
       "find": "if old[key] != new[key])",
       "replace": "if old[key][\"acceptance\"] != new[key][\"acceptance\"])",
       "why": "A stable item name and acceptance list must not conceal changed dependencies."
+    },
+    {
+      "id": "programme-replan-unsupported-version",
+      "file": "factory_kernel/programme_replan.py",
+      "find": "if any(not isinstance(value, dict) or value.get(\"version\") != \"1.0\"\n           for value in (current_input, proposed_input)):",
+      "replace": "if False:",
+      "why": "A future strategy-bearing input requires deliberate comparison support, independently of general compiler support."
     }
   ]
 }
