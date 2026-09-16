@@ -388,6 +388,55 @@
       "find": "if stale_prediction:",
       "replace": "if False:",
       "why": "A changed context or invalidated recommendation must not be exported as current. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "programme-strategy-identity",
+      "file": "factory_kernel/programme.py",
+      "find": "identity[\"strategy\"] = strategy",
+      "replace": "pass  # advice omitted from identity",
+      "why": "Changing strategy must invalidate programme identity and issue membership. Detector: tests/factory/test_programme_strategy.py"
+    },
+    {
+      "id": "programme-strategy-proof-status",
+      "file": "factory_kernel/programme_strategy.py",
+      "find": "if value[\"qualification_status\"] != \"UNPROVEN\" or value[\"proof_reuse_allowed\"] is not False:",
+      "replace": "if False:",
+      "why": "Planning advice cannot self-certify or authorise proof reuse. Detector: tests/factory/test_programme_strategy.py"
+    },
+    {
+      "id": "programme-strategy-scope",
+      "file": "factory_kernel/programme_strategy.py",
+      "find": "if value[\"spec_sha256\"] != sha256_value(spec):",
+      "replace": "if False:",
+      "why": "Strategy must name the same approved scope. Detector: tests/factory/test_programme_strategy.py"
+    },
+    {
+      "id": "programme-strategy-causal-closure",
+      "file": "factory_kernel/programme_strategy.py",
+      "find": "if closure(claims, roots) != claims.keys():",
+      "replace": "if False:",
+      "why": "Unrelated project claims do not belong in planning advice. Detector: tests/factory/test_programme_strategy.py"
+    },
+    {
+      "id": "programme-strategy-claim-currency",
+      "file": "factory_kernel/programme_strategy.py",
+      "find": "or claim[\"status\"] != \"active\"",
+      "replace": "",
+      "why": "Challenged or invalidated assumptions cannot be exported as current advice. Detector: tests/factory/test_programme_strategy.py"
+    },
+    {
+      "id": "programme-strategy-delivery",
+      "file": "factory_kernel/runtime.py",
+      "find": "context=issue_context + planning_advice(admission), env=env)",
+      "replace": "context=issue_context, env=env)",
+      "why": "The selected strategy must actually reach the initial planner. Detector: tests/factory/test_programme_strategy.py"
+    },
+    {
+      "id": "programme-strategy-isolation",
+      "file": "factory_kernel/runtime.py",
+      "find": "contract_context = issue_context\n",
+      "replace": "contract_context = issue_context + planning_advice(admission)\n",
+      "why": "Advice must not be added to the contract source of truth. Detector: tests/factory/test_programme_strategy.py"
     }
   ]
 }

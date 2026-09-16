@@ -290,12 +290,14 @@ class Exploration:
 
         return self._append(project, principal, command, "handoff", transition)[0]
 
-    def prepare_handoff(self, project, session_id, *, expected_project_version, principal):
+    def prepare_handoff(self, project, session_id, *, expected_project_version, principal, include_strategy=False):
         """Revalidate stored recommendation and use the existing review/admission input seam.
 
         This exports a proposal, never a publication capability. The publisher must still
         obtain its normal exact-input owner consent and recheck currency before effects.
         """
+        if type(include_strategy) is not bool:
+            raise IntentRefused("include_strategy must be an explicit boolean")
         self.check_stop()
         state, approval = self.records.read(project, principal)
         if type(expected_project_version) is not int or expected_project_version != state["project_version"]:
@@ -315,7 +317,13 @@ class Exploration:
         self.check_stop()
         if self._context() != session["context"]:
             raise IntentRefused("repository changed during handoff preparation")
+        if include_strategy:
+            from .programme_strategy import strategy_from_session
+            value = {**deepcopy(review["input"]), "version": "1.1", "strategy": strategy_from_session(state, session)}
+            programme = compile_programme(value, repository=self.records.store.repository)
+            review.update(input=value, input_sha256=sha256_value(value), programme_sha256=programme.sha256)
         return {**review, "exploration": {"session_id": session_id, "handoff_sha256": sha256_value(handoff),
             "recommendation_sha256": handoff["recommendation_sha256"], "strategy": deepcopy(handoff["strategy"]),
             "claim_ids": handoff["claim_ids"], "qualification_status": "UNPROVEN", "proof_reuse_allowed": False,
-            "strategy_enforcement": "advisory-sidecar-not-consumed-by-current-factory-workers"}}
+            "strategy_enforcement": "planning-advice-requires-v1.1-publication" if include_strategy else
+                                    "advisory-sidecar-not-consumed-by-current-factory-workers"}}
