@@ -82,6 +82,10 @@ class PublicationObservationTests(unittest.TestCase):
             self.observe()
 
     def test_digest_mismatch_and_locator_forgery_refuse(self):
+        # Refuse before parsing even a structurally valid ZIP. A later admission
+        # digest check cannot replace this boundary around untrusted archive bytes.
+        with self.assertRaisesRegex(IntentRefused, "digest"):
+            read_manifest_archive(self.raw, {"digest": "sha256:" + "0" * 64})
         self.raw += b"changed"
         with self.assertRaisesRegex(IntentRefused, "digest"):
             self.observe()
