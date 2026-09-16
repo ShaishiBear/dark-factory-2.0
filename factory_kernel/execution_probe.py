@@ -1,17 +1,27 @@
 """Account for each diagnostic process before it starts; never retry an uncertain call."""
 import os
+from dataclasses import dataclass
 from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
 
-from .agents import AgentRequest
-from .canonical import canonical_bytes
 from .execution_client import ExecutionClient
 from .frontdoor_intent import IntentRefused
 from .github_cli import GitHubClient
 from .providers import ClaudeCliProvider, parse_events
 from . import publication_policy as policy
+
+
+@dataclass(frozen=True)
+class ProbeRequest:
+    """Identity of an already rendered diagnostic command, not a provider AgentRequest."""
+    role: str
+    argv: list[str]
+    cwd: str
+    timeout: float | None
+    thinking_cap: str | None
+    max_budget_usd: int = 1
 
 
 class ProbeRunner:
@@ -51,9 +61,8 @@ class ProbeRunner:
                 or argv[argv.index("--max-budget-usd") + 1:] == []
                 or argv[argv.index("--max-budget-usd") + 1] != "1"):
             raise IntentRefused("diagnostic requires its protected one-dollar CLI bound")
-        request = AgentRequest(role=self.role, cwd=str(kwargs.get("cwd", Path.cwd())),
-            prompt=canonical_bytes({"argv": argv, "timeout": kwargs.get("timeout"),
-                "thinking_cap": env.get("MAX_THINKING_TOKENS")}).decode("utf-8"), max_budget_usd=1)
+        request = ProbeRequest(role=self.role, argv=list(argv), cwd=str(kwargs.get("cwd", Path.cwd())),
+            timeout=kwargs.get("timeout"), thinking_cap=env.get("MAX_THINKING_TOKENS"))
         result = None
 
         def run(_request, **_options):

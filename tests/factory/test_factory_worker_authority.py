@@ -296,7 +296,7 @@ class GitHubWorkerWorkflowTests(unittest.TestCase):
         self.assertIn("ANTHROPIC_BASE_URL: https://openrouter.ai/api\n", self.workflow)
         self.assertNotIn("openrouter.ai/api/v1", self.workflow)
         self.assertIn(
-            "FACTORY_PREFLIGHT_REFUSED OpenRouter messages endpoint returned", self.workflow
+            "python -m factory_kernel.execution_probe -- timeout 180 claude", self.workflow
         )
         self.assertIn("FACTORY_PREFLIGHT_REFUSED worker CLI cannot reach model", self.workflow)
         self.assertNotIn("api.anthropic.com", self.workflow)

@@ -4147,7 +4147,7 @@ is checkable from inside a copy and goes red exactly when the entry is removed.
 Mutation `copies-cannot-read-the-catalogue`, verified under the baseline-then-injection protocol
 that this record exists to establish.
 
-## 2026-09-17 — Reserve canonical worker and diagnostic model calls
+## 2026-09-17 â€” Reserve canonical worker and diagnostic model calls
 
 The cumulative host ledger now gates canonical model calls and each diagnostic process.
 The extra raw curl routing ping is removed: the pinned CLI probe is the routing evidence
