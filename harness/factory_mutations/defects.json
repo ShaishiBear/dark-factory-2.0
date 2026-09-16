@@ -1590,8 +1590,8 @@
     {
       "id": "thinking-cap-honoured-rule-inverted",
       "file": "scripts/factory_thinking_cap_probe.py",
-      "find": "    return within_cap(thinking, cap) and clearly_below(thinking, uncapped)\n",
-      "replace": "    return not (within_cap(thinking, cap) and clearly_below(thinking, uncapped))\n",
+      "find": "    return not within_cap(uncapped, cap) and within_cap(thinking, cap) and clearly_below(thinking, uncapped)\n",
+      "replace": "    return not (not within_cap(uncapped, cap) and within_cap(thinking, cap) and clearly_below(thinking, uncapped))\n",
       "why": "The preflight line would print honoured=true exactly when the route ignored MAX_THINKING_TOKENS, and the table every row of which waits on that line would be filled in on the strength of the opposite of the evidence; caught by tests/factory/test_factory_thinking_cap.py (a cap is honoured only when both hold; the line when the route ignores the variable) (D-059)."
     },
     {
@@ -2804,6 +2804,13 @@
       "find": "or current[\"decision\"] != \"current-owner-request\"",
       "replace": "or False",
       "why": "Authentication of a message is not a replacement for its required owner-decision semantics."
+    },
+    {
+      "id": "thinking-cap-unexercised-demand-accepted",
+      "file": "scripts/factory_thinking_cap_probe.py",
+      "find": "not within_cap(uncapped, cap) and within_cap(thinking, cap)",
+      "replace": "within_cap(thinking, cap)",
+      "why": "The actual 352/200-token measurement cannot establish a 1024-token cap: the uncapped sample must exercise its boundary."
     },
     {
       "id": "publication-currency-slow-observation-accepted",

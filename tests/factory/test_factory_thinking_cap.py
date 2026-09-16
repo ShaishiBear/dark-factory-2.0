@@ -321,6 +321,16 @@ class HonouredRuleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no cap"):
             probe.honoured(_measure(None, 4000), _measure(None, 900))
 
+    def test_unexercised_cap_is_inconclusive_despite_relative_reduction(self):
+        # Actual M3 diagnostic 35082680640: both samples fit below 1024; the old
+        # relative-margin heuristic incorrectly called this evidence of enforcement.
+        self.assertFalse(probe.cap_honoured(200, 1024, 352))
+        self.assertFalse(probe.honoured(_measure(None, 352), _measure(1024, 200)))
+        self.assertFalse(probe.cap_honoured(0, 1024, 1536))
+        self.assertTrue(probe.cap_honoured(0, 1024, 1537))
+        self.assertTrue(probe.cap_honoured(0, 0, 100))
+        self.assertFalse(probe.cap_honoured(0, 0, 99))
+
 
 class _FakeRunner:
     """Answers each run with the stream scripted for its `MAX_THINKING_TOKENS`."""

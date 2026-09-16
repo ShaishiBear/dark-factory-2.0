@@ -53,6 +53,7 @@ class TestAuthorRouteProbeTests(unittest.TestCase):
         self.assertEqual(record["model"], "actual/author")
         self.assertEqual(record["calls"], 3)
         self.assertTrue(record["cap1024_honoured"])
+        self.assertTrue(record["cap1024_exercised"])
         self.assertTrue(record["cap0_honoured"])
         self.assertFalse(record["qualifies_work"])
         self.assertFalse(record["changes_policy"])
@@ -69,6 +70,18 @@ class TestAuthorRouteProbeTests(unittest.TestCase):
         self.assertFalse(record["cap1024_honoured"])
         self.assertFalse(record["cap0_honoured"])
         self.assertTrue(all(not row["returned"] for row in record["measurements"]))
+        self.assertFalse(record["cap1024_exercised"])
+
+    def test_observed_small_samples_do_not_demonstrate_enforcement(self):
+        def observed(argv, **kwargs):
+            self.runner(argv, **kwargs)
+            thinking = {None: 352, "1024": 200, "0": 382}[kwargs["env"].get("MAX_THINKING_TOKENS")]
+            return SimpleNamespace(returncode=0, stdout=_stream_with_thinking(thinking))
+        record = diagnostic(self.policy, source=self.source, runner=observed)
+        self.assertFalse(record["cap1024_exercised"])
+        self.assertFalse(record["cap1024_honoured"])
+        self.assertFalse(record["cap0_honoured"])
+        self.assertEqual(len(self.calls), 3)
 
     def test_missing_api_credential_refuses_before_any_model_call(self):
         self.source.pop("ANTHROPIC_AUTH_TOKEN")
