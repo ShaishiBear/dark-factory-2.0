@@ -374,7 +374,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION ï¿½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION \u00c3\u00af\u00c2\u00bf\u00c2\u00bd10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -2584,7 +2584,7 @@
     {
       "id": "frontdoor-hosted-payload-role-widened",
       "file": "factory_kernel/frontdoor_hosted.py",
-      "find": "or payload[\"role\"] not in INTAKE_ROLES",
+      "find": "or payload[\"role\"] not in (PREFLIGHT_ROLES if exploration else INTAKE_ROLES)",
       "replace": "or False",
       "why": "The encrypted proposal bridge must never grant implementation or qualification capabilities."
     },
@@ -3168,6 +3168,69 @@
       "find": "\"holdout.json\", \"architecture-holdout.json\", \"validation-refusal.json\",",
       "replace": "\"holdout.json\", \"architecture-holdout.json\",",
       "why": "Failed validation must retain its existing structured refusal instead of only proof gaps. Detector: tests/factory/test_evidence_retention.py"
+    },
+    {
+      "id": "hosted-exploration-job-replay",
+      "file": "factory_kernel/frontdoor_exploration.py",
+      "find": "if created:\n                thread =",
+      "replace": "if True:\n                thread =",
+      "why": "A replay must never spawn a second job. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-concurrent-job",
+      "file": "factory_kernel/frontdoor_exploration.py",
+      "find": "if any(row[\"status\"] == \"running\" for row in state[\"adaptive_runs\"].values()):",
+      "replace": "if False:",
+      "why": "Recorded unfinished jobs block fresh starts, including after restart. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-live-recovery",
+      "file": "factory_kernel/frontdoor_exploration.py",
+      "find": "if run_id in self._threads:",
+      "replace": "if False:",
+      "why": "A live provider must not be abandoned while it can still return. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-unknown-spend",
+      "file": "factory_kernel/frontdoor_exploration.py",
+      "find": "if (budget[\"uncertain\"] or budget[\"calls\"] >= budget[\"limits\"][\"calls\"]",
+      "replace": "if (False or budget[\"calls\"] >= budget[\"limits\"][\"calls\"]",
+      "why": "Unknown cost blocks even a fresh operational job reservation. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-owner-boundary",
+      "file": "factory_kernel/frontdoor_exploration.py",
+      "find": "records._owner(principal)\n        with records.store._locked(project)",
+      "replace": "pass\n        with records.store._locked(project)",
+      "why": "An untrusted principal must not read private exploration state. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-worker-cap",
+      "file": "factory_kernel/hosted_exploration_call.py",
+      "find": "max_turns=limits[\"max_turns\"], max_budget_usd=limits[\"max_usd\"],",
+      "replace": "max_turns=limits[\"max_turns\"], max_budget_usd=1,",
+      "why": "The worker must preserve the owner-reserved cap rather than widening it. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-worker-stop",
+      "file": "factory_kernel/hosted_exploration_call.py",
+      "find": "    check_stop()\n    with tempfile.",
+      "replace": "    pass\n    with tempfile.",
+      "why": "A stopped worker must not spend. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-pre-dispatch-stop",
+      "file": "factory_kernel/frontdoor_hosted.py",
+      "find": "if limits is not None:\n            self.check_stop()\n        deadline",
+      "replace": "if False:\n            self.check_stop()\n        deadline",
+      "why": "Stop observed after reservation prevents the dispatch effect. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-concurrent-observation",
+      "file": "factory_kernel/frontdoor_intent.py",
+      "find": "with self._file_locked(project) as path:\n                yield path",
+      "replace": "self._thread_lock.release()\n            try:\n                with self._file_locked(project) as path:\n                    yield path\n            finally:\n                self._thread_lock.acquire()",
+      "why": "Local observation must not contend with a reserved effect and lose its usable completion. Detector: tests/factory/test_frontdoor_exploration.py"
     }
   ]
 }

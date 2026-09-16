@@ -14,6 +14,8 @@ from .frontdoor_hosted import AgeCipher, MAX_CIPHERTEXT, WORKFLOW, WORKFLOW_PATH
 from .frontdoor_intent import IntentRefused, IntentStore
 from .frontdoor_prepare import PreparationRecords, api_provider
 from .github_cli import GitHubClient
+from .frontdoor_control import stop_status
+from .hosted_exploration_call import SCHEMA as EXPLORATION_SCHEMA, execute as explore
 
 
 def authorize_job(environ, event, github):
@@ -64,11 +66,17 @@ def main():
             payload = cipher.decrypt(event["inputs"]["ciphertext"], limit=MAX_CIPHERTEXT)
             validate_payload(payload, repository=repository, request_id=request_id, head=head)
             refuse_replay(github, payload, run_id)
-            # No caller-supplied environment, tools, model or budget. The ordinary intake
-            # funnel constructs the request using central protected-main role policy.
+            # No caller-supplied environment, tools or model. Exploration may narrow its
+            # spending cap; both paths construct requests under protected role policy.
             store = IntentStore(private / "records", repository=repository, owner=owner)
-            runner = PreparationRecords(store, api_provider(config.provider), None)
-            output, telemetry = runner._call(payload["role"], payload["prompt"])
+            if payload["schema"] == EXPLORATION_SCHEMA:
+                def check_stop():
+                    if stop_status(github) != {"state": "clear", "issues": []}:
+                        raise IntentRefused("hosted exploration requires clear stop")
+                output, telemetry = explore(payload, api_provider(config.provider), check_stop)
+            else:
+                runner = PreparationRecords(store, api_provider(config.provider), None)
+                output, telemetry = runner._call(payload["role"], payload["prompt"])
             result = {"request_sha256": sha256_value(payload), "run_id": run_id, "head": head,
                       "output": output, "telemetry": telemetry}
             encrypted = cipher.encrypt(result)

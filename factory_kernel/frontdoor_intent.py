@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import threading
 
 from .canonical import canonical_bytes, sha256_value
 from .programme import compile_spec, parse_json
@@ -55,6 +56,7 @@ class IntentStore:
         self.directory = Path(directory)
         self.repository, self.owner = repository, _text(owner, 100)
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self._thread_lock = threading.RLock()
 
     def _authorize(self, principal):
         if not isinstance(principal, Principal) or not principal.identity:
@@ -66,6 +68,19 @@ class IntentStore:
 
     @contextmanager
     def _locked(self, project):
+        # Background exploration and HTTP observations share this store instance. Queue
+        # short local transactions instead of treating a concurrent read as an uncertain
+        # effect. Keep the existing nonblocking OS lock against another service process.
+        if not self._thread_lock.acquire(timeout=5):
+            raise IntentRefused("intent store is busy; refresh before another command")
+        try:
+            with self._file_locked(project) as path:
+                yield path
+        finally:
+            self._thread_lock.release()
+
+    @contextmanager
+    def _file_locked(self, project):
         if not isinstance(project, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", project):
             raise IntentRefused("invalid project ID")
         lock = self.directory / f"{project}.lock"

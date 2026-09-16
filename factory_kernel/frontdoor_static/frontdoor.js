@@ -182,7 +182,7 @@ function render() {
     message("Remote stop confirmed. Running work will stop at its next checkpoint.");
   }
 }
-async function refresh() { snapshot = await api("/api/snapshot"); render(); }
+async function refresh() { snapshot = await api("/api/snapshot"); render(); await refreshExploration(); }
 async function command(operation, payload) {
   await api("/api/commands", { idempotency_key: crypto.randomUUID(), expected_project_version: snapshot.intent.project_version, operation, payload });
   await refresh();

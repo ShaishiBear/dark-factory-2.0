@@ -5,6 +5,7 @@
   <title>Dark Factory · Front Door</title>
   <link rel="stylesheet" href="/frontdoor.css">
   <script src="/frontdoor.js" defer></script>
+  <script src="/exploration.js" defer></script>
 </head>
 <body>
   <header><div><span class="eyebrow">DARK FACTORY</span><h1>From intent to evidence.</h1></div><button id="logout" hidden>Lock workspace</button></header>
@@ -40,6 +41,20 @@
               <button class="primary" type="submit">Publish programme for execution</button>
             </form>
             <div id="publication-status"></div>
+          </section>
+          <section class="card" id="adaptive-card" hidden>
+            <span class="eyebrow">STRATEGY EXPLORATION</span><h2>Investigate before committing</h2>
+            <p>Compare different approaches to the approved scope. Reasoned judgments and bounded experiments guide a recommendation; independent factory qualification is still required.</p>
+            <p id="adaptive-state" role="status"></p>
+            <form id="adaptive-open" hidden>
+              <label for="adaptive-question">Which architectural decision needs investigation?</label>
+              <textarea id="adaptive-question" rows="3" maxlength="4000" required></textarea>
+              <div id="adaptive-policy"></div>
+              <label class="check"><input type="checkbox" id="adaptive-policy-check" required> Freeze these criteria and shared limits for this investigation.</label>
+              <button type="submit">Open investigation</button>
+            </form>
+            <div id="adaptive-sessions"></div>
+            <div id="adaptive-runs"></div>
           </section>
         </div>
         <aside>
