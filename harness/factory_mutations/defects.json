@@ -374,7 +374,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION \u00ef\u00bf\u00bd10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION ï¿½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -3091,6 +3091,83 @@
       "find": "context = lambda: protected_repository_context(github)",
       "replace": "context = lambda: {\"commit\": \"0\" * 40, \"files\": {}}",
       "why": "Current protected facts must bind hosted preparation without stale output or repeated spend. Detector: tests/factory/test_frontdoor_repository.py"
+    },
+    {
+      "id": "reconsideration-historical-handoff",
+      "file": "factory_kernel/reconsideration.py",
+      "find": "if candidate.sha256 == programme.sha256:",
+      "replace": "if True:",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-preview-digest",
+      "file": "factory_kernel/reconsideration.py",
+      "find": "if request[\"observation_sha256\"] != preview[\"observation_sha256\"]:",
+      "replace": "if False:",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-causal-ancestry",
+      "file": "factory_kernel/reconsideration.py",
+      "find": "if not set(claims) <= set(observation[\"causal_claim_ids\"]):",
+      "replace": "if False:",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-refusal-head",
+      "file": "factory_kernel/reconsideration.py",
+      "find": "or raw[\"head\"] != source.head_sha or raw[\"base\"] != source.base_sha",
+      "replace": "or False",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-refusal-authority",
+      "file": "factory_kernel/reconsideration.py",
+      "find": "or raw[\"authority\"] != AUTHORITY[raw[\"reason_code\"]]",
+      "replace": "or False",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-attempt-replay",
+      "file": "factory_kernel/reconsideration.py",
+      "find": "if previous:",
+      "replace": "if False:",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-affected-frontier",
+      "file": "factory_kernel/reconsideration.py",
+      "find": "and affected.intersection(session[\"recommendations\"][-1][\"claim_ids\"])]",
+      "replace": "and True]",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-round-budget",
+      "file": "factory_kernel/exploration.py",
+      "find": "if session[\"round\"] >= session[\"policy\"][\"max_rounds\"]:",
+      "replace": "if False:",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-pending-effects",
+      "file": "factory_kernel/exploration.py",
+      "find": "if any(row[\"status\"] == \"pending\" for row in session[\"reservations\"].values()):\n            raise IntentRefused(\"pending effects require reconciliation before reconsideration\")",
+      "replace": "if False:\n            raise IntentRefused(\"pending effects require reconciliation before reconsideration\")",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-shared-budget-reset",
+      "file": "factory_kernel/exploration_records.py",
+      "find": "session[\"reopenings\"].append(deepcopy(data))",
+      "replace": "session[\"reopenings\"].append(deepcopy(data))\n            result[\"budgets\"][session[\"binding\"][\"spec_sha256\"]][\"probe_units\"] = 0",
+      "why": "Owner feedback must remain subject-bound, causal, bounded and distinct from qualification. Detector: tests/factory/test_reconsideration.py"
+    },
+    {
+      "id": "reconsideration-refusal-retention",
+      "file": "factory_kernel/evidence_retention.py",
+      "find": "\"holdout.json\", \"architecture-holdout.json\", \"validation-refusal.json\",",
+      "replace": "\"holdout.json\", \"architecture-holdout.json\",",
+      "why": "Failed validation must retain its existing structured refusal instead of only proof gaps. Detector: tests/factory/test_evidence_retention.py"
     }
   ]
 }

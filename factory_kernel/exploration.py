@@ -40,7 +40,8 @@ class Exploration:
         command["request"] = {"action": action, "data": command["request"]}
         def replay_guard(state, approval, recorded):
             session = self._session(state, approval, command["session_id"],
-                          allow_stale=action in {"observe-claim", "reopen", "abandon-pending"})
+                          allow_stale=action in {"observe-claim", "reopen", "abandon-pending",
+                                                 "review-factory-feedback", "reopen-from-feedback"})
             if action == "handoff" and (session["status"] != "recommended" or
                     recorded["data"]["recommendation_sha256"] != sha256_value(session["recommendations"][-1])):
                 raise IntentRefused("recorded handoff no longer has a current recommendation")
@@ -260,13 +261,18 @@ class Exploration:
             session = self._session(state, approval, command["session_id"], allow_stale=True)
             _shape(request, {"reason"})
             _text(request["reason"], 4000)
-            if session["round"] >= session["policy"]["max_rounds"]:
-                raise IntentRefused("reconsideration round budget exhausted")
-            if any(row["status"] == "pending" for row in session["reservations"].values()):
-                raise IntentRefused("pending effects require reconciliation before reconsideration")
-            return "reopened", {**request, "context": self._context()}
+            return "reopened", {**request, "context": self._reopen_context(session)}
 
         return self._append(project, principal, command, "reopen", transition)[0]
+
+    def _reopen_context(self, session):
+        if session["round"] >= session["policy"]["max_rounds"]:
+            raise IntentRefused("reconsideration round budget exhausted")
+        if any(row["status"] == "pending" for row in session["reservations"].values()):
+            raise IntentRefused("pending effects require reconciliation before reconsideration")
+        context = self._context()
+        self.check_stop()
+        return context
 
     def handoff(self, project, command, *, principal):
         request = deepcopy(command["request"])
