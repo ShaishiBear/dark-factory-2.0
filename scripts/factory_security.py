@@ -13,6 +13,9 @@ from pathlib import Path
 # The kernel runs every trust-root program from its own checkout of main with cwd set to the
 # PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
 ROOT = Path.cwd().resolve()
+# New authorities are imported from beside this trusted program, never the tree under test.
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
 BACKEND_MANIFEST = "app/backend/pyproject.toml"
 BACKEND_LOCK = "app/backend/uv.lock"
 FRONTEND_MANIFEST = "app/frontend/package.json"
@@ -430,6 +433,49 @@ def bound(result: dict, *, mode: str, pr: str, base: str, head: str, changed: li
     return result
 
 
+def publication_verdict(result: dict, *, mode: str, pr: str, base: str, head: str,
+                        changed: list[str]) -> dict:
+    """Only a separately observed exact-data publication can discharge its path veto.
+
+    All other findings survive. Head CI sees public provenance only; the old-base guard
+    additionally authenticates current owner consent. Neither can arm maintainer merge.
+    """
+    from factory_kernel.programme import ACTIVE_PATH, parse_json
+    from factory_kernel.github_cli import GitHubClient
+    from factory_kernel.publication_client import current_currency
+    from factory_kernel.publication_observation import observe_publication
+
+    if result["authority"]["lane"] != "autonomous" or changed != [ACTIVE_PATH]:
+        return result
+    try:
+        if mode not in {"head", "trusted-base"}:
+            raise ValueError("unrecognized publication judge mode")
+        base_exists = run(["git", "cat-file", "-e", f"{base}:{ACTIVE_PATH}"], check=False).returncode == 0
+        tree = run(["git", "ls-tree", head, "--", ACTIVE_PATH]).stdout.split()
+        observation = observe_publication(
+            GitHubClient(repository_name(), cwd=ROOT), pr_number=int(pr), base_sha=base,
+            head_sha=head, changed_files=changed, file_mode=tree[0] if len(tree) == 4 else "",
+            base_input={} if base_exists else None, head_input=parse_json(git_show(head, ACTIVE_PATH)),
+            current=current_currency if mode == "trusted-base" else None,
+        )
+        if observation is None:
+            return result
+        if mode == "trusted-base" and observation.get("owner_currency") != "observed-current":
+            raise ValueError("old-base publication requires current owner consent")
+    except Exception:
+        result["findings"].append({"kind": "publication_provenance", "path": ACTIVE_PATH,
+                                   "detail": "exact publication provenance or current owner consent refused"})
+        result["verdict"] = "fail"
+        return result
+    result["findings"] = [row for row in result["findings"]
+                          if not (row["kind"] == "protected_path" and row["path"] == ACTIVE_PATH)]
+    result["verdict"] = "fail" if result["findings"] else "pass"
+    result["authority"].update(lane="programme-publication", protected_paths_permitted=True,
+                                unattended_merge_eligible=False)
+    result["publication"] = observation
+    return result
+
+
 def verify_pr(pr: str) -> dict:
     """Head mode: the validator worktree IS the PR head. Used by the head-based quick gate."""
     meta = json.loads(run(["gh", "pr", "view", pr, "--json", "body,baseRefOid,headRefOid"]).stdout)
@@ -448,6 +494,7 @@ def verify_pr(pr: str) -> dict:
         author=author, commits=commits,
         base_floor=git_show(base, FLOOR_FILE), head_floor=git_show(head, FLOOR_FILE),
     )
+    result = publication_verdict(result, mode="head", pr=pr, base=base, head=head, changed=changed)
     return bound(result, mode="head", pr=pr, base=base, head=head, changed=changed)
 
 
@@ -489,6 +536,7 @@ def verify_pr_trusted_base(pr: str, *, expect_base: str | None, expect_head: str
         author=author, commits=commits,
         base_floor=git_show(local, FLOOR_FILE), head_floor=git_show(head, FLOOR_FILE),
     )
+    result = publication_verdict(result, mode="trusted-base", pr=pr, base=local, head=head, changed=changed)
     return bound(result, mode="trusted-base", pr=pr, base=local, head=head, changed=changed)
 
 

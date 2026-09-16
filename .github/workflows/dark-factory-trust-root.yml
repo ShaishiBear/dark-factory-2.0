@@ -35,6 +35,7 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
+      actions: read
     outputs:
       unattended: ${{ steps.decide.outputs.unattended }}
       head: ${{ steps.judge.outputs.head }}
@@ -67,6 +68,8 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           TRUSTED_BASE: ${{ github.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          # Only old-base code can authenticate publication currency. Never expose this in head CI.
+          FRONTDOOR_AGE_IDENTITY: ${{ secrets.FRONTDOOR_AGE_IDENTITY }}
         run: |
           set -o pipefail
           python scripts/factory_security.py --pr "$PR_NUMBER" --trusted-base \
