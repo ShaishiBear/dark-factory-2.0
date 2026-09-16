@@ -19,8 +19,10 @@ from .worker_policy import ROLE_MAX_BUDGET_USD
 DOMAIN = b"dark-factory/execution-reservation/v1/"
 MAX_AGE_SECONDS = 60
 MAX_ENVELOPE = 16000
-ROLES = frozenset(ROLE_MAX_BUDGET_USD) - {
-    "preflight-proposer", "preflight-challenger", "intent-proposer", "intent-auditor", "programme-proposer"}
+ROLE_BOUNDS = {role: amount for role, amount in ROLE_MAX_BUDGET_USD.items() if role not in {
+    "preflight-proposer", "preflight-challenger", "intent-proposer", "intent-auditor", "programme-proposer"}}
+ROLE_BOUNDS.update({"diagnostic-" + name: 1 for name in ("route", "effort", "thinking", "scope")})
+ROLES = frozenset(ROLE_BOUNDS)
 
 
 def _hex(value, size):
@@ -66,7 +68,7 @@ class ExecutionProtocol:
         if type(call["run_attempt"]) is not int or call["run_attempt"] != 1 or call["role"] not in ROLES:
             raise IntentRefused("execution role or rerun refused")
         _integer(call["microusd"], MAX_MICROUSD)
-        if call["microusd"] > int(ROLE_MAX_BUDGET_USD[call["role"]] * 1_000_000):
+        if call["microusd"] > int(ROLE_BOUNDS[call["role"]] * 1_000_000):
             raise IntentRefused("execution request exceeds protected role policy")
         request = payload["request"]
         fields = {"reserve": set(), "start": {"reservation_version"}, "observe": {"reported_microusd", "outcome"}}

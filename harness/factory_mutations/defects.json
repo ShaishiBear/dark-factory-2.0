@@ -374,7 +374,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION \u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00e2\u20ac\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a2\u00c3\u0192\u00c6\u2019\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a0\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u00a2\u00e2\u20ac\u017e\u00c2\u00a2\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u2026\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u0192\u00e2\u20ac\u0161\u00c3\u201a\u00c2\u00af\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00e2\u20ac\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a2\u00c3\u0192\u00c6\u2019\u00c3\u201a\u00c2\u00a2\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u201a\u00c2\u00ac\u00c3\u0192\u00e2\u20ac\u00a6\u00c3\u201a\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u2026\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u0192\u00e2\u20ac\u0161\u00c3\u201a\u00c2\u00bf\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00e2\u20ac\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a2\u00c3\u0192\u00c6\u2019\u00c3\u201a\u00c2\u00a2\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u201a\u00c2\u00ac\u00c3\u0192\u00e2\u20ac\u00a6\u00c3\u201a\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u2026\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u0192\u00e2\u20ac\u0161\u00c3\u201a\u00c2\u00bd10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -3599,7 +3599,7 @@
     {
       "id": "execution-exchange-role-bound",
       "file": "factory_kernel/execution_exchange.py",
-      "find": "if call[\"microusd\"] > int(ROLE_MAX_BUDGET_USD[call[\"role\"]] * 1_000_000):",
+      "find": "if call[\"microusd\"] > int(ROLE_BOUNDS[call[\"role\"]] * 1_000_000):",
       "replace": "if False:",
       "why": "Only a fresh authenticated canonical worker can consume an exact reservation once; lost responses, reruns and altered owner decisions cannot grant another call. Detector: tests/factory/test_execution_exchange.py"
     },
@@ -3665,6 +3665,76 @@
       "find": "raise IntentRefused(\"unobserved worker retry refused\")",
       "replace": "return",
       "why": "Only a fresh authenticated canonical worker can consume an exact reservation once; lost responses, reruns and altered owner decisions cannot grant another call. Detector: tests/factory/test_execution_exchange.py"
+    },
+    {
+      "id": "execution-worker-runtime-wrapper",
+      "file": "factory_kernel/runtime.py",
+      "find": "self.provider = ExecutionWorker(ClaudeCliProvider(config.provider), self.github)",
+      "replace": "self.provider = ClaudeCliProvider(config.provider)",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-provider-bypass",
+      "file": "factory_kernel/execution_worker.py",
+      "find": "return self.client.run(self.provider, request, transcript=transcript, before_retry=before_retry)",
+      "replace": "return self.provider.run(request, transcript=transcript, before_retry=before_retry)",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-probe-bypass",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "if self.client is None:\n            return self.runner(argv, **kwargs)",
+      "replace": "if True:\n            return self.runner(argv, **kwargs)",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-probe-bound",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "or argv[argv.index(\"--max-budget-usd\") + 1] != \"1\"",
+      "replace": "or False",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-probe-secret",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "kwargs = {**kwargs, \"env\": env}",
+      "replace": "kwargs = {**kwargs, \"env\": supplied}",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-probe-unknown",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "return SimpleNamespace(cost_usd=cost)",
+      "replace": "return SimpleNamespace(cost_usd=cost or 0)",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-probe-failed",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "len(receipts) == 1 and result.returncode == 0",
+      "replace": "len(receipts) == 1",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-probe-workflow",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "if (not os.environ.get(\"GITHUB_ACTIONS\") and not ref) or ref == maintenance:",
+      "replace": "if not ref or ref == maintenance:",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-workflow-route",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "python -m factory_kernel.execution_probe -- timeout 180 claude",
+      "replace": "timeout 180 claude",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "execution-worker-workflow-ping",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "          # The authenticated, reserved CLI probe below establishes routing. No separate",
+      "replace": "          routing_code=\"$(curl https://example.invalid)\"\n          # The authenticated, reserved CLI probe below establishes routing. No separate",
+      "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
     }
   ]
 }

@@ -57,7 +57,7 @@ function render() {
     const statuses = {"historical-spend-unknown": "Earlier spending is unknown; this allowance cannot authorize execution.", "unresolved-attempt": "An attempt has unresolved spending. This allowance cannot authorize further calls.", overrun: "Reported spending exceeded a reservation. This allowance cannot authorize further calls.", exhausted: "The recorded execution allowance is exhausted.", available: "The recorded allowance has capacity."};
     executionBudget.append(text("p", statuses[budget.status] || "Execution budget state is unavailable."));
   }
-  executionBudget.append(text("p", "The hosted execution worker is not yet connected to this ledger. Programme replacement remains blocked. Reservations are retained across strategy changes.", "muted"));
+  executionBudget.append(text("p", "Canonical worker model calls and diagnostics require this ledger. Application validation spending and independent billing reconciliation remain incomplete, so total spending coverage and programme replacement remain blocked. Reservations are retained across strategy changes.", "muted"));
   if (history && history.project_version !== state.project_version) $("history-state").textContent = `Showing history through version ${history.project_version}. Saved decisions have changed; load history again for the latest.`;
   const ledger = $("ledger");
   ledger.replaceChildren();

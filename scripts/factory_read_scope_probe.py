@@ -343,6 +343,7 @@ def run_probe(
 
 
 def main(argv: list[str] | None = None) -> int:
+    from factory_kernel.execution_probe import ProbeRunner
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
         "--model",
@@ -352,7 +353,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--binary", default="claude")
     parser.add_argument("--timeout", type=float, default=PROBE_TIMEOUT_SECONDS)
     args = parser.parse_args(argv)
-    line, rc = run_probe(args.model or configured_model(), binary=args.binary, timeout=args.timeout)
+    line, rc = run_probe(args.model or configured_model(), binary=args.binary, timeout=args.timeout,
+                         runner=ProbeRunner.from_environment("diagnostic-scope"))
     print(line, flush=True)
     return rc
 

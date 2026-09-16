@@ -37,6 +37,7 @@ ROOT = Path.cwd().resolve()
 sys.path.insert(0, str(HERE.parent))
 
 from factory_kernel.providers import parse_events, thinking_tokens  # noqa: E402
+from factory_kernel.execution_probe import ProbeRunner  # noqa: E402
 from factory_kernel.worker_policy import EFFORT_LEVELS, ROLE_EFFORT, effort_rank  # noqa: E402
 
 LINE_PREFIX = "FACTORY_PREFLIGHT_EFFORT_PROBE"
@@ -225,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             low_level=args.low,
             high_level=args.high,
             timeout=args.timeout,
+            runner=ProbeRunner.from_environment("diagnostic-effort"),
         ),
         flush=True,
     )

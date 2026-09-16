@@ -4146,3 +4146,14 @@ is checkable from inside a copy and goes red exactly when the entry is removed.
 `test_the_copy_set_carries_every_manifest_the_runner_requires`, one subtest per manifest.
 Mutation `copies-cannot-read-the-catalogue`, verified under the baseline-then-injection protocol
 that this record exists to establish.
+
+## 2026-09-17 — Reserve canonical worker and diagnostic model calls
+
+The cumulative host ledger now gates canonical model calls and each diagnostic process.
+The extra raw curl routing ping is removed: the pinned CLI probe is the routing evidence
+and now reserves before launch. Mutation `worker-curl-probe-hardcoded-url` is retired
+because the raw request it protected no longer exists; worker integration detectors
+refuse reintroducing that unaccounted ping and bypassing the reserved CLI wrapper.
+Daily main-regression measurements retain their existing separate maintenance scope.
+This does not establish accounting for application validation APIs or independent billing;
+total spending coverage and governed replacement remain incomplete.

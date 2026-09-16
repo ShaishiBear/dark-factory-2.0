@@ -38,6 +38,7 @@ from .config import KernelConfig
 from .credential_env import scoped_environment
 from .github_cli import GitHubClient
 from .providers import ClaudeCliProvider, prompt_text
+from .execution_worker import ExecutionWorker
 from .programme_runtime import ProgrammeQueue
 from .programme_strategy import planning_advice
 from .independence import (
@@ -327,12 +328,12 @@ class KernelRuntime:
     def __init__(self, *, repo_root: Path, config: KernelConfig):
         self.repo_root = repo_root.resolve()
         self.config = config
-        self.provider = ClaudeCliProvider(config.provider)
         self.github = GitHubClient(
             config.repository,
             cwd=self.repo_root,
             identity_max_age_seconds=config.runtime.autonomous_identity_max_age_seconds,
         )
+        self.provider = ExecutionWorker(ClaudeCliProvider(config.provider), self.github)
         # The authority currently executing, or None. Opened by the stage sequence in
         # `validate_pr`, closed by `_exec` when the authority returns. Only an OPEN cursor may
         # name an authority in a refusal; see `refusal.classify` and DFE-014.
