@@ -23,6 +23,7 @@ class PublicationDispatchHTTPTests(unittest.TestCase):
 
     def test_preview_and_publish_require_owner_bearer_and_same_origin(self):
         for path, body in (("/api/publication-preview", self.fixture.review),
+                           ("/api/programme-replacement-review", self.fixture.review),
                            ("/api/programme-publish", self.fixture.command)):
             self.assertEqual(self.http.call(path, body=body, HTTP_AUTHORIZATION="")["status"], "401 Unauthorized")
             self.assertEqual(self.http.call(path, body=body, HTTP_ORIGIN="https://elsewhere.invalid")["status"], "403 Forbidden")

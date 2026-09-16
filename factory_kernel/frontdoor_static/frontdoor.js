@@ -316,6 +316,24 @@ async function showPublication(review, path = "/api/publication-preview") {
       target.append(text("p", "Strategy identity includes its assumptions, rationale, uncertainty and source references. None of these qualify the proposed work.", "muted"));
     }
     target.append(text("p", "Historical proof remains attached to the original programme and subject. It does not qualify this proposed plan.", "muted"));
+    const reviewRequest = publicationPreview.review;
+    const inspect = text("button", "Inspect replacement obligations"); inspect.type = "button";
+    inspect.addEventListener("click", () => perform(async () => {
+      const report = await api("/api/programme-replacement-review", reviewRequest);
+      const result = document.createElement("section");
+      const completed = report.preserved_completed_work.length, pending = report.pending_work.length;
+      result.append(text("h3", "Replacement obligations observed"),
+        text("p", `${completed} completed item${completed === 1 ? "" : "s"} verified against original receipts; ${pending} pending item${pending === 1 ? "" : "s"}.`));
+      const reasons = {"completed-work-changed": "Completed work would change", "open-pending-work": "Existing work is still open", "active-worker": "A worker has not finished", "open-app-pull": "A factory pull request remains open"};
+      list(result, "Current blockers", report.blockers.map((row) => `${reasons[row.kind] || row.kind}: ${row.item_id || row.run_id || row.pr}`));
+      result.append(text("p", "This review does not pause work or approve replacement. Before switching, the factory must prevent old work from continuing, account for all spending and verify that only the replacement can run. The replacement must pass fresh qualification.", "muted"));
+      const budget = report.exploration_budget.budget;
+      result.append(text("p", budget ? `Exploration budget retained: ${budget.calls} calls, $${budget.usd} reserved. ${budget.uncertain ? "Spend remains uncertain." : "No refund or reset."}` : "No exploration budget has been recorded for this approved scope."));
+      const record = document.createElement("details");
+      record.append(text("summary", "Exact replacement review"), text("pre", JSON.stringify(report, null, 2), "hash"));
+      result.append(record); target.append(result);
+    }));
+    target.append(inspect);
   }
   $("publish-check").checked = false;
   $("publication-form").hidden = publicationPreview.state !== "ready-for-consent";

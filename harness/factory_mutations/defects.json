@@ -374,7 +374,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION \u00c3\u00af\u00c2\u00bf\u00c2\u00bd10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION Ã¯Â¿Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -3357,6 +3357,55 @@
       "find": "for claim_id in data[\"invalidated_claim_ids\"]:",
       "replace": "for claim_id in []:",
       "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "programme-turnover-completed-changed",
+      "file": "factory_kernel/programme_turnover.py",
+      "find": "if new_items.get(key) != row[\"item\"]:",
+      "replace": "if False:",
+      "why": "Replacement review must expose verified completion, conflicting execution and cumulative uncertainty without granting activation. Detector: tests/factory/test_programme_turnover.py"
+    },
+    {
+      "id": "programme-turnover-receipt-ignored",
+      "file": "factory_kernel/programme_turnover.py",
+      "find": "receipt = queue.completion_receipt(programme, item, row) if row else None",
+      "replace": "receipt = {\"forged\": True} if row and row[\"state\"] == \"closed\" else None",
+      "why": "Replacement review must expose verified completion, conflicting execution and cumulative uncertainty without granting activation. Detector: tests/factory/test_programme_turnover.py"
+    },
+    {
+      "id": "programme-turnover-worker-hidden",
+      "file": "factory_kernel/programme_turnover.py",
+      "find": "blockers.extend({\"kind\": \"active-worker\", \"run_id\": row[\"id\"]} for row in execution[\"active_runs\"])",
+      "replace": "blockers.extend([])",
+      "why": "Replacement review must expose verified completion, conflicting execution and cumulative uncertainty without granting activation. Detector: tests/factory/test_programme_turnover.py"
+    },
+    {
+      "id": "programme-turnover-changed-observation",
+      "file": "factory_kernel/programme_turnover.py",
+      "find": "if execution != _execution(github, current) or observation != source(github):",
+      "replace": "if False:",
+      "why": "Replacement review must expose verified completion, conflicting execution and cumulative uncertainty without granting activation. Detector: tests/factory/test_programme_turnover.py"
+    },
+    {
+      "id": "programme-turnover-budget-reset",
+      "file": "factory_kernel/programme_turnover.py",
+      "find": "budget = deepcopy(state[\"budgets\"].get(approval[\"spec_sha256\"]))",
+      "replace": "budget = None",
+      "why": "Replacement review must expose verified completion, conflicting execution and cumulative uncertainty without granting activation. Detector: tests/factory/test_programme_turnover.py"
+    },
+    {
+      "id": "programme-turnover-new-intent-ignored",
+      "file": "factory_kernel/programme_turnover.py",
+      "find": "approval = approved_scope(store, events)",
+      "replace": "approval = store._snapshot(events)[\"approvals\"][-1]",
+      "why": "Replacement review must expose verified completion, conflicting execution and cumulative uncertainty without granting activation. Detector: tests/factory/test_programme_turnover.py"
+    },
+    {
+      "id": "programme-turnover-unknown-budget-is-zero",
+      "file": "factory_kernel/programme_turnover.py",
+      "find": "\"status\": \"requires-cumulative-ledger\"",
+      "replace": "\"status\": \"zero-spend\"",
+      "why": "Replacement review must expose verified completion, conflicting execution and cumulative uncertainty without granting activation. Detector: tests/factory/test_programme_turnover.py"
     }
   ]
 }

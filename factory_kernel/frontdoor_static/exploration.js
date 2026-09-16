@@ -119,7 +119,9 @@ function renderExploration() {
       list(card, "Remaining uncertainty", recommendation.remaining_uncertainty);
       card.append(text("p", `Next useful experiment: ${recommendation.next_useful_experiment}`));
     }
-    if (session.handoffs.length) card.append(text("p", "A strategy handoff is recorded. Refresh evidence and use the separate publication review when it is current.", "muted"));
+    if (session.handoffs.length) card.append(text("p", session.handoff_current
+      ? "A current strategy handoff is recorded. Refresh evidence before the separate publication review."
+      : "The earlier strategy handoff is historical. Reconsider this question and produce a fresh recommendation before publication review.", "muted"));
     const pending = Object.values(session.reservations).filter((row) => row.status === "pending");
     const handoffCurrent = session.handoff_current;
     if (!blocked && !pending.length && !handoffCurrent && !state.budget?.uncertain && ["exploring", "recommended"].includes(session.status)) {
