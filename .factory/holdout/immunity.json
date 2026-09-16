@@ -201,7 +201,17 @@
         {
           "kind": "text_contains",
           "path": ".github/workflows/dark-factory-trust-root.yml",
-          "value": "expectedHeadOid: $head"
+          "value": "--match-head-commit \"$EXPECTED_HEAD\""
+        },
+        {
+          "kind": "text_contains",
+          "path": ".github/workflows/dark-factory-trust-root.yml",
+          "value": "timeout 22m gh pr checks \"$PR_NUMBER\" --repo \"$REPOSITORY\" --required --watch --interval 10 --fail-fast"
+        },
+        {
+          "kind": "text_contains",
+          "path": ".github/workflows/dark-factory-trust-root.yml",
+          "value": "test \"$passed\" = true"
         },
         {
           "kind": "text_contains",

@@ -144,6 +144,14 @@ class ImmunityTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_static_rung_executes_immunity_before_expensive_checks(self):
+        # Do not verify the live registry here: this suite runs inside mutation copies,
+        # whose deliberate source edits must be judged by their own causal detectors.
+        source = (P.parent / "static.py").read_text(encoding="utf-8")
+        check = '("immunity", ROOT, [sys.executable, str(HERE / "immunity.py")])'
+        self.assertIn(check, source)
+        self.assertLess(source.index(check), source.index('("ruff-trust-root",'))
+
     def test_retired_entry_is_not_executed(self):
         tmp, root = self.make_root()
         try:
