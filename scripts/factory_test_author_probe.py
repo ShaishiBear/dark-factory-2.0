@@ -9,8 +9,9 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+ROOT = Path.cwd().resolve()
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 from factory_models import model_for_role  # noqa: E402
 from factory_thinking_cap_probe import CAPS, honoured, run_one  # noqa: E402
 
