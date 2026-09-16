@@ -216,6 +216,8 @@ COPY_FILES = (
     "tests/factory/test_factory_evidence_closure.py",
     "tests/factory/test_claim_explanation.py",
     "tests/factory/test_evidence_retention.py",
+    "tests/factory/test_preflight.py",
+    "tests/factory/test_preflight_prepare.py",
     "tests/factory/test_decision_history.py",
     "tests/factory/test_factory_independence.py",
     "tests/factory/test_factory_bootstrap.py",

@@ -40,12 +40,15 @@ AUTHORITY_ROLES = frozenset({
 
 # Intake may propose scope and audit clarity, but cannot certify product execution.
 INTAKE_ROLES = frozenset({"intent-proposer", "intent-auditor", "programme-proposer"})
-TOOLLESS_ROLES = AUTHORITY_ROLES | INTAKE_ROLES | {"triage"}
+PREFLIGHT_ROLES = frozenset({"preflight-proposer", "preflight-challenger"})
+TOOLLESS_ROLES = AUTHORITY_ROLES | INTAKE_ROLES | PREFLIGHT_ROLES | {"triage"}
 
 # Every role invoked against a repository checkout writes either run artifacts or, for the three
 # mutation roles below, candidate checkout files. The kernel separately asserts whether repository
 # changes are permitted and commits them deterministically.
 ROLE_TOOLS: dict[str, tuple[str, ...]] = {
+    "preflight-proposer": JUDGE_TOOLS,
+    "preflight-challenger": JUDGE_TOOLS,
     "intent-proposer": JUDGE_TOOLS,
     "intent-auditor": JUDGE_TOOLS,
     "programme-proposer": JUDGE_TOOLS,
@@ -99,6 +102,8 @@ OBSERVED_SECONDS_PER_TURN_CEILING = 45
 STAGE_WALL_HEADROOM = 1.5
 
 ROLE_MAX_TURNS: dict[str, int] = {
+    "preflight-proposer": 5,
+    "preflight-challenger": 5,
     "intent-proposer": 5,
     "intent-auditor": 5,
     "programme-proposer": 5,
@@ -128,6 +133,8 @@ ROLE_MAX_TURNS: dict[str, int] = {
 # cost for a non-Anthropic model is very likely a fallback-priced figure; until it is reconciled
 # against the OpenRouter dashboard these numbers are backstops, not budgets (D-025).
 ROLE_MAX_BUDGET_USD: dict[str, float] = {
+    "preflight-proposer": 2.0,
+    "preflight-challenger": 2.0,
     "intent-proposer": 1.0,
     "intent-auditor": 1.0,
     "programme-proposer": 1.0,
@@ -196,6 +203,8 @@ WORKER_EFFORT = "medium"
 JUDGE_EFFORT = "high"
 
 ROLE_EFFORT: dict[str, str] = {
+    "preflight-proposer": "medium",
+    "preflight-challenger": "medium",
     "intent-proposer": "medium",
     "intent-auditor": "medium",
     "programme-proposer": "medium",
@@ -244,6 +253,8 @@ THINKING_CAP_DISABLED = 0
 # Setting a row is a trust-root change; `provider.thinking_cap_overrides` in kernel.json is
 # the per-deployment `{role: cap}` override, validated at load like the effort table (D-059).
 ROLE_THINKING_CAP: dict[str, int | None] = {
+    "preflight-proposer": None,
+    "preflight-challenger": None,
     "intent-proposer": None,
     "intent-auditor": None,
     "programme-proposer": None,
@@ -355,6 +366,8 @@ ARCHITECTURE_SCOPE = PathScope(
 JUDGE_SCOPE = PathScope()
 
 ROLE_PATH_SCOPE: dict[str, PathScope] = {
+    "preflight-proposer": JUDGE_SCOPE,
+    "preflight-challenger": JUDGE_SCOPE,
     "intent-proposer": JUDGE_SCOPE,
     "intent-auditor": JUDGE_SCOPE,
     "programme-proposer": JUDGE_SCOPE,

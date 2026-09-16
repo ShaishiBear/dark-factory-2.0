@@ -5,6 +5,111 @@
   ],
   "defects": [
     {
+      "id": "preflight-decision-budget-not-applied",
+      "file": "factory_kernel/preflight_prepare.py",
+      "find": "request = replace(request, max_budget_usd=min(reserved, request.max_budget_usd),\n                              timeout_seconds=min(remaining, request.timeout_seconds))",
+      "replace": "request = request",
+      "why": "test_preflight_prepare requires both requests to respect the smaller per-decision dollar and wall reservation."
+    },
+    {
+      "id": "preflight-registration-binding-disabled",
+      "file": "factory_kernel/preflight.py",
+      "find": "value[\"registration_sha256\"] != sha256_value(registration) or value[\"candidates_sha256\"] != sha256_value(pool)",
+      "replace": "False or value[\"candidates_sha256\"] != sha256_value(pool)",
+      "why": "test_preflight rejects criteria changed after the frozen comparison was challenged."
+    },
+    {
+      "id": "preflight-candidate-binding-disabled",
+      "file": "factory_kernel/preflight.py",
+      "find": "or value[\"candidates_sha256\"] != sha256_value(pool):",
+      "replace": "or False:",
+      "why": "test_preflight rejects a candidate rewritten after its assessment."
+    },
+    {
+      "id": "preflight-uncertainty-ignored",
+      "file": "factory_kernel/preflight.py",
+      "find": "blocked |= uncertain",
+      "replace": "blocked |= False if assessment[\"uncertainties\"] else uncertain",
+      "why": "test_preflight retains a plausible reversal on the losing candidate instead of manufacturing dominance."
+    },
+    {
+      "id": "preflight-judgment-promoted-to-dominance",
+      "file": "factory_kernel/preflight.py",
+      "find": "if not blocked and not has_judgment:",
+      "replace": "if not blocked:",
+      "why": "test_preflight permits provisional preferences but does not turn opinions into established Pareto facts."
+    },
+    {
+      "id": "preflight-hard-conflict-traded-away",
+      "file": "factory_kernel/preflight.py",
+      "find": "conflicts = [row[\"id\"] for row in assessment[\"constraints\"] if row[\"status\"] == \"conflict\"]",
+      "replace": "conflicts = []",
+      "why": "test_preflight screens out a constraint conflict even when it has the smallest plan."
+    },
+    {
+      "id": "preflight-registered-priority-ignored",
+      "file": "factory_kernel/preflight.py",
+      "find": "for criterion in policy[\"priorities\"]:",
+      "replace": "for criterion in []:",
+      "why": "test_preflight resolves a real tradeoff only with the registered priority and records why the alternative lost."
+    },
+    {
+      "id": "preflight-baseline-erases-tradeoff",
+      "file": "factory_kernel/preflight.py",
+      "find": "and all(vectors[key] == vectors[remaining[0]] for key in remaining)):",
+      "replace": "and True):",
+      "why": "test_preflight permits baseline preference only on equal assessed dimensions."
+    },
+    {
+      "id": "preflight-replay-identity-unbound",
+      "file": "factory_kernel/preflight_prepare.py",
+      "find": "if record[\"identity\"] != identity or record[\"registration\"] != registration:",
+      "replace": "if record[\"registration\"] != registration:",
+      "why": "test_preflight_prepare refuses a new request key for the same frozen decision."
+    },
+    {
+      "id": "preflight-final-repository-currency-disabled",
+      "file": "factory_kernel/preflight_prepare.py",
+      "find": "if current != review or validate_context(self.context()) != context:",
+      "replace": "if False:",
+      "why": "test_preflight_prepare withholds the handoff when the repository changed during the final challenge."
+    },
+    {
+      "id": "preflight-final-stop-disabled",
+      "file": "factory_kernel/preflight_prepare.py",
+      "find": "def _finish(self, project, command, principal, review, context, record, selected):\n        self.check_stop()",
+      "replace": "def _finish(self, project, command, principal, review, context, record, selected):\n        pass",
+      "why": "test_preflight_prepare checks stop again immediately before emitting an advisory handoff."
+    },
+    {
+      "id": "preflight-unknown-spend-repeated",
+      "file": "factory_kernel/preflight_prepare.py",
+      "find": "if type(cost) not in {int, float} or not math.isfinite(cost) or not 0 <= cost <= reserved:",
+      "replace": "if False:",
+      "why": "test_preflight_prepare never deepens exploration after unknown or over-reserved spend."
+    },
+    {
+      "id": "preflight-total-wall-ignored",
+      "file": "factory_kernel/preflight_prepare.py",
+      "find": "if self.clock() > deadline:",
+      "replace": "if False:",
+      "why": "test_preflight_prepare refuses a challenge returned after the cumulative decision deadline."
+    },
+    {
+      "id": "preflight-handoff-self-qualifies",
+      "file": "factory_kernel/preflight_prepare.py",
+      "find": "\"qualification_status\": \"UNPROVEN\", \"proof_reuse_allowed\": False,\n                \"activation\":",
+      "replace": "\"qualification_status\": \"QUALIFIED\", \"proof_reuse_allowed\": False,\n                \"activation\":",
+      "why": "test_preflight_prepare requires every recommendation to enter normal admission as UNPROVEN."
+    },
+    {
+      "id": "preflight-generated-deep-trigger-ignored",
+      "file": "factory_kernel/preflight_prepare.py",
+      "find": "if set(record[\"observed_signals\"]) & DEEP_SIGNALS:",
+      "replace": "if False:",
+      "why": "test_preflight_prepare stops before more spend when the generated plan exposes a security-sensitive surface."
+    },
+    {
       "id": "evidence-retention-dispatch-failure-masked",
       "file": ".github/workflows/dark-factory-worker.yml",
       "find": "        id: dispatch\n",
