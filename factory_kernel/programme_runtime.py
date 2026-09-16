@@ -86,6 +86,9 @@ class ProgrammeQueue:
         return matches
 
     def completed(self, programme: Programme, item: dict, row: dict) -> bool:
+        return self.completion_receipt(programme, item, row) is not None
+
+    def completion_receipt(self, programme: Programme, item: dict, row: dict) -> dict | None:
         """Issue closure is not proof. Require the kernel's post-merge receipt and run success.
 
         Receipt writers are protected workflow code using Actions' ordinary observation/control
@@ -93,7 +96,7 @@ class ProgrammeQueue:
         It is retained on the issue; seven-day diagnostic artifacts are not completion authority.
         """
         if row.get("state") != "closed":
-            return False
+            return None
         repo = self.github.repository
         number = row["number"]
         for page in range(1, 11):
@@ -140,9 +143,9 @@ class ProgrammeQueue:
                         and run.get("head_branch") == self.default_branch
                         and run.get("event") in {"schedule", "workflow_dispatch"}
                         and run.get("run_attempt") == receipt.get("run_attempt")):
-                    return True
+                    return receipt
             if len(comments) < 100:
-                return False
+                return None
         raise ProgrammeRefused("outcome comments exceed bounded inventory")
 
     def sync(self, check_stop, *, expected_programme: str = "") -> dict:

@@ -30,6 +30,7 @@ from .strategy_rejection import StrategyRejection
 from .github_cli import GitHubClient
 from .programme import ProgrammeRefused, parse_json
 from .programme_runtime import ProgrammeQueue
+from .programme_turnover import review_turnover
 from .publication_currency import CurrencyProtocol, key_from_identity
 from .publication_request import PublicationRequests
 from .publication_source import observe_publication_source
@@ -217,6 +218,12 @@ class FrontDoorApplication:
                 request = self._body(environ)
                 result = self.publications.reserve(self.project, request, principal=self.principal,
                                                    observation=observe_publication_source(self.github))
+                return send("200 OK", result)
+            if method == "POST" and path == "/api/programme-replacement-review":
+                if self.publications is None:
+                    return send("503 Service Unavailable", {"error": "publication requests are not enabled"})
+                result = review_turnover(self.publications, self.github, self.project,
+                                         self._body(environ), principal=self.principal)
                 return send("200 OK", result)
             if method == "POST" and path in {"/api/publication-preview", "/api/strategy-publication-preview", "/api/programme-publish"}:
                 if self.publisher is None:
