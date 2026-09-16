@@ -771,8 +771,8 @@
     {
       "id": "context-worker-brief-reduced-to-hash",
       "file": "factory_kernel/runtime.py",
-      "find": "                    context=self._worker_brief(\n                        paths, contract_hash=contract_hash, issue_context=issue_context\n                    ),\n",
-      "replace": "                    context=f\"Validated contract sha256: {contract_hash}\",\n",
+      "find": "                    context=self._worker_brief(\n                        paths, contract_hash=contract_hash, issue_context=issue_context\n                    ) + planning_advice(admission),\n",
+      "replace": "                    context=f\"Validated contract sha256: {contract_hash}\" + planning_advice(admission),\n",
       "why": "The context worker would again receive only the hash and have to rediscover the whole task from disk, the slowest stage of the first canary."
     },
     {

@@ -63,6 +63,16 @@ class Programme:
     items: tuple[dict, ...]
     app_login: str
     sha256: str
+    strategy: dict | None = None
+
+    def to_input(self) -> dict:
+        """Lossless canonical input, including optional unproven planning advice."""
+        value = {"version": "1.0" if self.strategy is None else "1.1", "spec": deepcopy(self.spec),
+                 "app_login": self.app_login,
+                 "proposal": {"spec_sha256": sha256_value(self.spec), "items": deepcopy(list(self.items))}}
+        if self.strategy is not None:
+            value["strategy"] = deepcopy(self.strategy)
+        return value
 
     def marker(self, item: Mapping) -> str:
         return f"{MARKER}{self.sha256}:{item['id']} -->"
@@ -123,9 +133,13 @@ def compile_spec(raw: Any, *, repository: str) -> dict:
 
 
 def compile_programme(raw: Any, *, repository: str) -> Programme:
-    root = _object(raw, {"version", "spec", "proposal", "app_login"}, "programme input")
-    if root["version"] != "1.0":
-        raise ProgrammeRefused("programme version must be 1.0")
+    version = raw.get("version") if isinstance(raw, dict) else None
+    fields = {"version", "spec", "proposal", "app_login"}
+    if version == "1.1":
+        fields.add("strategy")
+    root = _object(raw, fields, "programme input")
+    if version not in ("1.0", "1.1"):
+        raise ProgrammeRefused("programme version must be 1.0 or 1.1")
     spec = compile_spec(root["spec"], repository=repository)
     acceptance = {ac["id"] for req in spec["requirements"] for ac in req["acceptance"]}
     proposal = _object(root["proposal"], {"spec_sha256", "items"}, "proposal")
@@ -162,8 +176,13 @@ def compile_programme(raw: Any, *, repository: str) -> Programme:
     login = root["app_login"]
     if not isinstance(login, str) or not re.fullmatch(r"[a-zA-Z0-9-]+\[bot\]", login):
         raise ProgrammeRefused("app_login must name the installation's GitHub bot")
-    identity = {"spec": spec, "items": ordered, "app_login": login, "version": "1.0"}
-    result = Programme(spec, tuple(ordered), login, sha256_value(identity))
+    strategy = None
+    identity = {"spec": spec, "items": ordered, "app_login": login, "version": version}
+    if version == "1.1":
+        from .programme_strategy import validate_strategy
+        strategy = validate_strategy(root["strategy"], spec)
+        identity["strategy"] = strategy
+    result = Programme(spec, tuple(ordered), login, sha256_value(identity), strategy)
     for item in ordered:
         result.render(item, {k: 999999999 for k in items})
     return result

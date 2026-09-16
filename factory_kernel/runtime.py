@@ -39,6 +39,7 @@ from .credential_env import scoped_environment
 from .github_cli import GitHubClient
 from .providers import ClaudeCliProvider, prompt_text
 from .programme_runtime import ProgrammeQueue
+from .programme_strategy import planning_advice
 from .independence import (
     authority_inputs,
     build_certificate,
@@ -498,7 +499,7 @@ class KernelRuntime:
         """
         self.check_stop()
         issue = self.github.issue(issue_number)
-        ProgrammeQueue(self.github, self.config.default_branch).admit(issue)
+        admission = ProgrammeQueue(self.github, self.config.default_branch).admit(issue)
         labels = self.github.labels(issue)
         if self.config.labels["accepted"] not in labels:
             raise NeedsHuman(f"issue #{issue_number} is not {self.config.labels['accepted']}")
@@ -561,7 +562,7 @@ class KernelRuntime:
                 base_sha=base_sha,
                 skipped_roles=skipped_roles,
             ):
-                self._agent(role, worktree.path, paths, context=issue_context, env=env)
+                self._agent(role, worktree.path, paths, context=issue_context + planning_advice(admission), env=env)
                 # plan.md / investigation.md are read by no deterministic program, only by the
                 # contract worker. A worker that wrote nothing would otherwise pass silently and
                 # the contract would be drawn from the issue alone (D-028).
@@ -588,7 +589,7 @@ class KernelRuntime:
                     paths,
                     context=self._worker_brief(
                         paths, contract_hash=contract_hash, issue_context=issue_context
-                    ),
+                    ) + planning_advice(admission),
                     env=env,
                 )
                 self._gate_context(paths, worktree.path, env)

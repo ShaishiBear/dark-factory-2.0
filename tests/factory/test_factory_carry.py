@@ -680,7 +680,7 @@ class CarryInBuildIssueTests(unittest.TestCase):
         write_upstream(self.source)
 
     def build(self, *, note: dict | None = None, refuse: set[str] | None = None,
-              expect: type[BaseException] = NeedsHuman):
+              expect: type[BaseException] = NeedsHuman, contexts: dict | None = None):
         gh = FakeGitHub()
         rt = KernelRuntime(repo_root=ROOT, config=self.config)
         rt.github = gh
@@ -699,6 +699,8 @@ class CarryInBuildIssueTests(unittest.TestCase):
 
         def agent(role, cwd, paths, *, context="", env):
             roles.append(role)
+            if contexts is not None:
+                contexts[role] = context
             recorder = holder["recorder"]
             recorder.events.append(f"agent:{role}")
             if role == "test_author":
