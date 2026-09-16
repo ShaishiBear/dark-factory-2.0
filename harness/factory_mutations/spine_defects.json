@@ -269,6 +269,104 @@
       "find": "if spine.get(\"policy_sha256\") != policy.sha256():",
       "replace": "if False and spine.get(\"policy_sha256\") != policy.sha256():",
       "why": "A bundle compiled against a weaker or stale evidence policy could authorize merge."
+    },
+    {
+      "id": "exploration-owner",
+      "file": "factory_kernel/exploration_records.py",
+      "find": "if not isinstance(principal, Principal) or principal.role != \"owner\":",
+      "replace": "if False:",
+      "why": "A proposal principal cannot write exploration events. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-current-intent",
+      "file": "factory_kernel/exploration_records.py",
+      "find": "if approval[\"source_intent_version\"] != latest[\"version\"]:",
+      "replace": "if False:",
+      "why": "New intent cannot inherit an old approval. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-causal-frontier",
+      "file": "factory_kernel/exploration_records.py",
+      "find": "affected = set(changed)",
+      "replace": "affected = set()",
+      "why": "Invalidation must walk recorded causal dependencies. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-probe-falsifier",
+      "file": "factory_kernel/exploration_records.py",
+      "find": "if observation[\"outcome\"] == \"contradicted\":",
+      "replace": "if False:",
+      "why": "A preregistered failed experiment invalidates its exploratory assumption. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-repository-currency",
+      "file": "factory_kernel/exploration.py",
+      "find": "if not allow_stale and session[\"context\"] != self._context():",
+      "replace": "if False:",
+      "why": "Changed repository context prevents a stale handoff. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-shared-budget",
+      "file": "factory_kernel/exploration.py",
+      "find": "if previous and previous[\"limits\"] != request[\"policy\"][\"budget\"]:",
+      "replace": "if False:",
+      "why": "New questions cannot reset the approved-scope budget. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-probe-budget",
+      "file": "factory_kernel/exploration.py",
+      "find": "if budget[\"probe_units\"] + units > budget[\"limits\"][\"probe_units\"]:",
+      "replace": "if False:",
+      "why": "Reserve experiment work before executing it. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-measurement-unit",
+      "file": "factory_kernel/exploration.py",
+      "find": "or criterion[\"unit\"] != target[\"metric\"] or identity in seen",
+      "replace": "or identity in seen",
+      "why": "A result cannot be relabelled into a different measurement unit. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-current-recommendation",
+      "file": "factory_kernel/exploration.py",
+      "find": "if session[\"status\"] != \"recommended\":",
+      "replace": "if False:",
+      "why": "Invalidated recommendations cannot produce a programme handoff. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-pending-work",
+      "file": "factory_kernel/exploration.py",
+      "find": "if any(row[\"status\"] == \"pending\" for row in session[\"reservations\"].values()):\n                raise IntentRefused(\"uncertain reserved work cannot be hidden by a recommendation\")",
+      "replace": "if False:\n                raise IntentRefused(\"uncertain reserved work cannot be hidden by a recommendation\")",
+      "why": "Unknown work cannot be hidden by a recommendation. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-reasoning-budget",
+      "file": "factory_kernel/exploration_reasoner.py",
+      "find": "if budget[\"calls\"] + 1 > budget[\"limits\"][\"calls\"] or budget[\"usd\"] + cap > budget[\"limits\"][\"usd\"]:",
+      "replace": "if False:",
+      "why": "Different sessions share the same cumulative model-call and dollar budget. Detector: tests/factory/test_exploration_reasoner.py"
+    },
+    {
+      "id": "exploration-unknown-spend",
+      "file": "factory_kernel/exploration_reasoner.py",
+      "find": "if budget[\"uncertain\"]:",
+      "replace": "if False:",
+      "why": "Unknown or excess reported spend blocks further calls. Detector: tests/factory/test_exploration_reasoner.py"
+    },
+    {
+      "id": "exploration-reasoning-replay",
+      "file": "factory_kernel/exploration_reasoner.py",
+      "find": "if not created:",
+      "replace": "if False:",
+      "why": "Replayed reasoning must not invoke a provider again. Detector: tests/factory/test_exploration_reasoner.py"
+    },
+    {
+      "id": "exploration-measurements-win",
+      "file": "factory_kernel/exploration_policy.py",
+      "find": "for measurement in observation.get(\"measurements\", []):",
+      "replace": "for measurement in []:",
+      "why": "Later model opinions cannot erase measured experimental results. Detector: tests/factory/test_exploration.py"
     }
   ]
 }
