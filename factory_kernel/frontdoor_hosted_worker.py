@@ -15,7 +15,21 @@ from .frontdoor_intent import IntentRefused, IntentStore
 from .frontdoor_prepare import PreparationRecords, api_provider
 from .github_cli import GitHubClient
 from .frontdoor_control import stop_status
+from .execution_fence import require_execution_open
 from .hosted_exploration_call import SCHEMA as EXPLORATION_SCHEMA, execute as explore
+
+
+def execute_call(store, github, payload, provider):
+    """Called after job authentication; recheck controls immediately before paid work."""
+    def check_stop():
+        if stop_status(github) != {"state": "clear", "issues": []}:
+            raise IntentRefused("hosted preparation requires clear stop")
+        require_execution_open(github)
+
+    check_stop()
+    if payload["schema"] == EXPLORATION_SCHEMA:
+        return explore(payload, provider, check_stop)
+    return PreparationRecords(store, provider, None)._call(payload["role"], payload["prompt"])
 
 
 def authorize_job(environ, event, github):
@@ -69,14 +83,7 @@ def main():
             # No caller-supplied environment, tools or model. Exploration may narrow its
             # spending cap; both paths construct requests under protected role policy.
             store = IntentStore(private / "records", repository=repository, owner=owner)
-            if payload["schema"] == EXPLORATION_SCHEMA:
-                def check_stop():
-                    if stop_status(github) != {"state": "clear", "issues": []}:
-                        raise IntentRefused("hosted exploration requires clear stop")
-                output, telemetry = explore(payload, api_provider(config.provider), check_stop)
-            else:
-                runner = PreparationRecords(store, api_provider(config.provider), None)
-                output, telemetry = runner._call(payload["role"], payload["prompt"])
+            output, telemetry = execute_call(store, github, payload, api_provider(config.provider))
             result = {"request_sha256": sha256_value(payload), "run_id": run_id, "head": head,
                       "output": output, "telemetry": telemetry}
             encrypted = cipher.encrypt(result)

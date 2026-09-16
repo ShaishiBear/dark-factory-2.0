@@ -374,7 +374,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION Ã¯Â¿Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION ÃƒÂ¯Ã‚Â¿Ã‚Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -3406,6 +3406,83 @@
       "find": "\"status\": \"requires-cumulative-ledger\"",
       "replace": "\"status\": \"zero-spend\"",
       "why": "Replacement review must expose verified completion, conflicting execution and cumulative uncertainty without granting activation. Detector: tests/factory/test_programme_turnover.py"
+    },
+    {
+      "id": "execution-fence-presence",
+      "file": "factory_kernel/execution_fence.py",
+      "find": "if result[\"state\"] != \"clear\":",
+      "replace": "if False:",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-protection",
+      "file": "factory_kernel/execution_fence.py",
+      "find": "branch.get(\"protected\") is not True or",
+      "replace": "False or",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-incomplete-tree",
+      "file": "factory_kernel/execution_fence.py",
+      "find": "tree.get(\"truncated\") is not False or",
+      "replace": "False or",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-changed-source",
+      "file": "factory_kernel/execution_fence.py",
+      "find": "latest.get(\"protected\") is not True or latest[\"commit\"][\"sha\"] != revision",
+      "replace": "False",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-kernel-stop",
+      "file": "factory_kernel/runtime.py",
+      "find": "            require_execution_open(self.github, self.config.default_branch)",
+      "replace": "            pass",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-paid-funnel",
+      "file": "factory_kernel/runtime.py",
+      "find": "        self.check_stop()  # Includes judges and certifiers that do not enter through _agent.",
+      "replace": "        pass  # Missing paid-stage control check.",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-late-publication",
+      "file": "factory_kernel/runtime.py",
+      "find": "        self.github.cwd = str(cwd)\n        self.check_stop()\n        self.github.push_branch(branch)",
+      "replace": "        self.github.cwd = str(cwd)\n        self.github.push_branch(branch)",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-retry",
+      "file": "factory_kernel/runtime.py",
+      "find": "        def guarded_retry(attempt):\n            self.check_stop()",
+      "replace": "        def guarded_retry(attempt):\n            pass",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-hosted-call",
+      "file": "factory_kernel/frontdoor_hosted_worker.py",
+      "find": "    check_stop()\n    if payload[\"schema\"] == EXPLORATION_SCHEMA:",
+      "replace": "    if payload[\"schema\"] == EXPLORATION_SCHEMA:",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-hosted-service",
+      "file": "factory_kernel/frontdoor_exploration.py",
+      "find": "    require_execution_open(github)",
+      "replace": "    pass",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-publisher",
+      "file": "factory_kernel/publication_source.py",
+      "find": "if require_execution_open(github) != branch[\"commit\"][\"sha\"]:",
+      "replace": "if False:",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
     }
   ]
 }

@@ -18,6 +18,7 @@ from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 from .config import load_config
 from .decision_history import explain_history
 from .frontdoor_control import stop_status
+from .execution_fence import fence_status
 from .frontdoor_intent import IntentRefused, IntentStore, Principal
 from .frontdoor_programme import prepare_programme
 from .frontdoor_prepare import IntentPreparation, api_provider, protected_repository_context
@@ -104,6 +105,10 @@ class FrontDoorApplication:
             result["stop_observed_at"] = datetime.now(timezone.utc).isoformat()
         except errors:
             result.update(stop=None, stop_observed_at=None)
+        try:
+            result["execution_fence"] = fence_status(self.github)
+        except errors:
+            result["execution_fence"] = None
         try:
             result["execution"] = ProgrammeQueue(self.github, "main").status(self.labels)
             result["execution_observed_at"] = datetime.now(timezone.utc).isoformat()

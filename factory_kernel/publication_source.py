@@ -4,6 +4,7 @@ from __future__ import annotations
 from .frontdoor_control import stop_status
 from .frontdoor_intent import IntentRefused
 from .programme_runtime import ProgrammeQueue
+from .execution_fence import require_execution_open
 
 
 def observe_publication_source(github):
@@ -24,5 +25,7 @@ def observe_publication_source(github):
             or latest_branch["commit"]["sha"] != branch["commit"]["sha"]
             or any(latest_metadata.get(key) != metadata[key] for key in ("full_name", "private", "default_branch"))):
         raise IntentRefused("publication source changed during observation")
+    if require_execution_open(github) != branch["commit"]["sha"]:
+        raise IntentRefused("publication source changed during execution fence observation")
     return {"repository": repository, "visibility": "private" if metadata["private"] else "public",
             "main_sha": branch["commit"]["sha"], "protected": True, "active_input": active, "stop": stop}

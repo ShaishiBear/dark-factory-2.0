@@ -31,13 +31,29 @@ execution retry budget is per issue; a replacement must not gain a fresh allowan
 creating a different issue. The report therefore requires a cumulative execution ledger
 instead of claiming that the exploration budget also covers factory execution.
 
+## Persistent execution fence
+
+Protected main may contain `.factory/programmes/execution-fence.json`. Its presence stops
+new work at the existing kernel stop checkpoints, the common paid-stage funnel (including
+independent judges and provider retries), triage, build publication, continuation/recovery
+and final merge. Hosted preparation/exploration and ordinary programme publication also
+refuse while fenced. Malformed content, symlinks, directories, incomplete observations or
+changing source cannot make the fence permissive. A missing local file has no effect.
+
+The reader cannot create or remove a fence. No fence is created by deploying this change.
+It remains independently observable in the owner interface; historical progress remains
+readable. Presence is global and conservative, matching current single-worker ownership.
+An already running model call may finish; its next checkpoint stops further work. This
+is not the atomic activation lock: the transition still must drain execution and acquire
+the shared workflow ownership before switching. Fence removal needs protected governance.
+
 ## Activation protocol still required
 
 1. Freeze an immutable transition intent bound to old programme, proposed input, approved
    scope, owner event-log head, source revision and completion/budget observations. Scope
    changes require separate current owner approval; this same-scope operation refuses them.
-2. Acquire a persistent execution fence observed at dispatch, each paid effect, publication,
-   recovery and merge. Serialize activation with the canonical worker workflow. Publication
+2. Publish the persistent execution fence and observe it before draining old work.
+   Serialize activation with the canonical worker workflow. Publication
    currently uses a different concurrency group; a quiet observation cannot bridge that race.
 3. Drain old execution and reconcile every pending or ambiguous external effect. Retire
    pending work through exact identity-bound, journaled effects; never retry an uncertain
