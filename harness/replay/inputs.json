@@ -1,0 +1,187 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "contract-valid",
+      "group": "contract-fixture",
+      "split": "development",
+      "adapter": "contract",
+      "inputs": {
+        "contract": {
+          "version": "2.0",
+          "issue": {
+            "number": 42,
+            "title": "Show the source timestamp"
+          },
+          "summary": "Render the source timestamp beside each citation.",
+          "behaviors": [
+            {
+              "id": "AC-1",
+              "given": "an answer with a timestamped citation",
+              "when": "the answer is rendered",
+              "then": "the citation shows its timestamp",
+              "seam": "CitationModal"
+            }
+          ],
+          "invariants": [
+            "Authentication remains required"
+          ],
+          "out_of_scope": [
+            "No new content sources"
+          ],
+          "risks": [],
+          "ambiguities": []
+        }
+      }
+    },
+    {
+      "id": "contract-ambiguous",
+      "group": "contract-fixture",
+      "split": "development",
+      "adapter": "contract",
+      "inputs": {
+        "contract": {
+          "version": "2.0",
+          "issue": {
+            "number": 42,
+            "title": "Show the source timestamp"
+          },
+          "summary": "Render the source timestamp beside each citation.",
+          "behaviors": [
+            {
+              "id": "AC-1",
+              "given": "an answer with a timestamped citation",
+              "when": "the answer is rendered",
+              "then": "the citation shows its timestamp",
+              "seam": "CitationModal"
+            }
+          ],
+          "invariants": [
+            "Authentication remains required"
+          ],
+          "out_of_scope": [
+            "No new content sources"
+          ],
+          "risks": [],
+          "ambiguities": [
+            "Which timestamp format?"
+          ]
+        }
+      }
+    },
+    {
+      "id": "repro-observed",
+      "group": "repro-fixture",
+      "split": "development",
+      "adapter": "repro",
+      "inputs": {
+        "repro": {
+          "version": "1.0",
+          "argv": [
+            "python",
+            "-m",
+            "pytest",
+            "tests/test_citation.py"
+          ],
+          "cwd": ".",
+          "expect_failure_containing": "missing timestamp"
+        },
+        "returncode": 1,
+        "stdout": "AssertionError: missing timestamp"
+      }
+    },
+    {
+      "id": "repro-passes",
+      "group": "repro-fixture",
+      "split": "development",
+      "adapter": "repro",
+      "inputs": {
+        "repro": {
+          "version": "1.0",
+          "argv": [
+            "python",
+            "-m",
+            "pytest",
+            "tests/test_citation.py"
+          ],
+          "cwd": ".",
+          "expect_failure_containing": "missing timestamp"
+        },
+        "returncode": 0,
+        "stdout": "1 passed"
+      }
+    },
+    {
+      "id": "lease-fresh",
+      "group": "lease-fixture",
+      "split": "development",
+      "adapter": "lease",
+      "inputs": {
+        "now": "2026-09-16T12:00:00+00:00",
+        "accepted": true,
+        "updated": "2026-09-16T10:00:00+00:00",
+        "lease": {
+          "state": "active",
+          "heartbeat_at": "2026-09-16T11:59:00+00:00"
+        },
+        "marker_seen": true,
+        "handoff": "none",
+        "active_ttl": 600,
+        "legacy_ttl": 3600
+      }
+    },
+    {
+      "id": "lease-expired",
+      "group": "lease-fixture",
+      "split": "development",
+      "adapter": "lease",
+      "inputs": {
+        "now": "2026-09-16T12:00:00+00:00",
+        "accepted": true,
+        "updated": "2026-09-16T10:00:00+00:00",
+        "lease": {
+          "state": "active",
+          "heartbeat_at": "2026-09-16T10:00:00+00:00"
+        },
+        "marker_seen": true,
+        "handoff": "none",
+        "active_ttl": 600,
+        "legacy_ttl": 3600
+      }
+    },
+    {
+      "id": "validation-happy",
+      "group": "validation-fixture",
+      "split": "development",
+      "adapter": "validation",
+      "inputs": {}
+    },
+    {
+      "id": "validation-architecture",
+      "group": "validation-fixture",
+      "split": "development",
+      "adapter": "validation",
+      "inputs": {
+        "reject": "architecture-holdout"
+      }
+    },
+    {
+      "id": "validation-bad-ancestry",
+      "group": "validation-fixture",
+      "split": "development",
+      "adapter": "validation",
+      "inputs": {
+        "pack_base_is_ancestor": false
+      }
+    },
+    {
+      "id": "validation-post-merge",
+      "group": "validation-fixture",
+      "split": "development",
+      "adapter": "validation",
+      "inputs": {
+        "fail": "merge_verify.py:post"
+      }
+    }
+  ]
+}
