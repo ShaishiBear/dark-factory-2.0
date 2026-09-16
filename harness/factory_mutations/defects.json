@@ -2888,6 +2888,76 @@
       "find": "if not (row[\"kind\"] == \"protected_path\" and row[\"path\"] == ACTIVE_PATH)",
       "replace": "if False",
       "why": "Publication never erases unrelated secret, path or ratchet findings."
+    },
+    {
+      "id": "publication-effect-stop-bypassed",
+      "file": "factory_kernel/publication_effects.py",
+      "find": "or observation[\"stop\"] != {\"state\": \"clear\", \"issues\": []}",
+      "replace": "or False",
+      "why": "A stop between branch and commit must prevent the next spend."
+    },
+    {
+      "id": "publication-effect-currency-bypassed",
+      "file": "factory_kernel/publication_effects.py",
+      "find": "if any(result.get(key) != value for key, value in expected.items()):",
+      "replace": "if False:",
+      "why": "Fresh authentication for another payload cannot authorize a write."
+    },
+    {
+      "id": "publication-effect-journal-too-late",
+      "file": "factory_kernel/publication_effects.py",
+      "find": "        self._save()  # A failed durable write means no POST.\n",
+      "replace": "",
+      "why": "Every effect must have durable pending evidence before POST."
+    },
+    {
+      "id": "publication-effect-uncertain-replayed",
+      "file": "factory_kernel/publication_effects.py",
+      "find": "if any(row[\"phase\"] == phase or row[\"state\"] != \"observed\" for row in self.record[\"effects\"]):",
+      "replace": "if False:",
+      "why": "An ambiguous POST cannot be repeated after a lost response."
+    },
+    {
+      "id": "publication-effect-required-authority-omitted",
+      "file": "factory_kernel/publication_effects.py",
+      "find": "or not {\"quick-authority\", \"trust-root-authority\"}.issubset({row.get(\"name\") for row in checks})",
+      "replace": "or False",
+      "why": "Passing unrelated checks cannot stand in for both required authorities."
+    },
+    {
+      "id": "publication-effect-merge-tree-unchecked",
+      "file": "factory_kernel/publication_effects.py",
+      "find": "or actual.get(\"tree\", {}).get(\"sha\") != expected.get(\"tree\", {}).get(\"sha\")",
+      "replace": "or False",
+      "why": "A different merged tree cannot receive a publication receipt."
+    },
+    {
+      "id": "publication-effect-merge-parent-unchecked",
+      "file": "factory_kernel/publication_effects.py",
+      "find": "or [row.get(\"sha\") for row in actual.get(\"parents\", [])] != [self.manifest[\"source_sha\"]]",
+      "replace": "or False",
+      "why": "The merged parent must be the exact approved protected source."
+    },
+    {
+      "id": "publication-effect-replay-allowed",
+      "file": "factory_kernel/publication_worker.py",
+      "find": "if len(matches) != 1 or matches[0].get(\"id\") != run_id or matches[0].get(\"run_attempt\") != 1:",
+      "replace": "if False:",
+      "why": "A second dispatch or rerun cannot reacquire authority."
+    },
+    {
+      "id": "publication-effect-public-secret-unchecked",
+      "file": "factory_kernel/publication_worker.py",
+      "find": "if secret_findings([(\"approved-programme\", canonical_bytes(manifest).decode(\"utf-8\"))]):",
+      "replace": "if False:",
+      "why": "Approved scope containing a high-confidence secret must not become a public artifact."
+    },
+    {
+      "id": "publication-effect-uncertain-merge-uncontained",
+      "file": "factory_kernel/publication_worker.py",
+      "find": "if phase == \"merge\" and publisher is not None and publisher.journal.record[\"effects\"]:",
+      "replace": "if False:",
+      "why": "An uncertain or unverified merge must request containment once."
     }
   ]
 }
