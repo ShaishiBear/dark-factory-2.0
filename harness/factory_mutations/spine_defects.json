@@ -5,6 +5,62 @@
   ],
   "defects": [
     {
+      "id": "claim-explanation-stale-identity-hidden",
+      "file": "factory_kernel/claim_explanation.py",
+      "find": "\"current\" if recorded_value == expected_value else \"stale\"",
+      "replace": "\"current\" if True else \"stale\"",
+      "why": "tests/factory/test_claim_explanation.py must expose wrong revisions and stale spine policy."
+    },
+    {
+      "id": "claim-explanation-dependency-propagation-disabled",
+      "file": "factory_kernel/claim_explanation.py",
+      "find": "if state == \"stale\" or prior[\"recorded_dependency_status\"] == \"stale\":",
+      "replace": "if False:",
+      "why": "tests/factory/test_claim_explanation.py must propagate changed inputs through actual spine edges."
+    },
+    {
+      "id": "claim-explanation-forged-authority-hidden",
+      "file": "factory_kernel/claim_explanation.py",
+      "find": "gaps.append(\"authority-envelope-mismatch\")",
+      "replace": "pass",
+      "why": "tests/factory/test_claim_explanation.py coherently rehashes a forged authority and still requires a gap."
+    },
+    {
+      "id": "claim-explanation-self-certification-hidden",
+      "file": "factory_kernel/claim_explanation.py",
+      "find": "gaps.append(\"independent-origin-unestablished\")",
+      "replace": "pass",
+      "why": "tests/factory/test_claim_explanation.py detects a builder judgement rewrapped as independent certification."
+    },
+    {
+      "id": "claim-explanation-missing-evidence-hidden",
+      "file": "factory_kernel/claim_explanation.py",
+      "find": "gaps.append(\"artifact-\" + status)",
+      "replace": "pass",
+      "why": "tests/factory/test_claim_explanation.py requires absent and tampered bytes to remain explicit."
+    },
+    {
+      "id": "claim-explanation-unknown-current-identity-hidden",
+      "file": "factory_kernel/claim_explanation.py",
+      "find": "gaps.append(\"current-claim-identity-unavailable\")",
+      "replace": "pass",
+      "why": "tests/factory/test_claim_explanation.py distinguishes omitted current identity from observed equality."
+    },
+    {
+      "id": "decision-history-owner-visibility-disabled",
+      "file": "factory_kernel/decision_history.py",
+      "find": "if principal.role != \"owner\":",
+      "replace": "if False:",
+      "why": "tests/factory/test_decision_history.py must prevent proposal principals from reading private history."
+    },
+    {
+      "id": "decision-history-replayed-event-accepted",
+      "file": "factory_kernel/decision_history.py",
+      "find": "if key in seen or command.get(\"expected_project_version\") != event[\"project_version\"] - 1:",
+      "replace": "if False:",
+      "why": "tests/factory/test_decision_history.py rejects duplicate events even after the chain is rehashed."
+    },
+    {
       "id": "provenance-exact-head-binding-disabled",
       "file": "factory_kernel/provenance.py",
       "find": "if expected_head_sha is not None and head != expected_head_sha:",
