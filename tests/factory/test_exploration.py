@@ -120,6 +120,11 @@ class ExplorationTests(unittest.TestCase):
         history = explain_history(self.store, "citations", principal=OWNER)
         self.assertEqual(history["exploration"], result)
         self.assertEqual(len(result["sessions"]["lookup"]["candidates"]), 2)
+        review = self.engine.prepare_handoff("citations", "lookup", expected_project_version=result["project_version"], principal=OWNER)
+        self.assertEqual(review["input_sha256"], handoff["input_sha256"])
+        self.assertEqual(review["programme_sha256"], handoff["programme_sha256"])
+        self.assertEqual(review["exploration"]["strategy"]["id"], "index")
+        self.assertEqual(review["activation"], "requires-protected-main-review")
 
     def test_restart_replay_does_not_repeat_probe_or_reset_spend(self):
         self.add()
@@ -187,6 +192,10 @@ class ExplorationTests(unittest.TestCase):
         self.rehash()
         with self.assertRaisesRegex(IntentRefused, "repository changed"):
             self.engine.handoff("citations", command, principal=OWNER)
+        self.engine.reopen("citations", self.command({"reason": "The source changed; reassess retained strategies."}), principal=OWNER)
+        result = self.inspect()["comparison"]
+        self.assertFalse(result["sufficient_support"])
+        self.assertEqual(result["candidates"]["scan"]["values"]["lookup"]["kind"], "stale-prediction")
 
     def test_handoff_replay_cannot_restore_invalidated_recommendation(self):
         self.add()
@@ -197,6 +206,8 @@ class ExplorationTests(unittest.TestCase):
             "observation": "The selection premise is false.", "source": "Owner observation."}), principal=OWNER)
         with self.assertRaisesRegex(IntentRefused, "current recommendation"):
             self.engine.handoff("citations", command, principal=OWNER)
+        with self.assertRaisesRegex(IntentRefused, "no current"):
+            self.engine.prepare_handoff("citations", "lookup", expected_project_version=self.command({})["expected_project_version"], principal=OWNER)
 
     def test_concurrent_project_change_keeps_result_pending_without_false_observation(self):
         self.add()

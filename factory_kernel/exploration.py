@@ -5,6 +5,7 @@ from copy import deepcopy
 
 from .canonical import sha256_value
 from .frontdoor_intent import IntentRefused, _shape, _text, _texts
+from .frontdoor_programme import prepare_programme
 from .programme import compile_programme
 from .exploration_policy import comparison, validate_addition, validate_policy, validate_predictions
 from .exploration_probe import METRICS, run_probe, validate_probe
@@ -288,3 +289,33 @@ class Exploration:
                 "activation": "requires-normal-publication-admission-and-fresh-qualification"}
 
         return self._append(project, principal, command, "handoff", transition)[0]
+
+    def prepare_handoff(self, project, session_id, *, expected_project_version, principal):
+        """Revalidate stored recommendation and use the existing review/admission input seam.
+
+        This exports a proposal, never a publication capability. The publisher must still
+        obtain its normal exact-input owner consent and recheck currency before effects.
+        """
+        self.check_stop()
+        state, approval = self.records.read(project, principal)
+        if type(expected_project_version) is not int or expected_project_version != state["project_version"]:
+            raise IntentRefused("stale project version before handoff preparation")
+        session = self._session(state, approval, session_id)
+        if session["status"] != "recommended" or not session["handoffs"]:
+            raise IntentRefused("no current stored exploration handoff")
+        handoff = session["handoffs"][-1]
+        if handoff["recommendation_sha256"] != sha256_value(session["recommendations"][-1]):
+            raise IntentRefused("handoff recommendation was superseded")
+        review = prepare_programme(self.records.store, project, {
+            "expected_project_version": expected_project_version, "approval_version": approval["project_version"],
+            "spec_sha256": approval["spec_sha256"], "proposal": deepcopy(handoff["input"]["proposal"])},
+            principal=principal, app_login=self.app_login)
+        if review["input_sha256"] != handoff["input_sha256"] or review["programme_sha256"] != handoff["programme_sha256"]:
+            raise IntentRefused("stored handoff does not match the current programme compiler")
+        self.check_stop()
+        if self._context() != session["context"]:
+            raise IntentRefused("repository changed during handoff preparation")
+        return {**review, "exploration": {"session_id": session_id, "handoff_sha256": sha256_value(handoff),
+            "recommendation_sha256": handoff["recommendation_sha256"], "strategy": deepcopy(handoff["strategy"]),
+            "claim_ids": handoff["claim_ids"], "qualification_status": "UNPROVEN", "proof_reuse_allowed": False,
+            "strategy_enforcement": "advisory-sidecar-not-consumed-by-current-factory-workers"}}

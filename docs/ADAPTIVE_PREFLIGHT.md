@@ -174,6 +174,11 @@ input and hash, candidate/strategy, recommendation hash, exploratory claim IDs, 
 binding and repository context. It is explicitly `UNPROVEN`, with proof reuse false and
 normal publication/admission/fresh qualification required.
 
+`prepare_handoff(project, session_id, expected_project_version=..., principal=...)`
+revalidates the stored current recommendation and invokes the existing `prepare_programme`
+adapter. It returns that ordinary programme-review shape with a separate `exploration`
+sidecar. Publication still needs its normal exact-input owner consent and fresh checks.
+
 The standard programme input remains `{version, spec, proposal, app_login}`. Its partition
 and ordering can reflect exploration. The richer selected-strategy record is an advisory
 sidecar; current publication and factory workers do not yet consume that sidecar. Therefore

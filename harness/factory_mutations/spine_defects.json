@@ -367,6 +367,27 @@
       "find": "for measurement in observation.get(\"measurements\", []):",
       "replace": "for measurement in []:",
       "why": "Later model opinions cannot erase measured experimental results. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-handoff-export",
+      "file": "factory_kernel/exploration.py",
+      "find": "if session[\"status\"] != \"recommended\" or not session[\"handoffs\"]:",
+      "replace": "if False:",
+      "why": "A changed context or invalidated recommendation must not be exported as current. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-replay-currency",
+      "file": "factory_kernel/exploration_records.py",
+      "find": "replay_guard(projection(events), approved_scope(self.store, events), old[\"payload\"])",
+      "replace": "pass  # stale replay guard removed",
+      "why": "A changed context or invalidated recommendation must not be exported as current. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-stale-prediction",
+      "file": "factory_kernel/exploration_policy.py",
+      "find": "if stale_prediction:",
+      "replace": "if False:",
+      "why": "A changed context or invalidated recommendation must not be exported as current. Detector: tests/factory/test_exploration.py"
     }
   ]
 }
