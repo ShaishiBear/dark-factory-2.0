@@ -20,7 +20,7 @@ from .decision_history import explain_history
 from .frontdoor_control import stop_status
 from .frontdoor_intent import IntentRefused, IntentStore, Principal
 from .frontdoor_programme import prepare_programme
-from .frontdoor_prepare import IntentPreparation, api_provider, repository_context
+from .frontdoor_prepare import IntentPreparation, api_provider, protected_repository_context
 from .frontdoor_synthesis import ProgrammePreparation
 from .frontdoor_hosted import AgeCipher, HostedPreparationProvider
 from .github_cli import GitHubClient
@@ -304,8 +304,9 @@ def main():
         provider = HostedPreparationProvider(store, github, AgeCipher(args.hosted_preparation_identity))
     elif args.enable_preparation:
         provider = api_provider(config.provider)
-    preparer = IntentPreparation(store, provider, lambda: repository_context(Path.cwd())) if provider else None
-    synthesizer = ProgrammePreparation(store, provider, lambda: repository_context(Path.cwd()),
+    context = lambda: protected_repository_context(github)
+    preparer = IntentPreparation(store, provider, context) if provider else None
+    synthesizer = ProgrammePreparation(store, provider, context,
                                       app_login=args.app_login) if provider else None
     publication_requests = PublicationRequests(store, app_login=args.app_login,
         strategy_reviews=StoredStrategyReviews(store, github, app_login=args.app_login)

@@ -3049,6 +3049,48 @@
       "find": "\"sha256\": sha256_value(strategy),",
       "replace": "\"sha256\": sha256_value(strategy[\"candidate\"]),",
       "why": "Assumptions, uncertainty and source references are part of strategy review identity."
+    },
+    {
+      "id": "preparation-context-after-proposer",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "            draft = validate_draft(draft, self.store.repository)\n            self._check_context(source[\"repository_context\"])",
+      "replace": "            draft = validate_draft(draft, self.store.repository)",
+      "why": "Current protected facts must bind hosted preparation without stale output or repeated spend. Detector: tests/factory/test_frontdoor_repository.py"
+    },
+    {
+      "id": "preparation-context-after-auditor",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "            audit = validate_audit(audit, draft)\n            self._check_context(source[\"repository_context\"])",
+      "replace": "            audit = validate_audit(audit, draft)",
+      "why": "Current protected facts must bind hosted preparation without stale output or repeated spend. Detector: tests/factory/test_frontdoor_repository.py"
+    },
+    {
+      "id": "preparation-context-after-synthesis",
+      "file": "factory_kernel/frontdoor_synthesis.py",
+      "find": "            self._check_context(source[\"repository_context\"])",
+      "replace": "            pass",
+      "why": "Current protected facts must bind hosted preparation without stale output or repeated spend. Detector: tests/factory/test_frontdoor_repository.py"
+    },
+    {
+      "id": "preparation-context-content-binding",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "if sha256_value(self.context()) != sha256_value(original):",
+      "replace": "if self.context()[\"commit\"] != original[\"commit\"]:",
+      "why": "Current protected facts must bind hosted preparation without stale output or repeated spend. Detector: tests/factory/test_frontdoor_repository.py"
+    },
+    {
+      "id": "preparation-context-total-bound",
+      "file": "factory_kernel/frontdoor_prepare.py",
+      "find": "if sum(len(value.encode(\"utf-8\")) for value in files.values()) > 100000:",
+      "replace": "if False:",
+      "why": "Current protected facts must bind hosted preparation without stale output or repeated spend. Detector: tests/factory/test_frontdoor_repository.py"
+    },
+    {
+      "id": "preparation-context-hosted-wiring",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "context = lambda: protected_repository_context(github)",
+      "replace": "context = lambda: {\"commit\": \"0\" * 40, \"files\": {}}",
+      "why": "Current protected facts must bind hosted preparation without stale output or repeated spend. Detector: tests/factory/test_frontdoor_repository.py"
     }
   ]
 }

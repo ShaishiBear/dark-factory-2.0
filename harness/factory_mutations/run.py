@@ -198,6 +198,7 @@ COPY_FILES = (
     "tests/factory/test_control_issue.py",
     "tests/factory/test_frontdoor_http.py",
     "tests/factory/test_frontdoor_prepare.py",
+    "tests/factory/test_frontdoor_repository.py",
     "tests/factory/test_frontdoor_synthesis.py",
     "tests/factory/test_publication_request.py",
     "tests/factory/test_publication_source.py",
