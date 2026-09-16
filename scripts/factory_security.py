@@ -14,7 +14,8 @@ from pathlib import Path
 # PR worktree, so a PR's copy of this program is never the authority that judges it (D-036).
 ROOT = Path.cwd().resolve()
 # New authorities are imported from beside this trusted program, never the tree under test.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
 BACKEND_MANIFEST = "app/backend/pyproject.toml"
 BACKEND_LOCK = "app/backend/uv.lock"
 FRONTEND_MANIFEST = "app/frontend/package.json"
