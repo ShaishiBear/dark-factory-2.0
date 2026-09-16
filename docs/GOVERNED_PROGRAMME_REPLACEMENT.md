@@ -104,3 +104,40 @@ authenticated reservation exchange, exact worker/run/generation bindings, and co
 every paid path (including diagnostics). Unknown historical/failed spending also needs an
 independent reconciliation mechanism before it can resume. Until these are connected and
 verified, replacement continues to require a cumulative execution ledger and stays blocked.
+
+## Authenticated worker reservation exchange
+
+`POST /api/execution-reservation` authenticates a bounded, nonce-bound HMAC envelope before
+reading the ledger or GitHub. Its key and message domains differ from read-only publication
+currency. The endpoint has no approval, allowance-increase, refund or replacement operation;
+an owner bearer alone cannot invoke it. The client uses the protected fixed origin, refuses
+redirects and never retries a mutating request automatically.
+
+Each call binds repository, project, original worker run/attempt, exact source revision,
+programme, role, reservation bound and request digest. The server independently reads the
+canonical worker workflow, run, actor, triggering actor and complete dispatch-job inventory.
+Reservation and start require a running first-attempt main workflow, current programme,
+clear stop/fence and matching protected service authority code. The host caches only source
+equality for an immutable Git revision; live controls and run state are read again.
+
+There are three operations:
+
+1. **Reserve:** charge capacity durably. Repetition returns historical status only.
+2. **Start:** consume that exact reservation once, using its stored original owner-log
+   version. A worker cannot substitute a later version after the owner changes decisions.
+   A lost start response remains consumed and cannot mint another execution grant.
+3. **Observe:** append the authenticated worker's reported result without refund. Exact
+   history may be read again; conflicting observations refuse. A completed run or a newly
+   active stop may still record charges for its own previously started call.
+
+The client adapter starts a provider only after verified reserve/start responses. Unknown
+retry spending refuses; crashes or lost responses retain charges. Host authentication is
+removed from the parent environment before source reads and stripped from all deterministic
+and model child environments. No prompt or owner wording crosses this exchange.
+
+This adds the transport and client adapter. **Canonical worker and diagnostic invocation
+wiring remains outstanding; deploying the endpoint alone does not establish total coverage.**
+Reported CLI cost also remains worker telemetry, not independently reconciled provider
+billing. Protected role dollar flags are existing backstops; a hard billed-spend guarantee
+needs provider-side limits and/or independently verified metering. The exchange does not
+upgrade estimates into billing authority or historical spending into zero.

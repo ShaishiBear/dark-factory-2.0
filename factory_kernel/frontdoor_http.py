@@ -20,6 +20,8 @@ from .decision_history import explain_history
 from .frontdoor_control import stop_status
 from .execution_fence import fence_status
 from .execution_budget import ExecutionBudget
+from .execution_exchange import ExecutionProtocol, ExecutionExchange
+from .execution_authority import ExecutionAuthority
 from .frontdoor_intent import IntentRefused, IntentStore, Principal
 from .frontdoor_programme import prepare_programme
 from .frontdoor_prepare import IntentPreparation, api_provider, protected_repository_context
@@ -70,6 +72,9 @@ class FrontDoorApplication:
         self.token_hash = hashlib.sha256(token.encode()).digest()
         self.principal = Principal(store.owner, "owner")
         self.execution_budget = ExecutionBudget(store)
+        self.execution_protocol = (ExecutionProtocol(publication_key, repository=store.repository, project=project)
+                                   if publication_key is not None else None)
+        self.execution_exchange = ExecutionExchange(self.execution_budget, project, self.principal, ExecutionAuthority(github))
         store.snapshot(project, principal=self.principal)  # validate configured project before serving
 
     def _authenticated(self, environ):
@@ -159,6 +164,16 @@ class FrontDoorApplication:
         if method == "GET" and path in assets:
             name, mime = assets[path]
             return send("200 OK", (ASSETS / name).read_bytes(), mime)
+        if method == "POST" and path == "/api/execution-reservation" and self.execution_protocol is not None:
+            if environ.get("HTTP_ORIGIN") != self.origin:
+                return send("403 Forbidden", {"error": "same-origin execution exchange required"})
+            try:
+                result = self.execution_protocol.answer(self._body(environ), service=self.execution_exchange)
+                return send("200 OK", result)
+            except (IntentRefused, ProgrammeRefused, UnicodeError, ValueError):
+                return send("409 Conflict", {"error": "execution reservation refused"})
+            except (RuntimeError, OSError, KeyError, TypeError, subprocess.SubprocessError):
+                return send("503 Service Unavailable", {"error": "execution reservation unavailable"})
         if method == "POST" and path == "/api/publication-currency" and self.currency is not None:
             try:
                 # Read-only shared-key route: it cannot create owner requests. Authenticate

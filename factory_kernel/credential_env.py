@@ -6,6 +6,7 @@ import time
 from typing import Mapping
 
 GITHUB_CREDENTIALS = ("GH_TOKEN", "GITHUB_TOKEN")
+HOST_AUTH_CREDENTIALS = ("FRONTDOOR_AGE_IDENTITY",)
 # The autonomous identity: a short-lived GitHub App installation token, minted per job. It is a
 # capability, not an ambient credential, and it is deliberately NOT one of GITHUB_CREDENTIALS --
 # `scope="github"` must never carry it. Only the three GitHub mutations that need normal event
@@ -70,6 +71,7 @@ def identity_age_seconds(
 def _sensitive(name: str) -> bool:
     return (
         name in GITHUB_CREDENTIALS
+        or name in HOST_AUTH_CREDENTIALS
         or name == GITHUB_MUTATION_CREDENTIAL
         # Not a secret, but it belongs to the identity: stripped by default and put back only
         # for `github-mutation`, so the age of a token can only be read where the token is.

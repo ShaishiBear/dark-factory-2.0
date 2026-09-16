@@ -61,9 +61,14 @@ def projection(events):
         elif kind == "reserved":
             if result["allowance"] is None or data["id"] in result["reservations"]:
                 raise IntentRefused("execution reservation history is invalid")
-            result["reservations"][data["id"]] = {**deepcopy(data), "observation": None}
+            result["reservations"][data["id"]] = {**deepcopy(data), "started": None, "observation": None}
             result["reserved_microusd"] += data["microusd"]
             result["calls"] += 1
+        elif kind == "started":
+            row = result["reservations"].get(data["id"])
+            if row is None or row["started"] is not None or row["observation"] is not None:
+                raise IntentRefused("execution start history is invalid")
+            row["started"] = deepcopy(data)
         elif kind == "observed":
             row = result["reservations"].get(data["id"])
             if row is None or row["observation"] is not None:
@@ -219,7 +224,7 @@ class ExecutionBudget:
             if source != observe():
                 raise IntentRefused("execution source changed before reservation")
             data = {**request, "id": command["idempotency_key"], "source_sha": source["main_sha"],
-                    "spec_sha256": approval["spec_sha256"]}
+                    "spec_sha256": approval["spec_sha256"], "reserved_project_version": len(events) + 1}
             state = self._append(path, events, principal, command, "reserved", data)
             return {"state": state, "execute": True}
 
@@ -242,6 +247,25 @@ class ExecutionBudget:
             if row is None or row["observation"] is not None:
                 raise IntentRefused("execution reservation missing or already observed")
             return self._append(path, events, principal, command, "observed", deepcopy(request))
+
+    def start(self, project, command, *, principal):
+        """Consume one remote reservation durably. A lost response cannot be reissued."""
+        self._owner(principal)
+        command = self._command(command)
+        _shape(command["request"], {"id", "execution_id"})
+        with self.store._locked(project) as path:
+            events = self.store._read(path)
+            if self._replay(events, command, "started") is not None:
+                return {"state": projection(events), "execute": False}
+            approval = approved_scope(self.store, events)
+            row = projection(events)["reservations"].get(command["request"]["id"])
+            if (row is None or row["execution_id"] != command["request"]["execution_id"]
+                    or row["reserved_project_version"] != command["expected_project_version"]
+                    or row["spec_sha256"] != approval["spec_sha256"]
+                    or row["started"] is not None or row["observation"] is not None):
+                raise IntentRefused("execution reservation cannot be started")
+            state = self._append(path, events, principal, command, "started", deepcopy(command["request"]))
+            return {"state": state, "execute": True}
 
     def run(self, project, *, principal, provider, request, observe_source,
             programme_sha256, execution_id, attempt, reservation_id, transcript=None):
