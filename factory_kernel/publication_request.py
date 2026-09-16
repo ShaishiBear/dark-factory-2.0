@@ -22,8 +22,9 @@ REQUEST_LIFETIME = timedelta(hours=1)
 
 
 class PublicationRequests:
-    def __init__(self, store, *, app_login, clock=None):
+    def __init__(self, store, *, app_login, clock=None, strategy_reviews=None):
         self.store, self.app_login = store, app_login
+        self.strategy_reviews = strategy_reviews
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.directory = store.directory / "publication-requests"
         if self.directory.is_symlink():
@@ -34,6 +35,14 @@ class PublicationRequests:
         self.store._authorize(principal)
         if principal.role != "owner":
             raise IntentRefused("only the authenticated owner may request publication")
+
+    def review(self, project, request, *, principal):
+        self._owner(principal)
+        if isinstance(request, dict) and "exploration" in request:
+            if self.strategy_reviews is None:
+                raise IntentRefused("strategy publication is not enabled")
+            return self.strategy_reviews.resolve(project, request, principal=principal)
+        return prepare_programme(self.store, project, request, principal=principal, app_login=self.app_login)
 
     def _path(self, project, request_id):
         if not isinstance(project, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", project):
@@ -77,8 +86,7 @@ class PublicationRequests:
         self._owner(principal)
         _shape(command, {"request_id", "review", "destination"})
         path = self._path(project, command["request_id"])
-        review = prepare_programme(self.store, project, command["review"],
-                                   principal=principal, app_login=self.app_login)
+        review = self.review(project, command["review"], principal=principal)
         destination = command["destination"]
         _shape(destination, {"repository", "visibility", "input_sha256"})
         self._observation(observation)
@@ -160,8 +168,23 @@ class PublicationRequests:
             if (sha256_value(record["input"]) != record["input_sha256"]
                     or compiled.sha256 != record["programme_sha256"]):
                 raise IntentRefused("publication payload changed")
-            return {"request_id": request_id, "request_sha256": sha256_value(record),
+            result = {"request_id": request_id, "request_sha256": sha256_value(record),
                     "repository": self.store.repository, "project": project,
                     "project_version": record["project_version"], "main_sha": observation["main_sha"],
                     "input_sha256": record["input_sha256"], "programme_sha256": compiled.sha256,
                     "expires_at": record["expires_at"], "decision": "current-owner-request"}
+        # Regeneration may perform remote reads and acquire the intent lock. Keep it
+        # outside this lock, then fence the owner state and lifetime again before returning.
+        review = self.review(project, record["identity"]["command"]["review"], principal=principal)
+        if (review["input_sha256"] != record["input_sha256"]
+                or review["programme_sha256"] != record["programme_sha256"]
+                or review["input"] != record["input"]):
+            raise IntentRefused("current canonical review differs from the consented publication")
+        with self.store._locked(project) as path:
+            after = self.store._read(path)
+            if (len(after) != record["project_version"] or not after
+                    or sha256_value(after[-1]) != record["intent_head_sha256"]):
+                raise IntentRefused("owner decisions changed during publication regeneration")
+            if not datetime.fromisoformat(record["created_at"]) <= self.clock() < datetime.fromisoformat(record["expires_at"]):
+                raise IntentRefused("publication request expired during regeneration")
+        return result

@@ -212,6 +212,7 @@ COPY_FILES = (
     "tests/factory/test_publication_worker.py",
     "tests/factory/test_publication_dispatch.py",
     "tests/factory/test_publication_dispatch_http.py",
+    "tests/factory/test_publication_strategy.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",
     "tests/factory/test_factory_github_e2e_bootstrap.py",

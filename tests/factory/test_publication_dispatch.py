@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from factory_kernel.canonical import sha256_value
 from factory_kernel.frontdoor_intent import IntentRefused, IntentStore, Principal
@@ -116,7 +116,7 @@ class PublicationDispatchTests(unittest.TestCase):
             self.write("add-exploration", {"wording": "A new owner decision"})
             return "encrypted"
         self.cipher.encrypt.side_effect = encrypt
-        with self.assertRaisesRegex(IntentRefused, "owner decisions changed"):
+        with self.assertRaisesRegex(IntentRefused, "current owner decisions|owner decisions changed"):
             self.publish()
         self.github.run.assert_not_called()
         self.assertEqual(list(self.service.directory.glob("*.json")), [])
@@ -127,6 +127,21 @@ class PublicationDispatchTests(unittest.TestCase):
         self.assertEqual(self.publish()["state"], "already-active")
         self.github.run.assert_not_called()
         self.cipher.encrypt.assert_not_called()
+
+    def test_owner_change_after_final_currency_is_fenced_before_post(self):
+        original = self.service.requests.current
+        calls = []
+        def current(*args, **kwargs):
+            result = original(*args, **kwargs)
+            calls.append(result)
+            if len(calls) == 2:
+                self.write("add-exploration", {"wording": "Changed after final remote read."})
+            return result
+        with patch.object(self.service.requests, "current", side_effect=current):
+            with self.assertRaisesRegex(IntentRefused, "owner decisions changed"):
+                self.publish()
+        self.github.run.assert_not_called()
+        self.assertEqual(list(self.service.directory.glob("*.json")), [])
 
     def test_known_pre_post_failure_can_only_resume_the_same_current_reservation(self):
         self.github.json.return_value["state"] = "disabled"
