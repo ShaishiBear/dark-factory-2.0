@@ -3,6 +3,8 @@ let token = "";
 let snapshot = null;
 let history = null;
 let historyShown = 0;
+let publicationPreview = null;
+let publicationRequestId = null;
 let busy = false;
 let preparationBusy = false;
 let synthesisBusy = false;
@@ -96,6 +98,26 @@ function render() {
   }
   const synthesis = snapshot.synthesis;
   const currentSynthesis = synthesis?.identity.command.expected_project_version === state.project_version;
+  if (publicationPreview && publicationPreview.project_version !== state.project_version) {
+    publicationPreview = null; publicationRequestId = null;
+    $("publication-review").replaceChildren(); $("publication-form").hidden = true;
+  }
+  const dispatchedCurrent = snapshot.publication?.project_version === state.project_version && snapshot.publication.state?.startsWith("dispatch-");
+  $("preview-publication").hidden = !snapshot.publication_available || !currentSynthesis || !synthesis?.review || dispatchedCurrent;
+  if (dispatchedCurrent) $("publication-form").hidden = true;
+  $("publication-status").replaceChildren();
+  if (snapshot.publication) {
+    const publication = snapshot.publication;
+    const statuses = { reserved: "Publication consent is reserved. Review it again to continue if it remains current.", "already-active": "This approved scope is already active. No duplicate work was dispatched.", "requires-governed-replacement": "The existing programme is preserved; governed replacement is required.", "dispatch-pending": "Publication was reserved. Its dispatch outcome is not confirmed; it will not be repeated automatically.", "dispatch-submitted": "Publication was submitted to the protected workflow. This is not evidence of delivery or product completion.", "dispatch-uncertain": "Publication dispatch has an uncertain outcome. Refresh to observe it; it will not be submitted again." };
+    $("publication-status").append(text("p", statuses[publication.state] || "Publication observation is unavailable.", "muted"));
+    if (publication.workflow_observation === "observed") {
+      $("publication-status").append(text("p", `Publication workflow: ${publication.workflow_status}${publication.workflow_conclusion ? ` · ${publication.workflow_conclusion}` : ""}. Active programme and product evidence are shown separately.`));
+      const link = text("a", "Publication workflow evidence");
+      link.href = `https://github.com/${snapshot.repository}/actions/runs/${publication.run_id}`;
+      link.target = "_blank"; link.rel = "noopener noreferrer";
+      $("publication-status").append(link);
+    }
+  }
   $("synthesize").hidden = !snapshot.synthesis_available || !state.approvals.length || currentSynthesis;
   $("programme-review").replaceChildren();
   if (synthesis) {
@@ -251,6 +273,32 @@ $("synthesize").addEventListener("click", async () => {
   } catch (error) { message(error.message, true); }
   finally { synthesisBusy = false; setButtons(); }
 });
+$("preview-publication").addEventListener("click", () => perform(async () => {
+  const synthesis = snapshot.synthesis;
+  const command = synthesis.identity.command;
+  const review = { expected_project_version: command.expected_project_version, approval_version: command.approval_version, spec_sha256: command.spec_sha256, proposal: synthesis.review.input.proposal };
+  publicationPreview = await api("/api/publication-preview", review);
+  publicationRequestId = publicationPreview.request_id || crypto.randomUUID().replaceAll("-", "");
+  const target = $("publication-review"); target.replaceChildren();
+  target.append(text("h3", "Publication destination"), text("p", `${publicationPreview.destination.repository} · ${publicationPreview.destination.visibility} repository`));
+  target.append(text("p", "The approved specification and programme below will be visible to everyone who can read that repository. Your original interview and approval wording are excluded."));
+  const details = document.createElement("details");
+  details.append(text("summary", "Exact content to publish"), text("pre", JSON.stringify(publicationPreview.input, null, 2), "hash"));
+  target.append(details, text("p", `Content identity: ${publicationPreview.input_sha256}`, "hash"));
+  const explanations = { "already-active": "This approved scope is already active. No duplicate programme or new execution will be created.", "requires-governed-replacement": "A different programme is active. Replacing it requires the governed replacement process, which is not yet connected here.", "requires-reconciliation": "An earlier publication reservation is no longer current. Its outcome must be reconciled before a new request; no work has been restarted." };
+  if (explanations[publicationPreview.state]) target.append(text("p", explanations[publicationPreview.state], "muted"));
+  $("publish-check").checked = false;
+  $("publication-form").hidden = publicationPreview.state !== "ready-for-consent";
+  message("Review the destination and exact public content before deciding.");
+}));
+$("publication-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => {
+  if (!publicationPreview || publicationPreview.state !== "ready-for-consent") throw new Error("Review publication again before submitting.");
+  const result = await api("/api/programme-publish", { request_id: publicationRequestId, review: publicationPreview.review, destination: publicationPreview.destination });
+  $("publication-form").hidden = true; $("publish-check").checked = false;
+  publicationPreview = null;
+  await refresh();
+  message(result.state === "already-active" ? "This approved scope is already active; no duplicate work was dispatched." : result.state === "requires-governed-replacement" ? "The active programme was preserved. Governed replacement is required." : "Publication request recorded. Observe its workflow and execution evidence below.");
+}); });
 $("exploration-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { await command("add-exploration", { wording: $("exploration").value }); $("exploration").value = ""; message("Exploration saved outside approved scope."); }); });
 $("approval-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { const draft = snapshot.intent.draft; await command("approve-spec", { draft_version: draft.draft_version, spec_sha256: draft.spec_sha256, wording: "This scope represents what I want to build." }); message("This exact scope is approved. Programme delivery and execution evidence remain separate."); }); });
 $("stop-form").addEventListener("submit", (event) => { event.preventDefault(); performStop(async () => { await api("/api/stop", { request_id: crypto.randomUUID().replaceAll("-", ""), reason: $("stop-reason").value }); stopRequested = true; message("Stop requested. Refresh evidence to confirm the remote stop is active."); }); });

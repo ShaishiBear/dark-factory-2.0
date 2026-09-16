@@ -29,6 +29,8 @@ from .programme_runtime import ProgrammeQueue
 from .publication_currency import CurrencyProtocol, key_from_identity
 from .publication_request import PublicationRequests
 from .publication_source import observe_publication_source
+from .publication_dispatch import PublicationDispatches
+from . import publication_policy
 
 ASSETS = Path(__file__).with_name("frontdoor_static")
 MAX_BODY = 250000
@@ -36,7 +38,7 @@ MAX_BODY = 250000
 
 class FrontDoorApplication:
     def __init__(self, *, store, project, token, origin, github, labels, app_login, preparer=None, synthesizer=None,
-                 publication_key=None):
+                 publication_key=None, publisher=None):
         parsed = urlsplit(origin)
         if (parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password
                 or not parsed.hostname or parsed.scheme not in {"http", "https"}
@@ -48,6 +50,9 @@ class FrontDoorApplication:
         self.labels, self.app_login = labels, app_login
         self.preparer = preparer
         self.synthesizer = synthesizer
+        if publisher is not None and publication_key is None:
+            raise ValueError("publication dispatch requires authenticated currency")
+        self.publisher = publisher
         self.publications = PublicationRequests(store, app_login=app_login) if publication_key is not None else None
         self.currency = (CurrencyProtocol(publication_key, repository=store.repository, project=project)
                          if publication_key is not None else None)
@@ -81,8 +86,9 @@ class FrontDoorApplication:
                   "preparation": self.preparer.latest(self.project) if self.preparer else None,
                   "preparation_recovery": self.preparer.recovery_offer(self.project) if self.preparer else None,
                   "synthesis_available": self.synthesizer is not None,
-                  "synthesis": self.synthesizer.latest(self.project) if self.synthesizer else None}
-        errors = (RuntimeError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
+                  "synthesis": self.synthesizer.latest(self.project) if self.synthesizer else None,
+                  "publication_available": self.publisher is not None, "publication": None}
+        errors = (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
         # Stop must remain observable even when a programme or its receipts are damaged.
         try:
             result["stop"] = stop_status(self.github)
@@ -97,6 +103,11 @@ class FrontDoorApplication:
         result["observation_available"] = result["stop"] is not None and result["execution"] is not None
         if result["observation_available"]:
             result["observed_at"] = result["execution_observed_at"]
+        if self.publisher is not None:
+            try:
+                result["publication"] = self.publisher.latest(self.project)
+            except errors:
+                result["publication"] = {"workflow_observation": "unavailable"}
         return result
 
     def __call__(self, environ, start_response):
@@ -162,6 +173,12 @@ class FrontDoorApplication:
                 result = self.publications.reserve(self.project, request, principal=self.principal,
                                                    observation=observe_publication_source(self.github))
                 return send("200 OK", result)
+            if method == "POST" and path in {"/api/publication-preview", "/api/programme-publish"}:
+                if self.publisher is None:
+                    return send("503 Service Unavailable", {"error": "programme publication is not enabled"})
+                operation = self.publisher.preview if path == "/api/publication-preview" else self.publisher.publish
+                result = operation(self.project, self._body(environ), principal=self.principal)
+                return send("200 OK" if path == "/api/publication-preview" else "202 Accepted", result)
             if method == "POST" and path == "/api/programme-prepare":
                 if self.synthesizer is None:
                     return send("503 Service Unavailable", {"error": "programme preparation is not enabled"})
@@ -246,9 +263,14 @@ def main():
                              help="private age identity for proposal calls through protected GitHub Actions")
     parser.add_argument("--enable-publication-requests", action="store_true",
                         help="enable private owner reservations and read-only publisher currency; no dispatch")
+    parser.add_argument("--enable-programme-publication", action="store_true",
+                        help="connect explicit owner consent to the protected programme publisher")
     args = parser.parse_args()
     if args.enable_publication_requests and not args.hosted_preparation_identity:
         parser.error("publication requests require the existing hosted preparation identity")
+    if args.enable_programme_publication and (not args.enable_publication_requests
+            or args.project != publication_policy.PROJECT or args.origin != publication_policy.ORIGIN):
+        parser.error("programme publication requires currency and its protected project/origin")
     if args.token_file.is_symlink() or args.token_file.stat().st_size > 100:
         raise ValueError("owner token must be a small private regular file")
     token = args.token_file.read_text(encoding="utf-8").strip()
@@ -270,9 +292,11 @@ def main():
     preparer = IntentPreparation(store, provider, lambda: repository_context(Path.cwd())) if provider else None
     synthesizer = ProgrammePreparation(store, provider, lambda: repository_context(Path.cwd()),
                                       app_login=args.app_login) if provider else None
+    publisher = (PublicationDispatches(store, github, AgeCipher(args.hosted_preparation_identity), app_login=args.app_login)
+                 if args.enable_programme_publication else None)
     app = FrontDoorApplication(store=store, project=args.project, token=token, origin=args.origin,
                                github=github, labels=config.labels, app_login=args.app_login,
-                               preparer=preparer, synthesizer=synthesizer,
+                               preparer=preparer, synthesizer=synthesizer, publisher=publisher,
                                publication_key=(key_from_identity(args.hosted_preparation_identity)
                                                 if args.enable_publication_requests else None))
     # Single-host, bounded request timeout, loopback only. Hosting must enforce HTTPS and keep

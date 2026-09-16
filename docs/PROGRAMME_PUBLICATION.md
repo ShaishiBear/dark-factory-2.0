@@ -1,8 +1,8 @@
 # Programme publication boundary
 
 Status: private request, authenticated observation, protected admission and publisher workflow
-implemented. The HTTP routes remain disabled by default. Host dispatch and the Front Door
-publication control are not yet connected. No real programme has used this publication workflow.
+implemented, including the host dispatch journal and explicit Front Door consent. The HTTP routes
+remain disabled by default. No real programme has used this publication workflow.
 
 `PublicationRequests.reserve` accepts an authenticated owner, a compiler review request and
 consent naming the exact programme input hash, repository and repository visibility. Private
@@ -50,8 +50,6 @@ transaction with GitHub; a response alone grants no merge authority.
 
 ## Remaining activation work
 
-- Connect the owner's private reservation to a durable host dispatch journal and explicit UI
-  consent for the exact public payload, repository and visibility.
 - Deploy and enable the currency endpoint only with the protected workflow delivered.
 - Observe the first appropriate real App publication, including the platform's resolved
   contents-API commit author/committer, normal required checks and exact merged-tree receipt.
@@ -59,7 +57,22 @@ transaction with GitHub; a response alone grants no merge authority.
   published. An existing active programme cannot be cleared to make the initial path usable.
 
 The current citation programme is already active. Its synthesized review is not permission
-to publish it again. Issue #189's human hold and the existing continuation counter remain.
+to publish it again. Existing issue dispositions and continuation counters remain authoritative.
+
+## Owner publication connection
+
+`--enable-programme-publication` requires currency, the existing age identity, and the protected
+project/origin. The owner previews the exact public input, repository and visibility before
+explicit consent. Private intake and approval wording stay on the host. Existing active scope
+shows its disposition without a publish control. Workflow submission and completion are displayed
+separately from active-programme observation and independently verified product completion.
+
+One private, fsynced journal per project version reserves the dispatch before its single encrypted
+POST. Concurrent or repeated requests return the historical pending, submitted or uncertain result;
+none repeats a POST. A failure known to precede POST may reuse only the same current consent.
+Changed owner decisions or expired consent require reconciliation. Workflow observation rechecks
+owner, repository, protected source and first attempt. Unavailable publication evidence does not
+hide independent stop or product progress. The host receives no App or model credential.
 
 ## Independent publication admission
 
