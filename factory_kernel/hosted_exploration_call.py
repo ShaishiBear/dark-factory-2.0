@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tempfile
+from dataclasses import replace
 
 from .agents import AgentRequest
 from .canonical import canonical_bytes
@@ -40,8 +41,10 @@ def execute(payload, provider, check_stop):
     with tempfile.TemporaryDirectory(prefix="factory-hosted-exploration-") as directory:
         request = AgentRequest(role=role, prompt=payload["prompt"], cwd=directory,
             allowed_tools=allowed_tools(role), environment={}, effort=effort(role),
-            max_turns=limits["max_turns"], max_budget_usd=limits["max_usd"],
-            timeout_seconds=limits["timeout_seconds"])
+            max_turns=max_turns(role), max_budget_usd=max_budget_usd(role),
+            timeout_seconds=stage_timeout_seconds(role))
+        request = replace(request, max_turns=limits["max_turns"], max_budget_usd=limits["max_usd"],
+                          timeout_seconds=limits["timeout_seconds"])
         result = provider.run(request)
     # Preserve reported spend even when the host must refuse stale/over-budget output.
     raw = canonical_bytes(result.structured_output) if result.structured_output is not None else result.content.encode()

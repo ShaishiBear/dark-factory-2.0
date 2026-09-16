@@ -135,7 +135,8 @@ class PreparationContextTests(unittest.TestCase):
         token.write_text("a" * 64)
         token.chmod(0o600)
         args = SimpleNamespace(enable_publication_requests=False, enable_programme_publication=False,
-            enable_strategy_publication=False, hosted_preparation_identity=None, enable_preparation=True,
+            enable_strategy_publication=False, enable_hosted_exploration=False, exploration_source=[],
+            hosted_preparation_identity=None, enable_preparation=True,
             token_file=token, state_dir=token.parent, owner=OWNER.identity, project="citations",
             app_login="factory[bot]", origin="https://factory.example.test", port=8765)
         config = SimpleNamespace(repository=fixture.store.repository, labels={}, provider=object())
