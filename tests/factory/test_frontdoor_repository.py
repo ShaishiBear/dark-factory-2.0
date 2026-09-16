@@ -154,3 +154,7 @@ class PreparationContextTests(unittest.TestCase):
             self.assertEqual(app.preparer.context(), contexts[0])
             self.assertEqual(app.synthesizer.context(), contexts[1])
             self.assertEqual([call.args for call in remote.call_args_list], [(github,), (github,)])
+
+
+if __name__ == "__main__":
+    unittest.main()
