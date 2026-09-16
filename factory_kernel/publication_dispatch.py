@@ -9,8 +9,8 @@ from .canonical import sha256_value
 from .frontdoor_hosted import MAX_CIPHERTEXT
 from .frontdoor_intent import IntentRefused
 from .frontdoor_prepare import PreparationRecords
-from .frontdoor_programme import prepare_programme
 from .programme import parse_json
+from .programme_replan import review_replan
 from .publication_request import PublicationRequests
 from .publication_source import observe_publication_source
 from .publication_observation import _complete
@@ -32,9 +32,19 @@ class PublicationDispatches(PreparationRecords):
         if project != policy.PROJECT:
             raise IntentRefused("project differs from protected publication policy")
 
+    def preview_strategy(self, project, request, *, principal):
+        self._project_owner(project, principal)
+        if self.requests.strategy_reviews is None:
+            raise IntentRefused("strategy publication is not enabled")
+        if not isinstance(request, dict) or set(request) != {"session_id", "expected_project_version"}:
+            raise IntentRefused("strategy preview must name a stored session and current project version")
+        reference = self.requests.strategy_reviews.reference(project, request["session_id"],
+            expected_project_version=request["expected_project_version"], principal=principal)
+        return self.preview(project, reference, principal=principal)
+
     def preview(self, project, review_request, *, principal):
         self._project_owner(project, principal)
-        review = prepare_programme(self.store, project, review_request, principal=principal, app_login=self.app_login)
+        review = self.requests.review(project, review_request, principal=principal)
         observation = self.observe(self.github)
         self.requests._observation(observation)
         active = observation["active_input"]
@@ -47,6 +57,9 @@ class PublicationDispatches(PreparationRecords):
                 "destination": {"repository": self.store.repository, "visibility": observation["visibility"],
                                 "input_sha256": review["input_sha256"]},
                 "source_sha": observation["main_sha"]}
+        if state == "already-active":
+            result["replanning"] = review_replan(active, review["input"], repository=self.store.repository,
+                                                 source_sha=observation["main_sha"])
         previous = self._latest_request(project)
         if previous is not None and previous["project_version"] == review["project_version"]:
             command = previous["identity"]["command"]
@@ -86,6 +99,8 @@ class PublicationDispatches(PreparationRecords):
         ciphertext = self.cipher.encrypt(payload)
         if not isinstance(ciphertext, str) or not ciphertext or len(ciphertext) > MAX_CIPHERTEXT:
             raise IntentRefused("approved publication exceeds its encrypted transport bound")
+        self.requests.current(project, command["request_id"], principal=principal,
+                              observation=self.observe(self.github))
         dispatch = {**summary, "schema": "dark-factory/host-publication-dispatch", "schema_version": "1.0",
                     "request_sha256": sha256_value(record), "source_sha": current["main_sha"],
                     "created_at": record["created_at"], "expires_at": record["expires_at"],

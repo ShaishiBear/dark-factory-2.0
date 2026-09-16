@@ -30,6 +30,7 @@ from .publication_currency import CurrencyProtocol, key_from_identity
 from .publication_request import PublicationRequests
 from .publication_source import observe_publication_source
 from .publication_dispatch import PublicationDispatches
+from .publication_strategy import StoredStrategyReviews
 from . import publication_policy
 
 ASSETS = Path(__file__).with_name("frontdoor_static")
@@ -53,7 +54,8 @@ class FrontDoorApplication:
         if publisher is not None and publication_key is None:
             raise ValueError("publication dispatch requires authenticated currency")
         self.publisher = publisher
-        self.publications = PublicationRequests(store, app_login=app_login) if publication_key is not None else None
+        self.publications = (publisher.requests if publisher is not None else
+                             PublicationRequests(store, app_login=app_login) if publication_key is not None else None)
         self.currency = (CurrencyProtocol(publication_key, repository=store.repository, project=project)
                          if publication_key is not None else None)
         self.origin, self.host = origin, parsed.netloc
@@ -87,7 +89,8 @@ class FrontDoorApplication:
                   "preparation_recovery": self.preparer.recovery_offer(self.project) if self.preparer else None,
                   "synthesis_available": self.synthesizer is not None,
                   "synthesis": self.synthesizer.latest(self.project) if self.synthesizer else None,
-                  "publication_available": self.publisher is not None, "publication": None}
+                  "publication_available": self.publisher is not None, "publication": None,
+                  "strategy_choices": []}
         errors = (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
         # Stop must remain observable even when a programme or its receipts are damaged.
         try:
@@ -108,6 +111,12 @@ class FrontDoorApplication:
                 result["publication"] = self.publisher.latest(self.project)
             except errors:
                 result["publication"] = {"workflow_observation": "unavailable"}
+            if self.publications.strategy_reviews is not None:
+                try:
+                    result["strategy_choices"] = self.publications.strategy_reviews.choices(
+                        self.project, principal=self.principal)
+                except errors:
+                    result["strategy_choices"] = []  # Historical choices never hide stop or product evidence.
         return result
 
     def __call__(self, environ, start_response):
@@ -173,12 +182,14 @@ class FrontDoorApplication:
                 result = self.publications.reserve(self.project, request, principal=self.principal,
                                                    observation=observe_publication_source(self.github))
                 return send("200 OK", result)
-            if method == "POST" and path in {"/api/publication-preview", "/api/programme-publish"}:
+            if method == "POST" and path in {"/api/publication-preview", "/api/strategy-publication-preview", "/api/programme-publish"}:
                 if self.publisher is None:
                     return send("503 Service Unavailable", {"error": "programme publication is not enabled"})
-                operation = self.publisher.preview if path == "/api/publication-preview" else self.publisher.publish
+                operation = {"/api/publication-preview": self.publisher.preview,
+                             "/api/strategy-publication-preview": self.publisher.preview_strategy,
+                             "/api/programme-publish": self.publisher.publish}[path]
                 result = operation(self.project, self._body(environ), principal=self.principal)
-                return send("200 OK" if path == "/api/publication-preview" else "202 Accepted", result)
+                return send("202 Accepted" if path == "/api/programme-publish" else "200 OK", result)
             if method == "POST" and path == "/api/programme-prepare":
                 if self.synthesizer is None:
                     return send("503 Service Unavailable", {"error": "programme preparation is not enabled"})
@@ -265,9 +276,13 @@ def main():
                         help="enable private owner reservations and read-only publisher currency; no dispatch")
     parser.add_argument("--enable-programme-publication", action="store_true",
                         help="connect explicit owner consent to the protected programme publisher")
+    parser.add_argument("--enable-strategy-publication", action="store_true",
+                        help="allow publication of a freshly regenerated stored strategy recommendation")
     args = parser.parse_args()
     if args.enable_publication_requests and not args.hosted_preparation_identity:
         parser.error("publication requests require the existing hosted preparation identity")
+    if args.enable_strategy_publication and not args.enable_programme_publication:
+        parser.error("strategy publication requires protected programme publication")
     if args.enable_programme_publication and (not args.enable_publication_requests
             or args.project != publication_policy.PROJECT or args.origin != publication_policy.ORIGIN):
         parser.error("programme publication requires currency and its protected project/origin")
@@ -292,7 +307,11 @@ def main():
     preparer = IntentPreparation(store, provider, lambda: repository_context(Path.cwd())) if provider else None
     synthesizer = ProgrammePreparation(store, provider, lambda: repository_context(Path.cwd()),
                                       app_login=args.app_login) if provider else None
-    publisher = (PublicationDispatches(store, github, AgeCipher(args.hosted_preparation_identity), app_login=args.app_login)
+    publication_requests = PublicationRequests(store, app_login=args.app_login,
+        strategy_reviews=StoredStrategyReviews(store, github, app_login=args.app_login)
+        if args.enable_strategy_publication else None) if args.enable_programme_publication else None
+    publisher = (PublicationDispatches(store, github, AgeCipher(args.hosted_preparation_identity), app_login=args.app_login,
+                                      requests=publication_requests)
                  if args.enable_programme_publication else None)
     app = FrontDoorApplication(store=store, project=args.project, token=token, origin=args.origin,
                                github=github, labels=config.labels, app_login=args.app_login,

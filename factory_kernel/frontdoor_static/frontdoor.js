@@ -104,6 +104,16 @@ function render() {
   }
   const dispatchedCurrent = snapshot.publication?.project_version === state.project_version && snapshot.publication.state?.startsWith("dispatch-");
   $("preview-publication").hidden = !snapshot.publication_available || !currentSynthesis || !synthesis?.review || dispatchedCurrent;
+  $("strategy-choices").replaceChildren();
+  if (!dispatchedCurrent) for (const choice of snapshot.strategy_choices || []) {
+    const section = document.createElement("section");
+    section.append(text("h3", "Saved strategy recommendation"), text("p", choice.mechanism));
+    section.append(text("p", "Planning advice awaiting fresh review. It is not qualified product evidence.", "muted"));
+    const button = text("button", "Review this strategy for publication"); button.type = "button";
+    button.addEventListener("click", () => perform(() => showPublication({session_id: choice.session_id,
+      expected_project_version: choice.project_version}, "/api/strategy-publication-preview")));
+    section.append(button); $("strategy-choices").append(section);
+  }
   if (dispatchedCurrent) $("publication-form").hidden = true;
   $("publication-status").replaceChildren();
   if (snapshot.publication) {
@@ -273,23 +283,49 @@ $("synthesize").addEventListener("click", async () => {
   } catch (error) { message(error.message, true); }
   finally { synthesisBusy = false; setButtons(); }
 });
-$("preview-publication").addEventListener("click", () => perform(async () => {
-  const synthesis = snapshot.synthesis;
-  const command = synthesis.identity.command;
-  const review = { expected_project_version: command.expected_project_version, approval_version: command.approval_version, spec_sha256: command.spec_sha256, proposal: synthesis.review.input.proposal };
-  publicationPreview = await api("/api/publication-preview", review);
+async function showPublication(review, path = "/api/publication-preview") {
+  publicationPreview = await api(path, review);
   publicationRequestId = publicationPreview.request_id || crypto.randomUUID().replaceAll("-", "");
   const target = $("publication-review"); target.replaceChildren();
   target.append(text("h3", "Publication destination"), text("p", `${publicationPreview.destination.repository} · ${publicationPreview.destination.visibility} repository`));
   target.append(text("p", "The approved specification and programme below will be visible to everyone who can read that repository. Your original interview and approval wording are excluded."));
+  if (publicationPreview.input.version === "1.1") {
+    const strategy = publicationPreview.input.strategy;
+    target.append(text("h3", "Included planning advice"), text("p", strategy.candidate.mechanism));
+    list(target, "Uncertainty still to resolve", strategy.remaining_uncertainty);
+    target.append(text("p", "This recommendation can guide planning and design. All independent proof gates still apply.", "muted"));
+  }
   const details = document.createElement("details");
   details.append(text("summary", "Exact content to publish"), text("pre", JSON.stringify(publicationPreview.input, null, 2), "hash"));
   target.append(details, text("p", `Content identity: ${publicationPreview.input_sha256}`, "hash"));
   const explanations = { "already-active": "This approved scope is already active. No duplicate programme or new execution will be created.", "requires-governed-replacement": "A different programme is active. Replacing it requires the governed replacement process, which is not yet connected here.", "requires-reconciliation": "An earlier publication reservation is no longer current. Its outcome must be reconciled before a new request; no work has been restarted." };
   if (explanations[publicationPreview.state]) target.append(text("p", explanations[publicationPreview.state], "muted"));
+  const replan = publicationPreview.replanning;
+  if (replan && replan.disposition !== "unchanged") {
+    target.append(text("h3", "Different execution plan for the same approved scope"));
+    target.append(text("p", "The proposal changes how work is divided, ordered or approached. The active programme, its work budget and its recorded outcomes remain in place. Applying this proposal requires a governed transition; this review grants no execution or proof authority."));
+    list(target, "New work items in this proposal", replan.added_items);
+    list(target, "Existing items replaced by this proposal", replan.retired_items);
+    list(target, "Items whose scope or dependencies change", replan.changed_items);
+    list(target, "Acceptance coverage", replan.coverage.map((row) => `${row.acceptance}: ${row.current_item} → ${row.proposed_item}`));
+    for (const row of replan.dependency_changes) target.append(text("p", `${row.item}: after ${row.current.join(", ") || "nothing"} → after ${row.proposed.join(", ") || "nothing"}`));
+    if (replan.strategy?.changed) {
+      target.append(text("h3", "Planning advice changes"));
+      target.append(text("p", `Current: ${replan.strategy.current?.mechanism || "No attached strategy"}`));
+      target.append(text("p", `Proposed: ${replan.strategy.proposed?.mechanism || "No attached strategy"}`));
+      target.append(text("p", "Strategy identity includes its assumptions, rationale, uncertainty and source references. None of these qualify the proposed work.", "muted"));
+    }
+    target.append(text("p", "Historical proof remains attached to the original programme and subject. It does not qualify this proposed plan.", "muted"));
+  }
   $("publish-check").checked = false;
   $("publication-form").hidden = publicationPreview.state !== "ready-for-consent";
   message("Review the destination and exact public content before deciding.");
+}
+$("preview-publication").addEventListener("click", () => perform(async () => {
+  const synthesis = snapshot.synthesis;
+  const command = synthesis.identity.command;
+  const review = { expected_project_version: command.expected_project_version, approval_version: command.approval_version, spec_sha256: command.spec_sha256, proposal: synthesis.review.input.proposal };
+  await showPublication(review);
 }));
 $("publication-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => {
   if (!publicationPreview || publicationPreview.state !== "ready-for-consent") throw new Error("Review publication again before submitting.");

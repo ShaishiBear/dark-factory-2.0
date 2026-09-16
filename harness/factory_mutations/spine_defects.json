@@ -479,6 +479,55 @@
       "find": "or entry.get(\"mode\") not in {\"100644\", \"100755\"}",
       "replace": "",
       "why": "Symlink data cannot be analysed as a regular source or protected policy. Detector: tests/factory/test_exploration_repository.py"
+    },
+    {
+      "id": "publication-strategy-reference",
+      "file": "factory_kernel/publication_strategy.py",
+      "find": "reference != expected or request[\"approval_version\"]",
+      "replace": "False or request[\"approval_version\"]",
+      "why": "Canonical recommendation and handoff hashes must match owner consent. Detector: tests/factory/test_publication_strategy.py"
+    },
+    {
+      "id": "publication-strategy-regeneration",
+      "file": "factory_kernel/publication_request.py",
+      "find": "review = self.review(project, record[\"identity\"][\"command\"][\"review\"], principal=principal)",
+      "replace": "review = {key: record[key] for key in (\"input\", \"input_sha256\", \"programme_sha256\")}",
+      "why": "Fresh currency must regenerate the canonical strategy and repository context. Detector: tests/factory/test_publication_strategy.py"
+    },
+    {
+      "id": "publication-strategy-expiry-fence",
+      "file": "factory_kernel/publication_request.py",
+      "find": "if not datetime.fromisoformat(record[\"created_at\"]) <= self.clock() < datetime.fromisoformat(record[\"expires_at\"]):",
+      "replace": "if False:",
+      "why": "Remote regeneration cannot extend owner consent lifetime. Detector: tests/factory/test_publication_strategy.py"
+    },
+    {
+      "id": "publication-strategy-owner-fence",
+      "file": "factory_kernel/publication_request.py",
+      "find": "if (len(after) != record[\"project_version\"] or not after\n                    or sha256_value(after[-1]) != record[\"intent_head_sha256\"]):",
+      "replace": "if False:",
+      "why": "Concurrent owner decisions during regeneration revoke currency. Detector: tests/factory/test_publication_strategy.py"
+    },
+    {
+      "id": "publication-strategy-shared-currency",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "(publisher.requests if publisher is not None else",
+      "replace": "(PublicationRequests(store, app_login=app_login) if publisher is not None else",
+      "why": "The currency endpoint must use the strategy-aware request service. Detector: tests/factory/test_publication_strategy.py"
+    },
+    {
+      "id": "publication-strategy-version-preserved",
+      "file": "factory_kernel/publication_source.py",
+      "find": "programme.to_input()",
+      "replace": "{\"version\": \"1.0\", \"spec\": programme.spec, \"proposal\": programme.to_input()[\"proposal\"]}",
+      "why": "Protected source observation cannot erase strategy or its input version. Detector: tests/factory/test_publication_strategy.py"
+    },
+    {
+      "id": "publication-strategy-before-post",
+      "file": "factory_kernel/publication_dispatch.py",
+      "find": "        self.requests.current(project, command[\"request_id\"], principal=principal,\n                              observation=self.observe(self.github))\n",
+      "replace": "",
+      "why": "Context changes during encryption must prevent the workflow POST. Detector: tests/factory/test_publication_strategy.py"
     }
   ]
 }

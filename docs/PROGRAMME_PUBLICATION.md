@@ -22,6 +22,23 @@ the proposal partitions it differently. This must never create duplicate work or
 continuation budget. Any different active specification returns `requires-governed-replacement`.
 This first publication path does not implement replacement, replanning or completion reuse.
 
+When the approved scope is already active but its proposed decomposition differs, preview
+also returns a deterministic replanning review. Both graphs are recompiled against the
+same exact specification and App identity. The review shows added, retired and changed
+item IDs, each acceptance criterion's owner, and dependency changes. It binds the observed
+protected source and both programme hashes. Input ordering alone is not a plan change.
+This adapter explicitly accepts programme inputs v1.0 and v1.1. It distinguishes changes
+to the decomposition, attached strategy, or both. Adding/removing strategy and changes to
+its assumptions, rationale, uncertainty or source identity remain visible even if item
+coverage is unchanged. Advice is UNPROVEN and cannot qualify replacement work. Future
+versions require deliberate comparison support even if the general compiler accepts them.
+
+This comparison carries review authority only. It neither retires active work nor changes
+continuation budgets. Historical completion stays attached to its original programme and
+subject; the review issues no replacement or proof-reuse capability. Runtime replacement
+still needs a separately governed transition that observes leases, human holds, current
+work and evidence. The Front Door never clears the active input to make publication possible.
+
 `current` rechecks the exact intent head and version, one-hour lifetime, protected main,
 visibility, active input, clear stop, payload hash and compiled programme hash. It refuses
 both terminal dispositions. Its response contains identities only, without scope wording.
