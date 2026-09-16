@@ -5,7 +5,7 @@ delete, rename or privatize a repository, upload data, dispatch work, modify a l
 state directory, import approval or grant execution authority.
 
 ```sh
-python scripts/factory_migration.py --archive /private/archive \
+python scripts/prepare_repository_migration.py --archive /private/archive \
   --output /private/new-preparation --account-plan free
 ```
 

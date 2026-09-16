@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from factory_migration import MigrationRefused, REQUIRED, prerequisites, verify_archive
+from prepare_repository_migration import MigrationRefused, REQUIRED, prerequisites, verify_archive
 from factory_kernel.frontdoor_intent import IntentStore, Principal
 from factory_kernel.programme import ProgrammeRefused
 from factory_kernel.programme_runtime import ProgrammeQueue
