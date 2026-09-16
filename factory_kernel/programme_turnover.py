@@ -7,6 +7,7 @@ from copy import deepcopy
 
 from .canonical import sha256_value
 from .exploration_records import approved_scope, projection
+from .execution_budget import projection as budget_projection
 from .frontdoor_intent import IntentRefused
 from .programme import compile_programme
 from .programme_replan import review_replan
@@ -111,6 +112,7 @@ def review_turnover(publications, github, project, request, *, principal):
             raise IntentRefused("replacement review no longer names current approved intent")
         head = sha256_value(events[-1])
         state = projection(events)
+        execution_budget = budget_projection(events)
         budget = deepcopy(state["budgets"].get(approval["spec_sha256"]))
         reservations = [{"session_id": key, "reservations": [
                             {**{field: reservation[field] for field in
@@ -132,4 +134,6 @@ def review_turnover(publications, github, project, request, *, principal):
                   input_sha256=review["input_sha256"], programme_sha256=review["programme_sha256"],
                   exploration_budget={"spec_sha256": approval["spec_sha256"], "budget": budget,
                                       "reservations": reservations, "reset_allowed": False})
+    # A ledger's existence alone does not establish that every historical worker used it.
+    result["execution_budget"]["ledger"] = execution_budget
     return {**result, "review_sha256": sha256_value(result)}

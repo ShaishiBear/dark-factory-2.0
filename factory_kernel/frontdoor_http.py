@@ -19,6 +19,7 @@ from .config import load_config
 from .decision_history import explain_history
 from .frontdoor_control import stop_status
 from .execution_fence import fence_status
+from .execution_budget import ExecutionBudget
 from .frontdoor_intent import IntentRefused, IntentStore, Principal
 from .frontdoor_programme import prepare_programme
 from .frontdoor_prepare import IntentPreparation, api_provider, protected_repository_context
@@ -68,6 +69,7 @@ class FrontDoorApplication:
         self.origin, self.host = origin, parsed.netloc
         self.token_hash = hashlib.sha256(token.encode()).digest()
         self.principal = Principal(store.owner, "owner")
+        self.execution_budget = ExecutionBudget(store)
         store.snapshot(project, principal=self.principal)  # validate configured project before serving
 
     def _authenticated(self, environ):
@@ -99,6 +101,10 @@ class FrontDoorApplication:
                   "publication_available": self.publisher is not None, "publication": None,
                   "strategy_choices": [], "exploration_available": self.explorer is not None}
         errors = (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
+        try:
+            result["execution_budget"] = self.execution_budget.snapshot(self.project, principal=self.principal)
+        except errors:
+            result["execution_budget"] = None
         # Stop must remain observable even when a programme or its receipts are damaged.
         try:
             result["stop"] = stop_status(self.github)
@@ -174,6 +180,10 @@ class FrontDoorApplication:
                 return send("200 OK", self._snapshot())
             if method == "GET" and path == "/api/history":
                 return send("200 OK", explain_history(self.store, self.project, principal=self.principal))
+            if method == "POST" and path == "/api/execution-budget":
+                result = self.execution_budget.approve(self.project, self._body(environ),
+                    principal=self.principal, github=self.github, app_login=self.app_login)
+                return send("200 OK", result)
             if path == "/api/exploration" and method == "GET":
                 if self.explorer is None:
                     return send("503 Service Unavailable", {"error": "hosted exploration is not enabled"})

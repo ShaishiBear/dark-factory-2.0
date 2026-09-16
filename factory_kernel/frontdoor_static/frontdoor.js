@@ -46,6 +46,18 @@ function render() {
   $("repository").textContent = snapshot.repository;
   $("project").textContent = snapshot.project.replaceAll("-", " ");
   const state = snapshot.intent;
+  const executionBudget = $("execution-budget");
+  executionBudget.replaceChildren();
+  const budget = snapshot.execution_budget;
+  if (!budget?.allowance) {
+    executionBudget.append(text("p", "No cumulative execution allowance is recorded. Historical execution spending is unknown."));
+  } else {
+    executionBudget.append(text("p", `Recorded allowance: $${(budget.allowance.limit_microusd / 1000000).toFixed(2)} across ${budget.allowance.max_calls} attempts.`));
+    executionBudget.append(text("p", `Retained reservations: $${(budget.reserved_microusd / 1000000).toFixed(2)} across ${budget.calls} ${budget.calls === 1 ? "attempt" : "attempts"}. This is reserved capacity, not a final bill.`));
+    const statuses = {"historical-spend-unknown": "Earlier spending is unknown; this allowance cannot authorize execution.", "unresolved-attempt": "An attempt has unresolved spending. This allowance cannot authorize further calls.", overrun: "Reported spending exceeded a reservation. This allowance cannot authorize further calls.", exhausted: "The recorded execution allowance is exhausted.", available: "The recorded allowance has capacity."};
+    executionBudget.append(text("p", statuses[budget.status] || "Execution budget state is unavailable."));
+  }
+  executionBudget.append(text("p", "The hosted execution worker is not yet connected to this ledger. Programme replacement remains blocked. Reservations are retained across strategy changes.", "muted"));
   if (history && history.project_version !== state.project_version) $("history-state").textContent = `Showing history through version ${history.project_version}. Saved decisions have changed; load history again for the latest.`;
   const ledger = $("ledger");
   ledger.replaceChildren();
@@ -189,7 +201,7 @@ async function command(operation, payload) {
   await refresh();
 }
 function renderEarlierHistory() {
-  const titles = { "record-intent": "Intent saved", "add-exploration": "Exploration recorded", "propose-spec": "Scope proposed", "approve-spec": "Scope approved" };
+  const titles = { "record-intent": "Intent saved", "add-exploration": "Exploration recorded", "propose-spec": "Scope proposed", "approve-spec": "Scope approved", "execution-budget-event": "Execution allowance record" };
   const versions = new Map(history.events.map((row) => [row.event_id, row.project_version]));
   const rows = history.events.slice().reverse().slice(historyShown, historyShown + 20);
   for (const row of rows) {
@@ -197,6 +209,12 @@ function renderEarlierHistory() {
     detail.append(text("summary", `Version ${row.project_version} · ${titles[row.operation] || row.operation}`));
     detail.append(text("p", `${row.actor.identity} (${row.actor.role}) · ${new Date(row.created_at).toLocaleString()}`, "muted"));
     if (row.record.wording) detail.append(text("blockquote", row.record.wording));
+    if (row.operation === "execution-budget-event") {
+      const data = row.record.data;
+      if (row.record.kind === "approved") detail.append(text("p", `Approved allowance: $${(data.limit_microusd / 1000000).toFixed(2)}, up to ${data.max_calls} attempts. Earlier spending: ${data.opening.status === "verified-empty" ? "no prior scope execution observed" : "unknown"}.`));
+      if (row.record.kind === "reserved") detail.append(text("p", `Reserved $${(data.microusd / 1000000).toFixed(2)} for ${data.role}, attempt ${data.attempt}. This charge is retained across strategy changes.`));
+      if (row.record.kind === "observed") detail.append(text("p", data.reported_microusd === null ? "Attempt ended with spending unresolved. The reservation remains charged." : `Reported cost: $${(data.reported_microusd / 1000000).toFixed(2)}. The full reservation remains charged.`));
+    }
     if (row.record.spec) {
       const spec = row.record.spec;
       detail.append(text("h3", spec.title), text("p", spec.outcome));

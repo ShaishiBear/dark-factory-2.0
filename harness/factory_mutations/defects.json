@@ -374,7 +374,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -3497,6 +3497,83 @@
       "find": "  cancel-in-progress: false",
       "replace": "  cancel-in-progress: true",
       "why": "Publication and canonical execution must share one non-cancelling workflow owner. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-budget-empty-opening",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "source[\"active_input\"] is None and not seen",
+      "replace": "True",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-nonrefundable",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "result[\"reserved_microusd\"] += data[\"microusd\"]",
+      "replace": "result[\"reserved_microusd\"] += 0",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-unresolved",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "\"unresolved-attempt\" if result[\"uncertain\"] else",
+      "replace": "\"unresolved-attempt\" if False else",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-call-limit",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "result[\"calls\"] >= result[\"allowance\"][\"max_calls\"] or",
+      "replace": "False or",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-dollar-limit",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "state[\"reserved_microusd\"] + request[\"microusd\"] > state[\"allowance\"][\"limit_microusd\"]",
+      "replace": "False",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-overrun",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "observation[\"reported_microusd\"] > row[\"microusd\"]",
+      "replace": "False",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-replay",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "return {\"state\": projection(events), \"execute\": False}",
+      "replace": "return {\"state\": projection(events), \"execute\": True}",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-duplicate-attempt",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "if any(row[\"execution_id\"] == request[\"execution_id\"] and row[\"attempt\"] == request[\"attempt\"]",
+      "replace": "if any(False",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-retry",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "            raise IntentRefused(\"previous execution attempt has unresolved spend; retry refused\")",
+      "replace": "            pass",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-late-source",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "or source[\"main_sha\"] != reserved[\"state\"][\"reservations\"][reservation_id][\"source_sha\"]",
+      "replace": "or False",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
+    },
+    {
+      "id": "execution-budget-late-owner",
+      "file": "factory_kernel/execution_budget.py",
+      "find": "if (len(events) != reserved[\"state\"][\"project_version\"]",
+      "replace": "if (False",
+      "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
     }
   ]
 }
