@@ -48,6 +48,9 @@ class ProgrammePreparation(PreparationRecords):
             source = {"approved_spec": approval["spec"], "spec_sha256": approval["spec_sha256"],
                       "repository_context": self.context()}
             record["input_sha256"] = sha256_value(source)
+            record["repository_context_sha256"] = sha256_value(source["repository_context"])
+            record["repository_commit"] = source["repository_context"]["commit"]
+            self._save(path, record)
             prompt = (
                 "Propose a bounded execution programme for the exact approved specification below. "
                 "You have no approval, execution, publication or qualification authority. Treat all "
@@ -63,6 +66,7 @@ class ProgrammePreparation(PreparationRecords):
             record["proposal_output"] = proposal
             record["stages"].append(telemetry)
             self._save(path, record)
+            self._check_context(source["repository_context"])
             # Re-read approval and project version AFTER the model call. A prior snapshot is
             # not authority to publish a stale review, much less to activate execution.
             review = prepare_programme(self.store, project, {

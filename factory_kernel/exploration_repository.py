@@ -106,6 +106,15 @@ def inspect_protected_repository(github, selected_paths, *, check_stop=lambda: N
     This snapshot is not a publication capability or an atomic lock on future main.
     """
     _paths(selected_paths)
+    return observe_protected_files(github, selected_paths, POLICY_PATHS, _analyse, check_stop=check_stop)
+
+
+def observe_protected_files(github, selected_paths, policy_paths, analyse, *, check_stop=lambda: None):
+    """Internal reader for trusted, fixed-path consumers; callers validate their path policy.
+
+    The analyser receives only exact committed bytes and must apply per-file read limits.
+    It runs before the final currency fence so its result cannot escape on main drift.
+    """
     repository = github.repository
     if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise IntentRefused("configured repository identity is invalid")
@@ -149,7 +158,7 @@ def inspect_protected_repository(github, selected_paths, *, check_stop=lambda: N
             or not isinstance(tree.get("tree"), list) or len(tree["tree"]) > 100000):
         raise IntentRefused("repository tree is incomplete or bound to the wrong revision")
     entries = {}
-    wanted = set(selected_paths) | set(POLICY_PATHS)
+    wanted = set(selected_paths) | set(policy_paths)
     for entry in tree["tree"]:
         if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
             raise IntentRefused("invalid repository tree entry")
@@ -185,7 +194,7 @@ def inspect_protected_repository(github, selected_paths, *, check_stop=lambda: N
             raise IntentRefused("repository blob content differs from its exact Git identity")
         return raw
 
-    context = _analyse(commit, selected_paths, read)
+    context = analyse(commit, selected_paths, read)
     if branch() != (commit, tree_oid) or metadata() != original_metadata:
         raise IntentRefused("protected repository changed during observation")
     check_stop()
