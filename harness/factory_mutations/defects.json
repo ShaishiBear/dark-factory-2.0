@@ -3231,6 +3231,20 @@
       "find": "with self._file_locked(project) as path:\n                yield path",
       "replace": "self._thread_lock.release()\n            try:\n                with self._file_locked(project) as path:\n                    yield path\n            finally:\n                self._thread_lock.acquire()",
       "why": "Local observation must not contend with a reserved effect and lose its usable completion. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-reader-adapter",
+      "file": "factory_kernel/frontdoor_exploration.py",
+      "find": "inspect_protected_repository(github, list(selected), check_stop=stop)",
+      "replace": "inspect_protected_repository(github, selected, check_stop=stop)",
+      "why": "Actual hosted source observation must accept fixed configured paths and retain scope after caller mutation. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "hosted-exploration-frozen-paths",
+      "file": "factory_kernel/frontdoor_exploration.py",
+      "find": "selected = tuple(paths)",
+      "replace": "selected = paths",
+      "why": "Actual hosted source observation must accept fixed configured paths and retain scope after caller mutation. Detector: tests/factory/test_frontdoor_exploration.py"
     }
   ]
 }

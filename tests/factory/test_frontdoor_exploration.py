@@ -10,18 +10,60 @@ from unittest.mock import Mock, patch
 from factory_kernel.agents import AgentRequest
 from factory_kernel.frontdoor_exploration import FrontDoorExploration, DEFAULT_POLICY
 from factory_kernel.frontdoor_hosted import validate_payload
-from factory_kernel.frontdoor_intent import IntentRefused
+from factory_kernel.frontdoor_intent import IntentRefused, IntentStore
+from factory_kernel.exploration_repository import inspect_repository
 from factory_kernel.hosted_exploration_call import SCHEMA, execute, request_limits
 from factory_kernel.worker_policy import allowed_tools, effort
 from tests.factory import test_exploration as fixture
 from tests.factory import test_frontdoor_hosted as transport
 from tests.factory import test_frontdoor_http as http
+from tests.factory import test_exploration_repository as repository_fixture
 from tests.factory.test_frontdoor_intent import OWNER, WORKER
 
 
 def reply(action="stop", request=None):
     return {"action": action, "request": request or {"reason": "Representative workload evidence is unavailable."},
             "reason": "Investigate a decision-changing uncertainty."}
+
+
+class ProtectedAdapterTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = repository_fixture.ProtectedRepositoryTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.store = IntentStore(self.fixture.root / "private-state",
+            repository=self.fixture.gh.repository, owner=OWNER.identity)
+        self.provider = Mock(config=None)
+
+    def test_configured_service_reads_real_protected_context_with_frozen_paths(self):
+        paths = list(self.fixture.paths)
+        expected = inspect_repository(self.fixture.root, paths)
+        with patch("factory_kernel.frontdoor_exploration.require_clear_stop") as stop:
+            service = FrontDoorExploration.protected(self.store, self.provider,
+                self.fixture.gh, paths, app_login="factory[bot]")
+            paths.append("../../untrusted.py")  # Caller mutation must not change configured scope.
+            try:
+                actual = service.engine._context()
+            except IntentRefused as exc:
+                self.fail("Valid configured protected context was refused: " + str(exc))
+            self.assertEqual(actual, expected)
+            self.assertGreaterEqual(stop.call_count, len(self.fixture.gh.calls))
+            self.assertEqual(actual["proof_status"], "not-established")
+        self.provider.run.assert_not_called()
+
+    def test_configured_service_still_refuses_stop_and_unprotected_main(self):
+        with patch("factory_kernel.frontdoor_exploration.require_clear_stop") as stop:
+            service = FrontDoorExploration.protected(self.store, self.provider,
+                self.fixture.gh, self.fixture.paths, app_login="factory[bot]")
+            stop.side_effect = IntentRefused("stopped")
+            with self.assertRaisesRegex(IntentRefused, "stopped"):
+                service.engine._context()
+            self.assertEqual(self.fixture.gh.calls, [])
+            stop.side_effect = None
+            self.fixture.gh.branch["protected"] = False
+            with self.assertRaisesRegex(IntentRefused, "protected main"):
+                service.engine._context()
+        self.provider.run.assert_not_called()
 
 
 class AdaptiveJobsTests(unittest.TestCase):
