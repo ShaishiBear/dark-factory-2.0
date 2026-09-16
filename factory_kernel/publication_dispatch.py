@@ -11,6 +11,7 @@ from .frontdoor_intent import IntentRefused
 from .frontdoor_prepare import PreparationRecords
 from .frontdoor_programme import prepare_programme
 from .programme import parse_json
+from .programme_replan import review_replan
 from .publication_request import PublicationRequests
 from .publication_source import observe_publication_source
 from .publication_observation import _complete
@@ -47,6 +48,9 @@ class PublicationDispatches(PreparationRecords):
                 "destination": {"repository": self.store.repository, "visibility": observation["visibility"],
                                 "input_sha256": review["input_sha256"]},
                 "source_sha": observation["main_sha"]}
+        if state == "already-active":
+            result["replanning"] = review_replan(active, review["input"], repository=self.store.repository,
+                                                 source_sha=observation["main_sha"])
         previous = self._latest_request(project)
         if previous is not None and previous["project_version"] == review["project_version"]:
             command = previous["identity"]["command"]

@@ -3000,6 +3000,34 @@
       "find": "\"-R\", policy.REPOSITORY, \"--ref\", \"main\",",
       "replace": "\"-R\", policy.REPOSITORY, \"--ref\", \"untrusted\",",
       "why": "Only protected main can receive the owner publication dispatch."
+    },
+    {
+      "id": "programme-replan-scope-laundered",
+      "file": "factory_kernel/programme_replan.py",
+      "find": "if current.spec != proposed.spec:",
+      "replace": "if False:",
+      "why": "A valid new scope hash cannot turn changed owner intent into same-scope replanning."
+    },
+    {
+      "id": "programme-replan-identity-changed",
+      "file": "factory_kernel/programme_replan.py",
+      "find": "if current.app_login != proposed.app_login:",
+      "replace": "if False:",
+      "why": "A replan cannot replace the execution identity."
+    },
+    {
+      "id": "programme-replan-unbound-source",
+      "file": "factory_kernel/programme_replan.py",
+      "find": "if not isinstance(source_sha, str) or not re.fullmatch(r\"[a-f0-9]{40}\", source_sha):",
+      "replace": "if False:",
+      "why": "A mutable branch name cannot bind a review to its observed protected source."
+    },
+    {
+      "id": "programme-replan-dependency-change-hidden",
+      "file": "factory_kernel/programme_replan.py",
+      "find": "if old[key] != new[key])",
+      "replace": "if old[key][\"acceptance\"] != new[key][\"acceptance\"])",
+      "why": "A stable item name and acceptance list must not conceal changed dependencies."
     }
   ]
 }

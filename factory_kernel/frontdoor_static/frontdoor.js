@@ -287,6 +287,17 @@ $("preview-publication").addEventListener("click", () => perform(async () => {
   target.append(details, text("p", `Content identity: ${publicationPreview.input_sha256}`, "hash"));
   const explanations = { "already-active": "This approved scope is already active. No duplicate programme or new execution will be created.", "requires-governed-replacement": "A different programme is active. Replacing it requires the governed replacement process, which is not yet connected here.", "requires-reconciliation": "An earlier publication reservation is no longer current. Its outcome must be reconciled before a new request; no work has been restarted." };
   if (explanations[publicationPreview.state]) target.append(text("p", explanations[publicationPreview.state], "muted"));
+  const replan = publicationPreview.replanning;
+  if (replan?.disposition === "decomposition-change") {
+    target.append(text("h3", "Different execution plan for the same approved scope"));
+    target.append(text("p", "The proposed decomposition changes how work is divided or ordered. The active programme, its work budget and its recorded outcomes remain in place. Applying this proposal requires a governed transition; this review grants no execution or proof authority."));
+    list(target, "New work items in this proposal", replan.added_items);
+    list(target, "Existing items replaced by this proposal", replan.retired_items);
+    list(target, "Items whose scope or dependencies change", replan.changed_items);
+    list(target, "Acceptance coverage", replan.coverage.map((row) => `${row.acceptance}: ${row.current_item} → ${row.proposed_item}`));
+    for (const row of replan.dependency_changes) target.append(text("p", `${row.item}: after ${row.current.join(", ") || "nothing"} → after ${row.proposed.join(", ") || "nothing"}`));
+    target.append(text("p", "Historical proof remains attached to the original programme and subject. It does not qualify this proposed plan.", "muted"));
+  }
   $("publish-check").checked = false;
   $("publication-form").hidden = publicationPreview.state !== "ready-for-consent";
   message("Review the destination and exact public content before deciding.");
