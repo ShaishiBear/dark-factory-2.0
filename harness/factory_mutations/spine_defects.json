@@ -444,6 +444,41 @@
       "find": ") + planning_advice(admission),",
       "replace": "),",
       "why": "The design worker must receive strategy without promoting it into acceptance. Detector: tests/factory/test_programme_strategy.py"
+    },
+    {
+      "id": "protected-context-currency",
+      "file": "factory_kernel/exploration_repository.py",
+      "find": "if branch() != (commit, tree_oid) or metadata() != original_metadata:",
+      "replace": "if False:",
+      "why": "Main or repository identity changes during inspection must invalidate the observation. Detector: tests/factory/test_exploration_repository.py"
+    },
+    {
+      "id": "protected-context-blob-identity",
+      "file": "factory_kernel/exploration_repository.py",
+      "find": "if len(raw) != entry[\"size\"] or actual_oid != entry[\"sha\"]:",
+      "replace": "if len(raw) != entry[\"size\"]:",
+      "why": "Same-sized forged blob content cannot retain a different Git object identity. Detector: tests/factory/test_exploration_repository.py"
+    },
+    {
+      "id": "protected-context-complete-tree",
+      "file": "factory_kernel/exploration_repository.py",
+      "find": "or tree.get(\"truncated\") is not False",
+      "replace": "",
+      "why": "A truncated tree is not complete source evidence. Detector: tests/factory/test_exploration_repository.py"
+    },
+    {
+      "id": "protected-context-main-protection",
+      "file": "factory_kernel/exploration_repository.py",
+      "find": "if not isinstance(row, dict) or row.get(\"protected\") is not True:",
+      "replace": "if not isinstance(row, dict):",
+      "why": "Unprotected main cannot supply hosted exploration currency. Detector: tests/factory/test_exploration_repository.py"
+    },
+    {
+      "id": "protected-context-regular-source",
+      "file": "factory_kernel/exploration_repository.py",
+      "find": "or entry.get(\"mode\") not in {\"100644\", \"100755\"}",
+      "replace": "",
+      "why": "Symlink data cannot be analysed as a regular source or protected policy. Detector: tests/factory/test_exploration_repository.py"
     }
   ]
 }
