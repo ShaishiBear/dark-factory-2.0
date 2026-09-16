@@ -24,6 +24,10 @@ output limits, candidate failure, timeout, cancellation and container cleanup.
 Ordinary quick tests cover orchestration and policy; they do not silently count
 as executing these container checks.
 
+The workflow uploads the experiment directory for 30 days, including incomplete
+journals when available. Download it before expiry for longer retention; this
+experiment does not silently write into the production trajectory archive.
+
 The six-case control deliberately starts with a failing draft and then memorizes
 only public examples. Every feedback arm should turn public checks green and still
 fail independent final examples. That proves the plumbing rejects this overfit;

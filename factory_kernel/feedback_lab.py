@@ -66,11 +66,24 @@ def validate_tasks(tasks):
         groups[task["group"]] = task["split"]
 
 
+def same_json(expected, actual):
+    # JSON numbers may serialize as 2 or 2.0; booleans must not equal 0/1.
+    if type(expected) in (int, float) and type(actual) in (int, float):
+        return expected == actual
+    if type(expected) is not type(actual):
+        return False
+    if isinstance(expected, list):
+        return len(expected) == len(actual) and all(same_json(a, b) for a, b in zip(expected, actual))
+    if isinstance(expected, dict):
+        return expected.keys() == actual.keys() and all(same_json(value, actual[key]) for key, value in expected.items())
+    return expected == actual
+
+
 def compare(checks, values):
     if not isinstance(values, list) or len(values) != len(checks):
         raise ValueError("incomplete observations")
     rows = [{"input": check["input"], "expected": check["expected"], "actual": actual,
-             "passed": canonical(check["expected"]) == canonical(actual)}
+             "passed": same_json(check["expected"], actual)}
             for check, actual in zip(checks, values)]
     return {"passed": all(row["passed"] for row in rows), "checks": rows}
 
@@ -178,6 +191,18 @@ def run_experiment(tasks, worker, sandbox, limits, *, emit, cancelled=lambda: Fa
     totals = {arm: {"assigned": len(tasks), "accepted": sum(r["accepted"] for r in rows if r["arm"] == arm),
                     "errors": sum(r["status"] != "observed" for r in rows if r["arm"] == arm)}
               for arm in ("single", "feedback")}
+    for arm, summary in totals.items():
+        assigned = [r for r in rows if r["arm"] == arm]
+        unknown = sum(r["reported_cost_usd"] is None for r in assigned)
+        known_total = sum(r["reported_cost_usd"] or 0 for r in assigned)
+        summary.update({"reserved_usd": sum(r["reserved_usd"] for r in assigned),
+                        "unknown_cost_arms": unknown, "known_reported_cost_usd": known_total,
+                        "total_reported_cost_usd": None if unknown else known_total,
+                        "elapsed_seconds": sum(r["elapsed_seconds"] for r in assigned)})
+    paired = [{"id": task["id"], **{arm: next(r["accepted"] for r in rows
+               if r["id"] == task["id"] and r["arm"] == arm) for arm in ("single", "feedback")}}
+              for task in tasks]
     return {"version": "1.0", "mode": "feedback-experiment", "arms": totals, "attempts": rows,
+            "paired_outcomes": paired,
             "qualification_authority": False, "billing_reconciled": False,
             "promotion": "not-authorized", "task_set_sha256": digest(tasks)}

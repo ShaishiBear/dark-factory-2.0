@@ -1,10 +1,11 @@
 from dataclasses import replace
 import json
 import unittest
+from unittest.mock import Mock, patch
 
 from factory_kernel.feedback_lab import Limits, compare, prompt_for, run_arm, run_experiment, validate_tasks
 from factory_kernel.feedback_sandbox import CandidateError, SandboxError
-from factory_kernel.feedback_lab_cli import RecordedWorker
+from factory_kernel.feedback_lab_cli import LiveWorker, RecordedWorker
 
 
 TASK = {"id": "identity", "group": "identity", "split": "development", "instruction": "Return the input.",
@@ -120,6 +121,8 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             compare(TASK["public"], [])
         self.assertFalse(compare([{"input": 0, "expected": 1}], [True])["passed"])
+        self.assertTrue(compare([{"input": 0, "expected": [2.0]}], [[2]])["passed"])
+        self.assertFalse(compare([{"input": 0, "expected": {"a": [1]}}], [{"a": [True]}])["passed"])
 
     def test_recorded_worker_only_uses_public_examples(self):
         worker = RecordedWorker()
@@ -133,6 +136,44 @@ class FeedbackTests(unittest.TestCase):
                       Limits(), emit=self.events.append)
         self.assertEqual(row["status"], "error")
         self.assertEqual(len(self.sandbox.calls), 0)
+
+    def test_overreported_spend_prevents_all_subsequent_calls(self):
+        worker = Mock(return_value={"code": "fixed", "cost_usd": 9})
+        report = run_experiment([TASK], worker, self.sandbox, Limits(), emit=self.events.append)
+        self.assertEqual(worker.call_count, 1)
+        self.assertEqual(len(report["attempts"]), 2)
+
+    def test_public_failure_cannot_be_saved_by_final_success(self):
+        class DifferentResults:
+            def evaluate(self, code, inputs, **caps):
+                return [None] if inputs == [2] else [5]
+        row = run_arm(TASK, "feedback", self.worker, DifferentResults(), Limits(), emit=self.events.append)
+        self.assertTrue(row["acceptance"]["passed"])
+        self.assertFalse(row["accepted"])
+
+    def test_unknown_costs_remain_unknown_in_summary(self):
+        report = run_experiment([TASK], self.worker, self.sandbox, Limits(), emit=self.events.append)
+        self.assertIsNone(report["arms"]["feedback"]["total_reported_cost_usd"])
+        self.assertEqual(report["arms"]["feedback"]["unknown_cost_arms"], 1)
+        self.assertEqual(report["paired_outcomes"], [{"id": "identity", "single": False, "feedback": True}])
+
+    def test_live_adapter_has_no_tools_or_automatic_retries(self):
+        from factory_kernel.config import ProviderConfig
+        configured = ProviderConfig("claude-cli", "claude", "fixture-model", 2700, transient_retries=2)
+        with patch("factory_kernel.feedback_lab_cli.load_config", return_value=Mock(provider=configured)):
+            worker = LiveWorker("fixture-config")
+        self.assertEqual(worker.provider.config.transient_retries, 0)
+        with patch.object(worker.provider, "run", return_value=Mock(
+                structured_output={"code": "def solve(x): return x"}, cost_usd=.01)) as run:
+            with patch("factory_kernel.feedback_lab_cli.tempfile.TemporaryDirectory") as directory:
+                directory.return_value.__enter__.return_value = "."
+                worker("instruction", turns=2, dollars=.05, seconds=30)
+        request = run.call_args.args[0]
+        self.assertEqual(request.allowed_tools, ())
+        self.assertEqual(request.environment, {})
+        self.assertEqual(request.max_turns, 2)
+        self.assertEqual(request.max_budget_usd, .05)
+        self.assertEqual(request.timeout_seconds, 30)
 
 
 if __name__ == "__main__":

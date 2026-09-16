@@ -20,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Resolve an official Python image for this recorded experiment
         run: |
@@ -41,3 +42,11 @@ jobs:
           assert all(a['rounds'][-1]['public']['passed'] for a in r['attempts'] if a['arm'] == 'feedback')
           print('FEEDBACK_OVERFIT_REJECTED arms=12 public_green_feedback_arms=6')
           PY
+      - name: Preserve experiment observations, including incomplete journals
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: feedback-control
+          path: ${{ runner.temp }}/feedback-control
+          retention-days: 30
+          if-no-files-found: warn
