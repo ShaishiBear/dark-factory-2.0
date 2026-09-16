@@ -12,10 +12,9 @@ name: dark-factory-trust-root
 # head-based quick gate (dark-factory-ci.yml) is where proposed code runs.
 #
 # `trust-root-authority` is the required status check the main ruleset names. `unattended-merge`
-# is not required: it arms GitHub auto-merge, bound to the exact judged head, for maintainer-lane
-# PRs only. GitHub then performs the squash merge itself once every required check is green on
-# that head, and refuses if the head moved. Autonomous PRs are never armed; the kernel merges
-# them only after the full evidence ladder.
+# is not required: it waits for required checks, then rechecks stop immediately before an
+# exact-head maintainer merge. It never leaves a deferred auto-merge armed. Autonomous PRs
+# remain exclusively on the kernel's full evidence path.
 
 on:
   pull_request_target:
@@ -142,21 +141,20 @@ jobs:
 
   unattended-merge:
     needs: trust-root-authority
-    # A draft gets a judged verdict but is never armed: GitHub refuses
-    # enablePullRequestAutoMerge on drafts, and a refused arm is not a failure of anything.
+    # A draft gets a judged verdict but is never merged.
     if: needs.trust-root-authority.outputs.unattended == 'true' && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # The required quick job is bounded at 20 minutes. Allow its setup/queue margin,
+    # while the inner wait leaves time for a fresh stop read and exact-head effect.
+    timeout-minutes: 25
     permissions:
       contents: write
       pull-requests: write
       issues: read
     steps:
-      # No checkout or candidate code. gh merges an immediately eligible PR or arms
-      # auto-merge while required checks are pending. Direct enablePullRequestAutoMerge
-      # refuses UNSTABLE even when only this non-required job is pending (PRs 186/187).
-      # Both paths enforce branch protection and the exact head; no administrator bypass.
-      - name: Merge or arm the exact checked head
+      # No checkout or candidate code. Deferred native auto-merge would outlive the stop
+      # observation. Wait here, then make one immediate guarded merge; never arm a later one.
+      - name: Wait for required checks and merge the exact checked head
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -169,5 +167,12 @@ jobs:
           # Recheck after the job boundary. A failed read or any stop issue refuses.
           stops=$(gh issue list --repo "$REPOSITORY" --label factory:stop --state open --limit 1 --json number --jq length)
           test "$stops" = 0
-          gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --auto --squash --match-head-commit "$EXPECTED_HEAD"
-          echo "UNATTENDED_MERGE_REQUESTED head=$EXPECTED_HEAD"
+          timeout 22m gh pr checks "$PR_NUMBER" --repo "$REPOSITORY" --required --watch --interval 10 --fail-fast
+          # A skipped/empty/missing check inventory is not successful qualification.
+          passed=$(gh pr checks "$PR_NUMBER" --repo "$REPOSITORY" --required --json name,bucket --jq 'length > 0 and all(.[]; .bucket == "pass")')
+          test "$passed" = true
+          # Checks may take minutes. A stop arriving during the wait must prevent the effect.
+          stops=$(gh issue list --repo "$REPOSITORY" --label factory:stop --state open --limit 1 --json number --jq length)
+          test "$stops" = 0
+          gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --squash --match-head-commit "$EXPECTED_HEAD"
+          echo "UNATTENDED_MERGE_COMPLETED head=$EXPECTED_HEAD"

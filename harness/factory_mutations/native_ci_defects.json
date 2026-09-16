@@ -238,16 +238,37 @@
     {
       "id": "unattended-final-stop-ignored",
       "file": ".github/workflows/dark-factory-trust-root.yml",
-      "find": "          test \"$stops\" = 0\n",
-      "replace": "",
-      "why": "A stop arriving between jobs must refuse before the merge request."
+      "find": "          test \"$stops\" = 0\n          gh pr merge",
+      "replace": "          gh pr merge",
+      "why": "A stop arriving while required checks run must refuse before the immediate merge."
     },
     {
       "id": "unattended-admin-bypass-added",
       "file": ".github/workflows/dark-factory-trust-root.yml",
-      "find": "--auto --squash",
-      "replace": "--auto --squash --admin",
+      "find": "--squash --match-head-commit",
+      "replace": "--squash --admin --match-head-commit",
       "why": "Required branch protections remain authoritative for the maintainer lane."
+    },
+    {
+      "id": "unattended-native-auto-merge-restored",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "--squash --match-head-commit",
+      "replace": "--auto --squash --match-head-commit",
+      "why": "A deferred native merge would survive the helper's last stop observation."
+    },
+    {
+      "id": "unattended-required-success-ignored",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "          test \"$passed\" = true\n",
+      "replace": "",
+      "why": "Empty, skipped or still-pending required checks must not reach the merge effect."
+    },
+    {
+      "id": "unattended-required-wait-skipped",
+      "file": ".github/workflows/dark-factory-trust-root.yml",
+      "find": "          timeout 22m gh pr checks \"$PR_NUMBER\" --repo \"$REPOSITORY\" --required --watch --interval 10 --fail-fast\n",
+      "replace": "",
+      "why": "The helper must observe the required-check outcome before its final stop and merge."
     }
   ]
 }

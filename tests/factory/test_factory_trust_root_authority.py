@@ -9,9 +9,9 @@ Two properties, each with a structural half and a behavioural half:
    refuses to run from the PR head, binds to the expected base and head, and judges a PR that
    rewrites the guard using the guard it did not rewrite.
 
-2. Merge is bound to the exact judged head. The unattended-merge job arms GitHub auto-merge
-   with `expectedHeadOid`, squash only, and only for the maintainer lane; the ruleset still
-   requires every check green on that head.
+2. Merge is bound to the exact judged head. The unattended helper waits for required checks,
+   observes stop again, then makes an immediate squash merge only for the maintainer lane.
+   It never leaves native auto-merge armed beyond its last stop observation.
 
 These tests run the real `scripts/factory_security.py` against a real temporary Git repository
 with a bare `origin`, and stand in only for `gh`.
@@ -353,6 +353,7 @@ class TrustRootWorkflowStructureTests(unittest.TestCase):
 
     def test_unattended_merge_is_gated_on_the_trusted_decision_and_the_stop_button(self):
         self.assertIn("if: needs.trust-root-authority.outputs.unattended == 'true'", self.merge)
+        self.assertIn("&& github.event.pull_request.draft == false", self.merge)
         self.assertIn("bash scripts/factory-stop.sh", self.authority)
         self.assertIn('[ "${{ steps.stop.outputs.stopped }}" = "false" ]', self.authority)
         outputs = self.authority.split("    outputs:\n", 1)[1].split("    steps:", 1)[0]
@@ -365,30 +366,45 @@ class TrustRootWorkflowStructureTests(unittest.TestCase):
         self.assertIn('test "$EXPECTED_HEAD" = "$EVENT_HEAD"', self.merge)
         self.assertIn("EXPECTED_HEAD: ${{ needs.trust-root-authority.outputs.head }}", self.merge)
         self.assertIn('--match-head-commit "$EXPECTED_HEAD"', self.merge)
-        self.assertIn('--auto --squash', self.merge)
+        self.assertIn('--squash --match-head-commit', self.merge)
+        self.assertNotIn('--auto', self.merge)
         self.assertNotIn('--admin', self.merge)
         self.assertIn("    permissions:\n      contents: write\n      pull-requests: write", self.merge)
 
     @unittest.skipUnless(os.name != "nt" and shutil.which("bash"), "workflow executes on Linux")
     def test_actual_merge_shell_refuses_stop_failed_read_changed_head_and_failed_merge(self):
         shell = textwrap.dedent(self.merge.split("        run: |\n", 1)[1])
-        for scenario in ("clear", "stopped", "unreadable", "changed", "merge-refused"):
+        for scenario in ("clear", "stopped", "unreadable", "changed", "merge-refused",
+                         "checks-failed", "no-required", "checks-pending", "late-stop", "late-unreadable"):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 stub = root / "gh"
                 stub.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
                     import json, os, pathlib, sys
                     args = sys.argv[1:]
-                    with pathlib.Path(os.environ['CALLS']).open('a') as output:
+                    calls = pathlib.Path(os.environ['CALLS'])
+                    previous = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+                    with calls.open('a') as output:
                         output.write(json.dumps(args)+'\\n')
                     mode = os.environ['SCENARIO']
                     if args[:2] == ['issue', 'list']:
                         assert '--label' in args and 'factory:stop' in args and 'open' in args
-                        if mode == 'unreadable': sys.exit(1)
-                        print(1 if mode == 'stopped' else 0)
+                        later = any(call[:2] == ['pr', 'checks'] for call in previous)
+                        if mode == 'unreadable' or (later and mode == 'late-unreadable'): sys.exit(1)
+                        print(1 if mode == 'stopped' or (later and mode == 'late-stop') else 0)
+                    elif args[:2] == ['pr', 'checks']:
+                        assert '--required' in args
+                        if '--watch' in args:
+                            assert '--fail-fast' in args
+                            if mode == 'checks-failed': sys.exit(1)
+                        else:
+                            assert '--json' in args and 'name,bucket' in args
+                            print('false' if mode in ('no-required', 'checks-pending') else 'true')
                     elif args[:2] == ['pr', 'merge']:
-                        assert '--auto' in args and '--squash' in args and '--admin' not in args
+                        assert '--auto' not in args and '--squash' in args and '--admin' not in args
                         assert args[args.index('--match-head-commit')+1] == 'a'*40
+                        assert len([call for call in previous if call[:2] == ['issue', 'list']]) == 2
+                        assert previous[-1][:2] == ['issue', 'list']
                         if mode == 'merge-refused': sys.exit(1)
                     else: sys.exit(2)
                     '''))
@@ -401,7 +417,17 @@ class TrustRootWorkflowStructureTests(unittest.TestCase):
                                         capture_output=True, text=True, timeout=10)
                 calls = (root / "calls").read_text().splitlines() if (root / "calls").exists() else []
                 self.assertEqual(result.returncode == 0, scenario == "clear", result.stderr)
-                self.assertEqual(len(calls), 0 if scenario == "changed" else 2 if scenario in {"clear", "merge-refused"} else 1)
+                expected = {"changed": 0, "clear": 5, "merge-refused": 5, "stopped": 1,
+                            "unreadable": 1, "checks-failed": 2, "no-required": 3,
+                            "checks-pending": 3, "late-stop": 4, "late-unreadable": 4}
+                self.assertEqual(len(calls), expected[scenario])
+
+    def test_wait_is_bounded_and_empty_skipped_checks_cannot_merge(self):
+        self.assertIn("timeout-minutes: 25", self.merge)
+        self.assertIn("timeout 22m gh pr checks", self.merge)
+        self.assertIn("--required --watch --interval 10 --fail-fast", self.merge)
+        self.assertIn('length > 0 and all(.[]; .bucket == "pass")', self.merge)
+        self.assertIn('test "$passed" = true', self.merge)
 
     def test_actions_are_pinned_by_commit(self):
         for line in self.text.splitlines():
