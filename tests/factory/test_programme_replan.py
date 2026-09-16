@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from factory_kernel.canonical import sha256_value
-from factory_kernel.programme import ProgrammeRefused
+from factory_kernel.programme import ProgrammeRefused, compile_programme
 from factory_kernel.programme_replan import review_replan
 from factory_kernel.publication_policy import PROJECT
 from tests.factory.test_frontdoor_intent import REPO, example_spec
@@ -31,9 +31,10 @@ class ReplanReviewTests(unittest.TestCase):
         self.assertEqual(result["current_programme_sha256"], result["proposed_programme_sha256"])
 
     def test_new_input_versions_require_explicit_review_adapter_even_if_compiler_can_accept_them(self):
+        compiled = compile_programme(self.current, repository=REPO)
         for value in (self.current, self.proposed):
             value["version"] = "1.1"
-            with patch("factory_kernel.programme_replan.compile_programme") as compiler:
+            with patch("factory_kernel.programme_replan.compile_programme", return_value=compiled) as compiler:
                 with self.assertRaisesRegex(ProgrammeRefused, "input v1.0"):
                     self.review()
                 compiler.assert_not_called()
