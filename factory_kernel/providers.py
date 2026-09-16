@@ -413,6 +413,14 @@ class ClaudeCliProvider:
             "last_event_age_s": run.last_event_age,
             "wall_seconds_last_attempt": run.elapsed,
             "partial_output": run.tail(),
+            # A wall may expire before the draft deadline (issue #189: turn 13 of 30).
+            # Retain activity even then; absence of a tool call is not proof about disk.
+            "draft_activity": {
+                "reads": run.reads,
+                "files_read": list(run.files_read[:FILES_READ_CAP]),
+                "first_write_turn": run.wrote_at_turn,
+                "deadline_turn": run.deadline_turn,
+            },
         }
         if run.draft_deadline_missed:
             # The deadline records; the turn cap decides (D-066). A process that had written
@@ -473,7 +481,7 @@ class ClaudeCliProvider:
             detail = (stdout + "\n" + stderr)[-4000:]
             raise ProviderStageError(
                 f"agent worker failed role={request.role!r} rc={run.returncode}: {detail}",
-                telemetry=telemetry,
+                telemetry={**observed, **telemetry},
                 envelope=envelope,
             )
         return run

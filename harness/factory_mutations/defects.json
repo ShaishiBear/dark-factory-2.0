@@ -2671,6 +2671,20 @@
       "find": "if original_owner_stop(self.github, row, programme.app_login):",
       "replace": "if True:",
       "why": "Removing a work item's programme marker must still stop the queue."
+    },
+    {
+      "id": "failure-activity-first-write-lost",
+      "file": "factory_kernel/providers.py",
+      "find": "\"first_write_turn\": run.wrote_at_turn,",
+      "replace": "\"first_write_turn\": None,",
+      "why": "A failed worker that attempted a draft must be distinguishable from one with no observed write."
+    },
+    {
+      "id": "failure-activity-read-paths-unbounded",
+      "file": "factory_kernel/providers.py",
+      "find": "\"files_read\": list(run.files_read[:FILES_READ_CAP]),\n                \"first_write_turn\"",
+      "replace": "\"files_read\": list(run.files_read),\n                \"first_write_turn\"",
+      "why": "Failure diagnostics must remain bounded even when a worker repeatedly reads files."
     }
   ]
 }
