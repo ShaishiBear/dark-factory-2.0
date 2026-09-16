@@ -213,6 +213,7 @@ function renderEarlierHistory() {
       const data = row.record.data;
       if (row.record.kind === "approved") detail.append(text("p", `Approved allowance: $${(data.limit_microusd / 1000000).toFixed(2)}, up to ${data.max_calls} attempts. Earlier spending: ${data.opening.status === "verified-empty" ? "no prior scope execution observed" : "unknown"}.`));
       if (row.record.kind === "reserved") detail.append(text("p", `Reserved $${(data.microusd / 1000000).toFixed(2)} for ${data.role}, attempt ${data.attempt}. This charge is retained across strategy changes.`));
+      if (row.record.kind === "started") detail.append(text("p", "Permission for this attempt was consumed once. Its actual outcome may still be unknown."));
       if (row.record.kind === "observed") detail.append(text("p", data.reported_microusd === null ? "Attempt ended with spending unresolved. The reservation remains charged." : `Reported cost: $${(data.reported_microusd / 1000000).toFixed(2)}. The full reservation remains charged.`));
     }
     if (row.record.spec) {
