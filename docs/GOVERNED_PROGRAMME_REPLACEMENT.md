@@ -166,3 +166,26 @@ outside this model adapter; independent billed-cost reconciliation and provider-
 hard limits are still missing. Do not describe this as total project spending coverage
 or authorize a paid acceptance run on that basis. Replacement remains blocked. All
 integration validation for this change uses recorded providers and disposable intent logs.
+
+## Immutable owner-reviewed replacement intent
+
+The owner can save an exact replacement review through
+`POST /api/programme-replacement-intent`. The service independently regenerates the review
+and recommendation, compares the reviewed digest, checks the owner event-log head again,
+and appends an immutable plan to the same durable intent log. It retains the old protected
+source, proposed input, original verified completion receipts, pending issue identities,
+active executions, open App pull requests and both budget observations. A proposed change
+to a completed obligation refuses even if its review digest matches.
+
+Lost responses and repeated request identities return the original historical plan; they
+never dispatch or repeat a remote operation. Altered content cannot reuse an identity.
+The record survives restart. Later owner decisions or spending mark it stale without
+rewriting its original facts or replenishing either budget. Its hash detects damaged
+content; the private service directory remains the authentication boundary.
+
+The UI displays the saved artifact and its owner-history currency. That currency is not
+a new observation of remote execution. **A frozen plan grants no activation permission**:
+it creates no protected fence, drains no worker, retires no issue, publishes no replacement
+and qualifies no code. The recorded required actions are obligations for the future
+governed transition. Actual effect journaling, protected fencing and serialized activation
+still need implementation and fresh independent observation/current owner consent.

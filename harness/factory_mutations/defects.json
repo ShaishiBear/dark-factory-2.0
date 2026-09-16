@@ -3735,6 +3735,48 @@
       "find": "          # The authenticated, reserved CLI probe below establishes routing. No separate",
       "replace": "          routing_code=\"$(curl https://example.invalid)\"\n          # The authenticated, reserved CLI probe below establishes routing. No separate",
       "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
+    },
+    {
+      "id": "replacement-intent-review-digest",
+      "file": "factory_kernel/replacement_intent.py",
+      "find": "review[\"review_sha256\"] != command[\"review_sha256\"]",
+      "replace": "False",
+      "why": "The owner can freeze only exact reviewed replacement facts with unchanged completed obligations and current owner history; replays remain immutable historical evidence, never activation. Detector: tests/factory/test_replacement_intent.py"
+    },
+    {
+      "id": "replacement-intent-completed-work",
+      "file": "factory_kernel/replacement_intent.py",
+      "find": "if any(row[\"kind\"] == \"completed-work-changed\" for row in review[\"blockers\"]):",
+      "replace": "if False:",
+      "why": "The owner can freeze only exact reviewed replacement facts with unchanged completed obligations and current owner history; replays remain immutable historical evidence, never activation. Detector: tests/factory/test_replacement_intent.py"
+    },
+    {
+      "id": "replacement-intent-owner-drift",
+      "file": "factory_kernel/replacement_intent.py",
+      "find": "if (len(events) != review[\"project_version\"]\n                    or sha256_value(events[-1]) != review[\"intent_head_sha256\"]):",
+      "replace": "if False:",
+      "why": "The owner can freeze only exact reviewed replacement facts with unchanged completed obligations and current owner history; replays remain immutable historical evidence, never activation. Detector: tests/factory/test_replacement_intent.py"
+    },
+    {
+      "id": "replacement-intent-plan-digest",
+      "file": "factory_kernel/replacement_intent.py",
+      "find": "if sha256_value(plan) != digest:",
+      "replace": "if False:",
+      "why": "The owner can freeze only exact reviewed replacement facts with unchanged completed obligations and current owner history; replays remain immutable historical evidence, never activation. Detector: tests/factory/test_replacement_intent.py"
+    },
+    {
+      "id": "replacement-intent-replay-content",
+      "file": "factory_kernel/replacement_intent.py",
+      "find": "or event[\"command\"][\"payload\"][\"request_sha256\"] != request_sha",
+      "replace": "or False",
+      "why": "The owner can freeze only exact reviewed replacement facts with unchanged completed obligations and current owner history; replays remain immutable historical evidence, never activation. Detector: tests/factory/test_replacement_intent.py"
+    },
+    {
+      "id": "replacement-intent-currency",
+      "file": "factory_kernel/replacement_intent.py",
+      "find": "event[\"project_version\"] == len(events) else \"owner-history-changed\"",
+      "replace": "True else \"owner-history-changed\"",
+      "why": "The owner can freeze only exact reviewed replacement facts with unchanged completed obligations and current owner history; replays remain immutable historical evidence, never activation. Detector: tests/factory/test_replacement_intent.py"
     }
   ]
 }
