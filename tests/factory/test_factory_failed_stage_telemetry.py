@@ -113,6 +113,42 @@ def _rows(paths: RunPaths) -> list[dict]:
 class ProviderErrorTelemetryTests(unittest.TestCase):
     """The refusals the provider raises carry what the stage cost."""
 
+    def test_timeout_before_draft_deadline_retains_activity_without_retry_or_salvage(self):
+        for first_write in (None, 5):
+            run = CliRun(returncode=None, stdout="", timed_out=True, elapsed=60,
+                         reads=53, files_read=tuple(f"app/file-{n}.py" for n in range(53)),
+                         wrote_at_turn=first_write, deadline_turn=24, draft_deadline_missed=False)
+            with self.subTest(first_write=first_write), mock.patch.object(
+                    providers_module, "_stream_cli", return_value=run) as launch:
+                with self.assertRaises(ProviderStageError) as caught:
+                    _provider().run(AgentRequest(role="test_author", prompt="p", cwd="/tmp", max_turns=30))
+            failure = caught.exception
+            self.assertTrue(failure.timed_out)
+            self.assertEqual(launch.call_count, 1)
+            self.assertNotIn("draft_deadline_missed", failure.telemetry)
+            self.assertEqual(failure.telemetry["draft_activity"], {
+                "reads": 53, "files_read": list(run.files_read[:providers_module.FILES_READ_CAP]),
+                "first_write_turn": first_write, "deadline_turn": 24,
+            })
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RunPaths.create(root, "run")
+                runtime = _runtime(root, _Raising(failure))
+                with self.assertRaises(ProviderStageError):
+                    _run_stage(runtime, paths, root)
+                self.assertEqual(_record(paths, "test_author")["draft_activity"],
+                                 failure.telemetry["draft_activity"])
+
+    def test_terminal_error_also_retains_observed_activity(self):
+        output = envelope(is_error=True, subtype="error_max_budget_usd", result="budget exhausted")
+        run = CliRun(returncode=1, stdout=output, reads=2, files_read=("app/example.py",),
+                     wrote_at_turn=1, deadline_turn=24)
+        with mock.patch.object(providers_module, "_stream_cli", return_value=run):
+            with self.assertRaises(ProviderStageError) as caught:
+                _provider().run(AgentRequest(role="test_author", prompt="p", cwd="/tmp", max_turns=30))
+        self.assertEqual(caught.exception.telemetry["draft_activity"]["first_write_turn"], 1)
+        self.assertEqual(caught.exception.telemetry["draft_activity"]["reads"], 2)
+
     def test_exhausted_transient_retries_carry_summed_telemetry(self):
         prov = _provider(retries=2)
         runs = _Runs((1, transient()), (1, transient()), (1, transient()))
