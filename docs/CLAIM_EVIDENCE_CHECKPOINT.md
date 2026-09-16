@@ -83,3 +83,32 @@ Front Door integration belongs to the coordinating task. Preflight and reconside
 subsequent milestones, not implemented here. Before probe execution, establish isolation and
 cumulative budgets. Before selective proof reuse, validate dependency coverage against retained
 and adversarial evidence. Keep the normal admission and fresh qualification boundary intact.
+
+## Follow-on delivery: evidence retention — 2026-09-16
+
+The owner authorized the next bounded slice. Worktree `.worktrees/claim-evidence-retention`,
+branch `codex/claim-evidence-retention`, was created from foundation main
+`c252828b164816fc752566cf5f5da328c52e3058` and rebased onto current main
+`146c4bb13b63062fe7aa53c46409e1508fefa885` after PRs 198, 199 and 200. Those deliveries are
+preserved. The coordinating task still owns Front Door and deployment. Issue 189 is untouched.
+
+`docs/EVIDENCE_RETENTION.md` describes the fixed-path, bounded 90-day evidence/index uploads,
+packaging-time source observations and sanitized metadata in the existing trajectory archive.
+The underlying loss was the worker's top-level JSON upload omitting nested spine/independent
+files. Raw proof does not enter the public archive, and retention cannot authorize reuse.
+
+Validation: 73 focused tests; nine new causal mutants and the existing proof-job fail-closed
+mutant caught after a green copied baseline; canonical quick gate passes 2,667 unit tests and
+seven static checks. The continuation workflow test now permits only the six named retention
+steps to ignore errors; both dispatch-step and proof-job error masking are causally detected.
+
+Read-only repack of retained run 35015446482/1 preserved four files (20,193 bytes), the archived
+bundle hash, and the exact explanation. The missing manifest stayed absent; all 21 claims stay
+insufficient and reuse remains false. No paid run, fresh qualification or platform upload was
+used as a canary. An ordinary future worker run must still demonstrate actual artifact delivery.
+
+Logs and receipt: this worktree's ignored `.validation/{focused,mutants,quick}.log` and
+`legacy-retention-receipt.json`. Linux validation checkout:
+`/home/yisha/.cache/dark-factory-evidence-retention-20260916/repo`, with the foundation tools
+and locked dependency directories reused read-only. Final PR/merge receipt remains in the
+separate main-checkout `docs/atlas/reviews/CLAIM-EVIDENCE-HANDOFF.md`, never `NEXT-CHAT-HANDOFF.md`.

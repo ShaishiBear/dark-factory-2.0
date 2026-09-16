@@ -95,7 +95,17 @@ class ContinuationTests(unittest.TestCase):
     def test_workflow_scheduling_failure_cannot_mask_a_failed_proof_job(self):
         source = (ROOT / ".github/workflows/dark-factory-worker.yml").read_text()
         proof, continuation = source.split("\n  continuation:\n")
-        self.assertNotIn("continue-on-error: true", proof)
+        observation_steps = {f"{prefix} {phase} evidence{suffix}" for phase in ("dispatch", "merge")
+                             for prefix, suffix in (("Stage bounded", ""), ("Retain", ""), ("Retain", " index"))}
+        for block in proof.split("      - name:"):
+            name = block.splitlines()[0].strip()
+            if name in observation_steps:
+                # Only fixed retention steps may be best effort; they cannot execute proof.
+                self.assertNotIn("python -m factory_kernel merge ", block)
+                self.assertNotIn("python -m factory_kernel dispatch ", block)
+                self.assertNotIn("secrets.", block)
+            else:
+                self.assertNotIn("continue-on-error: true", block)
         self.assertNotIn("actions: write", proof)
         self.assertIn("needs: [dispatch, merge]", continuation)
         self.assertIn("needs.dispatch.result == 'success'", continuation)

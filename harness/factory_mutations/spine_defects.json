@@ -5,6 +5,69 @@
   ],
   "defects": [
     {
+      "id": "evidence-retention-dispatch-failure-masked",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "        id: dispatch\n",
+      "replace": "        id: dispatch\n        continue-on-error: true\n",
+      "why": "test_factory_continuation permits only named retention steps to ignore errors, never actual dispatch."
+    },
+    {
+      "id": "evidence-retention-symlink-read",
+      "file": "factory_kernel/evidence_retention.py",
+      "find": "if path.is_symlink():",
+      "replace": "if False:",
+      "why": "test_evidence_retention refuses evidence read through a symlinked parent."
+    },
+    {
+      "id": "evidence-retention-byte-bound-disabled",
+      "file": "factory_kernel/evidence_retention.py",
+      "find": "if total + len(raw) > MAX_BYTES or len(files) >= MAX_FILES:",
+      "replace": "if len(files) >= MAX_FILES:",
+      "why": "test_evidence_retention requires byte omissions even below the file-count bound."
+    },
+    {
+      "id": "evidence-retention-source-binding-disabled",
+      "file": "factory_kernel/evidence_retention.py",
+      "find": "or value.get(\"source\") != binding):",
+      "replace": "or False):",
+      "why": "test_evidence_retention refuses indexes from a different run, attempt, revision or phase."
+    },
+    {
+      "id": "evidence-retention-proof-upgrade-accepted",
+      "file": "factory_kernel/evidence_retention.py",
+      "find": "or value.get(\"proof_reuse_allowed\") is not False",
+      "replace": "or False",
+      "why": "test_evidence_retention refuses an index claiming proof-reuse authority."
+    },
+    {
+      "id": "evidence-retention-duplicate-path-accepted",
+      "file": "factory_kernel/evidence_retention.py",
+      "find": "or parts[1] not in EVIDENCE_PATHS or name in seen):",
+      "replace": "or parts[1] not in EVIDENCE_PATHS):",
+      "why": "test_evidence_retention requires unique retained evidence identities."
+    },
+    {
+      "id": "evidence-retention-platform-head-unbound",
+      "file": "factory_kernel/evidence_retention_archive.py",
+      "find": "or run[\"head_sha\"] != source[\"head_sha\"] or run[\"head_branch\"] != \"main\"",
+      "replace": "or run[\"head_branch\"] != \"main\"",
+      "why": "test_evidence_retention refuses an artifact attributed to a different source revision."
+    },
+    {
+      "id": "evidence-retention-expiry-hidden",
+      "file": "factory_kernel/evidence_retention_archive.py",
+      "find": "if observed[\"expired_at_observation\"]:",
+      "replace": "if False:",
+      "why": "test_evidence_retention preserves raw expiry and never downloads an expired index."
+    },
+    {
+      "id": "evidence-retention-overwrite-race-hidden",
+      "file": "factory_kernel/evidence_retention_archive.py",
+      "find": "if artifact_observation(fresh, source=source, name=name, limit=MAX_RECORD + 10000) != observed:",
+      "replace": "if False:",
+      "why": "test_evidence_retention detects artifact replacement during index download."
+    },
+    {
       "id": "claim-explanation-stale-identity-hidden",
       "file": "factory_kernel/claim_explanation.py",
       "find": "\"current\" if recorded_value == expected_value else \"stale\"",

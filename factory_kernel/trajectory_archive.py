@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 
 from .canonical import canonical_bytes, sha256_bytes
+from .evidence_retention_archive import collect_retention
 from .github_cli import GitHubClient
 from .programme import parse_json
 from .trajectory import MAX_RECORD, TrajectoryRefused, oid, positive, summarize, validate_source
@@ -71,12 +72,23 @@ def collect(github, *, run_id, attempt):
             except (RuntimeError, OSError):
                 gaps.append({"phase": phase, "reason": "artifact-download-failed"})
         try:
-            return summarize(source, repository=repository, directories=directories, models=models, gaps=gaps)
+            record = summarize(source, repository=repository, directories=directories, models=models, gaps=gaps)
         except (ValueError, OSError, UnicodeError):
             # Malformed/oversized diagnostic files must not erase the platform-observed failed
             # attempt. Retain a bounded source-only observation without reading outside scope.
-            return summarize(source, repository=repository, directories={}, models=models,
-                             gaps=[*gaps, {"reason": "artifact-metadata-refused"}])
+            record = summarize(source, repository=repository, directories={}, models=models,
+                               gaps=[*gaps, {"reason": "artifact-metadata-refused"}])
+        retention = collect_retention(github, source=source, inventory=response["artifacts"], directory=directory)
+        if retention is not None:
+            record["evidence_retention"] = retention
+            if len(canonical_bytes(record)) > MAX_RECORD:
+                # Keep the completed attempt even when combined observations exceed the bound.
+                del record["evidence_retention"]
+                record["gaps"].append({"reason": "retention-metadata-over-bound"})
+                if len(canonical_bytes(record)) > MAX_RECORD:
+                    record = summarize(source, repository=repository, directories={}, models=models,
+                                       gaps=[{"reason": "retention-metadata-over-bound"}])
+        return record
 
 
 class TrajectoryArchive:

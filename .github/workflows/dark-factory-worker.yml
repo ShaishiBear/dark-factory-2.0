@@ -535,6 +535,37 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      # Observation only: retain fixed evidence paths separately from seven-day diagnostics.
+      # Failure to retain cannot turn an otherwise completed proof/merge into a failed run.
+      - name: Stage bounded dispatch evidence
+        id: retain_evidence
+        if: always()
+        continue-on-error: true
+        run: |
+          python -m factory_kernel.evidence_retention --phase dispatch \
+            --runs "$RUNNER_TEMP/dark-factory/runs" --checkout "$GITHUB_WORKSPACE" \
+            --destination "$RUNNER_TEMP/retained-evidence" --index-directory "$RUNNER_TEMP/retained-index"
+
+      - name: Retain dispatch evidence
+        if: always() && steps.retain_evidence.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-evidence-dispatch-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 90
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/retained-evidence/
+
+      - name: Retain dispatch evidence index
+        if: always() && steps.retain_evidence.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-evidence-index-dispatch-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/retained-index/retention-index.json
+
       # Observability only: nothing reads these to decide anything. Model transcripts, the
       # per-stage telemetry and timings, the deterministic gates' logs and the run's JSON
       # artifacts are kept for a week so a slow or failed stage can be read after the runner is
@@ -699,6 +730,35 @@ jobs:
           # 95 minutes that killed run 34151427980.
           export DARK_FACTORY_APP_TOKEN_MINTED_AT="$(date +%s)"
           python -m factory_kernel merge --pr "$MERGE_PR"             --from-authorization "$MERGE_AUTHORIZATION"
+
+      - name: Stage bounded merge evidence
+        id: retain_evidence
+        if: always()
+        continue-on-error: true
+        run: |
+          python -m factory_kernel.evidence_retention --phase merge \
+            --runs "$RUNNER_TEMP/dark-factory/runs" --checkout "$GITHUB_WORKSPACE" \
+            --destination "$RUNNER_TEMP/retained-evidence" --index-directory "$RUNNER_TEMP/retained-index"
+
+      - name: Retain merge evidence
+        if: always() && steps.retain_evidence.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-evidence-merge-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 90
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/retained-evidence/
+
+      - name: Retain merge evidence index
+        if: always() && steps.retain_evidence.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-evidence-index-merge-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/retained-index/retention-index.json
 
       - name: Upload merge and post-merge outcomes
         if: always()
