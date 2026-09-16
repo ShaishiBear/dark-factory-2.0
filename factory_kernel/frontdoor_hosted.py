@@ -23,6 +23,8 @@ from .frontdoor_intent import IntentRefused, _shape, _text
 from .frontdoor_prepare import PreparationRecords
 from .programme import parse_json
 from .worker_policy import INTAKE_ROLES, allowed_tools, effort, max_turns, max_budget_usd, stage_timeout_seconds
+from .worker_policy import PREFLIGHT_ROLES
+from .hosted_exploration_call import SCHEMA as EXPLORATION_SCHEMA, request_limits, validate_limits
 
 WORKFLOW = "dark-factory-frontdoor-prepare.yml"
 WORKFLOW_PATH = ".github/workflows/" + WORKFLOW
@@ -77,11 +79,15 @@ class AgeCipher:
 
 
 def validate_payload(payload, *, repository, request_id, head):
-    _shape(payload, {"schema", "request_id", "repository", "head", "role", "prompt", "issued_at"})
-    if (payload["schema"] != "dark-factory/hosted-proposal-v1" or payload["repository"] != repository
+    exploration = isinstance(payload, dict) and payload.get("schema") == EXPLORATION_SCHEMA
+    _shape(payload, {"schema", "request_id", "repository", "head", "role", "prompt", "issued_at"}
+           | ({"limits"} if exploration else set()))
+    if (payload["schema"] not in {"dark-factory/hosted-proposal-v1", EXPLORATION_SCHEMA} or payload["repository"] != repository
             or payload["request_id"] != _hex(request_id, 32) or payload["head"] != _hex(head, 40)
-            or payload["role"] not in INTAKE_ROLES):
+            or payload["role"] not in (PREFLIGHT_ROLES if exploration else INTAKE_ROLES)):
         raise IntentRefused("hosted preparation payload binding refused")
+    if exploration:
+        validate_limits(payload["role"], payload["limits"])
     _text(payload["prompt"], 450000)
     if type(payload["issued_at"]) is not int:
         raise IntentRefused("hosted preparation needs a bounded dispatch time")
@@ -105,19 +111,25 @@ def verify_run(run, *, repository, owner, request_id, head, workflow_id):
 class HostedPreparationProvider:
     """One fixed workflow POST per stage, with bounded read-only outcome reconciliation."""
 
-    def __init__(self, store, github, cipher, *, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, store, github, cipher, *, clock=time.monotonic, sleep=time.sleep, check_stop=None):
         self.store, self.github, self.cipher = store, github, cipher
         self.records = PreparationRecords(store, None, None, directory="hosted-calls")
         self.clock, self.sleep = clock, sleep
+        self.check_stop = check_stop
 
     def run(self, request):
-        if (request.role not in INTAKE_ROLES or request.allowed_tools != allowed_tools(request.role)
+        limits = request_limits(request) if request.role in PREFLIGHT_ROLES else None
+        if limits is None and (request.role not in INTAKE_ROLES or request.allowed_tools != allowed_tools(request.role)
                 or request.environment or request.model is not None or request.structured_schema is not None
                 or request.path_scope is not None or request.max_turns != max_turns(request.role)
                 or request.max_budget_usd != max_budget_usd(request.role)
                 or request.timeout_seconds != stage_timeout_seconds(request.role)
                 or request.effort != effort(request.role)):
             raise IntentRefused("hosted proposal request exceeds the central role policy")
+        if limits is not None:
+            if self.check_stop is None:
+                raise IntentRefused("hosted exploration needs an enforcing stop observer")
+            self.check_stop()
         repository, owner = self.store.repository, self.store.owner
         head = _hex(self.github.json(["api", f"repos/{repository}/git/ref/heads/main"])["object"]["sha"], 40)
         workflow = self.github.json(["api", f"repos/{repository}/actions/workflows/{WORKFLOW}"])
@@ -127,6 +139,8 @@ class HostedPreparationProvider:
         payload = {"schema": "dark-factory/hosted-proposal-v1", "request_id": request_id,
                    "repository": repository, "head": head, "role": request.role, "prompt": request.prompt,
                    "issued_at": int(time.time())}
+        if limits is not None:
+            payload.update(schema=EXPLORATION_SCHEMA, limits=limits)
         validate_payload(payload, repository=repository, request_id=request_id, head=head)
         ciphertext = self.cipher.encrypt(payload)
         if len(ciphertext) > MAX_CIPHERTEXT:
@@ -136,6 +150,8 @@ class HostedPreparationProvider:
                   "role": request.role, "state": "dispatch-reserved", "run_id": None,
                   "created_at": datetime.now(timezone.utc).isoformat()}
         self.records._save(path, record)  # No POST before this durable reservation.
+        if limits is not None:
+            self.check_stop()
         deadline = self.clock() + WAIT_SECONDS
         try:
             try:
@@ -147,6 +163,8 @@ class HostedPreparationProvider:
             self.records._save(path, record)
             run = None
             while self.clock() < deadline:
+                if limits is not None:
+                    self.check_stop()
                 if record["run_id"] is None:
                     rows = self.github.json(["api", f"repos/{repository}/actions/workflows/{WORKFLOW}/runs"
                                              "?event=workflow_dispatch&branch=main&per_page=100"])["workflow_runs"]

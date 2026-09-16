@@ -23,7 +23,7 @@ def approved_scope(store, events):
 
 
 def projection(events):
-    result = {"sessions": {}, "claims": {}, "budgets": {}, "feedback": {}, "project_version": len(events)}
+    result = {"sessions": {}, "claims": {}, "budgets": {}, "feedback": {}, "adaptive_runs": {}, "project_version": len(events)}
     for event in events:
         if event["command"]["operation"] != OPERATION:
             continue
@@ -89,6 +89,10 @@ def projection(events):
                 claim["observations"].append({"feedback_sha256": data["id"], "status": "invalidated",
                     "evidence_class": "owner-causal-assessment", "qualification_status": "UNPROVEN"})
                 invalidate_recommendations(result, claim_id, "invalidated")
+        elif kind == "adaptive-run-started":
+            result["adaptive_runs"][data["id"]] = deepcopy(data)
+        elif kind == "adaptive-run-finished":
+            result["adaptive_runs"][data["id"]].update(deepcopy(data))
         elif kind == "handoff":
             result["sessions"][key]["handoffs"].append(deepcopy(data))
         else:

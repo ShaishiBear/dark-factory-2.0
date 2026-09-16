@@ -23,6 +23,7 @@ from .frontdoor_programme import prepare_programme
 from .frontdoor_prepare import IntentPreparation, api_provider, protected_repository_context
 from .frontdoor_synthesis import ProgrammePreparation
 from .frontdoor_hosted import AgeCipher, HostedPreparationProvider
+from .frontdoor_exploration import FrontDoorExploration, require_clear_stop
 from .github_cli import GitHubClient
 from .programme import ProgrammeRefused, parse_json
 from .programme_runtime import ProgrammeQueue
@@ -39,7 +40,7 @@ MAX_BODY = 250000
 
 class FrontDoorApplication:
     def __init__(self, *, store, project, token, origin, github, labels, app_login, preparer=None, synthesizer=None,
-                 publication_key=None, publisher=None):
+                 publication_key=None, publisher=None, explorer=None):
         parsed = urlsplit(origin)
         if (parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password
                 or not parsed.hostname or parsed.scheme not in {"http", "https"}
@@ -51,6 +52,7 @@ class FrontDoorApplication:
         self.labels, self.app_login = labels, app_login
         self.preparer = preparer
         self.synthesizer = synthesizer
+        self.explorer = explorer
         if publisher is not None and publication_key is None:
             raise ValueError("publication dispatch requires authenticated currency")
         self.publisher = publisher
@@ -90,7 +92,7 @@ class FrontDoorApplication:
                   "synthesis_available": self.synthesizer is not None,
                   "synthesis": self.synthesizer.latest(self.project) if self.synthesizer else None,
                   "publication_available": self.publisher is not None, "publication": None,
-                  "strategy_choices": []}
+                  "strategy_choices": [], "exploration_available": self.explorer is not None}
         errors = (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
         # Stop must remain observable even when a programme or its receipts are damaged.
         try:
@@ -137,6 +139,7 @@ class FrontDoorApplication:
             return send("400 Bad Request", {"error": "query parameters are not supported"})
         assets = {"/": ("index.html", "text/html; charset=utf-8"),
                   "/frontdoor.js": ("frontdoor.js", "text/javascript; charset=utf-8"),
+                  "/exploration.js": ("exploration.js", "text/javascript; charset=utf-8"),
                   "/frontdoor.css": ("frontdoor.css", "text/css; charset=utf-8")}
         if method == "GET" and path in assets:
             name, mime = assets[path]
@@ -162,6 +165,21 @@ class FrontDoorApplication:
                 return send("200 OK", self._snapshot())
             if method == "GET" and path == "/api/history":
                 return send("200 OK", explain_history(self.store, self.project, principal=self.principal))
+            if path == "/api/exploration" and method == "GET":
+                if self.explorer is None:
+                    return send("503 Service Unavailable", {"error": "hosted exploration is not enabled"})
+                return send("200 OK", self.explorer.snapshot(self.project, principal=self.principal))
+            if method == "POST" and path in {"/api/exploration/open", "/api/exploration/start",
+                    "/api/exploration/recover", "/api/exploration/reopen", "/api/exploration/abandon"}:
+                if self.explorer is None:
+                    return send("503 Service Unavailable", {"error": "hosted exploration is not enabled"})
+                operation = path.rsplit("/", 1)[-1]
+                command = self._body(environ)
+                if operation in {"reopen", "abandon"}:
+                    result = self.explorer.command(self.project, operation, command, principal=self.principal)
+                else:
+                    result = getattr(self.explorer, operation)(self.project, command, principal=self.principal)
+                return send("202 Accepted" if operation == "start" else "200 OK", result)
             if method == "POST" and path == "/api/commands":
                 state = self.store.execute(self.project, self._body(environ), principal=self.principal)
                 return send("200 OK", state)
@@ -278,7 +296,13 @@ def main():
                         help="connect explicit owner consent to the protected programme publisher")
     parser.add_argument("--enable-strategy-publication", action="store_true",
                         help="allow publication of a freshly regenerated stored strategy recommendation")
+    parser.add_argument("--enable-hosted-exploration", action="store_true",
+                        help="enable owner-requested bounded adaptive jobs through protected workers")
+    parser.add_argument("--exploration-source", action="append", default=[],
+                        help="committed source path to include in exploration context (repeat, at most 40)")
     args = parser.parse_args()
+    if args.enable_hosted_exploration and (not args.hosted_preparation_identity or not args.exploration_source):
+        parser.error("hosted exploration requires the encrypted hosted identity and explicit source paths")
     if args.enable_publication_requests and not args.hosted_preparation_identity:
         parser.error("publication requests require the existing hosted preparation identity")
     if args.enable_strategy_publication and not args.enable_programme_publication:
@@ -301,7 +325,8 @@ def main():
         raise ValueError("intent state directory must be private to its service account")
     provider = None
     if args.hosted_preparation_identity:
-        provider = HostedPreparationProvider(store, github, AgeCipher(args.hosted_preparation_identity))
+        provider = HostedPreparationProvider(store, github, AgeCipher(args.hosted_preparation_identity),
+                                              check_stop=lambda: require_clear_stop(github))
     elif args.enable_preparation:
         provider = api_provider(config.provider)
     context = lambda: protected_repository_context(github)
@@ -317,6 +342,9 @@ def main():
     app = FrontDoorApplication(store=store, project=args.project, token=token, origin=args.origin,
                                github=github, labels=config.labels, app_login=args.app_login,
                                preparer=preparer, synthesizer=synthesizer, publisher=publisher,
+                               explorer=(FrontDoorExploration.protected(store, provider, github,
+                                         args.exploration_source, app_login=args.app_login)
+                                         if args.enable_hosted_exploration else None),
                                publication_key=(key_from_identity(args.hosted_preparation_identity)
                                                 if args.enable_publication_requests else None))
     # Single-host, bounded request timeout, loopback only. Hosting must enforce HTTPS and keep
