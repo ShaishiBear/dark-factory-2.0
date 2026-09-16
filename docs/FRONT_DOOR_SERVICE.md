@@ -32,6 +32,10 @@ contain no private state. All user text is rendered as text, with a restrictive 
 - `GET /api/snapshot`: stored intent plus the existing ProgrammeQueue status/receipt verifier.
   Stop and programme observations are independent and timestamped separately. A failed read
   leaves only its own result unknown; damaged programme evidence cannot hide an observed stop.
+- `GET /api/history`: owner-only projection of the existing verified intent log, fixed to the
+  server project and principal. The UI loads it explicitly and renders20 records at a time,
+  retaining old proposals, wording and each approval's exact basis. It grants no execution or
+  proof authority and never takes filesystem paths or a principal from the request.
 - `POST /api/commands`: closed-shape intent-store commands. The transport supplies the configured
   authenticated owner; request JSON cannot choose an actor or role.
 - `POST /api/programme-review`: compile a decomposition against the latest exact stored approval

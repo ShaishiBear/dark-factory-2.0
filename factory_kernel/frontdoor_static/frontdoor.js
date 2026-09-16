@@ -1,6 +1,8 @@
 "use strict";
 let token = "";
 let snapshot = null;
+let history = null;
+let historyShown = 0;
 let busy = false;
 let preparationBusy = false;
 let synthesisBusy = false;
@@ -42,6 +44,7 @@ function render() {
   $("repository").textContent = snapshot.repository;
   $("project").textContent = snapshot.project.replaceAll("-", " ");
   const state = snapshot.intent;
+  if (history && history.project_version !== state.project_version) $("history-state").textContent = `Showing history through version ${history.project_version}. Saved decisions have changed; load history again for the latest.`;
   const ledger = $("ledger");
   ledger.replaceChildren();
   for (const row of state.ledger) {
@@ -152,6 +155,36 @@ async function command(operation, payload) {
   await api("/api/commands", { idempotency_key: crypto.randomUUID(), expected_project_version: snapshot.intent.project_version, operation, payload });
   await refresh();
 }
+function renderEarlierHistory() {
+  const titles = { "record-intent": "Intent saved", "add-exploration": "Exploration recorded", "propose-spec": "Scope proposed", "approve-spec": "Scope approved" };
+  const versions = new Map(history.events.map((row) => [row.event_id, row.project_version]));
+  const rows = history.events.slice().reverse().slice(historyShown, historyShown + 20);
+  for (const row of rows) {
+    const detail = document.createElement("details");
+    detail.append(text("summary", `Version ${row.project_version} · ${titles[row.operation] || row.operation}`));
+    detail.append(text("p", `${row.actor.identity} (${row.actor.role}) · ${new Date(row.created_at).toLocaleString()}`, "muted"));
+    if (row.record.wording) detail.append(text("blockquote", row.record.wording));
+    if (row.record.spec) {
+      const spec = row.record.spec;
+      detail.append(text("h3", spec.title), text("p", spec.outcome));
+      list(detail, "Acceptance", spec.requirements.flatMap((requirement) => requirement.acceptance.map((acceptance) => acceptance.text)));
+      list(detail, "Constraints", spec.constraints);
+      list(detail, "Outside scope", spec.non_goals);
+      list(detail, "Assumptions", row.record.assumptions);
+      list(detail, "Open product questions", row.record.open_questions);
+      list(detail, "Technical questions", row.record.technical_questions);
+    }
+    if (row.basis.length) detail.append(text("p", `Based on ${row.basis.map((id) => `version ${versions.get(id)}`).join(", ")}.`, "muted"));
+    if (row.supersedes) detail.append(text("p", `Replaces the approval at version ${versions.get(row.supersedes)}.`, "muted"));
+    const identity = document.createElement("details");
+    identity.append(text("summary", "Record identity"), text("p", row.event_sha256, "hash"));
+    if (row.spec_sha256) identity.append(text("p", `Scope: ${row.spec_sha256}`, "hash"));
+    detail.append(identity);
+    $("history").append(detail);
+  }
+  historyShown += rows.length;
+  $("earlier-history").hidden = historyShown >= history.events.length;
+}
 async function perform(action) {
   if (busy) return;
   busy = true;
@@ -174,6 +207,12 @@ async function performStop(action) {
 $("login-form").addEventListener("submit", (event) => { event.preventDefault(); perform(async () => { token = $("owner-token").value.trim(); $("owner-token").value = ""; await refresh(); message(""); }); });
 $("logout").addEventListener("click", () => { token = ""; snapshot = null; location.reload(); });
 $("refresh").addEventListener("click", () => perform(refresh));
+$("load-history").addEventListener("click", () => perform(async () => {
+  history = await api("/api/history"); historyShown = 0; $("history").replaceChildren();
+  $("history-state").textContent = history.events.length ? `History through version ${history.project_version}. Approvals record scope; execution evidence is shown separately.` : "No decisions have been saved.";
+  renderEarlierHistory();
+}));
+$("earlier-history").addEventListener("click", renderEarlierHistory);
 $("prepare").addEventListener("click", async () => {
   if (busy || preparationBusy) return;
   const version = snapshot.intent.project_version;

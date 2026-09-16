@@ -40,6 +40,11 @@
             <form id="stop-form"><label for="stop-reason">Reason</label><input id="stop-reason" maxlength="2000" required placeholder="Why should execution pause?"><button class="danger" type="submit">Request stop</button></form>
             <p class="muted">A request is pending until GitHub confirms an open stop. Running work observes stop at its next checkpoint.</p>
           </section>
+          <section class="card"><span class="eyebrow">DECISION HISTORY</span><h2>How scope evolved</h2>
+            <p>Review saved intent, earlier proposals and the exact scope you approved.</p>
+            <button id="load-history">Load decision history</button><p id="history-state" class="muted"></p>
+            <div id="history"></div><button id="earlier-history" hidden>Show earlier decisions</button>
+          </section>
         </aside>
       </div>
     </div>

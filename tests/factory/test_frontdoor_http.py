@@ -14,7 +14,7 @@ from wsgiref.simple_server import make_server
 
 from factory_kernel.frontdoor_http import FrontDoorApplication, FrontDoorServer, QuietHandler, verify_host_identity
 from factory_kernel.frontdoor_intent import IntentStore
-from tests.factory.test_frontdoor_intent import OWNER, REPO
+from tests.factory.test_frontdoor_intent import OWNER, REPO, example_spec
 
 TOKEN = "b" * 64
 ORIGIN = "https://factory.example"
@@ -55,7 +55,7 @@ class FrontDoorHTTPTests(unittest.TestCase):
                 "operation": "record-intent", "payload": {"wording": "Show cited words."}, **changes}
 
     def test_private_reads_and_commands_require_real_bearer_authentication(self):
-        for path, body in (("/api/snapshot", None), ("/api/commands", self.command()),
+        for path, body in (("/api/snapshot", None), ("/api/history", None), ("/api/commands", self.command()),
                            ("/api/stop", {"request_id": "a" * 32, "reason": "Pause"})):
             for authorization in ("", "Bearer wrong", f"Basic {TOKEN}"):
                 with self.subTest(path=path, authorization=authorization):
@@ -137,6 +137,35 @@ class FrontDoorHTTPTests(unittest.TestCase):
         self.assertEqual(result["json"]["execution"], status)
         self.assertTrue(result["json"]["observation_available"])
         self.github.run.assert_not_called()
+
+    def test_history_preserves_old_drafts_and_binds_approval_without_effects(self):
+        self.call("/api/commands", body=self.command())
+        for version, title in ((1, "Earlier scope"), (2, "Reviewed scope")):
+            spec = example_spec()
+            spec["title"] = title
+            state = self.call("/api/commands", body=self.command(
+                idempotency_key=f"draft-{version}", expected_project_version=version,
+                operation="propose-spec", payload={"spec": spec, "assumptions": [],
+                                                    "open_questions": [], "technical_questions": []}))["json"]
+        self.call("/api/commands", body=self.command(
+            idempotency_key="approve", expected_project_version=3, operation="approve-spec",
+            payload={"draft_version": 3, "spec_sha256": state["draft"]["spec_sha256"], "wording": "Approved exact draft"}))
+        before = self.store.snapshot("citations", principal=OWNER)
+        history = self.call("/api/history")["json"]
+        self.assertEqual([row["record"]["spec"]["title"] for row in history["events"] if row["operation"] == "propose-spec"],
+                         ["Earlier scope", "Reviewed scope"])
+        self.assertEqual(history["events"][-1]["basis"], [history["events"][2]["event_id"]])
+        self.assertEqual(history["execution_status"], "not-activated-by-history")
+        self.assertEqual(self.store.snapshot("citations", principal=OWNER), before)
+        self.github.run.assert_not_called()
+        self.github.run_as_app.assert_not_called()
+
+    def test_history_is_fixed_to_server_project_owner_and_cannot_write(self):
+        with patch("factory_kernel.frontdoor_http.explain_history", return_value={"events": []}) as history:
+            self.assertEqual(self.call("/api/history")["status"], "200 OK")
+            history.assert_called_once_with(self.store, "citations", principal=OWNER)
+        self.assertEqual(self.call("/api/history", QUERY_STRING="project=private-other")["status"], "400 Bad Request")
+        self.assertEqual(self.call("/api/history", body={"actor": "intruder"})["status"], "404 Not Found")
 
     def test_successful_observation_records_a_timezone_aware_timestamp(self):
         with patch("factory_kernel.frontdoor_http.ProgrammeQueue") as queue:

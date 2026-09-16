@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 
 from .config import load_config
+from .decision_history import explain_history
 from .frontdoor_control import stop_status
 from .frontdoor_intent import IntentRefused, IntentStore, Principal
 from .frontdoor_programme import prepare_programme
@@ -120,6 +121,8 @@ class FrontDoorApplication:
         try:
             if method == "GET" and path == "/api/snapshot":
                 return send("200 OK", self._snapshot())
+            if method == "GET" and path == "/api/history":
+                return send("200 OK", explain_history(self.store, self.project, principal=self.principal))
             if method == "POST" and path == "/api/commands":
                 state = self.store.execute(self.project, self._body(environ), principal=self.principal)
                 return send("200 OK", state)
