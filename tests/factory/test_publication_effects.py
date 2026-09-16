@@ -118,7 +118,10 @@ class PublicationEffectsTests(unittest.TestCase):
         self.github.run_as_app.assert_not_called()
 
     def test_merge_requires_both_real_required_authorities_then_fresh_exact_head_effect(self):
-        self.publisher.merge(12, "b" * 40)
+        try:
+            self.publisher.merge(12, "b" * 40)
+        except IntentRefused as exc:
+            self.fail(f"valid exact-head merge was refused: {exc}")
         args, operation = self.effects[0]
         self.assertEqual(operation, "merge_squash")
         self.assertIn("--match-head-commit", args)
