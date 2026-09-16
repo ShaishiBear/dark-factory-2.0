@@ -3,6 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
+import re
 import unittest
 from unittest.mock import Mock, patch
 
@@ -154,6 +155,14 @@ class FenceTests(unittest.TestCase):
             with self.assertRaises(ExecutionFenced):
                 execute_call(None, self.github, {"schema": schema}, provider)
         provider.run.assert_not_called()
+
+    def test_publication_and_worker_share_one_non_cancelling_execution_owner(self):
+        root = Path(__file__).resolve().parents[2]
+        for name in ("dark-factory-worker.yml", "dark-factory-programme-publish.yml"):
+            workflow = (root / ".github/workflows" / name).read_text()
+            block = workflow.split("\nconcurrency:\n", 1)[1].split("\njobs:", 1)[0]
+            self.assertEqual(re.findall(r"(?m)^  group: (.+)$", block), ["dark-factory-worker"])
+            self.assertEqual(re.findall(r"(?m)^  cancel-in-progress: (.+)$", block), ["false"])
 
 
 if __name__ == "__main__":

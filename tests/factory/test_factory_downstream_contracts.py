@@ -220,6 +220,7 @@ class ValidatorSideBriefTests(unittest.TestCase):
 
     def test_certifier_suffix_is_a_literal_skeleton_with_certifies_filled(self):
         rt = bare_runtime()
+        rt.check_stop = mock.Mock()  # Prompt-only fixture; control behavior has separate detectors.
         rt.config.prompt_path = lambda role, root: ROOT / ".factory" / "prompts" / "holdout.md"
         rt.config.provider.model = "m"
         captured = {}

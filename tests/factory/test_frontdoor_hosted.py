@@ -261,10 +261,16 @@ class WorkerTests(unittest.TestCase):
             self.environ.update(GITHUB_EVENT_PATH=str(event_file), RUNNER_TEMP=str(root),
                                 FRONTDOOR_AGE_IDENTITY=identity.read_text())
             def read(args):
+                if "/branches/" in args[1]:
+                    return {"protected": True, "commit": {"sha": self.payload["head"]}}
+                if "/git/trees/" in args[1]:
+                    return {"truncated": False, "tree": []}
                 if "/runs?" in args[1]:
                     return {"total_count": 1, "workflow_runs": [self.run]}
                 return {"id": 7} if args[1].endswith(WORKFLOW) else self.run
             self.github.json.side_effect = read
+            self.github.repository = self.payload["repository"]
+            self.github.programme_issues.return_value = []
             provider = Mock()
             provider.run.return_value = SimpleNamespace(content='{"private":"Model output"}',
                                                         structured_output=None, model="fixture", cost_usd=0.01)

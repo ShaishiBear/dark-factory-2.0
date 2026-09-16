@@ -374,7 +374,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION ÃƒÂ¯Ã‚Â¿Ã‚Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -3483,6 +3483,20 @@
       "find": "if require_execution_open(github) != branch[\"commit\"][\"sha\"]:",
       "replace": "if False:",
       "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-separate-owner",
+      "file": ".github/workflows/dark-factory-programme-publish.yml",
+      "find": "  group: dark-factory-worker\n",
+      "replace": "  group: dark-factory-programme-publication\n",
+      "why": "Publication and canonical execution must share one non-cancelling workflow owner. Detector: tests/factory/test_execution_fence.py"
+    },
+    {
+      "id": "execution-fence-cancelling-owner",
+      "file": ".github/workflows/dark-factory-programme-publish.yml",
+      "find": "  cancel-in-progress: false",
+      "replace": "  cancel-in-progress: true",
+      "why": "Publication and canonical execution must share one non-cancelling workflow owner. Detector: tests/factory/test_execution_fence.py"
     }
   ]
 }

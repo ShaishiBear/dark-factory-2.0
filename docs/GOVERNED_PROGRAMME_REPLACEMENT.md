@@ -44,8 +44,11 @@ The reader cannot create or remove a fence. No fence is created by deploying thi
 It remains independently observable in the owner interface; historical progress remains
 readable. Presence is global and conservative, matching current single-worker ownership.
 An already running model call may finish; its next checkpoint stops further work. This
-is not the atomic activation lock: the transition still must drain execution and acquire
-the shared workflow ownership before switching. Fence removal needs protected governance.
+is not an activation capability. Publication and the canonical worker now share the same
+non-cancelling workflow concurrency group, including publication's validation, wait and
+merge jobs. Queued consent may expire; waiting does not extend or replay it. The transition
+still must observe drained execution and reconcile all uncertain effects before switching.
+Fence removal needs protected governance.
 
 ## Activation protocol still required
 
@@ -53,8 +56,8 @@ the shared workflow ownership before switching. Fence removal needs protected go
    scope, owner event-log head, source revision and completion/budget observations. Scope
    changes require separate current owner approval; this same-scope operation refuses them.
 2. Publish the persistent execution fence and observe it before draining old work.
-   Serialize activation with the canonical worker workflow. Publication
-   currently uses a different concurrency group; a quiet observation cannot bridge that race.
+   Use publication's shared workflow ownership for activation. A quiet observation outside
+   that ownership cannot substitute for serialization.
 3. Drain old execution and reconcile every pending or ambiguous external effect. Retire
    pending work through exact identity-bound, journaled effects; never retry an uncertain
    POST as if it had failed. A crash leaves the fence in place, not an unfenced half-swap.
