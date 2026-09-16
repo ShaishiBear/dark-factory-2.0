@@ -35,6 +35,7 @@ from .github_cli import GitHubClient
 from .programme import ProgrammeRefused, parse_json
 from .programme_runtime import ProgrammeQueue
 from .programme_turnover import review_turnover
+from .replacement_intent import ReplacementIntents
 from .publication_currency import CurrencyProtocol, key_from_identity
 from .publication_request import PublicationRequests
 from .publication_source import observe_publication_source
@@ -75,6 +76,7 @@ class FrontDoorApplication:
         self.execution_protocol = (ExecutionProtocol(publication_key, repository=store.repository, project=project)
                                    if publication_key is not None else None)
         self.execution_exchange = ExecutionExchange(self.execution_budget, project, self.principal, ExecutionAuthority(github))
+        self.replacement_intents = ReplacementIntents(self.publications, github) if self.publications else None
         store.snapshot(project, principal=self.principal)  # validate configured project before serving
 
     def _authenticated(self, environ):
@@ -106,6 +108,10 @@ class FrontDoorApplication:
                   "publication_available": self.publisher is not None, "publication": None,
                   "strategy_choices": [], "exploration_available": self.explorer is not None}
         errors = (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
+        try:
+            result["replacement_intents"] = self.replacement_intents.snapshot(self.project, principal=self.principal) if self.replacement_intents else []
+        except errors:
+            result["replacement_intents"] = None
         try:
             result["execution_budget"] = self.execution_budget.snapshot(self.project, principal=self.principal)
         except errors:
@@ -254,6 +260,11 @@ class FrontDoorApplication:
                     return send("503 Service Unavailable", {"error": "publication requests are not enabled"})
                 result = review_turnover(self.publications, self.github, self.project,
                                          self._body(environ), principal=self.principal)
+                return send("200 OK", result)
+            if method == "POST" and path == "/api/programme-replacement-intent":
+                if self.replacement_intents is None:
+                    return send("503 Service Unavailable", {"error": "replacement intents are not enabled"})
+                result = self.replacement_intents.freeze(self.project, self._body(environ), principal=self.principal)
                 return send("200 OK", result)
             if method == "POST" and path in {"/api/publication-preview", "/api/strategy-publication-preview", "/api/programme-publish"}:
                 if self.publisher is None:

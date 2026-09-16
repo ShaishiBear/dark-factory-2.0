@@ -128,6 +128,15 @@ function render() {
   }
   if (dispatchedCurrent) $("publication-form").hidden = true;
   $("publication-status").replaceChildren();
+  if (snapshot.replacement_intents?.length) {
+    const plan = snapshot.replacement_intents.at(-1);
+    const detail = document.createElement("details");
+    detail.append(text("summary", "Saved replacement plan"),
+      text("p", "This preserves the exact reviewed programmes, completed-work receipts, pending work and spending history. It does not pause, retire, replace or qualify work.", "muted"),
+      text("p", plan.currency === "owner-history-changed" ? "Owner decisions or spending have changed since this plan was saved. Fresh review is required." : "Owner history is unchanged since saving. Remote execution must still be observed again before any action."),
+      text("pre", JSON.stringify(plan, null, 2), "hash"));
+    $("publication-status").append(detail);
+  }
   if (snapshot.publication) {
     const publication = snapshot.publication;
     const statuses = { reserved: "Publication consent is reserved. Review it again to continue if it remains current.", "already-active": "This approved scope is already active. No duplicate work was dispatched.", "requires-governed-replacement": "The existing programme is preserved; governed replacement is required.", "dispatch-pending": "Publication was reserved. Its dispatch outcome is not confirmed; it will not be repeated automatically.", "dispatch-submitted": "Publication was submitted to the protected workflow. This is not evidence of delivery or product completion.", "dispatch-uncertain": "Publication dispatch has an uncertain outcome. Refresh to observe it; it will not be submitted again." };
@@ -201,7 +210,7 @@ async function command(operation, payload) {
   await refresh();
 }
 function renderEarlierHistory() {
-  const titles = { "record-intent": "Intent saved", "add-exploration": "Exploration recorded", "propose-spec": "Scope proposed", "approve-spec": "Scope approved", "execution-budget-event": "Execution allowance record" };
+  const titles = { "record-intent": "Intent saved", "add-exploration": "Exploration recorded", "propose-spec": "Scope proposed", "approve-spec": "Scope approved", "execution-budget-event": "Execution allowance record", "replacement-intent-event": "Replacement plan saved" };
   const versions = new Map(history.events.map((row) => [row.event_id, row.project_version]));
   const rows = history.events.slice().reverse().slice(historyShown, historyShown + 20);
   for (const row of rows) {
@@ -209,6 +218,7 @@ function renderEarlierHistory() {
     detail.append(text("summary", `Version ${row.project_version} · ${titles[row.operation] || row.operation}`));
     detail.append(text("p", `${row.actor.identity} (${row.actor.role}) · ${new Date(row.created_at).toLocaleString()}`, "muted"));
     if (row.record.wording) detail.append(text("blockquote", row.record.wording));
+    if (row.operation === "replacement-intent-event") detail.append(text("p", "Exact replacement facts were saved for review. No execution, retirement, budget reset or inherited qualification was authorized.", "muted"));
     if (row.operation === "execution-budget-event") {
       const data = row.record.data;
       if (row.record.kind === "approved") detail.append(text("p", `Approved allowance: $${(data.limit_microusd / 1000000).toFixed(2)}, up to ${data.max_calls} attempts. Earlier spending: ${data.opening.status === "verified-empty" ? "no prior scope execution observed" : "unknown"}.`));
@@ -352,6 +362,17 @@ async function showPublication(review, path = "/api/publication-preview") {
       const record = document.createElement("details");
       record.append(text("summary", "Exact replacement review"), text("pre", JSON.stringify(report, null, 2), "hash"));
       result.append(record); target.append(result);
+      if (!report.blockers.some((row) => row.kind === "completed-work-changed")) {
+        const save = text("button", "Save this exact replacement plan"); save.type = "button";
+        const requestId = crypto.randomUUID().replaceAll("-", "");
+        save.addEventListener("click", () => perform(async () => {
+          await api("/api/programme-replacement-intent", { idempotency_key: requestId,
+            expected_project_version: report.project_version, review_sha256: report.review_sha256, review: reviewRequest });
+          await refresh();
+          message("Replacement plan saved. Execution and budgets are unchanged; activation remains unavailable.");
+        }));
+        result.append(save);
+      }
     }));
     target.append(inspect);
   }
