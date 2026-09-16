@@ -74,15 +74,21 @@ class FrontDoorApplication:
                   "preparation_recovery": self.preparer.recovery_offer(self.project) if self.preparer else None,
                   "synthesis_available": self.synthesizer is not None,
                   "synthesis": self.synthesizer.latest(self.project) if self.synthesizer else None}
+        errors = (RuntimeError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
+        # Stop must remain observable even when a programme or its receipts are damaged.
+        try:
+            result["stop"] = stop_status(self.github)
+            result["stop_observed_at"] = datetime.now(timezone.utc).isoformat()
+        except errors:
+            result.update(stop=None, stop_observed_at=None)
         try:
             result["execution"] = ProgrammeQueue(self.github, "main").status(self.labels)
-            result["stop"] = stop_status(self.github)
-            result["observation_available"] = True
-            result["observed_at"] = datetime.now(timezone.utc).isoformat()
-        except (RuntimeError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-            # Read failure must not render a clear stop or complete programme. Intake remains
-            # available; no runtime effect consumes this observation as authority.
-            result.update(observation_available=False, execution=None, stop=None)
+            result["execution_observed_at"] = datetime.now(timezone.utc).isoformat()
+        except errors:
+            result.update(execution=None, execution_observed_at=None)
+        result["observation_available"] = result["stop"] is not None and result["execution"] is not None
+        if result["observation_available"]:
+            result["observed_at"] = result["execution_observed_at"]
         return result
 
     def __call__(self, environ, start_response):

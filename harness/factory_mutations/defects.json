@@ -2367,8 +2367,8 @@
     {
       "id": "frontdoor-http-read-failure-claims-clear",
       "file": "factory_kernel/frontdoor_http.py",
-      "find": "result.update(observation_available=False, execution=None, stop=None)",
-      "replace": "result.update(observation_available=True, execution=None, stop={\"state\": \"clear\", \"issues\": []})",
+      "find": "result.update(stop=None, stop_observed_at=None)",
+      "replace": "result.update(stop={\"state\": \"clear\", \"issues\": []}, stop_observed_at=None)",
       "why": "Missing remote evidence must remain unknown rather than claiming the stop is clear; caught by tests/factory/test_frontdoor_http.py."
     },
     {
@@ -2636,6 +2636,41 @@
       "find": "return self._record(path) if path.exists() else original",
       "replace": "return original",
       "why": "The owner must see the durable replacement result after recovery."
+    },
+    {
+      "id": "control-issue-edited-binding-forgiven",
+      "file": "factory_kernel/control_issue.py",
+      "find": "and issue[\"lastEditedAt\"] is None",
+      "replace": "and True",
+      "why": "An edited programme issue must not be disguised as an original stop record."
+    },
+    {
+      "id": "control-issue-missing-edit-provenance-forgiven",
+      "file": "factory_kernel/control_issue.py",
+      "find": "\"lastEditedAt\" in issue and issue[\"lastEditedAt\"] is None",
+      "replace": "issue.get(\"lastEditedAt\") is None",
+      "why": "Missing platform edit metadata is not evidence of an original issue body."
+    },
+    {
+      "id": "control-issue-body-race-forgiven",
+      "file": "factory_kernel/control_issue.py",
+      "find": "and issue.get(\"body\") == body",
+      "replace": "and True",
+      "why": "The original-body observation must bind the same issue snapshot."
+    },
+    {
+      "id": "control-issue-human-author-forgiven",
+      "file": "factory_kernel/control_issue.py",
+      "find": "and issue.get(\"author\") == {\"login\": app_login.removesuffix(\"[bot]\"), \"__typename\": \"Bot\"}",
+      "replace": "and True",
+      "why": "A human copy of a visible stop marker is not App control provenance."
+    },
+    {
+      "id": "control-issue-marker-only-bypass",
+      "file": "factory_kernel/programme_runtime.py",
+      "find": "if original_owner_stop(self.github, row, programme.app_login):",
+      "replace": "if True:",
+      "why": "Removing a work item's programme marker must still stop the queue."
     }
   ]
 }
