@@ -92,7 +92,7 @@ class FrontDoorHTTPTests(unittest.TestCase):
                 self.assertEqual(self.call("/api/commands", **request)["status"], "409 Conflict")
         self.assertEqual(self.store.snapshot("citations", principal=OWNER)["project_version"], 0)
 
-    def test_read_failure_keeps_intent_accessible_but_never_claims_clear_or_completed(self):
+    def test_programme_read_failure_preserves_independent_stop_observation(self):
         for failure in (RuntimeError("credential-shaped private failure"), subprocess.TimeoutExpired(["gh"], 60)):
             with self.subTest(failure=failure), patch("factory_kernel.frontdoor_http.ProgrammeQueue") as queue:
                 queue.return_value.status.side_effect = failure
@@ -100,9 +100,33 @@ class FrontDoorHTTPTests(unittest.TestCase):
             self.assertEqual(result["status"], "200 OK")
             self.assertFalse(result["json"]["observation_available"])
             self.assertIsNone(result["json"]["observed_at"])
-            self.assertIsNone(result["json"]["stop"])
+            self.assertEqual(result["json"]["stop"], {"state": "clear", "issues": []})
+            self.assertIsNotNone(result["json"]["stop_observed_at"])
+            self.assertIsNone(result["json"]["execution_observed_at"])
             self.assertIsNone(result["json"]["execution"])
             self.assertNotIn(b"credential-shaped", result["body"])
+
+    def test_damaged_programme_cannot_hide_observed_emergency_stop(self):
+        self.github.programme_issues.return_value = [
+            {"number": 194, "state": "open", "labels": [{"name": "factory:stop"}]}]
+        with patch("factory_kernel.frontdoor_http.ProgrammeQueue") as queue:
+            queue.return_value.status.side_effect = ValueError("App-created issue lost its programme binding")
+            result = self.call("/api/snapshot")["json"]
+        self.assertEqual(result["stop"], {"state": "stopped", "issues": [194]})
+        self.assertIsNone(result["execution"])
+        self.assertFalse(result["observation_available"])
+
+    def test_stop_read_failure_does_not_erase_progress_or_invent_clear_stop(self):
+        self.github.programme_issues.side_effect = RuntimeError("private read failure")
+        progress = {"status": "incomplete", "items": []}
+        with patch("factory_kernel.frontdoor_http.ProgrammeQueue") as queue:
+            queue.return_value.status.return_value = progress
+            result = self.call("/api/snapshot")["json"]
+        self.assertIsNone(result["stop"])
+        self.assertIsNone(result["stop_observed_at"])
+        self.assertEqual(result["execution"], progress)
+        self.assertIsNotNone(result["execution_observed_at"])
+        self.assertFalse(result["observation_available"])
 
     def test_observation_uses_existing_verifier_and_no_execution_effect(self):
         status = {"status": "incomplete", "items": [{"status": "closed-without-verified-completion"}]}

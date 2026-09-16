@@ -15,6 +15,7 @@ import time
 from typing import Mapping
 
 from .canonical import sha256_value
+from .control_issue import original_owner_stop
 from .programme import ACTIVE_PATH, MARKER, Programme, ProgrammeRefused, compile_programme, parse_json
 
 OUTCOME_MARKER = "<!-- dark-factory-programme-outcome:"
@@ -61,6 +62,8 @@ class ProgrammeQueue:
                     or row.get("user", {}).get("type") != "Bot"):
                 continue
             if row.get("user", {}).get("login") == programme.app_login and MARKER not in body:
+                if original_owner_stop(self.github, row, programme.app_login):
+                    continue  # original control record, never an executable programme member
                 raise ProgrammeRefused("App-created issue lost its programme binding")
             if (row.get("user", {}).get("login") == programme.app_login
                     and MARKER in body and prefix not in body and row.get("state") == "open"):

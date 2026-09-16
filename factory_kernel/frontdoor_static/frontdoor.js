@@ -111,7 +111,7 @@ function render() {
     } else $("programme-review").append(text("p", synthesis.state === "pending" ? "Programme preparation is running or was interrupted. Refresh to observe its recorded result." : "Programme preparation failed. No executable programme was delivered; the attempt is recorded for inspection.", "muted"));
   }
   $("progress").replaceChildren();
-  $("observation").textContent = snapshot.observation_available ? `GitHub observed ${snapshot.observed_at ? new Date(snapshot.observed_at).toLocaleString() : "just now"}. Refresh to check for changes.` : "GitHub observation is unavailable. Completion and stop state are unknown.";
+  $("observation").textContent = snapshot.observation_available ? `GitHub observed ${snapshot.observed_at ? new Date(snapshot.observed_at).toLocaleString() : "just now"}. Refresh to check for changes.` : "Some GitHub observations are unavailable. Programme progress and stop state are reported separately below.";
   if (snapshot.execution) {
     const execution = snapshot.execution;
     if (execution.programme) {
@@ -140,6 +140,7 @@ function render() {
       $("progress").append(row);
     }
   }
+  if (!snapshot.execution) $("progress").append(text("p", "Programme progress is unknown.", "muted"));
   $("stop-state").textContent = snapshot.stop?.state === "stopped" ? `Stop observed on GitHub: ${snapshot.stop.issues.map((n) => `#${n}`).join(", ")}.` : snapshot.stop ? "No open remote stop was observed." : "Stop state is unknown.";
   if (stopRequested && snapshot.stop?.state === "stopped") {
     stopRequested = false;

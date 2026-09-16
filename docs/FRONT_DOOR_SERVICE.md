@@ -2,9 +2,9 @@
 
 The isolated Front Door provides an owner-authenticated browser for original intent,
 exploration, prepared scope review, explicit approval, actual programme progress/evidence and
-requesting the existing remote stop. It is not deployed. Browser verification uses disposable
-fixtures, not real programme outcomes. Complete real programme execution remains an activation
-prerequisite. No new cloud resource or budget allowance is included.
+requesting the existing remote stop. Deployment and observed capabilities are recorded below;
+earlier local-validation sections describe fixtures. No new cloud resource or budget allowance
+is included.
 
 ## Authentication and hosting
 
@@ -30,7 +30,8 @@ contain no private state. All user text is rendered as text, with a restrictive 
 ## Commands and observation
 
 - `GET /api/snapshot`: stored intent plus the existing ProgrammeQueue status/receipt verifier.
-  GitHub read failure leaves stop/completion unknown while original intent remains accessible.
+  Stop and programme observations are independent and timestamped separately. A failed read
+  leaves only its own result unknown; damaged programme evidence cannot hide an observed stop.
 - `POST /api/commands`: closed-shape intent-store commands. The transport supplies the configured
   authenticated owner; request JSON cannot choose an actor or role.
 - `POST /api/programme-review`: compile a decomposition against the latest exact stored approval
@@ -47,21 +48,33 @@ the private App key never leaves that action. Missing/stale App identity refuses
 or repeated recorded IDs do not create another issue; uncertain POST/dispatch outcomes are not
 retried automatically. There is no stop-clear, resume, merge or product-dispatch endpoint.
 
-## Still required before calling this an operating Front Door
+## Observed deployment and remaining boundaries (16 September 2026)
 
-1. Observe the optional API preparation adapter on its deployed host with real owner intent.
-   Local tests use deterministic responses. Deployment and a live API preparation cycle are
-   still required before calling the conversational intake path operational.
+The existing $7/month Lightsail host serves trusted IP HTTPS. Production certificate issuance,
+renewal dry-run, owner-authenticated HTTPS API access and anonymous refusal were observed.
+Real encrypted API drafting, independent intent audit and programme synthesis completed; their
+outputs remain proposals. The real product cycle completed qualification, App merge, independent
+post-merge verification and automatic continuation in worker run 35015446482.
+
+Owner stop run 35072107396 created App issue #194. The unchanged runtime refused execution, and
+the test-only stop was then closed. This exposed an inventory defect: every App issue was assumed
+to be programme work. The repair recognises only an exact stop record whose App creator and
+unedited original body are independently confirmed by GitHub. Missing edit metadata, a changed
+body, another author, or a mismatched observation still refuses; labels alone grant no exemption.
+The control record never becomes programme work or completion evidence. Stop observation is also
+independent of programme reads. Delivery and host verification of this repair are separate steps.
+
+Still required:
+
+1. Observe the complete authenticated owner browser journey on the public host. Public login
+   rendering and authenticated HTTPS API calls have been observed; the bearer remains private.
 2. Connect reviewed programme delivery to the protected-main authority. Stored approval and an
    exported JSON object cannot bypass current trust-root governance. Re-read exact approval at
    delivery; an old export is not a capability.
-3. Pass maintainer delivery checks after the real product cycle; observe the App stop workflow
-   without interrupting useful qualification. No live stop test has been performed by this change.
-4. Complete the prepared IP HTTPS hosting on the existing $7/month Lightsail instance after
-   cycle proof. An exact public source release has been staged independently of the earlier
-   rejected private archive. No new instance, upgrade or paid add-on is authorized by this document.
-5. Add durable trajectories, bounded replanning and governed self-maintenance through separately
-   tested authority changes. None is implied by these UI controls.
+3. Deliver and re-observe the stop/inventory repair. Already-armed maintainer auto-merge cancellation
+   remains a separate stop-control limitation.
+4. Add bounded replanning and governed self-maintenance through separately tested authority changes.
+   Durable trajectory capture exists; it does not grant learning or self-modification authority.
 
 Local launch shape (requires a private token file and configured GitHub owner authentication):
 
@@ -101,8 +114,8 @@ draft repair is not yet connected.
 The progress view names the active specification and revision, with programme and scope
 hashes in expandable details. It compares that scope hash to the latest local owner approval
 so approving a newer scope cannot make older running work look newly activated. A successful
-GitHub observation carries a UTC timestamp; failed reads retain unknown completion/stop state
-and no observation timestamp. Observations remain read-only and are not atomic authority.
+GitHub observation carries a UTC timestamp; each failed read retains an unknown result and no
+timestamp for that observation. Observations remain read-only and are not atomic authority.
 
 ## Preparation validation (15 September 2026)
 
