@@ -46,6 +46,18 @@ function render() {
   $("repository").textContent = snapshot.repository;
   $("project").textContent = snapshot.project.replaceAll("-", " ");
   const state = snapshot.intent;
+  const executionBudget = $("execution-budget");
+  executionBudget.replaceChildren();
+  const budget = snapshot.execution_budget;
+  if (!budget?.allowance) {
+    executionBudget.append(text("p", "No cumulative execution allowance is recorded. Historical execution spending is unknown."));
+  } else {
+    executionBudget.append(text("p", `Recorded allowance: $${(budget.allowance.limit_microusd / 1000000).toFixed(2)} across ${budget.allowance.max_calls} attempts.`));
+    executionBudget.append(text("p", `Retained reservations: $${(budget.reserved_microusd / 1000000).toFixed(2)} across ${budget.calls} attempts. This is reserved capacity, not a final bill.`));
+    const statuses = {"historical-spend-unknown": "Earlier spending is unknown; this allowance cannot authorize execution.", "unresolved-attempt": "An attempt has unresolved spending. Further calls are blocked.", overrun: "Reported spending exceeded a reservation. Further calls are blocked.", exhausted: "The recorded execution allowance is exhausted.", available: "The recorded allowance has capacity."};
+    executionBudget.append(text("p", statuses[budget.status] || "Execution budget state is unavailable."));
+  }
+  executionBudget.append(text("p", "The hosted execution worker is not yet connected to this ledger. Programme replacement remains blocked. Reservations are retained across strategy changes.", "muted"));
   if (history && history.project_version !== state.project_version) $("history-state").textContent = `Showing history through version ${history.project_version}. Saved decisions have changed; load history again for the latest.`;
   const ledger = $("ledger");
   ledger.replaceChildren();

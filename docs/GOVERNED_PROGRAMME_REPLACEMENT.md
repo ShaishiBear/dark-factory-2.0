@@ -74,3 +74,33 @@ Fence removal needs protected governance.
    A-rejected to B-qualified cycle before calling the milestone complete.
 
 This review implementation is a prerequisite, not completion of governed replacement.
+
+## Cumulative execution allowance
+
+`ExecutionBudget` records an owner-approved project allowance and append-only reservations
+in the existing private intent log. `POST /api/execution-budget` requires owner bearer
+authentication, same origin, current approved scope, an exact project version and integer
+microdollar/call limits. It grants no publication, dispatch or qualification permission.
+There is one allowance per project; changing programme, issue, strategy or specification
+revision cannot reset it. Increasing or migrating an allowance is not implemented.
+
+Only protected source with no active programme and a complete, unchanged inventory without
+earlier materialization of this scope can establish an empty opening. Otherwise historical
+spending stays unknown and reservations refuse. Existing completed programmes are not
+retroactively assigned zero cost. An absent ledger is not a zero-dollar execution history.
+
+The trusted local executor reserves the full per-attempt bound durably before calling the
+provider. It rechecks source, controls and owner decisions before the effect. Lower reported
+cost does not refund the reservation. A lost result, crash, missing cost, or reported overrun
+blocks further calls. The adapter refuses internal provider retries while their spending is
+unresolved; another attempt must pass the ledger independently. Replaying a reservation
+returns history, never permission to execute it again. No reservation or settlement route is
+exposed to owner/model JSON. The store directory remains a trusted service boundary.
+
+The owner view and replacement review show the ledger and its limitations. **The hosted
+execution worker is not yet connected.** This is local enforcement, not evidence that all
+historical or hosted spending has been covered. The protected worker still needs an
+authenticated reservation exchange, exact worker/run/generation bindings, and coverage of
+every paid path (including diagnostics). Unknown historical/failed spending also needs an
+independent reconciliation mechanism before it can resume. Until these are connected and
+verified, replacement continues to require a cumulative execution ledger and stays blocked.

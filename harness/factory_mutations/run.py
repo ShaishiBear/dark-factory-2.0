@@ -218,6 +218,7 @@ COPY_FILES = (
     "tests/factory/test_programme_replan.py",
     "tests/factory/test_programme_turnover.py",
     "tests/factory/test_execution_fence.py",
+    "tests/factory/test_execution_budget.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",
     "tests/factory/test_factory_github_e2e_bootstrap.py",

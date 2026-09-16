@@ -6,6 +6,7 @@ from copy import deepcopy
 from .canonical import sha256_value
 from .frontdoor_intent import IntentRefused, IntentStore, Principal
 from .exploration_records import OPERATION, projection
+from .execution_budget import OPERATION as BUDGET_OPERATION, projection as budget_projection
 
 
 def explain_history(store: IntentStore, project: str, *, principal: Principal) -> dict:
@@ -36,7 +37,7 @@ def explain_history(store: IntentStore, project: str, *, principal: Principal) -
                 or actor.get("role") not in {"owner", "proposal"}
                 or (actor["role"] == "owner" and actor["identity"] != store.owner)):
             raise IntentRefused("invalid decision principal")
-        if operation not in {"record-intent", "add-exploration", "propose-spec", "approve-spec", OPERATION}:
+        if operation not in {"record-intent", "add-exploration", "propose-spec", "approve-spec", OPERATION, BUDGET_OPERATION}:
             raise IntentRefused("unsupported decision event")
         if operation != "propose-spec" and actor != {"identity": store.owner, "role": "owner"}:
             raise IntentRefused("decision event does not name the configured owner")
@@ -64,7 +65,7 @@ def explain_history(store: IntentStore, project: str, *, principal: Principal) -
             row["spec_sha256"] = payload["spec_sha256"]
             row["supersedes"] = latest_approval
             latest_approval = row["event_id"]
-        elif operation == OPERATION:
+        elif operation in {OPERATION, BUDGET_OPERATION}:
             row["basis"] = [latest_approval] if latest_approval else []
         rows.append(row)
     return {"schema": "dark-factory/decision-history", "schema_version": "1.0",
@@ -73,6 +74,7 @@ def explain_history(store: IntentStore, project: str, *, principal: Principal) -
             "source_head_sha256": sha256_value(events[-1]) if events else None,
             "events": rows, "latest_recorded_approval": latest_approval,
             "exploration": projection(events),
+            "execution_budget": budget_projection(events),
             "execution_status": "not-activated-by-history",
             "gaps": ["programme-admission-not-assessed", "qualification-not-assessed",
                      "exploratory-observations-do-not-establish-qualification"]}
