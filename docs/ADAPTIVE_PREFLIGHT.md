@@ -179,12 +179,14 @@ revalidates the stored current recommendation and invokes the existing `prepare_
 adapter. It returns that ordinary programme-review shape with a separate `exploration`
 sidecar. Publication still needs its normal exact-input owner consent and fresh checks.
 
-The standard programme input remains `{version, spec, proposal, app_login}`. Its partition
-and ordering can reflect exploration. The richer selected-strategy record is an advisory
-sidecar; current publication and factory workers do not yet consume that sidecar. Therefore
-this delivery does not claim that a published worker is constrained to the selected
-implementation strategy. Binding that context through publication and worker preparation
-needs a separate coordinated integration, preserving existing admission checks.
+The default version `1.0` programme input remains `{version, spec, proposal, app_login}`.
+Its partition and ordering can reflect exploration. The richer selected-strategy record
+is a separate advisory sidecar. The staged [worker advice adapter](PREFLIGHT_WORKER_ADVICE.md)
+adds opt-in `include_strategy=True` export of version `1.1`, binding the selected mechanism
+and causal assumptions to programme identity and delivering them to plan/investigate and
+context/design. Hosted version-aware publication still needs coordinated integration;
+the sidecar alone is not consumed by a worker. Neither version grants a strategy proof
+authority or requires a worker to follow an unsound mechanism.
 
 Also not delivered here: authenticated Front Door routes/UI, hosted adaptive execution,
 general model-authored executable probes, automatic classification of factory failures

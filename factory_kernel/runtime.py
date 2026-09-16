@@ -589,7 +589,7 @@ class KernelRuntime:
                     paths,
                     context=self._worker_brief(
                         paths, contract_hash=contract_hash, issue_context=issue_context
-                    ),
+                    ) + planning_advice(admission),
                     env=env,
                 )
                 self._gate_context(paths, worktree.path, env)

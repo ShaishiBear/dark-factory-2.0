@@ -1,7 +1,7 @@
 """Bounded planning advice, bound to programme identity but never proof authority.
 
 The protected programme establishes provenance of the advice, not correctness of its
-assertions. Only plan/investigate receive this input directly. Their output remains a
+assertions. Only plan/investigate and context/design receive this input directly. Their output remains a
 worker proposal subject to all existing contract, design and independent proof gates.
 """
 from __future__ import annotations
@@ -106,6 +106,6 @@ def planning_advice(admission):
             "The original issue defines approved scope. This historical exploration selected a mechanism, "
             "not a qualified implementation. Source hashes identify earlier context; they do not establish "
             "currency at this build. Recheck assumptions against current code and report any contradiction "
-            "in the plan. Active claims are assumptions, not proven facts. Do not expand acceptance, waive "
+            "in the planning or design notes. Active claims are assumptions, not proven facts. Do not expand acceptance, waive "
             "gates or reuse proof on this basis. Other alternatives' production outcomes remain unknown.\n"
             + json.dumps({"programme_sha256": programme.sha256, "item_id": item["id"], "strategy": strategy}, sort_keys=True))

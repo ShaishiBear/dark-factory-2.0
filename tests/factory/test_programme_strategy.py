@@ -126,7 +126,7 @@ class StrategyTests(unittest.TestCase):
         with self.assertRaises(ProgrammeRefused):
             queue.admit(issue)
 
-    def test_runtime_delivers_advice_only_to_initial_planner(self):
+    def test_runtime_delivers_advice_to_planner_and_designer_only(self):
         fixture = carry_fixture.CarryInBuildIssueTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
@@ -136,7 +136,9 @@ class StrategyTests(unittest.TestCase):
             recorder, roles, _, paths = fixture.build(contexts=contexts)
         self.assertEqual(roles, ["plan", "contract", "context", "architecture", "test_author"])
         self.assertIn("STRATEGY_SENTINEL", contexts["plan"])
-        for role in roles[1:]:
+        self.assertIn("STRATEGY_SENTINEL", contexts["context"])
+        self.assertTrue(contexts["context"].startswith("Validated contract sha256:"))
+        for role in ("contract", "architecture", "test_author"):
             self.assertNotIn("STRATEGY_SENTINEL", contexts[role], role)
         self.assertIn("architecture-gate", recorder.events)
         self.assertNotIn("STRATEGY_SENTINEL", (paths.artifacts / "issue.json").read_text())
@@ -188,6 +190,28 @@ class ExplorationStrategyExportTests(unittest.TestCase):
         self.assertEqual(strategy["qualification_status"], "UNPROVEN")
         self.assertEqual(self.fixture.inspect(), before)
         self.assertEqual(enriched["input_sha256"], sha256_value(enriched["input"]))
+        self.assertEqual(self.export(), enriched, "Repeated regeneration must be stable and read-only.")
+
+    def test_export_includes_selected_causal_ancestors_and_omits_losers(self):
+        f = exploration_fixture.ExplorationTests()
+        f.setUp()
+        self.addCleanup(f.doCleanups)
+        f.engine.add_candidates("citations", f.command({"claims": [exploration_fixture.claim("root"),
+            exploration_fixture.claim("leaf", ["root"]), exploration_fixture.claim("other")], "candidates": [
+                exploration_fixture.candidate("scan", "linear", 1, 2, ["leaf"]),
+                exploration_fixture.candidate("index", "hash", 3, 4, ["other"])]}), principal=OWNER)
+        f.recommend()
+        f.engine.handoff("citations", f.command({"proposal": f.fixture.request["proposal"]}), principal=OWNER)
+        review = f.engine.prepare_handoff("citations", "lookup", principal=OWNER, include_strategy=True,
+                                         expected_project_version=f.inspect()["project_version"])
+        self.assertEqual({c["id"] for c in review["input"]["strategy"]["claims"]}, {"root", "leaf"})
+
+    def test_regeneration_refuses_a_superseded_project_version(self):
+        version = self.fixture.inspect()["project_version"]
+        self.fixture.open("another", "lookup")
+        with self.assertRaisesRegex(IntentRefused, "stale project version"):
+            self.fixture.engine.prepare_handoff("citations", "lookup", principal=OWNER,
+                                                expected_project_version=version, include_strategy=True)
 
     def test_opt_in_does_not_bypass_owner_currency_stop_or_claim_reconsideration(self):
         with self.assertRaises(IntentRefused):

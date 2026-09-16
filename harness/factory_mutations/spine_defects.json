@@ -437,6 +437,13 @@
       "find": "contract_context = issue_context\n",
       "replace": "contract_context = issue_context + planning_advice(admission)\n",
       "why": "Advice must not be added to the contract source of truth. Detector: tests/factory/test_programme_strategy.py"
+    },
+    {
+      "id": "programme-strategy-design-delivery",
+      "file": "factory_kernel/runtime.py",
+      "find": ") + planning_advice(admission),",
+      "replace": "),",
+      "why": "The design worker must receive strategy without promoting it into acceptance. Detector: tests/factory/test_programme_strategy.py"
     }
   ]
 }
