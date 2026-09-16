@@ -23,7 +23,8 @@ def approved_scope(store, events):
 
 
 def projection(events):
-    result = {"sessions": {}, "claims": {}, "budgets": {}, "feedback": {}, "adaptive_runs": {}, "project_version": len(events)}
+    result = {"sessions": {}, "claims": {}, "budgets": {}, "feedback": {}, "adaptive_runs": {},
+              "factory_outcomes": {}, "project_version": len(events)}
     for event in events:
         if event["command"]["operation"] != OPERATION:
             continue
@@ -81,6 +82,8 @@ def projection(events):
             session["status"] = "exploring"
             session["context"] = deepcopy(data["context"])
             session["reopenings"].append(deepcopy(data))
+        elif kind == "factory-outcome-imported":
+            result["factory_outcomes"][data["id"]] = deepcopy(data)
         elif kind == "factory-feedback":
             result["feedback"][data["id"]] = deepcopy(data)
             for claim_id in data["judgment"]["claim_ids"]:

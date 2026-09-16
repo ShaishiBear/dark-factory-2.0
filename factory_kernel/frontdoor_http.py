@@ -24,6 +24,7 @@ from .frontdoor_prepare import IntentPreparation, api_provider, protected_reposi
 from .frontdoor_synthesis import ProgrammePreparation
 from .frontdoor_hosted import AgeCipher, HostedPreparationProvider
 from .frontdoor_exploration import FrontDoorExploration, require_clear_stop
+from .factory_feedback import FactoryFeedback
 from .github_cli import GitHubClient
 from .programme import ProgrammeRefused, parse_json
 from .programme_runtime import ProgrammeQueue
@@ -169,6 +170,12 @@ class FrontDoorApplication:
                 if self.explorer is None:
                     return send("503 Service Unavailable", {"error": "hosted exploration is not enabled"})
                 return send("200 OK", self.explorer.snapshot(self.project, principal=self.principal))
+            if path == "/api/exploration/import-feedback" and method == "POST":
+                if self.explorer is None:
+                    return send("503 Service Unavailable", {"error": "hosted exploration is not enabled"})
+                result = FactoryFeedback(self.explorer.engine, self.github).import_outcome(
+                    self.project, self._body(environ), principal=self.principal)
+                return send("200 OK", result)
             if method == "POST" and path in {"/api/exploration/open", "/api/exploration/start",
                     "/api/exploration/recover", "/api/exploration/reopen", "/api/exploration/abandon"}:
                 if self.explorer is None:

@@ -3245,6 +3245,62 @@
       "find": "selected = tuple(paths)",
       "replace": "selected = paths",
       "why": "Actual hosted source observation must accept fixed configured paths and retain scope after caller mutation. Detector: tests/factory/test_frontdoor_exploration.py"
+    },
+    {
+      "id": "authenticated-feedback-archive-digest",
+      "file": "factory_kernel/feedback_observation.py",
+      "find": "or artifact[\"digest\"] != \"sha256:\" + sha256_bytes(raw)",
+      "replace": "or False",
+      "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
+    },
+    {
+      "id": "authenticated-feedback-receipt-binding",
+      "file": "factory_kernel/feedback_observation.py",
+      "find": "if sha256_value(receipt) != sha256_value(expected):",
+      "replace": "if False:",
+      "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
+    },
+    {
+      "id": "authenticated-feedback-receipt-issuer",
+      "file": "factory_kernel/feedback_observation.py",
+      "find": "row.get(\"user\", {}).get(\"login\") == \"github-actions[bot]\"",
+      "replace": "True",
+      "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
+    },
+    {
+      "id": "authenticated-feedback-handoff-binding",
+      "file": "factory_kernel/factory_feedback.py",
+      "find": "if candidate.sha256 == programme.sha256:",
+      "replace": "if True:",
+      "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
+    },
+    {
+      "id": "authenticated-feedback-duplicate-attempt",
+      "file": "factory_kernel/factory_feedback.py",
+      "find": "if any(row[\"run_identity\"] == identity for row in state[\"factory_outcomes\"].values()):",
+      "replace": "if False:",
+      "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
+    },
+    {
+      "id": "authenticated-feedback-outcome-invalidates-strategy",
+      "file": "factory_kernel/exploration_records.py",
+      "find": "result[\"factory_outcomes\"][data[\"id\"]] = deepcopy(data)",
+      "replace": "result[\"factory_outcomes\"][data[\"id\"]] = deepcopy(data)\n            result[\"sessions\"][key][\"status\"] = \"reconsideration-required\"",
+      "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
+    },
+    {
+      "id": "authenticated-feedback-runtime-receipt",
+      "file": "factory_kernel/runtime.py",
+      "find": "feedback_marker = marker(receipt) + \"\\n\"",
+      "replace": "feedback_marker = \"\"",
+      "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
+    },
+    {
+      "id": "authenticated-feedback-stop-before-append",
+      "file": "factory_kernel/factory_feedback.py",
+      "find": "engine.check_stop()\n        # The shared writer",
+      "replace": "pass\n        # The shared writer",
+      "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
     }
   ]
 }
