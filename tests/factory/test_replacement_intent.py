@@ -13,6 +13,7 @@ from factory_kernel.execution_budget import ExecutionBudget
 from factory_kernel.frontdoor_http import FrontDoorApplication
 from factory_kernel.frontdoor_intent import IntentRefused, Principal
 from factory_kernel.programme_runtime import ProgrammeQueue
+from factory_kernel.publication_source import observe_publication_source
 from factory_kernel.replacement_intent import ReplacementIntents, OPERATION, plans
 from tests.factory import test_programme_turnover as turnover
 
@@ -75,6 +76,29 @@ class ReplacementIntentTests(unittest.TestCase):
         self.assertTrue(replay["replayed"])
         self.assertEqual(replay["plan"], initial["plan"])
         self.assertEqual(len(self.events()), 4)
+
+    def test_unresolved_execution_charge_is_preserved_without_refund_or_new_allowance(self):
+        budget = ExecutionBudget(self.case.store)
+        original = self.case.github.source
+        self.case.github.source = None
+        budget.approve("citations", {"idempotency_key": "budget", "expected_project_version": 3,
+            "request": {"spec_sha256": sha256_value(original["spec"]), "limit_microusd": 3_000_000, "max_calls": 3}},
+            principal=self.case.owner, github=self.case.github, app_login=turnover.BOT)
+        self.case.github.source = original
+        budget.reserve("citations", {"idempotency_key": "uncertain-attempt", "expected_project_version": 4,
+            "request": {"programme_sha256": ProgrammeQueue(self.case.github, "main").current().sha256,
+                "role": "plan", "microusd": 1_000_000, "attempt": 1, "execution_id": "first-attempt"}},
+            principal=self.case.owner, observe=lambda: observe_publication_source(self.case.github))
+        self.case.version = 5
+        self.case.request["expected_project_version"] = 5
+        before = budget.snapshot("citations", principal=self.case.owner)
+        frozen = self.freeze()["plan"]["review"]["execution_budget"]["ledger"]
+        self.assertEqual(frozen, before)
+        after = budget.snapshot("citations", principal=self.case.owner)
+        self.assertEqual(after["status"], "unresolved-attempt")
+        self.assertEqual(after["reserved_microusd"], 1_000_000)
+        self.assertEqual(after["reservations"], before["reservations"])
+        self.assertEqual(after["allowance"], before["allowance"])
 
     def test_changed_content_cannot_reuse_identity(self):
         command = self.command()
