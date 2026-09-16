@@ -10,7 +10,9 @@ it never reconstructs, recertifies or reuses proof.
 Both dispatch and merge jobs stage a separate, fixed evidence allowlist using
 `python -m factory_kernel.evidence_retention`. Names come from the existing 21-claim spine:
 the bundle, manifest, index, builder provenance, builder/validator claim subjects,
-certifications and independent wrappers. Logs, arbitrary nested files and model transcripts
+certifications and independent wrappers, plus the existing scrubbed `validation-refusal.json`.
+That refusal records the validator's stage/reason and exact PR/base/head; it is not automatic
+evidence that the underlying strategy is wrong. Logs, arbitrary nested files and model transcripts
 are excluded. Each job requests 90-day retention for two Actions artifacts:
 
 - `dark-factory-evidence-<phase>-<run>-<attempt>`: the original JSON bytes under the original

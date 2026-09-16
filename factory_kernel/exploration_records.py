@@ -23,7 +23,7 @@ def approved_scope(store, events):
 
 
 def projection(events):
-    result = {"sessions": {}, "claims": {}, "budgets": {}, "project_version": len(events)}
+    result = {"sessions": {}, "claims": {}, "budgets": {}, "feedback": {}, "project_version": len(events)}
     for event in events:
         if event["command"]["operation"] != OPERATION:
             continue
@@ -32,7 +32,7 @@ def projection(events):
         if kind == "opened":
             result["sessions"][key] = {**deepcopy(data), "id": key, "candidates": {},
                 "observations": [], "reservations": {}, "recommendations": [], "handoffs": [], "assessments": [],
-                "round": 1, "status": "exploring"}
+                "reopenings": [], "round": 1, "status": "exploring"}
             budget = data["binding"]["spec_sha256"]
             result["budgets"].setdefault(budget, {"limits": deepcopy(data["policy"]["budget"]),
                                                 "calls": 0, "usd": 0, "probe_units": 0, "uncertain": False})
@@ -80,6 +80,15 @@ def projection(events):
             session["round"] += 1
             session["status"] = "exploring"
             session["context"] = deepcopy(data["context"])
+            session["reopenings"].append(deepcopy(data))
+        elif kind == "factory-feedback":
+            result["feedback"][data["id"]] = deepcopy(data)
+            for claim_id in data["judgment"]["claim_ids"]:
+                claim = result["claims"][claim_id]
+                claim["status"] = "invalidated"
+                claim["observations"].append({"feedback_sha256": data["id"], "status": "invalidated",
+                    "evidence_class": "owner-causal-assessment", "qualification_status": "UNPROVEN"})
+                invalidate_recommendations(result, claim_id, "invalidated")
         elif kind == "handoff":
             result["sessions"][key]["handoffs"].append(deepcopy(data))
         else:

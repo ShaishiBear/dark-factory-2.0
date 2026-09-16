@@ -82,6 +82,14 @@ class RetentionTests(unittest.TestCase):
         self.assertGreater(receipt["gaps"][0]["counts"]["absent"], 0)
         self.assertFalse((self.output / ATTEMPT / "artifacts/spine/run-manifest.json").exists())
 
+    def test_existing_validation_refusal_survives_without_entering_public_index(self):
+        raw = b'{"detail":"PRIVATE refusal observation","reason_code":"code_holdout"}'
+        self.write("validation-refusal.json", raw)
+        receipt = self.retain()
+        self.assertEqual(len(receipt["files"]), 1)
+        self.assertEqual((self.output / ATTEMPT / "artifacts/validation-refusal.json").read_bytes(), raw)
+        self.assertNotIn("PRIVATE", (self.index_dir / "retention-index.json").read_text())
+
     def test_invalid_duplicate_nonobject_and_oversized_json_are_not_retained(self):
         for name, raw in zip(sorted(EVIDENCE_PATHS), (b'{"x":1,"x":2}', b'[]', b'broken', b'{"x":"' + b'a' * 250000 + b'"}')):
             self.write(name, raw)
