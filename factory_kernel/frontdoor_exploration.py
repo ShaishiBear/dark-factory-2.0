@@ -45,7 +45,7 @@ class FrontDoorExploration:
             raise IntentRefused("hosted exploration needs bounded source paths in its configured repository")
         selected = tuple(paths)
         stop = lambda: require_clear_stop(github)
-        return cls(store, provider, lambda: inspect_protected_repository(github, selected, check_stop=stop),
+        return cls(store, provider, lambda: inspect_protected_repository(github, list(selected), check_stop=stop),
                    check_stop=stop, app_login=app_login)
 
     def snapshot(self, project, *, principal):
