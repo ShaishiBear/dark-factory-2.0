@@ -2811,6 +2811,76 @@
       "find": "        self._challenge(challenge)  # remote reads must not silently outlive the challenge\n",
       "replace": "",
       "why": "Slow remote reads must not stretch the freshness window after authentication."
+    },
+    {
+      "id": "publication-admission-base-replacement",
+      "file": "factory_kernel/publication_admission.py",
+      "find": "or base_input is not None or changed_files != [ACTIVE_PATH]",
+      "replace": "or False or changed_files != [ACTIVE_PATH]",
+      "why": "Existing active scope cannot enter the initial publication lane."
+    },
+    {
+      "id": "publication-admission-payload-substitution",
+      "file": "factory_kernel/publication_admission.py",
+      "find": "or head_input != manifest[\"input\"]",
+      "replace": "or False",
+      "why": "The PR must contain exactly the validated owner payload."
+    },
+    {
+      "id": "publication-admission-commit-parent",
+      "file": "factory_kernel/publication_admission.py",
+      "find": "or commit.get(\"parents\") != [{\"sha\": base_sha}]",
+      "replace": "or False",
+      "why": "A publication cannot inherit an unapproved parent."
+    },
+    {
+      "id": "publication-admission-source-attempt",
+      "file": "factory_kernel/publication_admission.py",
+      "find": "or type(run.get(\"run_attempt\")) is not int or run[\"run_attempt\"] != 1",
+      "replace": "or False",
+      "why": "A repeated workflow attempt cannot replay the publication authority."
+    },
+    {
+      "id": "publication-admission-validation-job",
+      "file": "factory_kernel/publication_admission.py",
+      "find": "or matches[0].get(\"conclusion\") != \"success\"",
+      "replace": "or False",
+      "why": "A failed validation job cannot supply publication provenance."
+    },
+    {
+      "id": "publication-admission-artifact-digest",
+      "file": "factory_kernel/publication_observation.py",
+      "find": "or artifact.get(\"digest\") != \"sha256:\" + hashlib.sha256(raw).hexdigest()",
+      "replace": "or False",
+      "why": "Downloaded bytes must match the independently observed platform digest."
+    },
+    {
+      "id": "publication-admission-inventory-complete",
+      "file": "factory_kernel/publication_observation.py",
+      "find": "or len(payload[key]) != payload[\"total_count\"]",
+      "replace": "or False",
+      "why": "A truncated provenance inventory must not hide extra artifacts or jobs."
+    },
+    {
+      "id": "publication-admission-currency-payload",
+      "file": "factory_kernel/publication_client.py",
+      "find": "if (current[\"input_sha256\"] != manifest[\"input_sha256\"]\n            or current[\"programme_sha256\"] != manifest[\"programme_sha256\"]):",
+      "replace": "if False:",
+      "why": "An authenticated response for another public payload is not current consent."
+    },
+    {
+      "id": "publication-admission-guard-current",
+      "file": "scripts/factory_security.py",
+      "find": "if mode == \"trusted-base\" and observation.get(\"owner_currency\") != \"observed-current\":",
+      "replace": "if False:",
+      "why": "The old-base guard must reject head-only provenance without current owner consent."
+    },
+    {
+      "id": "publication-admission-guard-secret-preserved",
+      "file": "scripts/factory_security.py",
+      "find": "if not (row[\"kind\"] == \"protected_path\" and row[\"path\"] == ACTIVE_PATH)",
+      "replace": "if False",
+      "why": "Publication never erases unrelated secret, path or ratchet findings."
     }
   ]
 }
