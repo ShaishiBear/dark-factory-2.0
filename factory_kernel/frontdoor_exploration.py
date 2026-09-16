@@ -76,6 +76,7 @@ class FrontDoorExploration:
             policy["budget"] = deepcopy(budget["limits"])
         return {"ready": True, "project_version": state["project_version"], "sessions": sessions,
                 "runs": runs, "budget": deepcopy(budget), "default_policy": policy,
+                "factory_outcomes": list(state["factory_outcomes"].values()),
                 "qualification_status": "UNPROVEN", "proof_reuse_allowed": False}
 
     def open(self, project, command, *, principal):

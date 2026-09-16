@@ -63,6 +63,37 @@ function renderExploration() {
     const card = document.createElement("section");
     card.append(text("h3", session.question), text("p", `${session.status} · round ${session.round}`, "badge"));
     list(card, "Frozen comparison priorities", session.policy.priorities.map((id) => session.policy.criteria.find((row) => row.id === id).question));
+    for (const outcome of (state.factory_outcomes || []).filter((row) => row.session_id === session.id)) {
+      const observed = outcome.observation;
+      card.append(text("h4", "Authenticated factory refusal"),
+        text("p", `PR #${observed.receipt.pr}, run ${observed.receipt.run_id}, attempt ${observed.receipt.run_attempt}: ${observed.refusal.reason_code}.`),
+        text("p", "The factory reported a refusal. Its cause is unresolved; this does not reject the strategy or qualify a replacement.", "muted"));
+      const details = document.createElement("details"); details.append(text("summary", "Exact revision and evidence bindings"), text("pre", JSON.stringify(outcome, null, 2))); card.append(details);
+    }
+    if (session.handoffs.length) {
+      const form = document.createElement("form");
+      form.append(text("h4", "Import a factory outcome"), text("p", "Verify a current completed run against its retained evidence. Expired evidence, changed revisions and incomplete records are refused."));
+      const fields = {};
+      for (const [key, title] of [["run_id", "Workflow run ID"], ["attempt", "Run attempt"], ["pr", "Pull request number"]]) {
+        const label = text("label", title); const input = document.createElement("input");
+        input.type = "number"; input.min = "1"; input.step = "1"; input.required = true;
+        if (key === "attempt") input.value = "1";
+        label.append(input); form.append(label); fields[key] = input;
+      }
+      const label = text("label", "Programme item"); const item = document.createElement("select");
+      for (const row of session.handoffs[session.handoffs.length - 1].input.proposal.items) {
+        const option = text("option", row.id); option.value = row.id; item.append(option);
+      }
+      label.append(item); form.append(label);
+      const submit = text("button", "Verify and import outcome"); submit.type = "submit"; form.append(submit);
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const request = Object.fromEntries(Object.entries(fields).map(([key, input]) => [key, Number(input.value)]));
+        if (!Object.values(request).every(Number.isSafeInteger)) { message("Enter valid whole-number run and PR identities.", true); return; }
+        perform(() => explorationAction("import-feedback", session.id, {...request, item_id: item.value}));
+      });
+      card.append(form);
+    }
     for (const candidate of Object.values(session.candidates)) {
       const result = session.comparison.candidates[candidate.id];
       card.append(text("h4", candidate.mechanism), text("p", `${candidate.baseline ? "Baseline · " : ""}${result.status}`));

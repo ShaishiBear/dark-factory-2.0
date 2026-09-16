@@ -3793,11 +3793,22 @@ class KernelRuntime:
             pass
         try:
             self.github.cwd = str(self.repo_root)
+            feedback_marker = ""
+            try:
+                from .feedback_receipt import FILE, marker, refusal_receipt
+                receipt = refusal_receipt(self.github, default_branch=self.config.default_branch,
+                    issue_number=linked_issue, refusal=record, artifacts=paths.artifacts,
+                    kernel_revision=self._git("rev-parse", "HEAD", cwd=self.repo_root).strip(),
+                    environment=os.environ)
+                self._write_json(paths.artifacts / FILE, receipt)
+                feedback_marker = marker(receipt) + "\n"
+            except Exception:
+                pass  # No authenticated receipt; preserve the existing refusal/repair route.
             self.github.remove_pr_label(pr_number, self.config.labels["needs_review"])
             self.github.add_pr_label(pr_number, self.config.labels["needs_fix"])
             reason_code = record["reason_code"]
             summary = (
-                render_refusal_marker(record)
+                feedback_marker + render_refusal_marker(record)
                 + "\nDark Factory validation failed closed. No merge was authorized. "
                 f"Refused by: {record['authority']} (`{reason_code}`, `{record['exception']}`). "
                 "The scrubbed refusal record is `validation-refusal.json` in the run's uploaded "
