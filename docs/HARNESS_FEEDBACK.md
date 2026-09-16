@@ -79,7 +79,8 @@ container-engine vulnerability. Use a dedicated disposable host for adversarial
 code. The Docker client and daemon are trusted parts of this experiment boundary.
 
 Cancellation/timeout removes the exact named container, including descendants;
-killing the attached client alone is insufficient. A failed cleanup is an error.
+killing the attached client alone is insufficient. A failed cleanup halts all
+subsequent calls; its container name is retained for operator recovery.
 Cleanup/control calls have their own bounded deadlines. An in-flight live provider
 call stops at its allocated provider deadline; cancellation prevents later calls.
 

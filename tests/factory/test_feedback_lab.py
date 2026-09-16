@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from factory_kernel.feedback_lab import Limits, compare, prompt_for, run_arm, run_experiment, validate_tasks
-from factory_kernel.feedback_sandbox import CandidateError, SandboxError
+from factory_kernel.feedback_sandbox import CandidateError, CleanupError, SandboxError
 from factory_kernel.feedback_lab_cli import LiveWorker, RecordedWorker
 
 
@@ -142,6 +142,14 @@ class FeedbackTests(unittest.TestCase):
         report = run_experiment([TASK], worker, self.sandbox, Limits(), emit=self.events.append)
         self.assertEqual(worker.call_count, 1)
         self.assertEqual(len(report["attempts"]), 2)
+
+    def test_uncertain_cleanup_stops_all_subsequent_calls(self):
+        self.sandbox.evaluate = Mock(side_effect=CleanupError("unconfirmed cleanup"))
+        worker = Mock(return_value={"code": "fixed"})
+        report = run_experiment([TASK], worker, self.sandbox, Limits(), emit=self.events.append)
+        self.assertEqual(worker.call_count, 1)
+        self.assertEqual(len(report["attempts"]), 2)
+        self.assertTrue(report["attempts"][0]["unsafe_cleanup"])
 
     def test_public_failure_cannot_be_saved_by_final_success(self):
         class DifferentResults:

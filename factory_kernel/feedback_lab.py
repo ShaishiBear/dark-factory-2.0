@@ -11,7 +11,7 @@ import math
 import time
 
 from .benchmark import canonical, digest
-from .feedback_sandbox import CandidateError
+from .feedback_sandbox import CandidateError, CleanupError
 
 
 class BudgetExceeded(RuntimeError):
@@ -168,7 +168,8 @@ def run_arm(task, arm, worker, sandbox, limits, *, emit, cancelled=lambda: False
         result["status"] = "observed"
     except Exception as exc:
         result.update({"status": "error", "error_type": type(exc).__name__, "error": str(exc)[-2000:],
-                       "budget_breach": isinstance(exc, BudgetExceeded)})
+                       "budget_breach": isinstance(exc, BudgetExceeded),
+                       "unsafe_cleanup": isinstance(exc, CleanupError)})
     finally:
         result["elapsed_seconds"] = clock() - start
         if len(known_costs) == len(result["rounds"]) and known_costs and all(c is not None for c in known_costs):
@@ -180,14 +181,14 @@ def run_arm(task, arm, worker, sandbox, limits, *, emit, cancelled=lambda: False
 def run_experiment(tasks, worker, sandbox, limits, *, emit, cancelled=lambda: False):
     validate_tasks(tasks)
     limits.validate()
-    rows, budget_breach = [], False
+    rows, halted = [], False
     for index, task in enumerate(tasks):
         # Counterbalance execution order; fresh worker process and container on every call.
         for arm in (("single", "feedback") if index % 2 == 0 else ("feedback", "single")):
             row = run_arm(task, arm, worker, sandbox, limits, emit=emit,
-                          cancelled=lambda: budget_breach or cancelled())
+                          cancelled=lambda: halted or cancelled())
             rows.append(row)
-            budget_breach = budget_breach or row.get("budget_breach", False)
+            halted = halted or row.get("budget_breach", False) or row.get("unsafe_cleanup", False)
     totals = {arm: {"assigned": len(tasks), "accepted": sum(r["accepted"] for r in rows if r["arm"] == arm),
                     "errors": sum(r["status"] != "observed" for r in rows if r["arm"] == arm)}
               for arm in ("single", "feedback")}

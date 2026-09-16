@@ -34,6 +34,10 @@ class CandidateError(SandboxError):
     """The sandbox ran but the candidate did not return valid observations."""
 
 
+class CleanupError(SandboxError):
+    """Container state is uncertain; no subsequent experiment may launch."""
+
+
 class DockerSandbox:
     def __init__(self, image: str, binary: str = "docker"):
         if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
@@ -147,7 +151,10 @@ class DockerSandbox:
         finally:
             # Killing the attached CLI alone would leave candidate processes running.
             try:
-                self._control(["rm", "--force", name])
+                try:
+                    self._control(["rm", "--force", name])
+                except SandboxError as exc:
+                    raise CleanupError(f"cleanup failed for {name}: {exc}") from exc
             finally:
                 if process is not None:
                     if process.poll() is None:
