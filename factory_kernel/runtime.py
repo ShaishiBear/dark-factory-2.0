@@ -364,6 +364,11 @@ class KernelRuntime:
         if proc.returncode:
             detail = ((proc.stdout or "") + (proc.stderr or "")).strip()
             raise FactoryStopped(detail or "factory stop check failed closed")
+        from .execution_fence import ExecutionFenced, require_execution_open
+        try:
+            require_execution_open(self.github, self.config.default_branch)
+        except ExecutionFenced as exc:
+            raise FactoryStopped(str(exc)) from exc
 
     def reap_stale_claims(self) -> None:
         self._exec(
@@ -812,6 +817,7 @@ class KernelRuntime:
                        issue: Mapping, attempt: int, branch: str) -> int:
         issue_number = int(issue["number"])
         self.github.cwd = str(cwd)
+        self.check_stop()
         self.github.push_branch(branch)
 
         body = paths.root / "pr-body.md"
@@ -3349,6 +3355,15 @@ class KernelRuntime:
                 f"agent request for role {request.role!r} is unscoped: a repository-mutation "
                 "role must carry path_scope"
             )
+        self.check_stop()  # Includes judges and certifiers that do not enter through _agent.
+        original_retry = run_kwargs.get("before_retry")
+
+        def guarded_retry(attempt):
+            self.check_stop()
+            if original_retry is not None:
+                original_retry(attempt)
+
+        run_kwargs["before_retry"] = guarded_retry
         started = time.time()
         # The provider appends every stream line of every attempt to the stage's log as it
         # arrives, so a killed process leaves its whole transcript, not a 1500-character tail

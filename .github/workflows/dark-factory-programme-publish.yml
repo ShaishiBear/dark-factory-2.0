@@ -20,7 +20,9 @@ permissions:
   issues: read
 
 concurrency:
-  group: dark-factory-programme-publication
+  # Programme publication and canonical execution must never own the repository together.
+  # A queued request can expire; currency must refuse it rather than extend its consent.
+  group: dark-factory-worker
   cancel-in-progress: false
 
 jobs:

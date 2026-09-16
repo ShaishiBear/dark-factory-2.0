@@ -10,6 +10,7 @@ from .exploration_policy import comparison, number
 from .exploration_reasoner import ExplorationReasoner
 from .exploration_records import approved_scope, projection
 from .exploration_repository import inspect_protected_repository
+from .execution_fence import require_execution_open
 from .frontdoor_control import stop_status
 from .frontdoor_intent import IntentRefused, _shape
 
@@ -30,6 +31,7 @@ DEFAULT_POLICY = {
 def require_clear_stop(github):
     if stop_status(github) != {"state": "clear", "issues": []}:
         raise IntentRefused("adaptive exploration requires an observed clear stop")
+    require_execution_open(github)
 
 
 class FrontDoorExploration:

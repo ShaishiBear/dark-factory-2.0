@@ -109,6 +109,7 @@ class TriageEngine:
         # Triage decides from what is in its prompt; it gets no tools, and it is bounded in
         # turns and dollars like every other model call the kernel makes (D-052). It has no run
         # directory, so it is the one call that does not pass through `_agent_stage`.
+        self.runtime.check_stop()
         result = self.runtime.provider.run(
             AgentRequest(
                 role="triage", prompt=prompt, cwd=str(self.repo_root),
@@ -119,7 +120,8 @@ class TriageEngine:
                 max_budget_usd=max_budget_usd("triage"),
                 timeout_seconds=stage_timeout_seconds("triage"),
                 effort=effort("triage"),
-            )
+            ),
+            before_retry=lambda _attempt: self.runtime.check_stop(),
         )
         decisions = self._validate_decisions(result.structured_output, candidates)
         self.runtime.check_stop()

@@ -146,6 +146,7 @@ function render() {
     } else $("programme-review").append(text("p", synthesis.state === "pending" ? "Programme preparation is running or was interrupted. Refresh to observe its recorded result." : "Programme preparation failed. No executable programme was delivered; the attempt is recorded for inspection.", "muted"));
   }
   $("progress").replaceChildren();
+  if (snapshot.execution_fence?.state === "fenced") $("progress").append(text("p", "Programme transition: new work is blocked. Running work stops at its next checkpoint. Completed work and spending remain recorded.", "badge blocked"));
   $("observation").textContent = snapshot.observation_available ? `GitHub observed ${snapshot.observed_at ? new Date(snapshot.observed_at).toLocaleString() : "just now"}. Refresh to check for changes.` : "Some GitHub observations are unavailable. Programme progress and stop state are reported separately below.";
   if (snapshot.execution) {
     const execution = snapshot.execution;
