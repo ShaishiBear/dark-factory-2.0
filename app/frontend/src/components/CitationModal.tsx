@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Citation } from '../lib/api';
 
 interface CitationModalProps {
@@ -34,6 +34,26 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
   const externalUrl = videoId
     ? `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`
     : '';
+
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Keyboard focus management (issue #189):
+  // On mount, capture the currently focused element as the opener and move
+  // focus to the modal's Close button (the only always-present control,
+  // including Video-unavailable states). On unmount, restore focus to the
+  // opener when it is still connected to the document; otherwise no-op so
+  // focus falls back to body. The empty dependency array prevents re-running
+  // when ChatArea passes a fresh onClose closure each render — re-running
+  // would re-capture the wrong opener (the Close button itself) mid-session.
+  useEffect(() => {
+    const opener = document.activeElement;
+    closeButtonRef.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) {
+        opener.focus();
+      }
+    };
+  }, []);
 
   // Close on ESC key
   useEffect(() => {
@@ -76,6 +96,7 @@ export function CitationModal({ citation, onClose }: CitationModalProps) {
             </p>
           </div>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
             className="bg-none border-none text-slate-400 cursor-pointer text-xl leading-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             aria-label="Close"
