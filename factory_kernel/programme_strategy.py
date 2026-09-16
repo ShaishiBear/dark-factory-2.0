@@ -31,8 +31,11 @@ def validate_strategy(raw, spec):
     """Structural validation is not endorsement or authentication of model assertions."""
     if len(canonical_bytes(raw)) > MAX_STRATEGY_BYTES:
         raise ProgrammeRefused("strategy exceeds bounded planning context")
-    value = _object(raw, {"qualification_status", "proof_reuse_allowed", "spec_sha256", "source",
-                          "candidate", "claims", "rationale", "remaining_uncertainty"}, "strategy")
+    fields = {"qualification_status", "proof_reuse_allowed", "spec_sha256", "source",
+              "candidate", "claims", "rationale", "remaining_uncertainty"}
+    if isinstance(raw, dict) and "rejection_rules" in raw:
+        fields.add("rejection_rules")
+    value = _object(raw, fields, "strategy")
     if value["qualification_status"] != "UNPROVEN" or value["proof_reuse_allowed"] is not False:
         raise ProgrammeRefused("strategy cannot certify itself or grant proof reuse")
     if value["spec_sha256"] != sha256_value(spec):
@@ -76,6 +79,9 @@ def validate_strategy(raw, spec):
     _text(value["rationale"], "selection rationale", 4000)
     for text in _list(value["remaining_uncertainty"], "remaining uncertainty", empty=True):
         _text(text, "remaining uncertainty", 2000)
+    if "rejection_rules" in value:
+        from .strategy_rules import validate_rules
+        validate_rules(value["rejection_rules"], claims)
     return deepcopy(value)
 
 
@@ -84,7 +90,9 @@ def strategy_from_session(state, session):
     recommendation = session["recommendations"][-1]
     candidate = session["candidates"][recommendation["candidate_id"]]
     keys = closure(state["claims"], candidate["claim_ids"])
-    return {"qualification_status": "UNPROVEN", "proof_reuse_allowed": False,
+    rules = [deepcopy(row) for row in session.get("rejection_rules", []) if row["claim_id"] in keys]
+    return {**({"rejection_rules": rules} if rules else {}),
+            "qualification_status": "UNPROVEN", "proof_reuse_allowed": False,
             "spec_sha256": session["binding"]["spec_sha256"],
             "source": {"session_id": session["id"], "recommendation_sha256": sha256_value(recommendation),
                        "context_identity": session["context"]["identity"]},

@@ -234,6 +234,7 @@ COPY_FILES = (
     "tests/factory/test_exploration.py",
     "tests/factory/test_reconsideration.py",
     "tests/factory/test_factory_feedback.py",
+    "tests/factory/test_strategy_rejection.py",
     "tests/factory/test_exploration_reasoner.py",
     "tests/factory/test_exploration_repository.py",
     "tests/factory/test_programme_strategy.py",

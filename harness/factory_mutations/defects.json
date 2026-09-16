@@ -3301,6 +3301,62 @@
       "find": "engine.check_stop()\n        # The shared writer",
       "replace": "pass\n        # The shared writer",
       "why": "Authenticated outcome import must preserve exact provenance without granting causal or qualification authority. Detector: tests/factory/test_factory_feedback.py"
+    },
+    {
+      "id": "strategy-rejection-preregistration",
+      "file": "factory_kernel/strategy_rules.py",
+      "find": "if (session[\"status\"] != \"exploring\" or session[\"recommendations\"]\n                or session[\"handoffs\"] or session[\"rejection_rules\"]):",
+      "replace": "if False:",
+      "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "strategy-rejection-authority-source",
+      "file": "factory_kernel/strategy_findings.py",
+      "find": "if raw.replace(b\"\\r\\n\", b\"\\n\") != actual.replace(b\"\\r\\n\", b\"\\n\"):",
+      "replace": "if False:",
+      "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "strategy-rejection-finding-currency",
+      "file": "factory_kernel/strategy_findings.py",
+      "find": "if revision != expected_revision:",
+      "replace": "if False:",
+      "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "strategy-rejection-unknown-layer",
+      "file": "factory_kernel/strategy_findings.py",
+      "find": "\"status\": \"unresolved\" if permitted is None else \"supported\" if permitted else \"contradicted\",",
+      "replace": "\"status\": \"supported\" if permitted else \"contradicted\",",
+      "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "strategy-rejection-positive-is-contradiction",
+      "file": "factory_kernel/strategy_rejection.py",
+      "find": "if row[\"status\"] == \"contradicted\"",
+      "replace": "if row[\"status\"] in {\"contradicted\", \"supported\"}",
+      "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "strategy-rejection-missing-means-rejection",
+      "file": "factory_kernel/strategy_rejection.py",
+      "find": "if report else []",
+      "replace": "if report else [rules[0][\"claim_id\"]]",
+      "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "strategy-rejection-no-automatic-assessment",
+      "file": "factory_kernel/factory_feedback.py",
+      "find": "return after_import(engine, self.github, project, result, principal=principal)",
+      "replace": "return result",
+      "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "strategy-rejection-frontier-dropped",
+      "file": "factory_kernel/exploration_records.py",
+      "find": "for claim_id in data[\"invalidated_claim_ids\"]:",
+      "replace": "for claim_id in []:",
+      "why": "Only current independent counterexamples to preregistered operational assumptions may reopen the causal frontier. Detector: tests/factory/test_strategy_rejection.py"
     }
   ]
 }

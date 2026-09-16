@@ -337,7 +337,7 @@ class AdaptiveHTTPTests(unittest.TestCase):
     def test_authentication_and_same_origin_precede_adaptive_dispatch(self):
         service = Mock()
         self.fixture.app.explorer = service
-        for path in ("open", "start", "recover", "reopen", "abandon"):
+        for path in ("open", "start", "recover", "reopen", "abandon", "register-rules", "assess-feedback"):
             self.assertEqual(self.fixture.call("/api/exploration/" + path, body={"actor": "owner"},
                 HTTP_AUTHORIZATION="")["status"], "401 Unauthorized")
             self.assertEqual(self.fixture.call("/api/exploration/" + path, body={},

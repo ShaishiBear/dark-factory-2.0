@@ -24,7 +24,7 @@ def approved_scope(store, events):
 
 def projection(events):
     result = {"sessions": {}, "claims": {}, "budgets": {}, "feedback": {}, "adaptive_runs": {},
-              "factory_outcomes": {}, "project_version": len(events)}
+              "factory_outcomes": {}, "strategy_assessments": {}, "project_version": len(events)}
     for event in events:
         if event["command"]["operation"] != OPERATION:
             continue
@@ -33,7 +33,7 @@ def projection(events):
         if kind == "opened":
             result["sessions"][key] = {**deepcopy(data), "id": key, "candidates": {},
                 "observations": [], "reservations": {}, "recommendations": [], "handoffs": [], "assessments": [],
-                "reopenings": [], "round": 1, "status": "exploring"}
+                "reopenings": [], "rejection_rules": [], "round": 1, "status": "exploring"}
             budget = data["binding"]["spec_sha256"]
             result["budgets"].setdefault(budget, {"limits": deepcopy(data["policy"]["budget"]),
                                                 "calls": 0, "usd": 0, "probe_units": 0, "uncertain": False})
@@ -82,6 +82,16 @@ def projection(events):
             session["status"] = "exploring"
             session["context"] = deepcopy(data["context"])
             session["reopenings"].append(deepcopy(data))
+        elif kind == "strategy-rules-registered":
+            result["sessions"][key]["rejection_rules"] = deepcopy(data["rules"])
+        elif kind == "strategy-assessed":
+            result["strategy_assessments"][data["id"]] = deepcopy(data)
+            for claim_id in data["invalidated_claim_ids"]:
+                claim = result["claims"][claim_id]
+                claim["status"] = "invalidated"
+                claim["observations"].append({"strategy_assessment_sha256": data["id"], "status": "invalidated",
+                    "evidence_class": "independently-established-policy-contradiction", "qualification_status": "UNPROVEN"})
+                invalidate_recommendations(result, claim_id, "invalidated")
         elif kind == "factory-outcome-imported":
             result["factory_outcomes"][data["id"]] = deepcopy(data)
         elif kind == "factory-feedback":
