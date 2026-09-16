@@ -32,6 +32,13 @@
             <form id="approval-form" hidden><label class="check"><input type="checkbox" id="approve-check" required> This scope represents what I want to build.</label><button class="primary" type="submit">Approve this scope</button></form>
             <div id="approvals"></div>
             <button id="synthesize" hidden>Prepare execution programme</button><div id="programme-review"></div>
+            <button id="preview-publication" hidden>Review publication</button>
+            <div id="publication-review"></div>
+            <form id="publication-form" hidden>
+              <label class="check"><input type="checkbox" id="publish-check" required> I approve publishing the exact programme shown above to this repository.</label>
+              <button class="primary" type="submit">Publish programme for execution</button>
+            </form>
+            <div id="publication-status"></div>
           </section>
         </div>
         <aside>

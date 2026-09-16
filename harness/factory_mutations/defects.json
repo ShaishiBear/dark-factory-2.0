@@ -2958,6 +2958,48 @@
       "find": "if phase == \"merge\" and publisher is not None and publisher.journal.record[\"effects\"]:",
       "replace": "if False:",
       "why": "An uncertain or unverified merge must request containment once."
+    },
+    {
+      "id": "publication-dispatch-dispatch-replayed",
+      "file": "factory_kernel/publication_dispatch.py",
+      "find": "path = self.directory / f\"{project}-{record['project_version']}.json\"",
+      "replace": "path = self.directory / f\"{project}-{record['project_version'] + len(list(self.directory.glob('*.json')))}.json\"",
+      "why": "Reloading a dispatch must preserve the single POST reservation."
+    },
+    {
+      "id": "publication-dispatch-pending-not-durable",
+      "file": "factory_kernel/publication_dispatch.py",
+      "find": "self._save(path, dispatch)  # Durable reservation before POST, separate from immutable consent.",
+      "replace": "self._save(path, {**dispatch, \"state\": \"dispatch-submitted\"})  # Incorrectly claims success before POST.",
+      "why": "The durable journal must report pending while the POST outcome is unknown."
+    },
+    {
+      "id": "publication-dispatch-owner-change-ignored",
+      "file": "factory_kernel/publication_dispatch.py",
+      "find": "if len(events) != record[\"project_version\"] or sha256_value(events[-1]) != record[\"intent_head_sha256\"]:",
+      "replace": "if False:",
+      "why": "Owner decisions changed during encryption must prevent dispatch."
+    },
+    {
+      "id": "publication-dispatch-source-unchecked",
+      "file": "factory_kernel/publication_dispatch.py",
+      "find": "or run.get(\"head_sha\") != record[\"source_sha\"]",
+      "replace": "or False",
+      "why": "Workflow success from another source cannot become current publication evidence."
+    },
+    {
+      "id": "publication-dispatch-app-on-host",
+      "file": "factory_kernel/publication_dispatch.py",
+      "find": "self.github.run([\"workflow\", \"run\", policy.WORKFLOW",
+      "replace": "self.github.run_as_app([\"workflow\", \"run\", policy.WORKFLOW",
+      "why": "The host cannot use App authority for an owner dispatch."
+    },
+    {
+      "id": "publication-dispatch-foreign-ref",
+      "file": "factory_kernel/publication_dispatch.py",
+      "find": "\"-R\", policy.REPOSITORY, \"--ref\", \"main\",",
+      "replace": "\"-R\", policy.REPOSITORY, \"--ref\", \"untrusted\",",
+      "why": "Only protected main can receive the owner publication dispatch."
     }
   ]
 }
