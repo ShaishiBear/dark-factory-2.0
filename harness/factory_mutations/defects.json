@@ -2685,6 +2685,62 @@
       "find": "\"files_read\": list(run.files_read[:FILES_READ_CAP]),\n                \"first_write_turn\"",
       "replace": "\"files_read\": list(run.files_read),\n                \"first_write_turn\"",
       "why": "Failure diagnostics must remain bounded even when a worker repeatedly reads files."
+    },
+    {
+      "id": "publication-request-owner-bypassed",
+      "file": "factory_kernel/publication_request.py",
+      "find": "if principal.role != \"owner\":",
+      "replace": "if False:",
+      "why": "A proposal worker cannot reserve or query an owner publication request."
+    },
+    {
+      "id": "publication-request-destination-bypassed",
+      "file": "factory_kernel/publication_request.py",
+      "find": "if destination != {",
+      "replace": "if False and destination != {",
+      "why": "Approval must name the exact public payload and destination visibility."
+    },
+    {
+      "id": "publication-request-duplicate-version",
+      "file": "factory_kernel/publication_request.py",
+      "find": "previous[\"project_version\"] == review[\"project_version\"]",
+      "replace": "False",
+      "why": "A new request ID must not repeat a possibly uncertain prior effect for the same version."
+    },
+    {
+      "id": "publication-request-stale-owner-decisions",
+      "file": "factory_kernel/publication_request.py",
+      "find": "if (len(events) != record[\"project_version\"] or not events\n                    or sha256_value(events[-1]) != record[\"intent_head_sha256\"]):",
+      "replace": "if False:",
+      "why": "New owner decisions must invalidate an exported publication request before an effect."
+    },
+    {
+      "id": "publication-request-expiry-bypassed",
+      "file": "factory_kernel/publication_request.py",
+      "find": "if not datetime.fromisoformat(record[\"created_at\"]) <= now < datetime.fromisoformat(record[\"expires_at\"]):",
+      "replace": "if False:",
+      "why": "An expired request cannot become a lasting publication capability."
+    },
+    {
+      "id": "publication-request-existing-programme-restarted",
+      "file": "factory_kernel/publication_request.py",
+      "find": "if record[\"state\"] != \"reserved\":",
+      "replace": "if False:",
+      "why": "Already active scope and governed replacements cannot enter the initial publication path."
+    },
+    {
+      "id": "publication-request-changed-main-forgiven",
+      "file": "factory_kernel/publication_request.py",
+      "find": "if observation != record[\"observation\"]:",
+      "replace": "if False:",
+      "why": "Fresh main, active programme and visibility must match the owner's reserved source."
+    },
+    {
+      "id": "publication-source-main-race-forgiven",
+      "file": "factory_kernel/publication_source.py",
+      "find": "or latest_branch[\"commit\"][\"sha\"] != branch[\"commit\"][\"sha\"]",
+      "replace": "or False",
+      "why": "A programme read spanning different main revisions cannot establish publication prerequisites."
     }
   ]
 }
