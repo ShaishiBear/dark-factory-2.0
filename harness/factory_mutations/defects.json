@@ -2457,10 +2457,10 @@
     },
     {
       "id": "frontdoor-stale-command-overwrites-intent",
-      "file": "factory_kernel/frontdoor_intent.py",
-      "find": "if expected != len(events):",
-      "replace": "if False:",
-      "why": "A stale browser or worker cannot overwrite newer intent; caught by tests/factory/test_frontdoor_intent.py."
+      "file": "factory_kernel/project_events.py",
+      "find": "            if expected_version != len(events):",
+      "replace": "            if False:",
+      "why": "A stale browser or worker cannot overwrite newer intent; the check lives in the canonical append primitive since WP01. Detector: tests/factory/test_frontdoor_intent.py"
     },
     {
       "id": "frontdoor-approval-ignores-spec-hash",
@@ -2478,10 +2478,10 @@
     },
     {
       "id": "frontdoor-reuses-command-key-for-different-content",
-      "file": "factory_kernel/frontdoor_intent.py",
-      "find": "if event[\"command\"] != command or event[\"actor\"] != actor:",
-      "replace": "if False:",
-      "why": "Retry identity binds the original command and authenticated actor; caught by tests/factory/test_frontdoor_intent.py."
+      "file": "factory_kernel/project_events.py",
+      "find": "                if (old[\"operation\"] != operation or event[\"actor\"] != actor\n                        or not spec.replay_matches(old[\"payload\"], detached)):",
+      "replace": "                if False:",
+      "why": "Retry identity binds the original command and authenticated actor; the check lives in the canonical append primitive since WP01. Detector: tests/factory/test_frontdoor_intent.py"
     },
     {
       "id": "frontdoor-ignores-history-chain",
@@ -3543,8 +3543,8 @@
     {
       "id": "execution-budget-replay",
       "file": "factory_kernel/execution_budget.py",
-      "find": "if self._replay(events, command, \"reserved\") is not None:\n                return {\"state\": projection(events), \"execute\": False}",
-      "replace": "if self._replay(events, command, \"reserved\") is not None:\n                return {\"state\": projection(events), \"execute\": True}",
+      "find": "        result = self._append(project, principal, command, \"reserved\", validate)\n        return {\"state\": projection(self._history(project)), \"execute\": not result.replayed}",
+      "replace": "        result = self._append(project, principal, command, \"reserved\", validate)\n        return {\"state\": projection(self._history(project)), \"execute\": True}",
       "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
     },
     {
@@ -3847,6 +3847,48 @@
       "find": "    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)\n    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ, runner=runner)",
       "replace": "    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ)",
       "why": "The three nested test-author calls are paid calls and must go through the metered ProbeRunner; a raw subprocess here is the unmetered paid path the critic review named (WP00, C06). Detector: tests/factory/test_factory_test_author_probe.py"
+    },
+    {
+      "id": "project-events-role-allowlist-ignored",
+      "file": "factory_kernel/project_events.py",
+      "find": "        if principal.role not in spec.roles:",
+      "replace": "        if False:",
+      "why": "Each registered operation names the roles that may append it; a proposal principal must not approve scope through the primitive (C02). Detector: tests/factory/test_project_events.py"
+    },
+    {
+      "id": "project-events-nonfinite-payload-accepted",
+      "file": "factory_kernel/project_events.py",
+      "find": "            json.dumps(payload, allow_nan=False)",
+      "replace": "            json.dumps(payload)",
+      "why": "New records reject non-finite numbers before anything is compared or stored (C01). Detector: tests/factory/test_project_events.py"
+    },
+    {
+      "id": "project-events-cursor-ahead-restarts-chain",
+      "file": "factory_kernel/project_events.py",
+      "find": "        if after_version > version:\n            return EventPage(version, after_version, (), None, \"cursor_ahead\")",
+      "replace": "        if False:\n            return EventPage(version, after_version, (), None, \"cursor_ahead\")",
+      "why": "A cursor beyond the verified version is an explicit cursor_ahead result, never a silent empty page that looks like the end of history (C02). Detector: tests/factory/test_project_events.py"
+    },
+    {
+      "id": "project-profile-numeric-identity-ignored",
+      "file": "factory_kernel/project_profile.py",
+      "find": "    if type(identity) is not int or identity != profile.repository_id:",
+      "replace": "    if False:",
+      "why": "A destination is verified by its exact numeric repository identity; a name match alone is not a destination match (WP01). Detector: tests/factory/test_project_profile.py"
+    },
+    {
+      "id": "project-profile-visibility-ignored",
+      "file": "factory_kernel/project_profile.py",
+      "find": "    if type(private) is not bool or ((\"private\" if private else \"public\") != profile.visibility):",
+      "replace": "    if False:",
+      "why": "Visibility consent is part of the destination check; a private profile must not publish to a public repository or vice versa (WP01). Detector: tests/factory/test_project_profile.py"
+    },
+    {
+      "id": "execution-authority-policy-file-unverified",
+      "file": "factory_kernel/execution_authority.py",
+      "find": "            for path in POLICY_FILES:\n                raw = read(path, 100000)",
+      "replace": "            for path in ():\n                raw = read(path, 100000)",
+      "why": "The project profile is part of the execution authority's verified closure; a host whose profile drifted from protected main must refuse exactly as drifted code does (pitfall 15.1). Detector: tests/factory/test_execution_exchange.py"
     }
   ]
 }

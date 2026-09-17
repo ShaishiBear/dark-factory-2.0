@@ -15,7 +15,16 @@ PROGRAMS = ("execution_authority.py", "execution_exchange.py", "execution_budget
             "programme.py", "programme_runtime.py", "publication_source.py", "execution_fence.py",
             "exploration_repository.py", "frontdoor_control.py", "publication_observation.py",
             "exploration_records.py", "publication_policy.py", "programme_strategy.py",
-            "strategy_rules.py", "manifest.py")
+            "strategy_rules.py", "manifest.py", "project_profile.py")
+# Protected non-code inputs of the closure, repository-relative. The project profile decides
+# which repository, owner, App and project every constant in publication_policy names; a
+# host whose profile drifted from protected main must refuse exactly as drifted code does.
+POLICY_FILES = (".factory/project-profile.json",)
+
+
+def _normalised(raw):
+    """Line endings are checkout presentation, not source identity."""
+    return raw.replace(b"\r\n", b"\n")
 
 
 class ExecutionAuthority:
@@ -26,7 +35,8 @@ class ExecutionAuthority:
     def _programs(self, revision):
         if revision in self._verified:
             return  # Immutable Git objects; this authority instance belongs to one host process.
-        paths = ["factory_kernel/" + name for name in PROGRAMS]
+        paths = ["factory_kernel/" + name for name in PROGRAMS] + list(POLICY_FILES)
+        root = Path(__file__).resolve().parents[1]
         def compare(current, _paths, read):
             if current != revision:
                 raise IntentRefused("execution authority source changed")
@@ -35,6 +45,11 @@ class ExecutionAuthority:
                 local = Path(__file__).with_name(name).read_bytes()
                 if raw.replace(b"\r\n", b"\n") != local.replace(b"\r\n", b"\n"):
                     raise IntentRefused("execution authority differs from protected source")
+            for path in POLICY_FILES:
+                raw = read(path, 100000)
+                local = (root / path).read_bytes()
+                if _normalised(raw) != _normalised(local):
+                    raise IntentRefused("execution authority policy differs from protected source")
         observe_protected_files(self.github, paths, (), compare)
         self._verified.add(revision)
 

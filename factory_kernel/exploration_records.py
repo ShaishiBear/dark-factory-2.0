@@ -11,6 +11,11 @@ from .programme import _id, parse_json
 OPERATION = "preflight-event"
 
 
+def _exploration_replay(old, new):
+    """The caller's request under one key is the command; kind/data are derived (legacy rule)."""
+    return old["request"] == new["request"]
+
+
 def approved_scope(store, events):
     state = store._snapshot(events)
     if not state["approvals"]:
@@ -159,30 +164,25 @@ class ExplorationRecords:
         _id(command["session_id"])
         if type(command["expected_project_version"]) is not int:
             raise IntentRefused("project version must be an integer")
-        actor = {"identity": principal.identity, "role": principal.role}
-        with self.store._locked(project) as path:
-            events = self.store._read(path)
-            for event in events:
-                old = event["command"]
-                if old["idempotency_key"] == command["idempotency_key"]:
-                    if (old["operation"] != OPERATION or old["payload"]["request"] != command
-                            or event["actor"] != actor):
-                        raise IntentRefused("idempotency key already used")
-                    replay_guard(projection(events), approved_scope(self.store, events), old["payload"])
-                    return projection(events), deepcopy(old["payload"]), False
-            if command["expected_project_version"] != len(events):
-                raise IntentRefused("stale project version")
+
+        def validate_transition(events):
             state, approval = projection(events), approved_scope(self.store, events)
             kind, data = transition(state, approval)
             payload = {"session_id": command["session_id"], "request": command, "kind": kind, "data": data}
             if len(canonical_bytes(payload)) > 150000:
                 raise IntentRefused("exploration event exceeds size bound")
-            event = {"schema": "dark-factory/intent-event", "schema_version": "1.0", "project": project,
-                     "repository": self.store.repository, "project_version": len(events) + 1,
-                     "command": {"idempotency_key": command["idempotency_key"],
-                         "expected_project_version": len(events), "operation": OPERATION, "payload": payload},
-                     "actor": actor, "created_at": datetime.now(timezone.utc).isoformat(),
-                     "previous": sha256_value(events[-1]) if events else None}
-            events.append(event)
-            self.store._write(path, events)
-            return projection(events), deepcopy(payload), True
+            return payload
+
+        from .project_events import OperationSpec, ProjectEvents
+        result = ProjectEvents(self.store, {OPERATION: OperationSpec(OPERATION, frozenset({"owner"}), _exploration_replay)}).append(
+            project=project, principal=principal, expected_version=command["expected_project_version"],
+            idempotency_key=command["idempotency_key"], operation=OPERATION,
+            payload={"session_id": command["session_id"], "request": command, "kind": None, "data": None},
+            validate_transition=validate_transition)
+        with self.store._locked(project) as path:
+            events = self.store._read(path)
+        payload = deepcopy(result.event["command"]["payload"])
+        if result.replayed:
+            replay_guard(projection(events), approved_scope(self.store, events), payload)
+            return projection(events), payload, False
+        return projection(events), payload, True

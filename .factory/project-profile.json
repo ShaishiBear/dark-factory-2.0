@@ -1,0 +1,18 @@
+{
+  "schema": "dark-factory/project-profile",
+  "schema_version": "1.0",
+  "repository": "ShaishiBear/dark-factory-2.0",
+  "repository_id": 1341036238,
+  "owner": "ShaishiBear",
+  "visibility": "public",
+  "default_branch": "main",
+  "project": "citation-inspection",
+  "publication_origin": "https://108.131.113.253",
+  "app_login": "shaishibear-dark-factory[bot]",
+  "publication_workflow": "dark-factory-programme-publish.yml",
+  "publication_artifact": "programme-publication-validated",
+  "programme_branch_prefix": "factory/programme-",
+  "product_roots": ["app/"],
+  "validation_adapters": ["harness/ci.py", "harness/e2e.py", "harness/post_merge.py"],
+  "mission_binding": {"mission": "MISSION.md", "product_requirements": "docs/dynachat.prd.md"}
+}

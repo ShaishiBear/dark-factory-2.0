@@ -109,6 +109,9 @@ def inspect_protected_repository(github, selected_paths, *, check_stop=lambda: N
     return observe_protected_files(github, selected_paths, POLICY_PATHS, _analyse, check_stop=check_stop)
 
 
+SELECTION_BOUND = 400000
+
+
 def observe_protected_files(github, selected_paths, policy_paths, analyse, *, check_stop=lambda: None):
     """Internal reader for trusted, fixed-path consumers; callers validate their path policy.
 
@@ -172,7 +175,13 @@ def observe_protected_files(github, selected_paths, policy_paths, analyse, *, ch
         entries[name] = entry
     if entries.keys() != wanted:
         raise IntentRefused("repository context source or protected policy is missing")
-    if sum(entries[name]["size"] for name in selected_paths) > 200000:
+    # The selection bound for every trusted fixed-path consumer. Measured 2026-09-17 (WP01):
+    # the execution-authority closure is 199,408 bytes once the project profile joins it, so
+    # the former 200,000 left 592 bytes for any future edit of a closure file. Raised on that
+    # measurement, not omitted around; `_analyse` keeps its own 200,000 read bound, so the
+    # repository analysis path is not widened by this. tests/factory/test_project_profile.py
+    # pins the closure size with headroom so growth is seen before this refuses on the host.
+    if sum(entries[name]["size"] for name in selected_paths) > SELECTION_BOUND:
         raise IntentRefused("selected source exceeds analysis bound")
 
     def read(name, limit):

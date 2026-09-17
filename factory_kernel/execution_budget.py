@@ -110,9 +110,33 @@ def observe_opening(github, spec, app_login):
             "scope_id": spec["id"], "basis": "protected-source-and-complete-programme-inventory"}
 
 
+def _budget_replay(old, new):
+    """Same kind and same caller request under one key is the same command (legacy rule)."""
+    return old["kind"] == new["kind"] and old["request"] == new["request"]
+
+
+def _replayed(events, command, kind):
+    """Read-only pre-check where a network observation must precede the append: the
+    original event's data if this command was already recorded, else None."""
+    for event in events:
+        old = event["command"]
+        if old["idempotency_key"] == command["idempotency_key"]:
+            if (old["operation"] != OPERATION or old["payload"]["kind"] != kind
+                    or old["payload"]["request"] != command):
+                raise IntentRefused("execution idempotency key already used")
+            return deepcopy(old["payload"]["data"])
+    if len(events) != command["expected_project_version"]:
+        raise IntentRefused("stale project version")
+    return None
+
+
 class ExecutionBudget:
     def __init__(self, store):
         self.store = store
+
+    def _history(self, project):
+        with self.store._locked(project) as path:
+            return self.store._read(path)
 
     def _owner(self, principal):
         self.store._authorize(principal)
@@ -124,16 +148,22 @@ class ExecutionBudget:
         with self.store._locked(project) as path:
             return projection(self.store._read(path))
 
-    def _append(self, path, events, principal, command, kind, data):
-        events.append({"schema": "dark-factory/intent-event", "schema_version": "1.0",
-            "project": path.stem, "repository": self.store.repository, "project_version": len(events) + 1,
-            "command": {"idempotency_key": command["idempotency_key"], "expected_project_version": len(events),
-                        "operation": OPERATION, "payload": {"request": deepcopy(command), "kind": kind, "data": data}},
-            "actor": {"identity": principal.identity, "role": principal.role},
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "previous": sha256_value(events[-1]) if events else None})
-        self.store._write(path, events)
-        return projection(events)
+    def _events(self):
+        from .project_events import OperationSpec, ProjectEvents
+        return ProjectEvents(self.store, {OPERATION: OperationSpec(OPERATION, frozenset({"owner"}), _budget_replay)})
+
+    def _append(self, project, principal, command, kind, validate):
+        """Append one budget event through the canonical primitive.
+
+        `validate(events)` runs inside the store lock against the verified history and
+        returns the event data, or raises. On a replay of the same command the original
+        event is returned with `replayed=True` and nothing is appended.
+        """
+        return self._events().append(
+            project=project, principal=principal, expected_version=command["expected_project_version"],
+            idempotency_key=command["idempotency_key"], operation=OPERATION,
+            payload={"request": deepcopy(command), "kind": kind, "data": None},
+            validate_transition=lambda events: {"request": deepcopy(command), "kind": kind, "data": validate(events)})
 
     @staticmethod
     def _command(command):
@@ -142,19 +172,6 @@ class ExecutionBudget:
         _text(command["idempotency_key"], 100)
         _integer(command["expected_project_version"], 10000, zero=True)
         return command
-
-    @staticmethod
-    def _replay(events, command, kind):
-        for event in events:
-            old = event["command"]
-            if old["idempotency_key"] == command["idempotency_key"]:
-                if (old["operation"] != OPERATION or old["payload"]["kind"] != kind
-                        or old["payload"]["request"] != command):
-                    raise IntentRefused("execution idempotency key already used")
-                return deepcopy(old["payload"]["data"])
-        if len(events) != command["expected_project_version"]:
-            raise IntentRefused("stale project version")
-        return None
 
     def approve(self, project, command, *, principal, github, app_login):
         self._owner(principal)
@@ -167,7 +184,7 @@ class ExecutionBudget:
             raise IntentRefused("execution budget repository differs from owner scope")
         with self.store._locked(project) as path:
             events = self.store._read(path)
-            if self._replay(events, command, "approved") is not None:
+            if _replayed(events, command, "approved") is not None:
                 return projection(events)
             approval = approved_scope(self.store, events)
             if approval["spec_sha256"] != request["spec_sha256"]:
@@ -176,12 +193,14 @@ class ExecutionBudget:
                 raise IntentRefused("project already has an execution allowance; replacement cannot reset it")
             head = sha256_value(events[-1])
         opening = observe_opening(github, approval["spec"], app_login)
-        with self.store._locked(project) as path:
-            events = self.store._read(path)
+
+        def validate(events):
             if len(events) != command["expected_project_version"] or sha256_value(events[-1]) != head:
                 raise IntentRefused("owner scope changed during budget approval")
-            data = {**request, "scope_id": approval["spec"]["id"], "opening": opening}
-            return self._append(path, events, principal, command, "approved", data)
+            return {**request, "scope_id": approval["spec"]["id"], "opening": opening}
+
+        self._append(project, principal, command, "approved", validate)
+        return projection(self._history(project))
 
     def reserve(self, project, command, *, principal, observe):
         """Trusted local executor only. Replay reports history and NEVER grants another call.
@@ -205,10 +224,8 @@ class ExecutionBudget:
                 or source["stop"] != {"state": "clear", "issues": []}
                 or programme.sha256 != request["programme_sha256"]):
             raise IntentRefused("execution reservation source, stop or programme differs")
-        with self.store._locked(project) as path:
-            events = self.store._read(path)
-            if self._replay(events, command, "reserved") is not None:
-                return {"state": projection(events), "execute": False}
+
+        def validate(events):
             state = projection(events)
             approval = approved_scope(self.store, events)
             if state["status"] != "available":
@@ -223,10 +240,11 @@ class ExecutionBudget:
                 raise IntentRefused("execution attempt was already reserved")
             if source != observe():
                 raise IntentRefused("execution source changed before reservation")
-            data = {**request, "id": command["idempotency_key"], "source_sha": source["main_sha"],
+            return {**request, "id": command["idempotency_key"], "source_sha": source["main_sha"],
                     "spec_sha256": approval["spec_sha256"], "reserved_project_version": len(events) + 1}
-            state = self._append(path, events, principal, command, "reserved", data)
-            return {"state": state, "execute": True}
+
+        result = self._append(project, principal, command, "reserved", validate)
+        return {"state": projection(self._history(project)), "execute": not result.replayed}
 
     def observe(self, project, command, *, principal):
         """Record telemetry without refunding the reservation or granting another attempt."""
@@ -239,24 +257,21 @@ class ExecutionBudget:
             _integer(request["reported_microusd"], MAX_MICROUSD, zero=True)
         if request["outcome"] not in {"returned", "failed"}:
             raise IntentRefused("unknown execution observation")
-        with self.store._locked(project) as path:
-            events = self.store._read(path)
-            if self._replay(events, command, "observed") is not None:
-                return projection(events)
+        def validate(events):
             row = projection(events)["reservations"].get(request["id"])
             if row is None or row["observation"] is not None:
                 raise IntentRefused("execution reservation missing or already observed")
-            return self._append(path, events, principal, command, "observed", deepcopy(request))
+            return deepcopy(request)
+
+        self._append(project, principal, command, "observed", validate)
+        return projection(self._history(project))
 
     def start(self, project, command, *, principal):
         """Consume one remote reservation durably. A lost response cannot be reissued."""
         self._owner(principal)
         command = self._command(command)
         _shape(command["request"], {"id", "execution_id"})
-        with self.store._locked(project) as path:
-            events = self.store._read(path)
-            if self._replay(events, command, "started") is not None:
-                return {"state": projection(events), "execute": False}
+        def validate(events):
             approval = approved_scope(self.store, events)
             row = projection(events)["reservations"].get(command["request"]["id"])
             if (row is None or row["execution_id"] != command["request"]["execution_id"]
@@ -264,8 +279,10 @@ class ExecutionBudget:
                     or row["spec_sha256"] != approval["spec_sha256"]
                     or row["started"] is not None or row["observation"] is not None):
                 raise IntentRefused("execution reservation cannot be started")
-            state = self._append(path, events, principal, command, "started", deepcopy(command["request"]))
-            return {"state": state, "execute": True}
+            return deepcopy(command["request"])
+
+        result = self._append(project, principal, command, "started", validate)
+        return {"state": projection(self._history(project)), "execute": not result.replayed}
 
     def run(self, project, *, principal, provider, request, observe_source,
             programme_sha256, execution_id, attempt, reservation_id, transcript=None):
