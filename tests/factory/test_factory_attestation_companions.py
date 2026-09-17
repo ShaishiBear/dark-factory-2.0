@@ -3,11 +3,14 @@ own manifest and from identities the wrapper observed, retained before indexed, 
 the artifacts on disk, assessed in shadow, and never a substitute for the legacy closure."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -190,13 +193,80 @@ class ObservationTests(unittest.TestCase):
 
 
 class WrapperTests(unittest.TestCase):
-    def test_the_wrapper_emits_companions_after_closure_and_fails_loudly_when_it_cannot(self):
+    """The wrapper's run() with every subprocess and the closure stubbed: what remains is the
+    wrapper's own contract, that the bundle it writes carries the companions it emitted, and
+    that a failure to emit them is a refusal of this authority."""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("spine_wrapper_under_test", ROOT / "scripts" / "factory_evidence_spine.py")
+        self.spine = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.spine)
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.legacy = {"version": "5.0", "pr": 42, "issue": 7, "base_sha": BASE, "head_sha": HEAD, "observed": {}}
+
+    def fake_run(self, argv, **kwargs):
+        program = str(argv[1]) if len(argv) > 1 else ""
+        if program.endswith("factory_evidence.py"):
+            (self.root / "evidence-bundle-core-v5.json").write_bytes(canonical_bytes(self.legacy))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if program.endswith("factory_mutations/run.py") or program.endswith("run.py"):
+            return subprocess.CompletedProcess(argv, 0, "FACTORY_MUTATIONS_OK FACTORY_MUTATIONS_TOTAL=3 FACTORY_MUTATIONS_CAUGHT=3 "
+                                               "FACTORY_MUTATIONS_NOT_INJECTED=0 IMMUNITY_OK entries=1 assertions=2 sha256=" + "e" * 64, "")
+        if program.endswith("factory_provenance.py"):
+            (self.root / "spine").mkdir(exist_ok=True)
+            (self.root / "spine" / "builder-provenance.json").write_bytes(canonical_bytes({"version": "1.0"}))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        raise AssertionError(f"unexpected subprocess: {argv}")
+
+    def run_wrapper(self, emit):
+        (self.root / "holdout.json").write_bytes(canonical_bytes({"version": "1.0", "verdict": "pass"}))
+        (self.root / "architecture-holdout.json").write_bytes(canonical_bytes({"version": "1.0", "verdict": "pass"}))
+        (self.root / "independent").mkdir(exist_ok=True)
+        for claim in ("contract", "design", "architecture-governor"):
+            (self.root / "independent" / f"{claim}.json").write_bytes(canonical_bytes({"claim_id": claim}))
+        manifest = SimpleNamespace(sha256=lambda: "9" * 64, run_id="pr-42-evidence-" + HEAD[:12], base_sha=BASE)
+        index = {"version": "1.0", "claims": [], "completion_level": 100, "builder_provenance_sha256": "8" * 64}
+        args = SimpleNamespace(pr="42", verdict=str(self.root / "verdict.json"), architecture_verdict=str(self.root / "architecture-holdout.json"),
+                               output=str(self.root / "evidence-bundle.json"))
+        with patch.object(self.spine.subprocess, "run", self.fake_run), \
+                patch.object(self.spine, "verify_pack", lambda *a, **k: None), \
+                patch.object(self.spine, "compile_full_spine", lambda **k: (manifest, index)), \
+                patch.object(self.spine, "emit_companions", emit), \
+                patch.object(self.spine, "ROOT", self.root), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.spine.run(args)
+        return json.loads((self.root / "evidence-bundle.json").read_text(encoding="utf-8")), out.getvalue()
+
+    def test_the_bundle_carries_the_companion_summary_the_wrapper_emitted(self):
+        calls = []
+
+        def emit(**kwargs):
+            calls.append(kwargs)
+            return {"index_sha256": "7" * 64, "count": 21, "verified": 21, "shadow_current": 21, "proof_reuse_allowed": False}
+
+        bundle, _ = self.run_wrapper(emit)
+        self.assertEqual(bundle["attestations"], {"index_sha256": "7" * 64, "count": 21, "verified": 21, "shadow_current": 21, "proof_reuse_allowed": False})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual((calls[0]["head"], calls[0]["candidate_root"], calls[0]["kernel_root"]), (HEAD, self.root, ROOT))
+        self.assertEqual(calls[0]["index"]["completion_level"], 100)
+        self.assertEqual(bundle["run_manifest_sha256"], "9" * 64, "legacy fields are untouched")
+
+    def test_a_companion_failure_is_a_refusal_of_this_authority(self):
+        def emit(**kwargs):
+            raise ValueError("candidate tree cannot be observed")
+
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            self.run_wrapper(emit)
+        self.assertIn("proof companions could not be emitted: candidate tree cannot be observed", err.getvalue())
+        self.assertFalse((self.root / "evidence-bundle.json").exists(), "no bundle is written without its companions")
+
+    def test_companions_are_emitted_after_closure_and_before_the_bundle_is_written(self):
         source = (ROOT / "scripts" / "factory_evidence_spine.py").read_text(encoding="utf-8")
         closure = source.index("manifest, index = compile_full_spine(")
         emit = source.index('final["attestations"] = emit_companions(')
         write = source.index("output.write_bytes(canonical_bytes(final))")
-        self.assertTrue(closure < emit < write, "companions are emitted after closure and before the bundle is written")
-        self.assertIn('fail(f"proof companions could not be emitted: {exc}")', source)
+        self.assertTrue(closure < emit < write)
         self.assertIn("EVIDENCE_ATTESTATIONS_OK", source)
 
 

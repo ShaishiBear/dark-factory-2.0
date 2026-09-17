@@ -237,8 +237,9 @@ def emit_companions(*, manifest, index: dict, artifact_root: Path, head: str, ke
     supplies the issuer, authenticated only when GitHub Actions ran this program. The summary
     is additive bundle metadata; `proof_reuse_allowed` is always false at this stage.
     """
+    # The wrapper's own clock bounds this observation, like every other clock in the ladder.
     kernel_head = subprocess.run(["git", "-C", str(kernel_root), "rev-parse", "HEAD"], capture_output=True,
-                                 text=True, timeout=60)
+                                 text=True, timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="evidence-spine"))
     source_revision = kernel_head.stdout.strip() if kernel_head.returncode == 0 else ""
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", source_revision):
         raise ValueError("kernel checkout revision cannot be observed for the issuer record")
