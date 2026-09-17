@@ -15,7 +15,10 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 from factory_models import model_for_role  # noqa: E402
 from factory_thinking_cap_probe import CAPS, honoured, run_one, within_cap  # noqa: E402
+from factory_kernel.canonical import sha256_value  # noqa: E402
 from factory_kernel.execution_probe import ProbeRunner  # noqa: E402
+from factory_kernel.execution_budget import microusd  # noqa: E402
+from factory_kernel.validation_meter import ExchangeLedger, close_validation_scope, open_validation_scope  # noqa: E402
 
 WORKFLOW = "dark-factory-test-author-probe.yml"
 # The three nested calls are paid calls. Each must be reserved and observed through the same
@@ -72,8 +75,25 @@ def main():
     if head != os.environ["GITHUB_SHA"]:
         raise ValueError("diagnostic checkout differs from protected workflow revision")
     runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)
-    record = diagnostic(ROOT / ".factory/kernel.json", source=os.environ, runner=runner)
-    record.update(source_sha=head, run_id=os.environ["GITHUB_RUN_ID"], run_attempt=1)
+    scope = None
+    client = getattr(runner, "client", None)
+    if client is not None:
+        # One prepaid bundle for the three nested calls (C06): the ledger holds one reservation of
+        # three times the protected one-dollar CLI bound, started once; each call takes its own
+        # ceiling inside it and the bundle is observed once when the last call has returned.
+        scope = open_validation_scope(
+            ExchangeLedger(client), scope_class="diagnostic-probe", binding=client.binding,
+            execution_id=f"test-author-route-{os.environ['GITHUB_RUN_ID']}", attempt=1,
+            limit_microusd=microusd(len(CAPS)), max_calls=len(CAPS),
+            request_sha256=sha256_value({"role": "test_author", "caps": list(CAPS), "source_sha": head}),
+            record_dir=os.environ.get("FACTORY_DIAGNOSTICS_DIR") or None)
+        runner = runner.with_scope(scope)
+    try:
+        record = diagnostic(ROOT / ".factory/kernel.json", source=os.environ, runner=runner)
+    finally:
+        bundle = close_validation_scope(scope) if scope is not None else None
+    record.update(source_sha=head, run_id=os.environ["GITHUB_RUN_ID"], run_attempt=1,
+                  metering=getattr(runner, "metering", "unknown"), bundle=bundle)
     path = Path(os.environ["RUNNER_TEMP"]) / "test-author-route-diagnostic.json"
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(record))

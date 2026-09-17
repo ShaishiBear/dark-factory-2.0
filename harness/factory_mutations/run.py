@@ -292,6 +292,7 @@ COPY_FILES = (
     "tests/factory/test_validation_meter.py",
     "tests/factory/test_provider_gateway.py",
     "tests/factory/test_billing_reconciliation.py",
+    "tests/factory/test_probe_bundle.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

@@ -13,7 +13,7 @@ launch or the provider failed after one. The record below answers that for the n
 does not answer it for those four (WP00, C06).
 """
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 import secrets
 import subprocess
@@ -111,14 +111,20 @@ def write_diagnostic(path, record):
 
 
 class ProbeRunner:
-    def __init__(self, role, client, *, runner=None, result_path=None, result_dir=None, metering=None):
+    def __init__(self, role, client, *, runner=None, result_path=None, result_dir=None, metering=None, scope=None):
         if role not in DIAGNOSTIC_ROLES:
             raise IntentRefused("unknown diagnostic role")
         self.role, self.client = role, client
+        # A validation-meter scope (WP02): every launch takes a per-call ceiling inside one bundle
+        # the ledger already holds, instead of its own reservation exchange. The scope's class must
+        # be the diagnostic class; the meter refuses anything else before a process exists.
+        self.scope = scope
+        if scope is not None and getattr(scope, "scope_class", None) != "diagnostic-probe":
+            raise IntentRefused("diagnostic launches need a diagnostic-probe scope")
         self.runner = runner or subprocess.run
         self.result_path = Path(result_path) if result_path else None
         self.result_dir = Path(result_dir) if result_dir else None
-        self.metering = metering or ("metered" if client is not None else "unknown")
+        self.metering = metering or ("metered-bundle" if scope is not None else "metered" if client is not None else "unknown")
         self.last_diagnostic = None
 
     @classmethod
@@ -175,6 +181,50 @@ class ProbeRunner:
                 sys.stderr.write(f"FACTORY_DIAGNOSTIC_UNRETAINED {type(exc).__name__}\n")
         return record
 
+    def with_scope(self, scope):
+        """The same runner, result paths and client, launching inside a validation bundle."""
+        return ProbeRunner(self.role, self.client, runner=self.runner, result_path=self.result_path,
+                           result_dir=self.result_dir, scope=scope)
+
+    def _launch_metered(self, invocation_id, request, argv, kwargs, state):
+        """One launch inside the bundle: ceiling reserved, started once, observed once. The
+        one-dollar CLI bound is the ceiling charged; a refusal by the meter is an admission
+        refusal that never creates a process."""
+        from .validation_meter import MeterRefused, observe_call, reserve_call, start_call
+
+        try:
+            call = reserve_call(self.scope, call_class="diagnostic-probe", microusd=microusd(1),
+                                request_sha256=sha256_bytes(canonical_bytes(asdict(request))))
+        except MeterRefused as exc:
+            raise IntentRefused(str(exc)) from exc
+        # The call identity is the reservation identity of this launch; the bundle it sits in is
+        # named by the meter record (meter-<bundle>.json) beside the diagnostics.
+        state["reservation_id"] = call.call_id
+        start_call(self.scope, call.call_id)
+        state["phase"] = "launch"
+        try:
+            result = self._launch(argv, kwargs, state)
+        except BaseException:
+            observe_call(self.scope, call.call_id, reported_microusd=None, outcome="failed",
+                         telemetry={"provider_started": state["provider_started"]})
+            raise
+        state["phase"] = "parse"
+        events = parse_events(result.stdout or "")
+        receipts = [row for row in events if row.get("type") == "result"]
+        state["receipts"] = receipts
+        cost = receipts[0].get("total_cost_usd") if len(receipts) == 1 and result.returncode == 0 else None
+        try:
+            reported = microusd(cost) if cost is not None else None
+        except IntentRefused:
+            reported = None
+        state["phase"] = "observe"
+        observe_call(self.scope, call.call_id, reported_microusd=reported,
+                     outcome="returned" if result.returncode == 0 else "failed",
+                     telemetry={"exit_code": int(result.returncode), "receipts": len(receipts)})
+        state["phase"] = "returned"
+        self._record(invocation_id, state)
+        return result
+
     def __call__(self, argv, **kwargs):
         invocation_id = secrets.token_hex(16)
         state = {"phase": "admission", "provider_started": "not_started", "reservation_id": None,
@@ -190,7 +240,7 @@ class ProbeRunner:
                 if key in supplied:
                     env[key] = supplied[key]
             kwargs = {**kwargs, "env": env}
-            if self.client is None:
+            if self.client is None and self.scope is None:
                 state["phase"] = "launch"
                 result = self._launch(argv, kwargs, state)
                 state["phase"] = "parse"
@@ -206,6 +256,8 @@ class ProbeRunner:
             request = ProbeRequest(role=self.role, argv=list(argv), cwd=str(kwargs.get("cwd", Path.cwd())),
                 timeout=kwargs.get("timeout"), thinking_cap=env.get("MAX_THINKING_TOKENS"))
             state["phase"] = "reservation"
+            if self.scope is not None:
+                return self._launch_metered(invocation_id, request, argv, kwargs, state)
 
             def run(_request, **_options):
                 state["reservation_id"] = getattr(self.client, "last_call_id", None)

@@ -195,7 +195,7 @@ def reserve_call(scope: ValidationScope, *, call_class: str, microusd: int, requ
         raise MeterRefused("validation scope call count would exceed its bundle")
     if scope.ceiling_sum() + microusd > scope.limit_microusd:
         raise MeterRefused("call ceilings would exceed the bundle reservation")
-    call = MeteredCall(call_id=secrets.token_hex(12), call_class=call_class, microusd=microusd, request_sha256=request_sha256)
+    call = MeteredCall(call_id=secrets.token_hex(16), call_class=call_class, microusd=microusd, request_sha256=request_sha256)
     scope.calls[call.call_id] = call
     _record(scope)
     return call
