@@ -38,14 +38,24 @@ jobs:
         run: |
           npm install -g @anthropic-ai/claude-code@2.1.245
           test "$(claude --version)" = "2.1.245 (Claude Code)"
+      # Disabled pending an authenticated, metered scope (WP00). The three calls this script
+      # makes are paid calls that were reserved and observed nowhere: the workflow handed the
+      # model credential straight to a raw subprocess. The script now launches only through
+      # the metered `ProbeRunner`, which refuses under this workflow's identity, and the
+      # credential is withheld here so no code path in this lane can spend. Re-enabling needs
+      # an execution identity and reservation scope for this workflow, reviewed as its own
+      # trust change, not a secret line put back.
       - name: Measure three fixed tool-free calls on the actual test-author route
         env:
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          FACTORY_DIAGNOSTICS_DIR: ${{ runner.temp }}/diagnostics
         run: timeout 600 python scripts/factory_test_author_probe.py
       - name: Retain bounded diagnostic observation
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: test-author-route-diagnostic
-          path: ${{ runner.temp }}/test-author-route-diagnostic.json
-          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/test-author-route-diagnostic.json
+            ${{ runner.temp }}/diagnostics/*.json
+          if-no-files-found: ignore
           retention-days: 30

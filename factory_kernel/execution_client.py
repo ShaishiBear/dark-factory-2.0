@@ -62,6 +62,9 @@ class ExecutionClient:
     def run(self, provider, request, *, transcript=None, before_retry=None):
         call = {**self.binding, "id": secrets.token_hex(16), "role": request.role,
                 "microusd": microusd(request.max_budget_usd), "request_sha256": sha256_value(asdict(request))}
+        # The reservation identity this call is charged under, for the diagnostic record of
+        # whoever launched it. Observation only: nothing reads it to decide anything.
+        self.last_call_id = call["id"]
         reservation = self.exchange("reserve", call, {})
         if reservation["status"] != "reserved":
             raise IntentRefused("historical reservation cannot authorize a worker call")

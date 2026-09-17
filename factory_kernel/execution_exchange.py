@@ -21,7 +21,7 @@ MAX_AGE_SECONDS = 60
 MAX_ENVELOPE = 16000
 ROLE_BOUNDS = {role: amount for role, amount in ROLE_MAX_BUDGET_USD.items() if role not in {
     "preflight-proposer", "preflight-challenger", "intent-proposer", "intent-auditor", "programme-proposer"}}
-ROLE_BOUNDS.update({"diagnostic-" + name: 1 for name in ("route", "effort", "thinking", "scope")})
+ROLE_BOUNDS.update({"diagnostic-" + name: 1 for name in ("route", "effort", "thinking", "scope", "test-author")})
 ROLES = frozenset(ROLE_BOUNDS)
 
 

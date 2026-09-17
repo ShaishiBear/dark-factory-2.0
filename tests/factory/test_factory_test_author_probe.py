@@ -1,5 +1,7 @@
 """The diagnostic observes the actual role route without product or GitHub authority."""
+import contextlib
 from copy import deepcopy
+import io
 import json
 import os
 from pathlib import Path
@@ -8,6 +10,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -111,6 +114,40 @@ class TestAuthorRouteProbeTests(unittest.TestCase):
         for forbidden in ("contents: write", "issues: write", "pull-requests: write", "schedule:",
                           "create-github-app-token", "workflow run", "factory:accepted", "continue-on-error:"):
             self.assertNotIn(forbidden, workflow)
+
+    def test_the_lane_is_metered_or_disabled_never_an_unmetered_paid_path(self):
+        """WP00/C06: three paid calls ran here through a raw subprocess with the model credential
+        handed to them by the workflow. Now the script launches only through the metered
+        runner, and the workflow withholds the credential until an authenticated scope exists."""
+        from factory_kernel.execution_probe import ProbeRunner
+        from factory_kernel.frontdoor_intent import IntentRefused
+        import factory_test_author_probe as script
+
+        source = (ROOT / "scripts/factory_test_author_probe.py").read_text()
+        self.assertIn('runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)', source)
+        self.assertIn("source=os.environ, runner=runner)", source)
+        self.assertEqual(script.DIAGNOSTIC_ROLE, "diagnostic-test-author")
+        workflow = (ROOT / ".github/workflows/dark-factory-test-author-probe.yml").read_text()
+        for forbidden in ("secrets.OPENROUTER_API_KEY", "ANTHROPIC_AUTH_TOKEN", "FRONTDOOR_AGE_IDENTITY"):
+            self.assertNotIn(forbidden, workflow)
+        self.assertIn("FACTORY_DIAGNOSTICS_DIR", workflow)
+        ref = "ShaishiBear/dark-factory-2.0/.github/workflows/dark-factory-test-author-probe.yml@refs/heads/main"
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_WORKFLOW_REF": ref,
+                                     "GITHUB_REPOSITORY": "ShaishiBear/dark-factory-2.0",
+                                     "GITHUB_RUN_ATTEMPT": "1"}, clear=True):
+            with self.assertRaises(IntentRefused):
+                ProbeRunner.from_environment(script.DIAGNOSTIC_ROLE)
+        # The metered runner is threaded through every nested call, not only the first.
+        with patch.object(ProbeRunner, "from_environment", return_value=self.runner) as connect, \
+                patch.object(script, "verify_dispatch"), patch.object(script.subprocess, "check_output", return_value="a" * 40), \
+                patch.dict(os.environ, {"GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "7", "RUNNER_TEMP": str(self.policy.parent),
+                                        "PATH": os.environ["PATH"], "ANTHROPIC_AUTH_TOKEN": "fixture-api"}), \
+                patch.object(script, "ROOT", self.policy.parent), contextlib.redirect_stdout(io.StringIO()):
+            (self.policy.parent / ".factory").mkdir(exist_ok=True)
+            (self.policy.parent / ".factory" / "kernel.json").write_text(self.policy.read_text())
+            script.main()
+        connect.assert_called_once_with("diagnostic-test-author")
+        self.assertEqual(len(self.calls), 3)
 
 
 if __name__ == "__main__":

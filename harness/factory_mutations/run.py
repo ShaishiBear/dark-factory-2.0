@@ -51,6 +51,9 @@ COPY_FILES = (
     ".github/workflows/dark-factory-programme-publish.yml",
     ".github/workflows/dark-factory-test-author-probe.yml",
     "scripts/factory_test_author_probe.py",
+    # The stop script's own words are what the read-only planner pins as "unreadable" (WP00);
+    # the planner's detector reads the script, so the copy must carry it.
+    "scripts/factory-stop.sh",
     ".factory/architecture.json",
     ".factory/prompts/holdout.md",
     ".factory/prompts/investigate.md",
@@ -221,6 +224,9 @@ COPY_FILES = (
     "tests/factory/test_execution_budget.py",
     "tests/factory/test_execution_exchange.py",
     "tests/factory/test_execution_worker.py",
+    # WP00: read-only dispatch planning and typed diagnostic retention, with their mutants.
+    "tests/factory/test_dispatch_plan.py",
+    "tests/factory/test_execution_probe.py",
     "tests/factory/test_replacement_intent.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",

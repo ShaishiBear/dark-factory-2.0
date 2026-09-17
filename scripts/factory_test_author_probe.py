@@ -12,10 +12,19 @@ import tempfile
 ROOT = Path.cwd().resolve()
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))
 from factory_models import model_for_role  # noqa: E402
 from factory_thinking_cap_probe import CAPS, honoured, run_one, within_cap  # noqa: E402
+from factory_kernel.execution_probe import ProbeRunner  # noqa: E402
 
 WORKFLOW = "dark-factory-test-author-probe.yml"
+# The three nested calls are paid calls. Each must be reserved and observed through the same
+# metered runner as every other diagnostic (WP00, C06). `ProbeRunner.from_environment` accepts
+# only the worker workflow's authenticated identity or the daily maintenance scope; under this
+# workflow's own identity it refuses before any call, so this lane is disabled until an
+# authenticated scope for it exists. A raw `subprocess.run` here would be an unmetered paid
+# path, which is the defect the critic review named.
+DIAGNOSTIC_ROLE = "diagnostic-test-author"
 
 
 def diagnostic(policy, *, source, runner=subprocess.run):
@@ -62,7 +71,8 @@ def main():
     head = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
     if head != os.environ["GITHUB_SHA"]:
         raise ValueError("diagnostic checkout differs from protected workflow revision")
-    record = diagnostic(ROOT / ".factory/kernel.json", source=os.environ)
+    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)
+    record = diagnostic(ROOT / ".factory/kernel.json", source=os.environ, runner=runner)
     record.update(source_sha=head, run_id=os.environ["GITHUB_RUN_ID"], run_attempt=1)
     path = Path(os.environ["RUNNER_TEMP"]) / "test-author-route-diagnostic.json"
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")

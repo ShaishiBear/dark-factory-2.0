@@ -210,7 +210,11 @@ class OrderTests(unittest.TestCase):
         self.assertNotIn("validation", window)
 
     def test_the_dispatch_tells_the_budget_what_the_head_is(self):
-        self.assertIn('head=str(pr.get("headRefOid") or "")', self.runtime)
+        # The dispatcher's ask lives in the read-only observer since WP00 (dispatch_plan.py);
+        # the runtime delegates to it. The property is the same: the ask carries the head.
+        dispatcher = (ROOT / "factory_kernel" / "dispatch_plan.py").read_text(encoding="utf-8")
+        self.assertIn('head=str(pr.get("headRefOid") or "")', dispatcher)
+        self.assertIn("DispatchPlanner", self.runtime, "the runtime must still route through it")
 
 
 class OneBudgetTests(unittest.TestCase):
@@ -229,13 +233,18 @@ class OneBudgetTests(unittest.TestCase):
     """
 
     def setUp(self):
+        # The dispatcher asks from the read-only observer (dispatch_plan.py) since WP00; the
+        # re-head guard and the refusal path still ask from runtime.py. Same three askers.
         self.source = (ROOT / "factory_kernel" / "runtime.py").read_text(encoding="utf-8")
-        self.tree = ast.parse(self.source)
+        self.trees = [
+            ast.parse((ROOT / "factory_kernel" / name).read_text(encoding="utf-8"))
+            for name in ("runtime.py", "dispatch_plan.py")
+        ]
 
     def budget_calls(self) -> list[ast.Call]:
         names = {"rehead_eligible", "rehead_budget_allows"}
         return [
-            node for node in ast.walk(self.tree)
+            node for tree in self.trees for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name) and node.func.id in names
         ]

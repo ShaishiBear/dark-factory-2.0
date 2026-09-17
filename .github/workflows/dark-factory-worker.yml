@@ -54,8 +54,72 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  dispatch:
+  # Read-only planning (WP00). Four worker runs on 17 September 2026 each started a Postgres
+  # service, installed two toolchains, minted an App token and launched a paid route probe
+  # before anything had asked whether there was work to do. Job-level services start before
+  # any step, so no conditional step inside `dispatch` can avoid that cost: the question has
+  # to be answered in a job with no service, no model secret and no mutation token. This job
+  # observes exactly what the dispatcher observes (stop, fence, the leases the reaper would
+  # release, review/re-head/accepted work, an explicit resume or continuation) and decides
+  # purely; it reaps nothing, labels nothing, comments nothing and syncs no programme. Its
+  # outputs are a proposal: `dispatch` re-observes everything before it acts, so a forged
+  # output can start a job but never an action the dispatcher's own reads do not support.
+  plan:
     if: github.repository == 'ShaishiBear/dark-factory-2.0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      ready: ${{ steps.plan.outputs.ready }}
+      plan_sha256: ${{ steps.plan.outputs.plan_sha256 }}
+      plan_status: ${{ steps.plan.outputs.plan_status }}
+      plan_action: ${{ steps.plan.outputs.plan_action }}
+    steps:
+      - name: Checkout current main for read-only planning
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Python for read-only planning
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.14'
+          token: ''
+
+      # Exit 1 fails closed on a stopped, fenced or unobservable control plane, so `dispatch`
+      # cannot start. Idle and a missing allowance exit 0 with `ready=false`. A lease the
+      # reaper would release is `reconciliation_required` with `ready=true`: reconciliation is
+      # effectful work only the dispatcher may do, and it does it before selecting anything.
+      - name: Plan the dispatch without effects
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FACTORY_WORKDIR: ${{ runner.temp }}/dark-factory
+          RESUME_PR: ${{ inputs.resume_pr }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+          EXPECTED_PROGRAMME: ${{ inputs.continuation_programme }}
+        run: |
+          python -m factory_kernel plan-dispatch --output "$RUNNER_TEMP/dispatch-plan.json" \
+            --resume-pr "$RESUME_PR" --resume-run-id "$RESUME_RUN_ID" \
+            --expected-programme "$EXPECTED_PROGRAMME"
+
+      - name: Retain the dispatch plan
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/dispatch-plan.json
+
+  dispatch:
+    needs: plan
+    if: github.repository == 'ShaishiBear/dark-factory-2.0' && needs.plan.outputs.ready == 'true'
     runs-on: ubuntu-24.04
     # Qualification and post-merge validation have separate hosted job clocks.
     # The existing 15540s spine + five 675s judges + setup fit within this job;
@@ -75,6 +139,11 @@ jobs:
       # "there's an issue with the selected model" for every model (run 33876017910, D-010).
       # Defined once at job level so the preflight probes and the dispatch cannot diverge.
       ANTHROPIC_BASE_URL: https://openrouter.ai/api
+      # Every probe launch (route, effort, thinking-cap, read-scope) writes one bounded,
+      # secret-free `dark-factory/diagnostic-result` record here, before any run directory
+      # exists, so a refusal before launch and a provider failure after one are retained as
+      # different facts (WP00). Uploaded by "Retain early diagnostic records" on every outcome.
+      FACTORY_DIAGNOSTICS_DIR: ${{ runner.temp }}/dark-factory/diagnostics
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -565,6 +634,18 @@ jobs:
           retention-days: 90
           if-no-files-found: error
           path: ${{ runner.temp }}/retained-index/retention-index.json
+
+      # Early diagnostics (WP00): the typed record of every probe launch, retained whether or
+      # not a run directory was ever created and whether or not dispatch ran. Observation
+      # only: nothing reads these to decide anything.
+      - name: Retain early diagnostic records
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/dark-factory/diagnostics/*.json
 
       # Observability only: nothing reads these to decide anything. Model transcripts, the
       # per-stage telemetry and timings, the deterministic gates' logs and the run's JSON
