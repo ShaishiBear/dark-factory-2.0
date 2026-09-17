@@ -265,11 +265,18 @@ def main(argv=None):
             # The public summary first, so a log that keeps only the head of stderr still names
             # the phase and the exception class. The private record holds the traceback.
             sys.stderr.write(diagnostic_summary(record) + "\n")
-            if result_path is not None and (runner is None or runner.last_diagnostic is None):
-                try:
-                    write_diagnostic(result_path, record)
-                except OSError as exc:
-                    sys.stderr.write(f"FACTORY_DIAGNOSTIC_UNRETAINED {type(exc).__name__}\n")
+            if runner is None or runner.last_diagnostic is None:
+                # No runner ever existed (the identity phase), so nothing else has written the
+                # record. The host's directory is the fallback when no explicit path was given:
+                # this is the worker's actual invocation, and the four failed runs are exactly
+                # the case where this record is the only retained fact.
+                directory = os.environ.get(DIAGNOSTICS_DIR_ENV) or None
+                destination = result_path or (directory and Path(directory) / f"{record['role']}-{record['invocation_id']}.json")
+                if destination is not None:
+                    try:
+                        write_diagnostic(destination, record)
+                    except OSError as exc:
+                        sys.stderr.write(f"FACTORY_DIAGNOSTIC_UNRETAINED {type(exc).__name__}\n")
     sys.stdout.write(scrub(result.stdout or ""))
     sys.stderr.write(scrub(result.stderr or ""))
     return result.returncode

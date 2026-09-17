@@ -265,6 +265,30 @@ class MainTests(unittest.TestCase):
         self.assertEqual((record["phase"], record["error_type"], record["metering"]), ("identity", "IntentRefused", "unknown"))
         self.assertIn("IntentRefused", record["traceback"])
 
+    def test_the_workers_own_invocation_retains_an_identity_refusal_without_a_result_path(self):
+        """The pinned launch line passes no --result-path; the job-level directory must be
+        enough for the record the four failed runs lacked (review finding F1)."""
+        directory = self.path.parent
+        env = {"PATH": os.environ["PATH"], "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": policy.REPOSITORY,
+               "GITHUB_RUN_ATTEMPT": "1", "GITHUB_RUN_ID": "1", "GITHUB_SHA": "a" * 40,
+               "GITHUB_WORKFLOW_REF": policy.REPOSITORY + "/.github/workflows/dark-factory-worker.yml@refs/heads/main",
+               DIAGNOSTICS_DIR_ENV: str(directory)}
+        outcome, _stdout, stderr = self.run_main(["--", "timeout", "180", "claude", *ARGV[1:]], env)
+        self.assertIsInstance(outcome, IntentRefused)
+        files = sorted(directory.iterdir())
+        self.assertEqual(len(files), 1, files)
+        self.assertRegex(files[0].name, r"^diagnostic-route-[0-9a-f]{32}\.json$")
+        record = validate_diagnostic(json.loads(files[0].read_text(encoding="utf-8")))
+        self.assertEqual((record["phase"], record["reason_code"], record["provider_started"]),
+                         ("identity", "identity_refused", "not_started"))
+        self.assertTrue(stderr.startswith("FACTORY_DIAGNOSTIC "))
+        # Without either a path or a directory, the summary line is still the public record.
+        outcome, _stdout, stderr = self.run_main(["--", "timeout", "180", "claude", *ARGV[1:]],
+                                                 {k: v for k, v in env.items() if k != DIAGNOSTICS_DIR_ENV})
+        self.assertIsInstance(outcome, IntentRefused)
+        self.assertEqual(len(sorted(directory.iterdir())), 1)
+        self.assertTrue(stderr.startswith("FACTORY_DIAGNOSTIC "))
+
     def test_legacy_delimiter_forwards_output_and_exit_code_and_records_the_launch(self):
         runner = Mock(return_value=subprocess.CompletedProcess(["x"], 3, "out " + RECEIPT, "err"))
         with patch.object(ProbeRunner, "from_environment",
