@@ -51,8 +51,7 @@ COPY_FILES = (
     ".github/workflows/dark-factory-programme-publish.yml",
     ".github/workflows/dark-factory-test-author-probe.yml",
     "scripts/factory_test_author_probe.py",
-    # The stop script's own words are what the read-only planner pins as "unreadable" (WP00);
-    # the planner's detector reads the script, so the copy must carry it.
+    "unreadable",
     "scripts/factory-stop.sh",
     ".factory/architecture.json",
     ".factory/prompts/holdout.md",
@@ -70,7 +69,6 @@ COPY_FILES = (
     ".factory/prompts/conformance.md",
     ".factory/evidence-spine.json",
     ".factory/kernel.json",
-    # WP01: the trusted project profile every publication/execution constant is read from.
     ".factory/project-profile.json",
     ".factory/authority-profiles.json",
     ".factory/locks/floor.json",
@@ -109,26 +107,12 @@ COPY_FILES = (
     "harness/ci.py",
     "harness/static.py",
     "harness/unit.py",
-    # The check that keeps this catalogue honest, and its own detector. Both are copied so a
-    # mutation of the anchor check can be injected and caught like any other (D-076).
     "harness/mutation_anchors.py",
     "tests/factory/test_factory_mutation_anchors.py",
-    # A base that moved is noticed before anything is paid for, and recovered from without a
-    # maintainer deleting a marker by hand (D-077).
     "tests/factory/test_factory_base_move.py",
-    # The detector four re-head defects name. It existed, and was not here, so those
-    # defects escaped every run of the family that was supposed to catch them (D-078).
     "tests/factory/test_factory_rehead_guard_files.py",
-    # The wrapper must accept every call the kernel makes of the program it wraps; the
-    # routing that makes that necessary lives one class above the rehearsal (D-079).
     "tests/factory/test_factory_spine_routing.py",
-    # This runner, in the copy: a mutation of its own concurrency or its own accounting has to
-    # be injectable somewhere its detector can read it. The copy is never executed as a runner.
     "harness/factory_mutations/run.py",
-    # ...and the manifests it reads. `load_defects()` requires all eight, so without them the
-    # runner cannot be loaded from inside a copy at all, and any test that asks it a question
-    # dies with `required factory mutation manifest missing` -- which is what turned the whole
-    # family's baseline red in run 34125312694 (D-081). They are data, never injected.
     "harness/factory_mutations/defects.json",
     "harness/factory_mutations/native_ci_defects.json",
     "harness/factory_mutations/post_merge_defects.json",
@@ -161,9 +145,6 @@ COPY_FILES = (
     "tests/factory/fixtures/context/run-33914596611-issue-49-task-contract.json",
     "tests/factory/test_factory_workflow_hygiene.py",
     "tests/factory/test_factory_worker_throughput.py",
-    # The rule that keeps this suite runnable from the copy this runner builds: a test that
-    # only passes where the tree around it is a repository makes the whole family unusable,
-    # because every copy runs the suite (D-074).
     "tests/factory/test_factory_suite_hermetic.py",
     "tests/factory/test_factory_provider_retry.py",
     "tests/factory/test_factory_failed_stage_telemetry.py",
@@ -227,11 +208,8 @@ COPY_FILES = (
     "tests/factory/test_execution_budget.py",
     "tests/factory/test_execution_exchange.py",
     "tests/factory/test_execution_worker.py",
-    # WP00: read-only dispatch planning and typed diagnostic retention, with their mutants.
     "tests/factory/test_dispatch_plan.py",
     "tests/factory/test_execution_probe.py",
-    # WP01: canonical journal primitive, project profile, and the baseline-recorded flows the
-    # journal must reproduce byte for byte (the recorder is a test helper, never production).
     "tests/factory/test_project_events.py",
     "tests/factory/test_project_profile.py",
     "tests/factory/project_events_fixture.py",
@@ -239,10 +217,8 @@ COPY_FILES = (
     "tests/factory/fixtures/project-events/budget.json",
     "tests/factory/fixtures/project-events/exploration.json",
     "tests/factory/fixtures/project-events/replacement.json",
-    # R02 source subjects and WP04 claims, with their detectors.
     "tests/factory/test_code_subjects.py",
     "tests/factory/test_claims.py",
-    # R02 vertical slice: frozen protocols, candidate lifecycle and search policy.
     "tests/factory/test_evaluation_protocol.py",
     "tests/factory/test_code_experiments.py",
     "tests/factory/test_search_policy.py",
@@ -313,6 +289,9 @@ COPY_FILES = (
     "FACTORY.md",
     ".factory/decisions.md",
     "tests/factory/test_factory_carry.py",
+    "tests/factory/test_validation_meter.py",
+    "tests/factory/test_provider_gateway.py",
+    "tests/factory/test_billing_reconciliation.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python
