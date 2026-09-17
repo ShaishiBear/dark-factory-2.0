@@ -238,6 +238,9 @@ COPY_FILES = (
     "tests/factory/fixtures/project-events/budget.json",
     "tests/factory/fixtures/project-events/exploration.json",
     "tests/factory/fixtures/project-events/replacement.json",
+    # R02 source subjects and WP04 claims, with their detectors.
+    "tests/factory/test_code_subjects.py",
+    "tests/factory/test_claims.py",
     "tests/factory/test_replacement_intent.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",

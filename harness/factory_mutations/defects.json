@@ -3889,6 +3889,90 @@
       "find": "            for path in POLICY_FILES:\n                raw = read(path, 100000)",
       "replace": "            for path in ():\n                raw = read(path, 100000)",
       "why": "The project profile is part of the execution authority's verified closure; a host whose profile drifted from protected main must refuse exactly as drifted code does (pitfall 15.1). Detector: tests/factory/test_execution_exchange.py"
+    },
+    {
+      "id": "code-subject-stale-blob-accepted",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "    if not isinstance(expected, str) or expected != source.sha256:",
+      "replace": "    if False:",
+      "why": "A requested span is bound to the exact blob it believes it addresses; a changed blob is source_mismatch, never a silent re-target (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "code-subject-split-utf8-accepted",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "        text = source.raw[start:end].decode(\"utf-8\")",
+      "replace": "        text = source.raw[start:end].decode(\"utf-8\", \"replace\")",
+      "why": "A span splitting a multi-byte UTF-8 sequence is refused as invalid_utf8_boundary, never decoded leniently into replacement characters (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "code-subject-empty-interval-without-anchor",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "    if start == end and not anchor:",
+      "replace": "    if False:",
+      "why": "An empty interval is permitted only for an explicitly typed insertion anchor, never as evidence that existing code implements a claim (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "code-subject-symlink-followed",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "        if mode == \"120000\":\n            gaps.append({\"path\": path, \"reason\": \"symlink_not_followed\"})\n            continue",
+      "replace": "        if False:\n            gaps.append({\"path\": path, \"reason\": \"symlink_not_followed\"})\n            continue",
+      "why": "The indexer never follows symlinks; a link is a recorded gap, not a blob (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "code-subject-changed-blob-treated-as-current",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "        if old.blob_oid == new.blob_oid:\n            files[path] = FileChange(path, \"unchanged\", old.blob_oid, new.blob_oid, (), (), ((0, 0, len(old.raw)),))\n            continue",
+      "replace": "        if True:\n            files[path] = FileChange(path, \"unchanged\", old.blob_oid, new.blob_oid, (), (), ((0, 0, len(old.raw)),))\n            continue",
+      "why": "A changed blob cannot be silently treated as current because line numbers look unchanged; only an exact blob match carries spans over (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "trace-coverage-double-links-inflate",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "                out.append((s, e))\n    return _union(out)",
+      "replace": "                out.append((s, e))\n    return sorted(out)",
+      "why": "Overlapping bindings are unioned so double links do not inflate trace coverage (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "claims-cycle-undetected",
+      "file": "factory_kernel/claims.py",
+      "find": "                if colour[child] == GREY:\n                    cycle = stack[stack.index(child):]\n                    raise ClaimRefused(f\"{what} dependency cycle: {sorted(cycle)}\")",
+      "replace": "                if False:\n                    cycle = stack[stack.index(child):]\n                    raise ClaimRefused(f\"{what} dependency cycle: {sorted(cycle)}\")",
+      "why": "Dependency edges must be acyclic; cycle members are reported deterministically (C03). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-uncovered-acceptance-bound",
+      "file": "factory_kernel/claims.py",
+      "find": "    unowned = sorted(set(keys) - set(owners))\n    if unowned:",
+      "replace": "    unowned = sorted(set(keys) - set(owners))\n    if False:",
+      "why": "Programme binding requires every accepted criterion to have assigned work (C03). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-foreign-authority-profile-accepted",
+      "file": "factory_kernel/claims.py",
+      "find": "        if claim.kind == \"proof-obligation\" and claim.authority_profile not in policy_ids:",
+      "replace": "        if False:",
+      "why": "Proof obligations derive from the protected policy; a model cannot invent a weaker authority profile (3.3). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-model-self-certification",
+      "file": "factory_kernel/claims.py",
+      "find": "        binding = check(row, (\"proposed_implementation\", \"depends_on\"), str(row.get(\"source\", \"model\")))",
+      "replace": "        binding = check(row, BINDING_RELATIONS, str(row.get(\"source\", \"model\")))",
+      "why": "A model-proposed binding may only propose; an observed relation needs an observer that verified it (LINE_LEVEL_CLAIMS 2). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-forged-approval-accepted",
+      "file": "factory_kernel/claims.py",
+      "find": "        if (not isinstance(actor, Mapping) or actor.get(\"role\") != \"owner\" or not actor.get(\"identity\")\n                or approval.get(\"spec_sha256\") != spec_sha256 or approval.get(\"spec\") != approved_spec):",
+      "replace": "        if False:",
+      "why": "Approval is the owner's recorded decision for exactly this spec, never a boolean or a proposal-role record (3.3). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-stale-predecessor-ignored",
+      "file": "factory_kernel/claims.py",
+      "find": "            if by_key[dep].kind == \"proof-obligation\":\n                dep_proof, dep_currency, _ = proof(dep, seen + (key,))",
+      "replace": "            if False:\n                dep_proof, dep_currency, _ = proof(dep, seen + (key,))",
+      "why": "A stale or missing predecessor obligation propagates as insufficient to dependents (3.4). Detector: tests/factory/test_claims.py"
     }
   ]
 }
