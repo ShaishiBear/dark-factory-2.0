@@ -212,8 +212,11 @@ class RetentionTests(unittest.TestCase):
             write_diagnostic(path, {**record, "extra": 1})
 
     def test_environment_directory_names_one_file_per_launch_and_holds_no_secret(self):
+        # Distinctive fixture values: the retained traceback carries interpreter paths such as
+        # /opt/hostedtoolcache on Linux, so a short common word would match by accident.
+        identity = "AGE-SECRET-KEY-1FIXTUREIDENTITYVALUEONLY"
         env = {"PATH": "bin", "ANTHROPIC_AUTH_TOKEN": SECRET, "GH_TOKEN": "ghp_" + "b" * 36,
-               "FRONTDOOR_AGE_IDENTITY": "host", DIAGNOSTICS_DIR_ENV: str(self.directory / "diag")}
+               "FRONTDOOR_AGE_IDENTITY": identity, DIAGNOSTICS_DIR_ENV: str(self.directory / "diag")}
         runner = Mock(side_effect=[completed(), RuntimeError("leak " + env["GH_TOKEN"] + " " + SECRET)])
         with patch.dict(os.environ, env, clear=True):
             probe = ProbeRunner.from_environment("diagnostic-thinking")
@@ -227,7 +230,7 @@ class RetentionTests(unittest.TestCase):
         for file in files:
             self.assertRegex(file.name, r"^diagnostic-thinking-[0-9a-f]{32}\.json$")
             text = file.read_text(encoding="utf-8")
-            for secret in (SECRET, env["GH_TOKEN"], "host"):
+            for secret in (SECRET, env["GH_TOKEN"], identity):
                 self.assertNotIn(secret, text)
             validate_diagnostic(json.loads(text))
         maintenance = policy.REPOSITORY + "/.github/workflows/dark-factory-main-regression.yml@refs/heads/main"
