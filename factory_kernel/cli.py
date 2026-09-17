@@ -145,6 +145,21 @@ def main() -> int:
     plan.add_argument("--resume-run-id", default="", help="operator resume input (needs --resume-pr)")
     plan.add_argument("--expected-programme", default="", help="continuation programme hash, or empty")
 
+    # Claim views (WP04, shadow). Both read retained records and observed inputs and write a
+    # bounded JSON record; neither contacts GitHub, a provider or the intent store's writers.
+    for name, help_text in (("explain-claims", "project requirement/obligation claims and the graph over them, without effects"),
+                            ("plan-obligations", "compile allowed actions in shadow and compare them with a recorded dispatch plan")):
+            command = sub.add_parser(name, help=help_text)
+            command.add_argument("--state-dir", type=Path, required=True, help="the Front Door intent store directory")
+            command.add_argument("--owner", required=True, help="the configured owner identity (host operator)")
+            command.add_argument("--project", required=True)
+            command.add_argument("--programme", type=Path, default=None, help="programme candidate JSON (compile_programme input)")
+            command.add_argument("--proof", type=Path, default=None, help="artifact root holding spine/attestations/index.json")
+            command.add_argument("--observations", type=Path, default=None, help="JSON of trusted observations (items, heads, control)")
+            command.add_argument("--output", type=Path, required=True)
+            if name == "plan-obligations":
+                command.add_argument("--dispatch-plan", type=Path, required=True, help="a plan-dispatch record to compare with")
+
     dispatch = sub.add_parser("dispatch")
     dispatch.add_argument("--once", action="store_true", help="execute exactly one priority item")
     dispatch.add_argument("--no-merge", action="store_true")
@@ -226,6 +241,14 @@ def main() -> int:
 
     if args.command == "plan-dispatch":
         return plan_dispatch(args)
+
+    if args.command in {"explain-claims", "plan-obligations"}:
+        from .claim_views import explain_claims, plan_obligations
+
+        cfg = load_config(args.config)
+        if args.command == "explain-claims":
+            return explain_claims(args, cfg)
+        return plan_obligations(args, cfg)
 
     if args.command == "programme-pulse":
         import json
