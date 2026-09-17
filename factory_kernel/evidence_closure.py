@@ -8,9 +8,10 @@ import subprocess
 import sys
 from typing import Any, Mapping
 
-from .canonical import canonical_bytes, sha256_file, sha256_value
+from .canonical import canonical_bytes, sha256_bytes, sha256_file, sha256_value
 from .credential_env import scoped_environment
 from .independence import (
+    REGISTRY,
     authority_for,
     build_certificate,
     externally_supplied_claims,
@@ -18,7 +19,7 @@ from .independence import (
 )
 from .manifest import ArtifactRef, Certification, ClaimRecord, RunManifest
 from .provenance import BUILDER_CLAIMS, pack_sha256, verify_pack
-from .spine import compile_evidence_index, load_policy
+from .spine import SpinePolicy, compile_evidence_index, load_policy
 
 
 PRODUCERS = {
@@ -473,3 +474,207 @@ def compile_full_spine(
         **index,
         "builder_provenance_sha256": pack_sha256(pack),
     }
+
+
+# ---------------------------------------------------------------------------------------------
+# Typed proof companions (WP05, R05). Everything below is additive: compile_full_spine and the
+# legacy spine hashes are untouched. The companions are built from the manifest the closure
+# already produced, from identities the trusted wrapper observed itself, and are verified and
+# assessed in shadow. They authorise nothing; merge_verify still re-derives the legacy closure.
+# ---------------------------------------------------------------------------------------------
+
+ATTESTATION_AUTHORITY = "evidence-spine-closure"
+ATTESTATION_INDEX_PATH = "spine/attestations/index.json"
+ATTESTATION_STORE_DIR = "spine/attestations/store"
+# The trusted program closure whose bytes decide what the companions mean. Read from the kernel
+# checkout, never from the candidate tree.
+CLOSURE_PROGRAMS = (
+    "scripts/factory_evidence_spine.py", "scripts/factory_evidence.py",
+    "factory_kernel/evidence_closure.py", "factory_kernel/spine.py", "factory_kernel/independence.py",
+    "factory_kernel/manifest.py", "factory_kernel/provenance.py", "factory_kernel/canonical.py",
+    "factory_kernel/attestations.py", "factory_kernel/proof_dependencies.py", "factory_kernel/proof_store.py",
+)
+CONFIGURATION_FILES = (".factory/kernel.json", ".factory/project-profile.json")
+LOCK_FILES = ("app/backend/uv.lock", "app/frontend/bun.lock")
+JUDGE_CLAIMS = frozenset({"holdout-behavior", "holdout-e2e", "holdout-architecture", "holdout-code", "holdout-security"})
+RUNNER_IMAGE_VARIABLES = ("RUNNER_OS", "RUNNER_ARCH", "ImageOS", "ImageVersion")
+
+
+def _git_observe(candidate_root: Path, *args: str) -> str | None:
+    proc = subprocess.run(["git", "-C", str(candidate_root), *args], capture_output=True, timeout=60)
+    if proc.returncode:
+        return None
+    return proc.stdout.decode("utf-8", "replace").strip()
+
+
+def observe_issuer(environ: Mapping[str, str], *, source_revision: str) -> dict:
+    """The platform identity of this execution, as the trusted wrapper sees it. Anything not run
+    by GitHub Actions is `local`: recorded, never authenticated."""
+    if environ.get("GITHUB_ACTIONS") == "true":
+        try:
+            run_id, attempt = int(environ.get("GITHUB_RUN_ID", "")), int(environ.get("GITHUB_RUN_ATTEMPT", ""))
+        except ValueError:
+            run_id, attempt = 0, 0
+        return {"platform": "github-actions",
+                "workflow_id": environ.get("GITHUB_WORKFLOW_REF") or environ.get("GITHUB_WORKFLOW") or "unknown",
+                "run_id": run_id, "attempt": attempt, "job_id": environ.get("GITHUB_JOB") or "unknown",
+                "source_revision": source_revision}
+    return {"platform": "local", "workflow_id": "local", "run_id": 0, "attempt": 0, "job_id": "local",
+            "source_revision": source_revision}
+
+
+def observe_closure_environment(*, kernel_root: str | Path, candidate_root: str | Path, head_sha: str,
+                                environ: Mapping[str, str]) -> dict:
+    """Identities the companions depend on, observed by trusted code: the authority program
+    closure and policies from the kernel checkout, the candidate tree and its lock files from
+    the candidate repository at the exact head, the interpreter and runner image from the host.
+    A lock file absent from the candidate tree is reported absent, not invented."""
+    kernel, candidate = Path(kernel_root).resolve(), Path(candidate_root).resolve()
+    from .attestations import SCHEMA_VERSION as ATTESTATION_VERSION  # local import: closure lists this module
+    from .proof_dependencies import COMPILER_VERSION, load_profiles
+
+    policy = load_policy(kernel / ".factory" / "evidence-spine.json")
+    profiles = load_profiles(kernel / ".factory" / "authority-profiles.json",
+                             spine_claim_ids=[requirement.claim_id for requirement in policy.requirements])
+    program_closure = sha256_value([[rel, sha256_file(kernel / rel)] for rel in CLOSURE_PROGRAMS])
+    independence_profile = sha256_value([{"claim_id": e.claim_id, "authority_id": e.authority_id, "subject_claim": e.subject_claim,
+                                          "binds": list(e.binds), "sees": list(e.sees), "externally_supplied": e.externally_supplied,
+                                          "extra_inputs": list(e.extra_inputs)} for e in REGISTRY])
+    configuration = sha256_value([[rel, sha256_file(kernel / rel)] for rel in CONFIGURATION_FILES])
+    toolchain = sha256_value({"python": sys.version.split()[0], "platform": sys.platform,
+                              "attestation_schema": ATTESTATION_VERSION, "dependency_compiler": COMPILER_VERSION})
+    runtime_image = sha256_value({name: environ.get(name, "unobserved") for name in RUNNER_IMAGE_VARIABLES})
+    candidate_tree = _git_observe(candidate, "rev-parse", f"{head_sha}^{{tree}}")
+    if not candidate_tree:
+        raise ValueError(f"candidate tree for {head_sha} cannot be observed in {candidate}")
+    locks: dict[str, str] = {}
+    for rel in LOCK_FILES:
+        proc = subprocess.run(["git", "-C", str(candidate), "show", f"{head_sha}:{rel}"], capture_output=True, timeout=60)
+        if proc.returncode == 0:
+            locks[rel] = sha256_bytes(proc.stdout)
+    return {
+        "policy_sha256": policy.sha256(), "authority_profiles_sha256": profiles.sha256, "profiles": profiles,
+        "program_closure_sha256": program_closure, "independence_profile_sha256": independence_profile,
+        "configuration_digest": configuration, "toolchain_digest": toolchain, "runtime_image_digest": runtime_image,
+        "candidate_tree": candidate_tree, "dependency_lock_digests": locks,
+    }
+
+
+def companion_inputs(environment: Mapping[str, Any], *, base_sha: str) -> list[dict]:
+    """The declared dependency closure of one companion, one row per identity the protected
+    profile can require. Coverage is complete for every observed identity; an unobservable lock
+    file simply has no row, which the profile turns into `dependency_missing`."""
+    rows = [
+        {"kind": "exact-tree", "identity": "candidate_tree", "digest": environment["candidate_tree"], "coverage": "complete"},
+        {"kind": "exact-tree", "identity": "base_commit", "digest": base_sha, "coverage": "complete"},
+        {"kind": "trusted-authority", "identity": "program_closure", "digest": environment["program_closure_sha256"], "coverage": "complete"},
+        {"kind": "trusted-policy", "identity": "spine_policy", "digest": environment["policy_sha256"], "coverage": "complete"},
+        {"kind": "trusted-policy", "identity": "independence_profile", "digest": environment["independence_profile_sha256"], "coverage": "complete"},
+        {"kind": "trusted-policy", "identity": "authority_profiles", "digest": environment["authority_profiles_sha256"], "coverage": "complete"},
+        {"kind": "environment", "identity": "toolchain", "digest": environment["toolchain_digest"], "coverage": "complete"},
+        {"kind": "environment", "identity": "configuration", "digest": environment["configuration_digest"], "coverage": "complete"},
+    ]
+    for rel, digest in sorted(environment["dependency_lock_digests"].items()):
+        rows.append({"kind": "environment", "identity": f"lock:{rel}", "digest": digest, "coverage": "complete"})
+    return rows
+
+
+def compile_attestations(*, manifest: RunManifest, index: Mapping[str, Any], policy: SpinePolicy,
+                         artifact_root: str | Path, repository_id: int, head_sha: str, environment: Mapping[str, Any],
+                         issuer: Mapping[str, Any], created_at: str) -> dict:
+    """One companion per spine claim, retained in the proof store, independently verified against
+    the artifacts on disk, and assessed for currency in shadow against the very identities just
+    observed. Returns the index written to `spine/attestations/index.json` and a summary."""
+    from . import proof_store
+    from .attestations import Refusal, TrustedExecution, build_attestation, verify_attestation
+    from .proof_dependencies import assess_currency, build_dependency_index
+
+    root = Path(artifact_root).resolve()
+    store = root / ATTESTATION_STORE_DIR
+    profiles = environment["profiles"]
+    rows_by_claim = {row["claim_id"]: row for row in index["claims"] if isinstance(row, Mapping)}
+    authority = {"id": ATTESTATION_AUTHORITY, "program_closure_sha256": environment["program_closure_sha256"],
+                 "policy_sha256": environment["policy_sha256"],
+                 "independence_profile_sha256": environment["independence_profile_sha256"]}
+    env = {"toolchain_digest": environment["toolchain_digest"], "dependency_lock_digests": dict(environment["dependency_lock_digests"]),
+           "runtime_image_digest": environment["runtime_image_digest"], "configuration_digest": environment["configuration_digest"]}
+    subject = {"repository_id": repository_id, "base_commit": manifest.base_sha, "candidate_commit": head_sha,
+               "candidate_tree": environment["candidate_tree"], "programme_sha256": None}
+    inputs = companion_inputs(environment, base_sha=manifest.base_sha)
+
+    records: list[dict] = []
+    by_claim: dict[str, str] = {}
+    for requirement in policy.requirements:
+        claim = manifest.claim(requirement.claim_id)
+        if claim is None:
+            raise ValueError(f"manifest lacks required claim {requirement.claim_id}")
+        row = rows_by_claim.get(requirement.claim_id) or {}
+        evidence = []
+        for ref in claim.referenced_artifacts():
+            data = (root / ref.path).read_bytes()
+            if sha256_bytes(data) != ref.sha256:
+                raise ValueError(f"materialized artifact {ref.path} differs from the manifest digest")
+            proof_store.put_verified_object(store, data, role="judge" if requirement.claim_id in JUDGE_CLAIMS else "public")
+            evidence.append({"retained_object_id": ref.path, "sha256": ref.sha256, "media_type": ref.media_type})
+        complete = row.get("completion_level") == 100
+        reasons = [str(reason) for reason in (row.get("reasons") or []) if isinstance(reason, str)]
+        record = build_attestation(TrustedExecution(
+            claim_key=requirement.claim_id, obligation_profile_id=profiles.obligations[requirement.claim_id],
+            subject=subject, authority=authority, environment=env, inputs=inputs, evidence=evidence,
+            outcome={"verdict": "pass" if complete else "incomplete", "reason_codes": reasons},
+            issuer=issuer, created_at=created_at))
+        records.append(record)
+        by_claim[requirement.claim_id] = record["attestation_id"]
+    proof_store.index_run(store, manifest.run_id, records)
+
+    registry = {ATTESTATION_AUTHORITY: authority}
+
+    def reader(object_id: str) -> bytes | None:
+        path = root / object_id
+        return path.read_bytes() if path.is_file() else None
+
+    verification: dict[str, dict] = {}
+    verified: dict[str, Any] = {}
+    for record in records:
+        outcome = verify_attestation(record, issuer, reader, registry)
+        if isinstance(outcome, Refusal):
+            verification[record["attestation_id"]] = {"verified": False, **outcome.to_dict()}
+        else:
+            verification[record["attestation_id"]] = {"verified": True, "dependency_digest": outcome.dependency_digest}
+            verified[record["attestation_id"]] = outcome
+
+    edges = [{"source": by_claim[requirement.claim_id], "target": by_claim[predecessor], "kind": "depends_on"}
+             for requirement in policy.requirements for predecessor in requirement.requires]
+    dependency_index = build_dependency_index({aid: item for aid, item in verified.items()}, edges) if verified else None
+
+    observed = {row["identity"]: row["digest"] for row in inputs}
+    shadow: dict[str, dict] = {}
+    for requirement in policy.requirements:
+        attestation_id = by_claim[requirement.claim_id]
+        item = verified.get(attestation_id)
+        if item is None:
+            refusal = verification[attestation_id]
+            shadow[attestation_id] = {"status": refusal["status"], "reason_codes": refusal["reason_codes"],
+                                      "affected": [], "satisfies_obligation": False, "detail": refusal["detail"]}
+            continue
+        predecessors = {by_claim[name]: shadow[by_claim[name]]["status"] for name in requirement.requires}
+        result = assess_currency(item, {"issuer_valid": True, "retained": True, "dependencies": observed, "coverage": "complete",
+                                        "predecessors": predecessors}, profiles.profile_for(requirement.claim_id))
+        shadow[attestation_id] = result.to_dict()
+
+    index_record = {
+        "schema": "dark-factory/attestation-index", "schema_version": "1.0", "authority": "shadow",
+        "proof_reuse_allowed": False, "run_id": manifest.run_id, "head_sha": head_sha, "base_sha": manifest.base_sha,
+        "attestations": records, "verification": verification, "dependency_index": dependency_index, "shadow_currency": shadow,
+    }
+    raw = canonical_bytes(index_record)
+    target = root / ATTESTATION_INDEX_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(raw)
+    summary = {
+        "index_sha256": sha256_bytes(raw), "count": len(records),
+        "verified": sum(1 for row in verification.values() if row["verified"]),
+        "shadow_current": sum(1 for row in shadow.values() if row["status"] == "current"),
+        "proof_reuse_allowed": False,
+    }
+    return {"index": index_record, "summary": summary}
