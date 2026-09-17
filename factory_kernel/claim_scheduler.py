@@ -267,7 +267,9 @@ def compare_legacy_frontier(explanation: Mapping[str, Any], dispatch_plan: Mappi
     control reason / legacy blocked on budget and the shadow proposes nothing). `shadow_stricter`:
     legacy is ready but the shadow blocks that action. `shadow_looser`: the shadow proposes work
     legacy would not start. `different_choice`: the legacy action is neither proposed nor blocked
-    by the shadow (the shadow never saw that subject). Retained, never acted on.
+    by the shadow (the shadow never saw that subject). `different_block`: both hold work but for
+    different control reasons (legacy stopped, shadow fenced), or legacy waits on reconciliation
+    the shadow does not see. Retained, never acted on.
     """
     proposals = [p.to_dict() if isinstance(p, ActionProposal) else dict(p) for p in explanation.get("proposals", ())]
     blocked = [b.to_dict() if isinstance(b, Blocked) else dict(b) for b in explanation.get("blocked", ())]

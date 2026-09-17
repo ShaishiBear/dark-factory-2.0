@@ -167,6 +167,12 @@ class LegacyComparisonTests(unittest.TestCase):
         held = compare_legacy_frontier(explain_actions(None, POLICY, {}, None, observed(review=[5], rehead=[9], budget=None)),
                                        self.legacy(review=review[:1], rehead=(9,), budget=True))
         self.assertEqual(held["classification"], "shadow_stricter", "an unobserved allowance blocks the paid action legacy would start")
+        crossed = compare_legacy_frontier(explain_actions(None, POLICY, {}, None, observed(fenced=True, review=[5])),
+                                          self.legacy(stopped=True, review=review[:1]))
+        self.assertEqual(crossed["classification"], "different_block", "both hold work, for different control reasons")
+        unseen_lease = compare_legacy_frontier(explain_actions(None, POLICY, {}, None, observed()),
+                                               self.legacy(reconciliation_required=True))
+        self.assertEqual(unseen_lease["classification"], "different_block")
         budget = compare_legacy_frontier(explain_actions(None, POLICY, {}, None, observed(review=[5], budget=False)),
                                          self.legacy(review=review[:1], budget=False))
         self.assertEqual(budget["classification"], "agree")
