@@ -374,7 +374,7 @@
       "file": "scripts/factory_security.py",
       "find": "or path in APPLICATION_SECURITY_PATHS",
       "replace": "or False",
-      "why": "The MISSION \u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00e2\u20ac\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a2\u00c3\u0192\u00c6\u2019\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a0\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u00a2\u00e2\u20ac\u017e\u00c2\u00a2\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u2026\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u0192\u00e2\u20ac\u0161\u00c3\u201a\u00c2\u00af\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00e2\u20ac\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a2\u00c3\u0192\u00c6\u2019\u00c3\u201a\u00c2\u00a2\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u201a\u00c2\u00ac\u00c3\u0192\u00e2\u20ac\u00a6\u00c3\u201a\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u2026\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u0192\u00e2\u20ac\u0161\u00c3\u201a\u00c2\u00bf\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00e2\u20ac\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a2\u00c3\u0192\u00c6\u2019\u00c3\u201a\u00c2\u00a2\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u201a\u00c2\u00ac\u00c3\u0192\u00e2\u20ac\u00a6\u00c3\u201a\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u2020\u00e2\u20ac\u2122\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u2026\u00c2\u00a1\u00c3\u0192\u00c6\u2019\u00c3\u00a2\u00e2\u201a\u00ac\u00c5\u00a1\u00c3\u0192\u00e2\u20ac\u0161\u00c3\u201a\u00c2\u00bd10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
+      "why": "The MISSION ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½10 application security surface could stop being trust root, letting an autonomous run alter owner-only access, the message cap or the signup guard unrefused."
     },
     {
       "id": "security-auth-package-unguarded",
@@ -2457,10 +2457,10 @@
     },
     {
       "id": "frontdoor-stale-command-overwrites-intent",
-      "file": "factory_kernel/frontdoor_intent.py",
-      "find": "if expected != len(events):",
-      "replace": "if False:",
-      "why": "A stale browser or worker cannot overwrite newer intent; caught by tests/factory/test_frontdoor_intent.py."
+      "file": "factory_kernel/project_events.py",
+      "find": "            if expected_version != len(events):",
+      "replace": "            if False:",
+      "why": "A stale browser or worker cannot overwrite newer intent; the check lives in the canonical append primitive since WP01. Detector: tests/factory/test_frontdoor_intent.py"
     },
     {
       "id": "frontdoor-approval-ignores-spec-hash",
@@ -2478,10 +2478,10 @@
     },
     {
       "id": "frontdoor-reuses-command-key-for-different-content",
-      "file": "factory_kernel/frontdoor_intent.py",
-      "find": "if event[\"command\"] != command or event[\"actor\"] != actor:",
-      "replace": "if False:",
-      "why": "Retry identity binds the original command and authenticated actor; caught by tests/factory/test_frontdoor_intent.py."
+      "file": "factory_kernel/project_events.py",
+      "find": "                if (old[\"operation\"] != operation or event[\"actor\"] != actor\n                        or not spec.replay_matches(old[\"payload\"], detached)):",
+      "replace": "                if False:",
+      "why": "Retry identity binds the original command and authenticated actor; the check lives in the canonical append primitive since WP01. Detector: tests/factory/test_frontdoor_intent.py"
     },
     {
       "id": "frontdoor-ignores-history-chain",
@@ -3543,8 +3543,8 @@
     {
       "id": "execution-budget-replay",
       "file": "factory_kernel/execution_budget.py",
-      "find": "if self._replay(events, command, \"reserved\") is not None:\n                return {\"state\": projection(events), \"execute\": False}",
-      "replace": "if self._replay(events, command, \"reserved\") is not None:\n                return {\"state\": projection(events), \"execute\": True}",
+      "find": "        result = self._append(project, principal, command, \"reserved\", validate)\n        return {\"state\": projection(self._history(project)), \"execute\": not result.replayed}",
+      "replace": "        result = self._append(project, principal, command, \"reserved\", validate)\n        return {\"state\": projection(self._history(project)), \"execute\": True}",
       "why": "Spending is charged before an effect and retained across restarts and replacement; stale, repeated or uncertain attempts cannot gain capacity. Detector: tests/factory/test_execution_budget.py"
     },
     {
@@ -3847,6 +3847,216 @@
       "find": "    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)\n    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ, runner=runner)",
       "replace": "    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ)",
       "why": "The three nested test-author calls are paid calls and must go through the metered ProbeRunner; a raw subprocess here is the unmetered paid path the critic review named (WP00, C06). Detector: tests/factory/test_factory_test_author_probe.py"
+    },
+    {
+      "id": "project-events-role-allowlist-ignored",
+      "file": "factory_kernel/project_events.py",
+      "find": "        if principal.role not in spec.roles:",
+      "replace": "        if False:",
+      "why": "Each registered operation names the roles that may append it; a proposal principal must not approve scope through the primitive (C02). Detector: tests/factory/test_project_events.py"
+    },
+    {
+      "id": "project-events-nonfinite-payload-accepted",
+      "file": "factory_kernel/project_events.py",
+      "find": "            json.dumps(payload, allow_nan=False)",
+      "replace": "            json.dumps(payload)",
+      "why": "New records reject non-finite numbers before anything is compared or stored (C01). Detector: tests/factory/test_project_events.py"
+    },
+    {
+      "id": "project-events-cursor-ahead-restarts-chain",
+      "file": "factory_kernel/project_events.py",
+      "find": "        if after_version > version:\n            return EventPage(version, after_version, (), None, \"cursor_ahead\")",
+      "replace": "        if False:\n            return EventPage(version, after_version, (), None, \"cursor_ahead\")",
+      "why": "A cursor beyond the verified version is an explicit cursor_ahead result, never a silent empty page that looks like the end of history (C02). Detector: tests/factory/test_project_events.py"
+    },
+    {
+      "id": "project-profile-numeric-identity-ignored",
+      "file": "factory_kernel/project_profile.py",
+      "find": "    if type(identity) is not int or identity != profile.repository_id:",
+      "replace": "    if False:",
+      "why": "A destination is verified by its exact numeric repository identity; a name match alone is not a destination match (WP01). Detector: tests/factory/test_project_profile.py"
+    },
+    {
+      "id": "project-profile-visibility-ignored",
+      "file": "factory_kernel/project_profile.py",
+      "find": "    if type(private) is not bool or ((\"private\" if private else \"public\") != profile.visibility):",
+      "replace": "    if False:",
+      "why": "Visibility consent is part of the destination check; a private profile must not publish to a public repository or vice versa (WP01). Detector: tests/factory/test_project_profile.py"
+    },
+    {
+      "id": "execution-authority-policy-file-unverified",
+      "file": "factory_kernel/execution_authority.py",
+      "find": "            for path in POLICY_FILES:\n                raw = read(path, 100000)",
+      "replace": "            for path in ():\n                raw = read(path, 100000)",
+      "why": "The project profile is part of the execution authority's verified closure; a host whose profile drifted from protected main must refuse exactly as drifted code does (pitfall 15.1). Detector: tests/factory/test_execution_exchange.py"
+    },
+    {
+      "id": "code-subject-stale-blob-accepted",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "    if not isinstance(expected, str) or expected != source.sha256:",
+      "replace": "    if False:",
+      "why": "A requested span is bound to the exact blob it believes it addresses; a changed blob is source_mismatch, never a silent re-target (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "code-subject-split-utf8-accepted",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "        text = source.raw[start:end].decode(\"utf-8\")",
+      "replace": "        text = source.raw[start:end].decode(\"utf-8\", \"replace\")",
+      "why": "A span splitting a multi-byte UTF-8 sequence is refused as invalid_utf8_boundary, never decoded leniently into replacement characters (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "code-subject-empty-interval-without-anchor",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "    if start == end and not anchor:",
+      "replace": "    if False:",
+      "why": "An empty interval is permitted only for an explicitly typed insertion anchor, never as evidence that existing code implements a claim (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "code-subject-symlink-followed",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "        if mode == \"120000\":\n            gaps.append({\"path\": path, \"reason\": \"symlink_not_followed\"})\n            continue",
+      "replace": "        if False:\n            gaps.append({\"path\": path, \"reason\": \"symlink_not_followed\"})\n            continue",
+      "why": "The indexer never follows symlinks; a link is a recorded gap, not a blob (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "code-subject-changed-blob-treated-as-current",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "        if old.blob_oid == new.blob_oid:\n            files[path] = FileChange(path, \"unchanged\", old.blob_oid, new.blob_oid, (), (), ((0, 0, len(old.raw)),))\n            continue",
+      "replace": "        if True:\n            files[path] = FileChange(path, \"unchanged\", old.blob_oid, new.blob_oid, (), (), ((0, 0, len(old.raw)),))\n            continue",
+      "why": "A changed blob cannot be silently treated as current because line numbers look unchanged; only an exact blob match carries spans over (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "trace-coverage-double-links-inflate",
+      "file": "factory_kernel/code_subjects.py",
+      "find": "                out.append((s, e))\n    return _union(out)",
+      "replace": "                out.append((s, e))\n    return sorted(out)",
+      "why": "Overlapping bindings are unioned so double links do not inflate trace coverage (C03). Detector: tests/factory/test_code_subjects.py"
+    },
+    {
+      "id": "claims-cycle-undetected",
+      "file": "factory_kernel/claims.py",
+      "find": "                if colour[child] == GREY:\n                    cycle = stack[stack.index(child):]\n                    raise ClaimRefused(f\"{what} dependency cycle: {sorted(cycle)}\")",
+      "replace": "                if False:\n                    cycle = stack[stack.index(child):]\n                    raise ClaimRefused(f\"{what} dependency cycle: {sorted(cycle)}\")",
+      "why": "Dependency edges must be acyclic; cycle members are reported deterministically (C03). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-uncovered-acceptance-bound",
+      "file": "factory_kernel/claims.py",
+      "find": "    unowned = sorted(set(keys) - set(owners))\n    if unowned:",
+      "replace": "    unowned = sorted(set(keys) - set(owners))\n    if False:",
+      "why": "Programme binding requires every accepted criterion to have assigned work (C03). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-foreign-authority-profile-accepted",
+      "file": "factory_kernel/claims.py",
+      "find": "        if claim.kind == \"proof-obligation\" and claim.authority_profile not in policy_ids:",
+      "replace": "        if False:",
+      "why": "Proof obligations derive from the protected policy; a model cannot invent a weaker authority profile (3.3). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-model-self-certification",
+      "file": "factory_kernel/claims.py",
+      "find": "        binding = check(row, (\"proposed_implementation\", \"depends_on\"), str(row.get(\"source\", \"model\")))",
+      "replace": "        binding = check(row, BINDING_RELATIONS, str(row.get(\"source\", \"model\")))",
+      "why": "A model-proposed binding may only propose; an observed relation needs an observer that verified it (LINE_LEVEL_CLAIMS 2). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-forged-approval-accepted",
+      "file": "factory_kernel/claims.py",
+      "find": "        if (not isinstance(actor, Mapping) or actor.get(\"role\") != \"owner\" or not actor.get(\"identity\")\n                or approval.get(\"spec_sha256\") != spec_sha256 or approval.get(\"spec\") != approved_spec):",
+      "replace": "        if False:",
+      "why": "Approval is the owner's recorded decision for exactly this spec, never a boolean or a proposal-role record (3.3). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "claims-stale-predecessor-ignored",
+      "file": "factory_kernel/claims.py",
+      "find": "            if by_key[dep].kind == \"proof-obligation\":\n                dep_proof, dep_currency, _ = proof(dep, seen + (key,))",
+      "replace": "            if False:\n                dep_proof, dep_currency, _ = proof(dep, seen + (key,))",
+      "why": "A stale or missing predecessor obligation propagates as insufficient to dependents (3.4). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "experiment-frozen-test-edit-accepted",
+      "file": "factory_kernel/code_experiments.py",
+      "find": "            if path in plan.unchanged_contract_refs:\n                raise InvestigationRefused(f\"candidate patch edits frozen acceptance test {path!r}\")",
+      "replace": "            if False:\n                raise InvestigationRefused(f\"candidate patch edits frozen acceptance test {path!r}\")",
+      "why": "Experiments may not edit frozen acceptance tests; a candidate that does is refused before any measurement (LINE_LEVEL 4). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "experiment-envelope-escape-accepted",
+      "file": "factory_kernel/code_experiments.py",
+      "find": "            if path not in plan.editable_subjects:\n                raise InvestigationRefused(f\"candidate patch touches {path!r} outside the design envelope\")",
+      "replace": "            if False:\n                raise InvestigationRefused(f\"candidate patch touches {path!r} outside the design envelope\")",
+      "why": "A candidate patch stays inside the compiled design envelope; widening it is not the experiment's to do (LINE_LEVEL 4). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "experiment-baseline-not-measured",
+      "file": "factory_kernel/code_experiments.py",
+      "find": "    order = [BASELINE_ID] + sorted(frozen)",
+      "replace": "    order = sorted(frozen)",
+      "why": "The unchanged baseline is always included in the comparison; without it a candidate cannot lose to the implementer's own version (C08). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "experiment-stage-not-reverted",
+      "file": "factory_kernel/code_experiments.py",
+      "find": "        finally:\n            stage.revert(baseline_commit, plan.exact_baseline_tree)\n        observations.append(validate_observation(plan.protocol, candidate_id, raw))",
+      "replace": "        finally:\n            pass\n        observations.append(validate_observation(plan.protocol, candidate_id, raw))",
+      "why": "Every candidate is measured on the exact baseline plus its own patch and the stage is reset after each run; leakage between candidates is a defect (C08). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "screening-hard-failure-selected",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "    eligible = [r for r in rows if r[\"hard_pass\"]]",
+      "replace": "    eligible = list(rows)",
+      "why": "Hard constraints are admission gates: a faster candidate that fails the contract cannot be selected (C09). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "screening-tie-exaggerated",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "    selected = baseline_id if baseline_id in best else None\n    return ComparisonResult(\"finite-contract-v1\", \"tie\",",
+      "replace": "    selected = best[0]\n    return ComparisonResult(\"finite-contract-v1\", \"provisional\",",
+      "why": "A tie is a tie: it retains an eligible baseline and never becomes a provisional selection of an arbitrary candidate (C09). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "sign-test-ties-counted",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "    nonzero = [v for v in values if v != 0]",
+      "replace": "    nonzero = list(values)",
+      "why": "Zero differences are ties, reported and excluded from n in the exact sign test (C09, NIST). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "protocol-evaluator-from-proposal",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "        if digest not in trusted:\n            raise ProtocolRefused(\"protocol names an evaluator outside the trusted registry\")\n        evaluators.append(trusted[digest])",
+      "replace": "        if digest not in trusted:\n            trusted[digest] = Evaluator(\"proposed\", \"0\", digest, \"unreviewed\", ())\n        evaluators.append(trusted[digest])",
+      "why": "Evaluators are resolved by digest from the trusted registry; a proposal cannot supply one (LINE_LEVEL 3). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "paired-inconclusive-called-supported",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "    if significant and practical:",
+      "replace": "    if significant or practical:",
+      "why": "A supported directional claim needs both the registered alpha and the preregistered practical threshold (C09). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "search-confirmation-results-steer-search",
+      "file": "factory_kernel/search_policy.py",
+      "find": "    rows = [o for o in public_observations if o.get(\"partition\") == \"public\" and o.get(\"complete\") is True and o.get(\"hard_pass\") is True]",
+      "replace": "    rows = [o for o in public_observations if o.get(\"complete\") is True and o.get(\"hard_pass\") is True]",
+      "why": "Confirmation results are never a candidate-generation score stream; only public search observations choose the next parent (LINE_LEVEL 5). Detector: tests/factory/test_search_policy.py"
+    },
+    {
+      "id": "runtime-investigation-request-ignored",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._host_investigation(worktree.path, paths, env, stage=\"implement\")",
+      "replace": "            pass  # investigation skipped",
+      "why": "The inner experiment loop is wired between the implementer and the GREEN gate; an implementer's bounded request must be honoured there, not dropped (LINE_LEVEL 4, R02). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "runtime-investigation-recovery-anchors-to-head",
+      "file": "factory_kernel/runtime.py",
+      "find": "            if (stage_tree.head_commit() != baseline_commit or stage_tree.head_tree() != baseline_tree\n                    or not stage_tree.is_clean()):\n                stage_tree.revert(baseline_commit, baseline_tree)",
+      "replace": "            if not stage_tree.is_clean():\n                stage_tree.revert(stage_tree.head_commit(), stage_tree.head_tree())",
+      "why": "Refusal recovery must restore the recorded baseline commit; anchoring to whatever HEAD is after a failed reset silently adopts a disposable candidate commit as the worker's baseline (C08 stage identity; evidence review 68ea493b F1). Detector: tests/factory/test_code_experiments.py"
     }
   ]
 }

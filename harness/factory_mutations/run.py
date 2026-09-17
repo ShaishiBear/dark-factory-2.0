@@ -70,6 +70,8 @@ COPY_FILES = (
     ".factory/prompts/conformance.md",
     ".factory/evidence-spine.json",
     ".factory/kernel.json",
+    # WP01: the trusted project profile every publication/execution constant is read from.
+    ".factory/project-profile.json",
     ".factory/locks/floor.json",
     "app/backend/main.py",
     "scripts/frontier_filter.py",
@@ -227,6 +229,22 @@ COPY_FILES = (
     # WP00: read-only dispatch planning and typed diagnostic retention, with their mutants.
     "tests/factory/test_dispatch_plan.py",
     "tests/factory/test_execution_probe.py",
+    # WP01: canonical journal primitive, project profile, and the baseline-recorded flows the
+    # journal must reproduce byte for byte (the recorder is a test helper, never production).
+    "tests/factory/test_project_events.py",
+    "tests/factory/test_project_profile.py",
+    "tests/factory/project_events_fixture.py",
+    "tests/factory/fixtures/project-events/intake.json",
+    "tests/factory/fixtures/project-events/budget.json",
+    "tests/factory/fixtures/project-events/exploration.json",
+    "tests/factory/fixtures/project-events/replacement.json",
+    # R02 source subjects and WP04 claims, with their detectors.
+    "tests/factory/test_code_subjects.py",
+    "tests/factory/test_claims.py",
+    # R02 vertical slice: frozen protocols, candidate lifecycle and search policy.
+    "tests/factory/test_evaluation_protocol.py",
+    "tests/factory/test_code_experiments.py",
+    "tests/factory/test_search_policy.py",
     "tests/factory/test_replacement_intent.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",

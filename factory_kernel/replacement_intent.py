@@ -11,6 +11,11 @@ from .programme_turnover import review_turnover
 OPERATION = "replacement-intent-event"
 
 
+def _replacement_replay(old, new):
+    """One request digest under one key is the same frozen plan request (legacy rule)."""
+    return old["request_sha256"] == new["request_sha256"]
+
+
 def plans(events):
     result = []
     for event in events:
@@ -83,17 +88,27 @@ class ReplacementIntents:
                 "establish-cumulative-spending-coverage", "fresh-owner-consent-and-protected-replacement",
                 "observe-exact-activation-before-fence-release", "fresh-independent-qualification"]}
         plan["plan_sha256"] = sha256_value(plan)
-        with self.store._locked(project) as path:
-            events = self.store._read(path)
+        def validate_transition(events):
             if (len(events) != review["project_version"]
                     or sha256_value(events[-1]) != review["intent_head_sha256"]):
                 raise IntentRefused("owner decisions or spending changed before freezing replacement")
-            event = {"schema": "dark-factory/intent-event", "schema_version": "1.0",
-                "project": project, "repository": self.store.repository, "project_version": len(events) + 1,
-                "command": {"idempotency_key": command["idempotency_key"],
-                    "expected_project_version": len(events), "operation": OPERATION,
-                    "payload": {"request_sha256": request_sha, "plan": plan}},
-                "actor": {"identity": principal.identity, "role": principal.role},
-                "created_at": datetime.now(timezone.utc).isoformat(), "previous": sha256_value(events[-1])}
-            self.store._write(path, [*events, event])
-            return {"plan": plans([*events, event])[-1], "replayed": False}
+            return {"request_sha256": request_sha, "plan": plan}
+
+        from .project_events import OperationSpec, ProjectEvents
+        try:
+            result = ProjectEvents(self.store, {OPERATION: OperationSpec(OPERATION, frozenset({"owner"}), _replacement_replay)}).append(
+                project=project, principal=principal, expected_version=command["expected_project_version"],
+                idempotency_key=command["idempotency_key"], operation=OPERATION,
+                payload={"request_sha256": request_sha, "plan": None}, validate_transition=validate_transition)
+        except IntentRefused as exc:
+            # The primitive checks the version before the validator (C02). A history that moved
+            # during the owner's review is the same fact this service always named.
+            if "stale project version" in str(exc):
+                raise IntentRefused("owner decisions or spending changed before freezing replacement") from exc
+            raise
+        with self.store._locked(project) as path:
+            events = self.store._read(path)
+        if result.replayed:
+            return {"plan": next(row for row in plans(events)
+                                 if row["request_id"] == command["idempotency_key"]), "replayed": True}
+        return {"plan": plans(events)[-1], "replayed": False}

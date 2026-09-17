@@ -378,8 +378,8 @@
     {
       "id": "exploration-replay-currency",
       "file": "factory_kernel/exploration_records.py",
-      "find": "replay_guard(projection(events), approved_scope(self.store, events), old[\"payload\"])",
-      "replace": "pass  # stale replay guard removed",
+      "find": "            replay_guard(projection(events), approved_scope(self.store, events), payload)",
+      "replace": "            pass  # stale replay guard removed",
       "why": "A changed context or invalidated recommendation must not be exported as current. Detector: tests/factory/test_exploration.py"
     },
     {

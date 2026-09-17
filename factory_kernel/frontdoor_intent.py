@@ -51,6 +51,23 @@ def _texts(value):
     return [_text(item, 2000) for item in value]
 
 
+def _intake_replay(old, new):
+    return old == new
+
+
+def intake_operations():
+    """The four intake operations, statically registered with the roles `execute` always
+    enforced. Built on call: project_events imports this module, so a module-level registry
+    would be an import cycle. Same contents every time."""
+    from .project_events import OperationSpec
+    return {
+        "record-intent": OperationSpec("record-intent", frozenset({"owner"}), _intake_replay),
+        "add-exploration": OperationSpec("add-exploration", frozenset({"owner"}), _intake_replay),
+        "propose-spec": OperationSpec("propose-spec", frozenset({"owner", "proposal"}), _intake_replay),
+        "approve-spec": OperationSpec("approve-spec", frozenset({"owner"}), _intake_replay),
+    }
+
+
 class IntentStore:
     def __init__(self, directory: Path, *, repository: str, owner: str):
         self.directory = Path(directory)
@@ -152,6 +169,11 @@ class IntentStore:
                 temporary.unlink(missing_ok=True)
 
     @staticmethod
+    def _now():
+        """The one clock every appended event is stamped with; tests pin it for byte identity."""
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
     def _snapshot(events):
         draft, approvals, ledger = None, [], []
         for event in events:
@@ -192,16 +214,7 @@ class IntentStore:
         operation, payload = command["operation"], command["payload"]
         if principal.role != "owner" and operation != "propose-spec":
             raise IntentRefused("only the authenticated owner can record intent or approve scope")
-        actor = {"identity": principal.identity, "role": principal.role}
-        with self._locked(project) as path:
-            events = self._read(path)
-            for index, event in enumerate(events):
-                if event["command"]["idempotency_key"] == command["idempotency_key"]:
-                    if event["command"] != command or event["actor"] != actor:
-                        raise IntentRefused("idempotency key was used for another command or actor")
-                    return self._snapshot(events[:index + 1])
-            if expected != len(events):
-                raise IntentRefused("stale project version; reload before changing intent")
+        def validate_transition(events):
             state = self._snapshot(events)
             if operation in {"record-intent", "add-exploration"}:
                 _shape(payload, {"wording"})
@@ -232,11 +245,18 @@ class IntentStore:
                     raise IntentRefused("this draft was already approved")
             else:
                 raise IntentRefused("unknown intake operation")
-            event = {"schema": "dark-factory/intent-event", "schema_version": "1.0",
-                     "project": project, "repository": self.repository,
-                     "project_version": len(events) + 1, "command": command, "actor": actor,
-                     "created_at": datetime.now(timezone.utc).isoformat(),
-                     "previous": sha256_value(events[-1]) if events else None}
-            events.append(event)
-            self._write(path, events)
-            return self._snapshot(events)
+            return payload
+
+        operations = intake_operations()
+        if operation not in operations:
+            raise IntentRefused("unknown intake operation")
+        from .project_events import ProjectEvents
+        result = ProjectEvents(self, operations).append(
+            project=project, principal=principal, expected_version=expected,
+            idempotency_key=command["idempotency_key"], operation=operation, payload=payload,
+            validate_transition=validate_transition)
+        with self._locked(project) as path:
+            events = self._read(path)
+        if result.replayed:
+            return self._snapshot(events[:result.index + 1])
+        return self._snapshot(events)

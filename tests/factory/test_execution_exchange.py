@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 from factory_kernel.agents import AgentRequest
 from factory_kernel.canonical import canonical_bytes, sha256_value
 from factory_kernel.credential_env import SCOPES, scoped_environment
-from factory_kernel.execution_authority import ExecutionAuthority, PROGRAMS, WORKFLOW_PATH
+from factory_kernel.execution_authority import ExecutionAuthority, POLICY_FILES, PROGRAMS, WORKFLOW_PATH
 from factory_kernel.execution_client import ExecutionClient
 from factory_kernel.execution_exchange import ExecutionExchange, ExecutionProtocol
 from factory_kernel.frontdoor_http import FrontDoorApplication
@@ -296,6 +296,8 @@ class AuthorityTests(unittest.TestCase):
         self.blobs = {}
         for name in PROGRAMS:
             self.put("factory_kernel/" + name, (ROOT / "factory_kernel" / name).read_bytes())
+        for path in POLICY_FILES:
+            self.put(path, (ROOT / path).read_bytes())
         self.put(ACTIVE_PATH, canonical_bytes(fixture.source))
         self.github = Mock(repository=self.repository)
         self.github.programme_issues.return_value = []
@@ -355,6 +357,14 @@ class AuthorityTests(unittest.TestCase):
         self.jobs["total_count"] = 1
         self.put("factory_kernel/execution_budget.py", b"# stale host must not mint new spending capabilities\n")
         with self.assertRaisesRegex(IntentRefused, "differs from protected source"):
+            self.authority(self.call, "reserve")
+        self.put("factory_kernel/execution_budget.py", (ROOT / "factory_kernel/execution_budget.py").read_bytes())
+        # The project profile is closure policy: a host whose profile drifted from protected
+        # main names a different repository/App/project and must refuse like drifted code.
+        drifted = json.loads((ROOT / ".factory/project-profile.json").read_text(encoding="utf-8"))
+        drifted["repository_id"] += 1
+        self.put(".factory/project-profile.json", canonical_bytes(drifted))
+        with self.assertRaisesRegex(IntentRefused, "policy differs from protected source"):
             self.authority(self.call, "reserve")
 
     def test_completed_exact_run_can_record_spending_without_opening_controls(self):
