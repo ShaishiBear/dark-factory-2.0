@@ -38,6 +38,7 @@ MAX_ITEMS = 256
 REASONS = {
     "record_invalid": "rejected", "issuer_invalid": "rejected", "subject_mismatch": "rejected",
     "profile_unknown": "rejected", "profile_mismatch": "rejected", "predecessor_rejected": "rejected",
+    "record_unobserved": "insufficient", "subject_unobserved": "insufficient",
     "artifact_missing": "insufficient", "dependency_missing": "insufficient",
     "dependency_coverage_unknown": "insufficient", "live_observation_missing": "insufficient",
     "predecessor_insufficient": "insufficient",
@@ -225,7 +226,8 @@ def _status_of(codes: Sequence[str]) -> str:
 def assess_currency(attestation: Any, current_observations: Mapping[str, Any],
                     profile: DependencyProfile | None) -> CurrencyResult:
     """See the module docstring for the order. `current_observations` carries observer results,
-    never conclusions: `record_valid`, `issuer_valid`, `subject_match`, `retained` (bool or a
+    never conclusions, and all three of `record_valid`, `issuer_valid` and `subject_match` must be
+    observed (an absent observer result is insufficient): `record_valid`, `issuer_valid`, `subject_match`, `retained` (bool or a
     mapping object id → bool), `dependencies` (identity → digest now), `coverage`
     (`complete`|`unknown` for the observer's own analysis), `live` (observer id → {"valid": bool}),
     `predecessors` (attestation id → status)."""
@@ -240,13 +242,23 @@ def assess_currency(attestation: Any, current_observations: Mapping[str, Any],
         return CurrencyResult(status=status, reason_codes=tuple(sorted(set(codes))), affected=tuple(sorted(set(affected))),
                               satisfies_obligation=status == "current" and verdict == "pass", detail="; ".join(details))
 
-    if observations.get("record_valid", True) is not True:
+    # Every observer result is required. An observer that never looked is not a pass: absence is
+    # insufficient, a negative is rejected, and only an explicit True proceeds (C04 order).
+    record = observations.get("record_valid")
+    if record is None:
+        codes.append("record_unobserved"); details.append("record shape and digest were not verified")
+        return finish()
+    if record is not True:
         codes.append("record_invalid"); details.append("record shape or digest failed verification")
         return finish()
     if observations.get("issuer_valid") is not True:
         codes.append("issuer_invalid"); details.append("issuer could not be authenticated independently")
         return finish()
-    if observations.get("subject_match", True) is not True:
+    subject = observations.get("subject_match")
+    if subject is None:
+        codes.append("subject_unobserved"); details.append("the exact subject under query was not compared")
+        return finish()
+    if subject is not True:
         codes.append("subject_mismatch"); details.append("attestation subject is not the exact subject under query")
         return finish()
 

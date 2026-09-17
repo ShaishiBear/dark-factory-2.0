@@ -4166,9 +4166,23 @@
     {
       "id": "wrapper-companions-dropped",
       "file": "scripts/factory_evidence_spine.py",
-      "find": "    try:\n        final[\"attestations\"] = emit_companions(",
-      "replace": "    if False:\n        final[\"attestations\"] = emit_companions(",
-      "why": "Companions are emitted at the trusted wrapper boundary for every full run; dropping them leaves no shadow record to compare before cutover (WP05, R05). Detector: tests/factory/test_factory_attestation_companions.py"
+      "find": "        final[\"attestations\"] = emit_companions(manifest=manifest, index=index, artifact_root=artifact_root,\n                                                head=head, kernel_root=HERE.parent, candidate_root=ROOT)",
+      "replace": "        final[\"attestations\"] = {\"index_sha256\": \"0\" * 64, \"count\": 21, \"verified\": 21,\n                                 \"shadow_current\": 21, \"proof_reuse_allowed\": False}",
+      "why": "Companions are emitted at the trusted wrapper boundary for every full run; a wrapper that writes a plausible summary without emitting them leaves no shadow record (WP05, R05). Detector: tests/factory/test_factory_attestation_companions.py"
+    },
+    {
+      "id": "currency-unobserved-subject-is-current",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "    subject = observations.get(\"subject_match\")\n    if subject is None:\n        codes.append(\"subject_unobserved\"); details.append(\"the exact subject under query was not compared\")\n        return finish()",
+      "replace": "    subject = observations.get(\"subject_match\", True)\n    if subject is None:\n        codes.append(\"subject_unobserved\"); details.append(\"the exact subject under query was not compared\")\n        return finish()",
+      "why": "C04: authenticate the exact subject before anything else; an observer that never compared the subject is insufficient, never current. Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "companion-reader-ignores-store",
+      "file": "factory_kernel/evidence_closure.py",
+      "find": "        try:\n            retained = proof_store.get_by_digest(store, sha256_bytes(data))\n        except proof_store.ProofStoreRefused:\n            return None\n        return data if retained == data else None",
+      "replace": "        return data",
+      "why": "Verification loads retained objects; bytes on disk that the proof store does not hold are not retained evidence (SPEC 3.5 'no object address grants proof'). Detector: tests/factory/test_factory_attestation_companions.py"
     }
   ]
 }

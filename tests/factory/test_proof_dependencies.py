@@ -37,8 +37,8 @@ def attestation(**overrides) -> dict:
 
 
 def observations(**overrides) -> dict:
-    fields = {"issuer_valid": True, "retained": True, "dependencies": {"candidate_tree": "A", "spine_policy": "P"},
-              "coverage": "complete", "predecessors": {}}
+    fields = {"record_valid": True, "issuer_valid": True, "subject_match": True, "retained": True,
+              "dependencies": {"candidate_tree": "A", "spine_policy": "P"}, "coverage": "complete", "predecessors": {}}
     fields.update(overrides)
     return fields
 
@@ -144,6 +144,13 @@ class CurrencyTests(unittest.TestCase):
         self.assertEqual(assess_currency(attestation(), observations(), None).reason_codes, ("profile_unknown",))
         other = DependencyProfile(profile_id="narrow", version="1.0", required_identities=("candidate_tree",), live_observers=())
         self.assertEqual(assess_currency(attestation(), observations(), other).reason_codes, ("profile_mismatch",))
+
+    def test_an_observer_that_never_looked_at_the_record_or_subject_is_insufficient_not_a_pass(self):
+        for absent, code in (("record_valid", "record_unobserved"), ("subject_match", "subject_unobserved")):
+            with self.subTest(absent):
+                rows = {k: v for k, v in observations().items() if k != absent}
+                result = assess_currency(attestation(), rows, PROFILE)
+                self.assertEqual((result.status, result.reason_codes, result.satisfies_obligation), ("insufficient", (code,), False))
 
     def test_missing_artifacts_are_insufficient_and_name_the_objects(self):
         result = assess_currency(attestation(), observations(retained={"spine/a.json": True, "spine/b.json": False}), PROFILE)

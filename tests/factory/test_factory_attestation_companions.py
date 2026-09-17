@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from factory_kernel.canonical import canonical_bytes, sha256_bytes
+from factory_kernel.canonical import canonical_bytes, sha256_bytes, sha256_value
 from factory_kernel.evidence_closure import (
     ATTESTATION_INDEX_PATH,
     ATTESTATION_STORE_DIR,
@@ -24,9 +24,10 @@ from factory_kernel.evidence_closure import (
     compile_attestations,
     observe_closure_environment,
     observe_issuer,
+    reverify_companions,
 )
 from factory_kernel.proof_dependencies import load_profiles
-from factory_kernel.proof_store import role_of, verify_inventory
+from factory_kernel.proof_store import get_by_digest, role_of, verify_inventory
 from factory_kernel.spine import load_policy
 from tests.factory.test_factory_evidence_closure import BASE, HEAD, IMMUNITY_RESULT, EvidenceClosureTests
 
@@ -115,6 +116,57 @@ class CompanionTests(EvidenceClosureTests):
             self.assertTrue(edges and all(edge["kind"] == "depends_on" for edge in edges))
             ids = {a["claim_key"]: a["attestation_id"] for a in index["attestations"]}
             self.assertIn({"source": ids["tickets"], "target": ids["contract"], "kind": "depends_on"}, edges)
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_verification_reads_retained_objects_so_an_unretained_or_altered_artifact_is_not_evidence(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, result = self.companions(root)
+            issuer = observe_issuer(HOSTED, source_revision=KERNEL_HEAD)
+            again = reverify_companions(root, issuer)
+            self.assertEqual((len(again["verified"]), again["proof_reuse_allowed"]), (21, False))
+            by_claim = {a["claim_key"]: a for a in result["index"]["attestations"]}
+            store = root / ATTESTATION_STORE_DIR
+            # The store no longer holds the impact artifact: the bytes on disk are unchanged, but
+            # unretained evidence is missing evidence.
+            impact = by_claim["impact"]
+            digest = next(row["sha256"] for row in impact["evidence"] if row["retained_object_id"].endswith("impact.json"))
+            (store / "objects" / "public" / digest).unlink()
+            self.assertIsNone(get_by_digest(store, digest))
+            after = reverify_companions(root, issuer)
+            row = after["verification"][impact["attestation_id"]]
+            self.assertEqual((row["verified"], row["status"], row["reason_codes"]), (False, "insufficient", ["artifact_missing"]))
+            self.assertEqual(len(after["verified"]), 20)
+            # A rewritten artifact on disk is bytes the store never vouched for: not retained, so
+            # missing, never silently accepted because a file of that name exists.
+            design = by_claim["design"]
+            (root / "spine" / "builder" / "design.json").write_bytes(b'{"version":"1.0","edited":true}')
+            edited = reverify_companions(root, issuer)["verification"][design["attestation_id"]]
+            self.assertEqual((edited["status"], edited["reason_codes"]), ("insufficient", ["artifact_missing"]))
+            # A re-signed record that names a different digest for a retained object is forged:
+            # the object exists, its bytes do not match what the record attests.
+            index_path = root / ATTESTATION_INDEX_PATH
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            for record in index["attestations"]:
+                if record["claim_key"] == "context":
+                    record["evidence"][0]["sha256"] = "5" * 64
+                    body = {k: v for k, v in record.items() if k != "attestation_id"}
+                    record["attestation_id"] = sha256_value(body)
+                    forged_id = record["attestation_id"]
+            index_path.write_bytes(canonical_bytes(index))
+            forged = reverify_companions(root, issuer)["verification"][forged_id]
+            self.assertEqual((forged["status"], forged["reason_codes"]), ("rejected", ["artifact_tampered"]))
+
+    @patch("factory_kernel.evidence_closure._load_immunity")
+    def test_shadow_currency_compares_the_exact_subject(self, immunity):
+        immunity.return_value = IMMUNITY_RESULT
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, result = self.companions(root)
+            shadow = result["index"]["shadow_currency"]
+            self.assertTrue(all(row["status"] == "current" for row in shadow.values()))
+            self.assertTrue(all(a["subject"]["candidate_tree"] == "1" * 40 for a in result["index"]["attestations"]))
 
     @patch("factory_kernel.evidence_closure._load_immunity")
     def test_a_local_issuer_yields_recorded_but_rejected_companions(self, immunity):

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .canonical import canonical_bytes, sha256_bytes, sha256_file, sha256_value
 from .credential_env import scoped_environment
@@ -579,6 +579,61 @@ def companion_inputs(environment: Mapping[str, Any], *, base_sha: str) -> list[d
     return rows
 
 
+def companion_reader(artifact_root: Path, store: Path) -> Any:
+    """The object reader every companion verification uses: the bytes at the attested artifact
+    path, but only when the proof store retains exactly those bytes. An artifact the store does
+    not hold, or holds differently, is not retained evidence, whatever is on disk."""
+    from . import proof_store
+
+    def reader(object_id: str) -> bytes | None:
+        path = artifact_root / object_id
+        if not path.is_file():
+            return None
+        data = path.read_bytes()
+        try:
+            retained = proof_store.get_by_digest(store, sha256_bytes(data))
+        except proof_store.ProofStoreRefused:
+            return None
+        return data if retained == data else None
+    return reader
+
+
+def verify_companions(records: Sequence[Mapping[str, Any]], artifact_root: Path, store: Path,
+                      observed_issuer: Mapping[str, Any], registry: Mapping[str, Mapping[str, str]]) -> tuple[dict, dict]:
+    """Verify each companion against the retained objects and the observed issuer. Returns the
+    per-attestation verification record and the verified attestations by id."""
+    from .attestations import Refusal, verify_attestation
+
+    reader = companion_reader(artifact_root, store)
+    verification: dict[str, dict] = {}
+    verified: dict[str, Any] = {}
+    for record in records:
+        outcome = verify_attestation(record, observed_issuer, reader, registry)
+        if isinstance(outcome, Refusal):
+            verification[record["attestation_id"]] = {"verified": False, **outcome.to_dict()}
+        else:
+            verification[record["attestation_id"]] = {"verified": True, "dependency_digest": outcome.dependency_digest}
+            verified[record["attestation_id"]] = outcome
+    return verification, verified
+
+
+def reverify_companions(artifact_root: str | Path, observed_issuer: Mapping[str, Any]) -> dict:
+    """Re-verify a run's companions from what was retained: the index, the artifacts on disk and
+    the proof store. A proof observer's entry point; it reads, compares and reports, never repairs."""
+    root = Path(artifact_root).resolve()
+    index_path = root / ATTESTATION_INDEX_PATH
+    if not index_path.is_file():
+        raise ValueError("no companion index is retained for this run")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    records = index.get("attestations") if isinstance(index, Mapping) else None
+    if not isinstance(records, list) or not records:
+        raise ValueError("companion index carries no attestations")
+    authorities = {record["authority"]["id"]: record["authority"] for record in records if isinstance(record, Mapping)}
+    verification, verified = verify_companions(records, root, root / ATTESTATION_STORE_DIR, observed_issuer, authorities)
+    return {"run_id": index.get("run_id"), "verification": verification, "verified": sorted(verified),
+            "authority": "observation-only", "proof_reuse_allowed": False}
+
+
 def compile_attestations(*, manifest: RunManifest, index: Mapping[str, Any], policy: SpinePolicy,
                          artifact_root: str | Path, repository_id: int, head_sha: str, environment: Mapping[str, Any],
                          issuer: Mapping[str, Any], created_at: str) -> dict:
@@ -628,20 +683,7 @@ def compile_attestations(*, manifest: RunManifest, index: Mapping[str, Any], pol
     proof_store.index_run(store, manifest.run_id, records)
 
     registry = {ATTESTATION_AUTHORITY: authority}
-
-    def reader(object_id: str) -> bytes | None:
-        path = root / object_id
-        return path.read_bytes() if path.is_file() else None
-
-    verification: dict[str, dict] = {}
-    verified: dict[str, Any] = {}
-    for record in records:
-        outcome = verify_attestation(record, issuer, reader, registry)
-        if isinstance(outcome, Refusal):
-            verification[record["attestation_id"]] = {"verified": False, **outcome.to_dict()}
-        else:
-            verification[record["attestation_id"]] = {"verified": True, "dependency_digest": outcome.dependency_digest}
-            verified[record["attestation_id"]] = outcome
+    verification, verified = verify_companions(records, root, store, issuer, registry)
 
     edges = [{"source": by_claim[requirement.claim_id], "target": by_claim[predecessor], "kind": "depends_on"}
              for requirement in policy.requirements for predecessor in requirement.requires]
@@ -658,7 +700,13 @@ def compile_attestations(*, manifest: RunManifest, index: Mapping[str, Any], pol
                                       "affected": [], "satisfies_obligation": False, "detail": refusal["detail"]}
             continue
         predecessors = {by_claim[name]: shadow[by_claim[name]]["status"] for name in requirement.requires}
-        result = assess_currency(item, {"issuer_valid": True, "retained": True, "dependencies": observed, "coverage": "complete",
+        # Observer results, each from a check that actually ran: the record and issuer from
+        # verify_companions (a verified item exists only if both passed), the exact subject from
+        # comparing the attested subject with the head and tree observed for this run, and the
+        # retained objects from the store-backed reader that the verification used.
+        result = assess_currency(item, {"record_valid": True, "issuer_valid": True,
+                                        "subject_match": item.subject == subject,
+                                        "retained": True, "dependencies": observed, "coverage": "complete",
                                         "predecessors": predecessors}, profiles.profile_for(requirement.claim_id))
         shadow[attestation_id] = result.to_dict()
 

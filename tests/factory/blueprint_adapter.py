@@ -153,7 +153,10 @@ def _proof_currency(payload: dict) -> dict:
                    for name, digest in sorted(required.items())],
         "outcome": {"verdict": "pass", "reason_codes": []},
     }
+    # The fixture isolates single causes; its record is well-formed and its subject is the one
+    # under query by construction, so both observer results are supplied explicitly as true.
     observations = {
+        "record_valid": True, "subject_match": True,
         "issuer_valid": bool(payload["issuer_valid"]), "retained": bool(payload["retained"]),
         "dependencies": dict(payload["observed"]), "coverage": str(payload["coverage"]),
         "predecessors": {"predecessor": str(payload["predecessor"])},
