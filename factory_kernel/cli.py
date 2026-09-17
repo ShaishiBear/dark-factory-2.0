@@ -42,6 +42,69 @@ def runtime(config_path: Path) -> WorkerControlledRuntime:
     return WorkerControlledRuntime(repo_root=ROOT, config=load_config(config_path))
 
 
+PLAN_RECORD_LIMIT = 65536
+
+
+def plan_dispatch(args) -> int:
+    """`plan-dispatch`: observe, decide, write one bounded record, hand the workflow outputs.
+
+    Constructs no runtime and no provider: the standard library, the kernel's read modules and
+    an installed `gh` are all it needs. Calls nothing that dispatches, reaps or syncs. An
+    explicit resume or continuation input is validated and represented as planned work; a
+    typo in it refuses here rather than falling through to an ordinary dispatch. The exit
+    code fails closed on a stopped, fenced or unobservable control plane so the dependent
+    dispatch job cannot start; idle and a missing allowance are honest zero-exit outcomes.
+    """
+    import os
+    import re
+
+    from .canonical import canonical_bytes, sha256_bytes
+    from .dispatch_plan import DispatchPlanner
+    from .github_cli import GitHubClient
+
+    resume_pr, resume_run = str(args.resume_pr or "").strip(), str(args.resume_run_id or "").strip()
+    if bool(resume_pr) != bool(resume_run):
+        print("FACTORY_PLAN_REFUSED resume needs both resume_pr and resume_run_id", flush=True)
+        return 1
+    if resume_pr and not (resume_pr.isdecimal() and resume_run.isdecimal() and int(resume_pr) > 0 and int(resume_run) > 0):
+        print("FACTORY_PLAN_REFUSED resume inputs must be positive integers", flush=True)
+        return 1
+    continuation = str(args.expected_programme or "").strip()
+    if continuation and not re.fullmatch(r"[0-9a-f]{64}", continuation):
+        print("FACTORY_PLAN_REFUSED continuation programme must be a SHA-256 hex digest or empty", flush=True)
+        return 1
+    cfg = load_config(args.config)
+    planner = DispatchPlanner(GitHubClient(cfg.repository, cwd=ROOT), cfg, repo_root=ROOT, observe_programme=True)
+    plan = planner.plan(resume=int(resume_pr) if resume_pr else None, continuation=continuation)
+    record = plan.record(resume_pr=int(resume_pr) if resume_pr else None,
+                         resume_run_id=int(resume_run) if resume_run else None,
+                         continuation_programme=continuation, repository=cfg.repository)
+    raw = canonical_bytes(record)
+    if len(raw) > PLAN_RECORD_LIMIT:
+        raise ValueError("dispatch plan record exceeds its bound")
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + f".{os.getpid()}.tmp")
+    with temporary.open("wb") as handle:
+        handle.write(raw)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, output)
+    digest = sha256_bytes(raw)
+    # Reconciliation is effectful work only the dispatcher may do (it reaps under its own
+    # authority before selecting); the plan cannot select past it, so the job must run.
+    ready = plan.status == "ready" or "reconciliation_required" in plan.reason_codes
+    print(f"FACTORY_PLAN status={plan.status} action={plan.action or '-'} "
+          f"subject={plan.subject if plan.subject is not None else '-'} "
+          f"reasons={','.join(plan.reason_codes) or '-'} ready={'true' if ready else 'false'} "
+          f"mutations={plan.mutation_count} sha256={digest}", flush=True)
+    _emit_step_outputs(ready="true" if ready else "false", plan_sha256=digest, plan_status=plan.status,
+                       plan_action=plan.action or "", plan_reasons=",".join(plan.reason_codes))
+    if plan.status == "blocked" and any(code in {"control_unobserved", "stopped", "fenced"} for code in plan.reason_codes):
+        return 1
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="python -m factory_kernel")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -72,6 +135,15 @@ def main() -> int:
         transfer.add_argument("--destination", type=Path, required=True)
         if name == "merge-import":
             transfer.add_argument("--sha256", required=True)
+
+    # Read-only planning (WP00/R00): the same stop/fence/lease/priority observation the
+    # dispatcher makes, decided purely, with zero mutations. Its outputs tell the workflow
+    # whether a dispatch job is worth starting at all; they are never execution authority.
+    plan = sub.add_parser("plan-dispatch", help="observe and decide whether a dispatch is needed, without effects")
+    plan.add_argument("--output", type=Path, required=True, help="where to write the bounded plan record")
+    plan.add_argument("--resume-pr", default="", help="operator resume input (needs --resume-run-id)")
+    plan.add_argument("--resume-run-id", default="", help="operator resume input (needs --resume-pr)")
+    plan.add_argument("--expected-programme", default="", help="continuation programme hash, or empty")
 
     dispatch = sub.add_parser("dispatch")
     dispatch.add_argument("--once", action="store_true", help="execute exactly one priority item")
@@ -151,6 +223,9 @@ def main() -> int:
         else:
             import_handoff(args.source, args.destination, expected_sha256=args.sha256, subject=subject)
         return 0
+
+    if args.command == "plan-dispatch":
+        return plan_dispatch(args)
 
     if args.command == "programme-pulse":
         import json

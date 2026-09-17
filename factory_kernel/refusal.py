@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Iterable, Mapping
@@ -336,6 +337,154 @@ def rehead_count(bodies: Iterable[str]) -> int:
 def resume_count(bodies: Iterable[str]) -> int:
     """How many times a pushed-but-unpublished PR has been resumed from uploaded artifacts."""
     return len(_markers(bodies, RESUME_MARKER))
+
+
+# ---------- typed diagnostic outcomes (WP00) ----------
+#
+# The refusal vocabulary above is the validator's: what an authority said about a candidate.
+# A diagnostic launch (the route, effort, thinking-cap, read-scope and test-author probes) is
+# not a verdict about anything; it is one process the host paid for, and what must survive
+# it is which phase it reached, whether a provider was started, and what refused or failed.
+# These codes apply to `dark-factory/diagnostic-result` records only. They do not replace the
+# reason codes above, whose compatibility tests pin their strings.
+
+DIAGNOSTIC_SCHEMA = "dark-factory/diagnostic-result"
+DIAGNOSTIC_SCHEMA_VERSION = "1.0"
+DIAGNOSTIC_ROLES: frozenset[str] = frozenset({
+    "diagnostic-route", "diagnostic-effort", "diagnostic-thinking", "diagnostic-scope",
+    "diagnostic-test-author",
+})
+# The order a call passes through. `identity` is before a runner exists (host identity and
+# workflow checks); `returned` is after the provider's output was parsed and observed.
+DIAGNOSTIC_PHASES: tuple[str, ...] = (
+    "identity", "admission", "reservation", "launch", "parse", "observe", "returned",
+)
+DIAGNOSTIC_STATUSES: tuple[str, ...] = ("returned", "refused", "failed")
+DIAGNOSTIC_REASON_CODES: tuple[str, ...] = (
+    "returned",                     # the process returned rc 0 with exactly one result receipt
+    "provider_error",               # the process returned non-zero; the provider spoke
+    "provider_envelope_malformed",  # rc 0 but no single result receipt could be parsed
+    "identity_refused",             # host identity/workflow refused before a runner existed
+    "admission_refused",            # the argv bound or role refused before any reservation
+    "reservation_refused",          # reserve/start refused: nothing was launched
+    "observation_refused",          # the provider returned; recording the observation refused
+    "launch_failed",                # the interpreter could not create the process
+    "timeout",                      # the process did not return in time; spend unknown
+    "unexpected_exception",         # retained with its traceback; never recast as a cause
+)
+# Each status owns its reason codes: a process that returned cannot be `timeout`, and a
+# refusal before launch cannot be `provider_error`.
+DIAGNOSTIC_STATUS_REASONS: Mapping[str, frozenset[str]] = {
+    "returned": frozenset({"returned", "provider_error", "provider_envelope_malformed"}),
+    "refused": frozenset({"identity_refused", "admission_refused", "reservation_refused", "observation_refused"}),
+    "failed": frozenset({"launch_failed", "timeout", "unexpected_exception"}),
+}
+# Three-valued on purpose (C06): a lost acknowledgement of start is not `False`.
+PROVIDER_START: tuple[str, ...] = ("not_started", "started", "unknown")
+DIAGNOSTIC_METERING: tuple[str, ...] = (
+    "metered", "unmetered-local", "unmetered-maintenance-scope", "unknown",
+)
+DIAGNOSTIC_UNCERTAINTY: tuple[str, ...] = ("cost_unknown", "provider_start_unknown")
+DIAGNOSTIC_COST_REASONS: tuple[str, ...] = (
+    "reported", "no_receipt", "ambiguous_receipt", "nonzero_exit", "not_launched", "unknown",
+)
+DIAGNOSTIC_FIELDS: frozenset[str] = frozenset({
+    "schema", "schema_version", "invocation_id", "role", "phase", "status", "reason_code",
+    "provider_started", "metering", "reservation_id", "error_type", "error_message", "traceback",
+    "exit_code", "output_sha256", "output_bytes", "reported_microusd", "cost_reason", "uncertainty",
+})
+_DIAGNOSTIC_TEXT_LIMITS = {"error_type": 200, "error_message": 2000, "traceback": 8000}
+_HEX = re.compile(r"[0-9a-f]+")
+
+
+def _diagnostic_text(value: object, limit: int, *, optional: bool = True) -> None:
+    if value is None and optional:
+        return
+    if not isinstance(value, str) or len(value) > limit or "\x00" in value:
+        raise ValueError("diagnostic text field is invalid or over bound")
+
+
+def validate_diagnostic(value: object) -> dict:
+    """Strict shape: exact keys, closed enumerations, bounded text, no booleans-as-integers."""
+    if not isinstance(value, dict) or set(value) != DIAGNOSTIC_FIELDS:
+        raise ValueError("diagnostic record must carry exactly the declared fields")
+    if value["schema"] != DIAGNOSTIC_SCHEMA or value["schema_version"] != DIAGNOSTIC_SCHEMA_VERSION:
+        raise ValueError("unsupported diagnostic record schema")
+    if not isinstance(value["invocation_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", value["invocation_id"]):
+        raise ValueError("diagnostic invocation identity must be 32 lowercase hex characters")
+    for key, allowed in (("role", DIAGNOSTIC_ROLES), ("phase", DIAGNOSTIC_PHASES),
+                         ("status", DIAGNOSTIC_STATUSES), ("reason_code", DIAGNOSTIC_REASON_CODES),
+                         ("provider_started", PROVIDER_START), ("metering", DIAGNOSTIC_METERING),
+                         ("cost_reason", DIAGNOSTIC_COST_REASONS)):
+        if not isinstance(value[key], str) or value[key] not in allowed:
+            raise ValueError(f"diagnostic {key} is not a known value")
+    reservation = value["reservation_id"]
+    if reservation is not None and (not isinstance(reservation, str) or not re.fullmatch(r"[0-9a-f]{32}", reservation)):
+        raise ValueError("diagnostic reservation identity must be null or 32 lowercase hex characters")
+    for key, limit in _DIAGNOSTIC_TEXT_LIMITS.items():
+        _diagnostic_text(value[key], limit)
+    for key in ("exit_code", "output_bytes", "reported_microusd"):
+        number = value[key]
+        if number is not None and (type(number) is not int or (key != "exit_code" and number < 0)):
+            raise ValueError(f"diagnostic {key} must be null or an integer")
+    digest = value["output_sha256"]
+    if digest is not None and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+        raise ValueError("diagnostic output digest must be null or SHA-256 hex")
+    if (digest is None) != (value["output_bytes"] is None):
+        raise ValueError("diagnostic output digest and size must be recorded together")
+    uncertainty = value["uncertainty"]
+    if (not isinstance(uncertainty, list) or len(set(uncertainty)) != len(uncertainty)
+            or uncertainty != sorted(uncertainty) or any(item not in DIAGNOSTIC_UNCERTAINTY for item in uncertainty)):
+        raise ValueError("diagnostic uncertainty must be a sorted set of known values")
+    if value["status"] == "returned" and value["provider_started"] != "started":
+        raise ValueError("a returned diagnostic must have started its provider")
+    if value["reason_code"] not in DIAGNOSTIC_STATUS_REASONS[value["status"]]:
+        raise ValueError("diagnostic reason code does not belong to its status")
+    if value["reason_code"] == "returned" and (value["status"] != "returned" or value["error_type"] is not None):
+        raise ValueError("a returned reason code cannot carry an error")
+    if value["status"] != "returned" and value["error_type"] is None:
+        raise ValueError("a refused or failed diagnostic must name its exception class")
+    return dict(value)
+
+
+def classify_diagnostic(phase: str, exc: BaseException | None, *, result: object = None,
+                        receipts: object = None) -> tuple[str, str]:
+    """(status, reason_code) for a launch that reached `phase`.
+
+    Only exception CLASSES and the phase decide. No text is read: "unreadable output" is not
+    evidence of a provider outage, and this function must never turn it into one.
+    """
+    if phase not in DIAGNOSTIC_PHASES:
+        raise ValueError(f"unknown diagnostic phase {phase!r}")
+    if exc is None:
+        if result is None or receipts is None:
+            raise ValueError("a returned diagnostic needs its result and parsed receipts")
+        if int(getattr(result, "returncode", 1)) != 0:
+            return "returned", "provider_error"
+        if len(receipts) != 1:
+            return "returned", "provider_envelope_malformed"
+        return "returned", "returned"
+    from .frontdoor_intent import IntentRefused  # local: refusal.py must stay import-light
+
+    if isinstance(exc, IntentRefused):
+        code = {"identity": "identity_refused", "admission": "admission_refused",
+                "reservation": "reservation_refused", "observe": "observation_refused"}.get(phase)
+        return ("refused", code) if code else ("failed", "unexpected_exception")
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "failed", "timeout"
+    if isinstance(exc, OSError) and phase == "launch":
+        return "failed", "launch_failed"
+    return "failed", "unexpected_exception"
+
+
+def diagnostic_summary(record: Mapping[str, object]) -> str:
+    """The public one-liner: identity fields only, never the message or the traceback."""
+    fields = ("role", "phase", "status", "reason_code", "provider_started", "metering", "error_type",
+              "reservation_id", "cost_reason")
+    parts = [f"{key}={record.get(key) if record.get(key) is not None else '-'}" for key in fields]
+    uncertainty = record.get("uncertainty") or []
+    parts.append("uncertainty=" + (",".join(str(item) for item in uncertainty) if uncertainty else "-"))
+    return "FACTORY_DIAGNOSTIC " + " ".join(parts)
 
 
 def rehead_eligible(bodies: Iterable[str], *, head: str | None = None) -> bool:

@@ -36,6 +36,9 @@ from .carry import (
 )
 from .config import KernelConfig
 from .credential_env import scoped_environment
+from .dispatch_plan import (
+    DispatchObservation, DispatchPlan, DispatchPlanner, issue_dispatch_key, select_dispatch,
+)
 from .github_cli import GitHubClient
 from .providers import ClaudeCliProvider, prompt_text
 from .execution_worker import ExecutionWorker
@@ -383,60 +386,44 @@ class KernelRuntime:
             timeout=180,
         )
 
+    def _dispatch_planner(self, *, observe_programme: bool) -> DispatchPlanner:
+        return DispatchPlanner(
+            self.github, self.config, repo_root=self.repo_root, observe_programme=observe_programme
+        )
+
+    def plan_dispatch(self, *, resume: int | None = None, continuation: str = "") -> DispatchPlan:
+        """Read-only: what `choose_dispatch` would pick, without stopping, reaping or acting.
+
+        Observes stop/fence, what the reaper would release, and the same review/re-head/issue
+        reads as the dispatcher, then decides purely. Performs no lease reaping, label change,
+        comment, programme sync, provider launch or reservation. A lease the reaper would
+        release is reported as `reconciliation_required`, not treated as free (C04).
+        """
+        return self._dispatch_planner(observe_programme=True).plan(
+            resume=resume, continuation=continuation
+        )
+
     def choose_dispatch(self) -> DispatchDecision:
-        """Canonical priority: stop -> reap -> review -> highest-priority accepted issue."""
+        """Canonical priority: stop -> reap -> review -> highest-priority accepted issue.
+
+        The legacy effectful entry point: the stop check raises, the reap releases stale
+        claims, and only then is work observed and selected through the same read-only
+        observer and pure selector `plan_dispatch` uses. Existing callers keep these
+        semantics; new planning never reaches the reap.
+        """
         self.check_stop()
         self.reap_stale_claims()
-
-        review = self.github.list_prs(self.config.labels["needs_review"])
-        if review:
-            return DispatchDecision(
-                "validate-pr", self._oldest_number(review), "PR validation has priority"
-            )
-
-        # A refused PR whose only fault is that main moved under it is re-headed without a
-        # model, before any new build starts: finishing certified work outranks starting more.
-        # Every other refusal leaves the PR where it is (section 7).
-        for pr in sorted(
-            self.github.list_prs(self.config.labels["needs_fix"]),
-            key=lambda row: (str(row.get("updatedAt") or ""), int(row["number"])),
-        ):
-            number = int(pr["number"])
-            # The head decides whether a second re-head is the same certified work meeting a
-            # base that moved again, or a pull request that has changed since (D-077).
-            if rehead_eligible(
-                self.github.pr_comments(number), head=str(pr.get("headRefOid") or "")
-            ):
-                return DispatchDecision(
-                    "rehead-pr", number, "stale-base refusal; model-free re-head onto current main"
-                )
-
-        accepted = self.github.list_issues(self.config.labels["accepted"])
-        idle = [
-            issue
-            for issue in accepted
-            if self.config.labels["in_progress"] not in self.github.labels(issue)
-        ]
-        # Programme candidates cannot consume model budget until their current binding and
-        # predecessor outcomes are checked. Ordinary accepted issues keep their existing route.
-        queue = ProgrammeQueue(self.github, self.config.default_branch)
-        from .programme import ProgrammeRefused
-        admitted = []
-        for candidate in idle:
-            issue = self.github.issue(int(candidate["number"]))
-            try:
-                queue.admit(issue)
-            except ProgrammeRefused as exc:
-                print(f"FACTORY_PROGRAMME_WAIT issue={issue['number']} reason={exc}", flush=True)
-                continue
-            admitted.append(candidate)
-        idle = admitted
-        if idle:
-            issue = min(idle, key=self._issue_dispatch_key)
-            return DispatchDecision(
-                "build-issue", int(issue["number"]), "highest-priority accepted issue is idle"
-            )
-        return DispatchDecision("idle", reason="no review PR or accepted idle issue")
+        work = self._dispatch_planner(observe_programme=False).observe_work()
+        plan = select_dispatch(
+            DispatchObservation(
+                control_observed=True, stopped=False, fenced=False, reconciliation_required=False,
+                review=work["review"], rehead=work["rehead"], build=work["build"],
+            ),
+            issue_key=self._issue_dispatch_key,
+        )
+        if plan.action is None:
+            return DispatchDecision("idle", reason=plan.reason)
+        return DispatchDecision(plan.action, plan.subject, plan.reason)
 
     def dispatch_once(self, *, merge: bool = True) -> DispatchDecision:
         """Run one action. `merge=False` stops validation at merge pre-authorization.
@@ -3941,7 +3928,10 @@ class KernelRuntime:
     def _issue_dispatch_key(self, issue: Mapping[str, Any]) -> tuple[int, str, int]:
         labels = self.github.labels(issue)
         priority = min((self.PRIORITY[label] for label in labels if label in self.PRIORITY), default=4)
-        return priority, str(issue.get("updatedAt") or ""), int(issue["number"])
+        key = (priority, str(issue.get("updatedAt") or ""), int(issue["number"]))
+        # One priority rule: the pure planner's key must agree with the runtime's own.
+        assert key == issue_dispatch_key(issue), "dispatch priority rule diverged from dispatch_plan"
+        return key
 
     @staticmethod
     def _is_bug(labels: set[str]) -> bool:
