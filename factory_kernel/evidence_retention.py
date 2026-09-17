@@ -27,6 +27,7 @@ KERNEL_RUN = r"(?:issue-[0-9]+-a[0-9]+-[0-9a-f]{10}|(?:pr|merge|rehead|resume)-[
 EVIDENCE_PATHS = frozenset({
     "evidence-bundle.json", "evidence-bundle-core-v5.json", "spine/run-manifest.json",
     "spine/evidence-index.json", "spine/builder-provenance.json", "spine/validator/immunity-verification.json",
+    "spine/attestations/index.json",
     "holdout.json", "architecture-holdout.json", "validation-refusal.json", "factory-feedback.json",
     *(f"spine/{'builder' if claim in BUILDER_CLAIMS else 'validator'}/{claim}.json" for claim in PRODUCERS),
     *(f"spine/certifications/{claim}-{kind}.json" for claim in PRODUCERS

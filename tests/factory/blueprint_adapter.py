@@ -134,8 +134,40 @@ def _paired_sign(payload: dict) -> dict:
             "numerator": result["numerator"], "denominator": result["denominator"]}
 
 
+def _proof_currency(payload: dict) -> dict:
+    """`proof_currency` -> `factory_kernel.proof_dependencies.assess_currency` (C04).
+
+    `required` is the attested dependency closure, `observed` the current observer map,
+    `retained`/`issuer_valid`/`coverage`/`predecessor` the fixture's observer results. The
+    profile requires exactly the attested identities; the production assessor orders and
+    classifies everything.
+    """
+    from factory_kernel.proof_dependencies import DependencyProfile, assess_currency
+
+    required = dict(payload["required"])
+    profile = DependencyProfile(profile_id="fixture-profile", version="1.0",
+                                required_identities=tuple(sorted(required)), live_observers=())
+    attestation = {
+        "obligation_profile_id": "fixture-profile",
+        "inputs": [{"kind": "trusted-policy", "identity": name, "digest": digest, "coverage": "complete"}
+                   for name, digest in sorted(required.items())],
+        "outcome": {"verdict": "pass", "reason_codes": []},
+    }
+    # The fixture isolates single causes; its record is well-formed and its subject is the one
+    # under query by construction, so both observer results are supplied explicitly as true.
+    observations = {
+        "record_valid": True, "subject_match": True,
+        "issuer_valid": bool(payload["issuer_valid"]), "retained": bool(payload["retained"]),
+        "dependencies": dict(payload["observed"]), "coverage": str(payload["coverage"]),
+        "predecessors": {"predecessor": str(payload["predecessor"])},
+    }
+    result = assess_currency(attestation, observations, profile)
+    return {"status": result.status, "reason_codes": list(result.reason_codes)}
+
+
 OPERATIONS = {
     "plan_dispatch": _plan_dispatch,
+    "proof_currency": _proof_currency,
     "event_replay": _event_replay,
     "source_span": _source_span,
     "select_candidate": _select_candidate,

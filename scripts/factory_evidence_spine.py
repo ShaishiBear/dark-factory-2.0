@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -21,7 +23,14 @@ ROOT = Path.cwd().resolve()
 
 from factory_kernel.canonical import canonical_bytes
 from factory_kernel.credential_env import scoped_environment
-from factory_kernel.evidence_closure import compile_full_spine
+from factory_kernel.evidence_closure import (
+    compile_attestations,
+    compile_full_spine,
+    observe_closure_environment,
+    observe_issuer,
+)
+from factory_kernel.project_profile import load_profile
+from factory_kernel.spine import load_policy
 from factory_kernel.independence import externally_supplied_claims
 from factory_kernel.provenance import verify_pack
 from harness import budget as ladder_budget
@@ -203,11 +212,52 @@ def run(args: argparse.Namespace) -> None:
     final["spine"] = index
     final["run_manifest_sha256"] = manifest.sha256()
     final["builder_provenance_sha256"] = index["builder_provenance_sha256"]
+    # Additive companion records, outside every hash the legacy closure carries. They are
+    # emitted and verified here, at the trusted wrapper boundary, from identities this program
+    # observed itself; a failure to emit them is a failure of this authority, reported loudly.
+    try:
+        final["attestations"] = emit_companions(manifest=manifest, index=index, artifact_root=artifact_root,
+                                                head=head, kernel_root=HERE.parent, candidate_root=ROOT)
+    except (ValueError, OSError) as exc:
+        fail(f"proof companions could not be emitted: {exc}")
     output.write_bytes(canonical_bytes(final))
     print(
         f"EVIDENCE_SPINE_OK head={head} claims={len(index['claims'])} "
         f"completion={index['completion_level']} manifest_sha256={manifest.sha256()}"
     )
+
+
+def emit_companions(*, manifest, index: dict, artifact_root: Path, head: str, kernel_root: Path,
+                    candidate_root: Path) -> dict:
+    """Build, retain, verify and shadow-assess one typed attestation per spine claim.
+
+    The kernel checkout (`kernel_root`, beside this program) supplies the authority closure and
+    protected policies; the candidate repository supplies the exact tree and lock files at
+    `head`; the host supplies interpreter and runner identities; the platform environment
+    supplies the issuer, authenticated only when GitHub Actions ran this program. The summary
+    is additive bundle metadata; `proof_reuse_allowed` is always false at this stage.
+    """
+    # The wrapper's own clock bounds this observation, like every other clock in the ladder.
+    kernel_head = subprocess.run(["git", "-C", str(kernel_root), "rev-parse", "HEAD"], capture_output=True,
+                                 text=True, timeout=ladder_budget.budget_seconds(ladder_budget.load(), scope="evidence-spine"))
+    source_revision = kernel_head.stdout.strip() if kernel_head.returncode == 0 else ""
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", source_revision):
+        raise ValueError("kernel checkout revision cannot be observed for the issuer record")
+    environment = observe_closure_environment(kernel_root=kernel_root, candidate_root=candidate_root, head_sha=head,
+                                              environ=os.environ)
+    issuer = observe_issuer(os.environ, source_revision=source_revision)
+    profile = load_profile(kernel_root / ".factory" / "project-profile.json")
+    policy = load_policy(kernel_root / ".factory" / "evidence-spine.json")
+    result = compile_attestations(
+        manifest=manifest, index=index, policy=policy, artifact_root=artifact_root,
+        repository_id=profile.repository_id, head_sha=head, environment=environment, issuer=issuer,
+        created_at=_dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat())
+    summary = result["summary"]
+    print(
+        f"EVIDENCE_ATTESTATIONS_OK count={summary['count']} verified={summary['verified']} "
+        f"shadow_current={summary['shadow_current']} issuer={issuer['platform']} index_sha256={summary['index_sha256']}"
+    )
+    return summary
 
 
 def currency_only(pr: str) -> None:

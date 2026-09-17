@@ -4059,6 +4059,132 @@
       "why": "Refusal recovery must restore the recorded baseline commit; anchoring to whatever HEAD is after a failed reset silently adopts a disposable candidate commit as the worker's baseline (C08 stage identity; evidence review 68ea493b F1). Detector: tests/factory/test_code_experiments.py"
     },
     {
+      "id": "attestation-object-hash-not-checked",
+      "file": "factory_kernel/attestations.py",
+      "find": "        elif not isinstance(data, (bytes, bytearray)) or sha256_bytes(bytes(data)) != row[\"sha256\"]:\n            tampered.append(row[\"retained_object_id\"])",
+      "replace": "        elif not isinstance(data, (bytes, bytearray)):\n            tampered.append(row[\"retained_object_id\"])",
+      "why": "verify_attestation must re-hash every retained object against its attested digest; a present but altered artifact is forged evidence (SPEC 3.4). Detector: tests/factory/test_attestations.py"
+    },
+    {
+      "id": "attestation-local-issuer-authenticated",
+      "file": "factory_kernel/attestations.py",
+      "find": "AUTHENTICATED_PLATFORMS = (\"github-actions\",)",
+      "replace": "AUTHENTICATED_PLATFORMS = (\"github-actions\", \"local\")",
+      "why": "Only the platform issuer can be authenticated independently; a local execution is recorded, never trusted (SPEC 3.4 'signature or workflow-success bit alone is insufficient'). Detector: tests/factory/test_attestations.py"
+    },
+    {
+      "id": "attestation-issuer-observation-ignored",
+      "file": "factory_kernel/attestations.py",
+      "find": "    if observed != issuer:\n        differing = sorted(name for name in ISSUER_FIELDS if observed[name] != issuer[name])",
+      "replace": "    if observed[\"platform\"] != issuer[\"platform\"]:\n        differing = sorted(name for name in ISSUER_FIELDS if observed[name] != issuer[name])",
+      "why": "The issuer must match the independent observation on every field (run, attempt, job, source revision), not merely the platform name. Detector: tests/factory/test_attestations.py"
+    },
+    {
+      "id": "currency-missing-dependency-is-current",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "        if then is None or not isinstance(now, str) or not now:\n            codes.append(\"dependency_missing\"); affected.append(identity)",
+      "replace": "        if then is None or not isinstance(now, str) or not now:\n            continue",
+      "why": "C04: missing or unknown dependencies are insufficient, never a cache hit. Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "currency-unknown-coverage-is-current",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "    if any(row[\"coverage\"] != \"complete\" for row in required.values()) or observations.get(\"coverage\", \"complete\") != \"complete\":\n        codes.append(\"dependency_coverage_unknown\")",
+      "replace": "    if False:\n        codes.append(\"dependency_coverage_unknown\")",
+      "why": "Unknown dependency-analysis coverage forbids narrowing and is insufficient (C04). Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "currency-forged-issuer-continues",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "    if observations.get(\"issuer_valid\") is not True:\n        codes.append(\"issuer_invalid\"); details.append(\"issuer could not be authenticated independently\")\n        return finish()",
+      "replace": "    if observations.get(\"issuer_valid\") is not True:\n        codes.append(\"dependency_changed\"); details.append(\"issuer could not be authenticated independently\")\n        return finish()",
+      "why": "Forged evidence is rejected, not stale; an unauthenticated issuer cannot become a merely stale proof (C04). Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "frontier-selected-edge-propagates",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "        if edge[\"kind\"] == \"depends_on\":\n            dependents.setdefault(edge[\"target\"], []).append(edge[\"source\"])",
+      "replace": "        dependents.setdefault(edge[\"target\"], []).append(edge[\"source\"])",
+      "why": "Only explicit depends_on edges carry proof dependence; a selected or layout relation must not invalidate proof (C04). Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "frontier-incomplete-index-all-clear",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "    if not isinstance(dependency_index, Mapping) or dependency_index.get(\"version\") != \"1.0\" or dependency_index.get(\"complete\") is not True:\n        raise DependencyIndexInvalid(\"dependency index is missing, unversioned or incomplete\")",
+      "replace": "    if not isinstance(dependency_index, Mapping) or dependency_index.get(\"version\") != \"1.0\" or dependency_index.get(\"complete\") is not True:\n        return ()",
+      "why": "An invalid or incomplete dependency index cannot yield an empty all-clear frontier (C04). Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "profile-narrowing-accepted",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "        if entry[\"narrowing_allowed\"] is not False:\n            raise ProfileRefused(",
+      "replace": "        if entry[\"narrowing_allowed\"] not in (True, False):\n            raise ProfileRefused(",
+      "why": "Only a protected migration can narrow a dependency profile; the policy file cannot grant itself narrowing (SPEC 3.4). Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "profile-spine-equivalence-skipped",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "    if spine_claim_ids is not None and set(obligations) != set(spine_claim_ids):\n        raise ProfileRefused(",
+      "replace": "    if spine_claim_ids is not None and not set(obligations) <= set(spine_claim_ids):\n        raise ProfileRefused(",
+      "why": "The obligation map must name exactly the protected spine claims; dropping one silently removes a required obligation from currency (WP04 existing-policy equivalence). Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "proof-store-index-before-objects",
+      "file": "factory_kernel/proof_store.py",
+      "find": "        if role is None:\n            raise ProofStoreRefused(f\"evidence object {digest} is not retained; an index cannot precede its objects\")\n        objects.append",
+      "replace": "        if role is None:\n            role = \"public\"\n        objects.append",
+      "why": "Partial writes never establish retention: an index must not reference an object the store does not hold (SPEC 3.5). Detector: tests/factory/test_proof_store.py"
+    },
+    {
+      "id": "proof-store-conflict-overwrites",
+      "file": "factory_kernel/proof_store.py",
+      "find": "        if target.read_bytes() != data:\n            raise ProofStoreRefused(f\"object conflict: {digest} already holds different bytes\")\n        return digest",
+      "replace": "        if target.read_bytes() != data:\n            _write_atomic(target, data)\n        return digest",
+      "why": "Object writes are immutable; a same-key/different-bytes conflict refuses instead of overwriting (SPEC 3.5). Detector: tests/factory/test_proof_store.py"
+    },
+    {
+      "id": "companion-judge-material-public",
+      "file": "factory_kernel/evidence_closure.py",
+      "find": "            proof_store.put_verified_object(store, data, role=\"judge\" if requirement.claim_id in JUDGE_CLAIMS else \"public\")",
+      "replace": "            proof_store.put_verified_object(store, data, role=\"public\")",
+      "why": "Independent judge material must stay in its own privacy partition, inaccessible to proposal/build roles (SPEC 3.5). Detector: tests/factory/test_factory_attestation_companions.py"
+    },
+    {
+      "id": "companion-artifact-digest-unchecked",
+      "file": "factory_kernel/evidence_closure.py",
+      "find": "            if sha256_bytes(data) != ref.sha256:\n                raise ValueError(f\"materialized artifact {ref.path} differs from the manifest digest\")",
+      "replace": "            if False:\n                raise ValueError(f\"materialized artifact {ref.path} differs from the manifest digest\")",
+      "why": "A companion attests the bytes on disk against the manifest digest; a tampered artifact must not be retained under the manifest's identity. Detector: tests/factory/test_factory_attestation_companions.py"
+    },
+    {
+      "id": "companion-incomplete-claim-passes",
+      "file": "factory_kernel/evidence_closure.py",
+      "find": "            outcome={\"verdict\": \"pass\" if complete else \"incomplete\", \"reason_codes\": reasons},",
+      "replace": "            outcome={\"verdict\": \"pass\", \"reason_codes\": reasons},",
+      "why": "An incomplete spine claim is attested as incomplete; a companion cannot report a success the closure did not reach (C04). Detector: tests/factory/test_factory_attestation_companions.py"
+    },
+    {
+      "id": "wrapper-companions-dropped",
+      "file": "scripts/factory_evidence_spine.py",
+      "find": "        final[\"attestations\"] = emit_companions(manifest=manifest, index=index, artifact_root=artifact_root,\n                                                head=head, kernel_root=HERE.parent, candidate_root=ROOT)",
+      "replace": "        final[\"attestations\"] = {\"index_sha256\": \"0\" * 64, \"count\": 21, \"verified\": 21,\n                                 \"shadow_current\": 21, \"proof_reuse_allowed\": False}",
+      "why": "Companions are emitted at the trusted wrapper boundary for every full run; a wrapper that writes a plausible summary without emitting them leaves no shadow record (WP05, R05). Detector: tests/factory/test_factory_attestation_companions.py"
+    },
+    {
+      "id": "currency-unobserved-subject-is-current",
+      "file": "factory_kernel/proof_dependencies.py",
+      "find": "    subject = observations.get(\"subject_match\")\n    if subject is None:\n        codes.append(\"subject_unobserved\"); details.append(\"the exact subject under query was not compared\")\n        return finish()",
+      "replace": "    subject = observations.get(\"subject_match\", True)\n    if subject is None:\n        codes.append(\"subject_unobserved\"); details.append(\"the exact subject under query was not compared\")\n        return finish()",
+      "why": "C04: authenticate the exact subject before anything else; an observer that never compared the subject is insufficient, never current. Detector: tests/factory/test_proof_dependencies.py"
+    },
+    {
+      "id": "companion-reader-ignores-store",
+      "file": "factory_kernel/evidence_closure.py",
+      "find": "        try:\n            retained = proof_store.get_by_digest(store, sha256_bytes(data))\n        except proof_store.ProofStoreRefused:\n            return None\n        return data if retained == data else None",
+      "replace": "        return data",
+      "why": "Verification loads retained objects; bytes on disk that the proof store does not hold are not retained evidence (SPEC 3.5 'no object address grants proof'). Detector: tests/factory/test_factory_attestation_companions.py"
+    },
+    {
       "id": "worker-job-env-runner-context",
       "file": ".github/workflows/dark-factory-worker.yml",
       "find": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api\n    services:",

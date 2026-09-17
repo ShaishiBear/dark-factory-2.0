@@ -72,6 +72,7 @@ COPY_FILES = (
     ".factory/kernel.json",
     # WP01: the trusted project profile every publication/execution constant is read from.
     ".factory/project-profile.json",
+    ".factory/authority-profiles.json",
     ".factory/locks/floor.json",
     "app/backend/main.py",
     "scripts/frontier_filter.py",
@@ -246,6 +247,10 @@ COPY_FILES = (
     "tests/factory/test_code_experiments.py",
     "tests/factory/test_search_policy.py",
     "tests/factory/test_factory_workflow_contexts.py",
+    "tests/factory/test_attestations.py",
+    "tests/factory/test_proof_dependencies.py",
+    "tests/factory/test_proof_store.py",
+    "tests/factory/test_factory_attestation_companions.py",
     "tests/factory/test_replacement_intent.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",

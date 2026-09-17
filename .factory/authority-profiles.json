@@ -1,0 +1,47 @@
+{
+  "schema": "dark-factory/authority-profiles",
+  "schema_version": "1.0",
+  "compiler_version": "1.0",
+  "profiles": {
+    "full-closure-v1": {
+      "version": "1.0",
+      "required_identities": [
+        "candidate_tree",
+        "base_commit",
+        "program_closure",
+        "spine_policy",
+        "independence_profile",
+        "authority_profiles",
+        "toolchain",
+        "configuration",
+        "lock:app/backend/uv.lock",
+        "lock:app/frontend/bun.lock"
+      ],
+      "live_observers": [],
+      "narrowing_allowed": false
+    }
+  },
+  "obligations": {
+    "contract": "full-closure-v1",
+    "tickets": "full-closure-v1",
+    "frontier": "full-closure-v1",
+    "context": "full-closure-v1",
+    "architecture-policy": "full-closure-v1",
+    "design": "full-closure-v1",
+    "architecture-governor": "full-closure-v1",
+    "test-plan": "full-closure-v1",
+    "red-proof": "full-closure-v1",
+    "green-proof": "full-closure-v1",
+    "impact": "full-closure-v1",
+    "architecture-drift": "full-closure-v1",
+    "architecture-conformance": "full-closure-v1",
+    "holdout-behavior": "full-closure-v1",
+    "holdout-e2e": "full-closure-v1",
+    "holdout-architecture": "full-closure-v1",
+    "holdout-code": "full-closure-v1",
+    "holdout-security": "full-closure-v1",
+    "mutation": "full-closure-v1",
+    "ratchet": "full-closure-v1",
+    "immunity": "full-closure-v1"
+  }
+}
