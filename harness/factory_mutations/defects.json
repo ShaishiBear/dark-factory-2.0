@@ -4190,6 +4190,90 @@
       "find": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api\n    services:",
       "replace": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api\n      FACTORY_DIAGNOSTICS_DIR: ${{ runner.temp }}/dark-factory/diagnostics\n    services:",
       "why": "A job-level env may not use the runner context; GitHub refuses the whole workflow file at load time and the hourly schedule silently starts nothing (17 Sept 2026 outage after WP00). Detector: tests/factory/test_factory_workflow_contexts.py"
+    },
+    {
+      "id": "scheduler-budget-outranks-stop",
+      "file": "factory_kernel/claim_scheduler.py",
+      "find": "    control_block = None\n    if not o[\"control_observed\"]:\n        control_block = \"control_unobserved\"\n    elif o[\"stopped\"]:\n        control_block = \"stopped\"",
+      "replace": "    control_block = None\n    if not o[\"control_observed\"]:\n        control_block = \"control_unobserved\"\n    elif o[\"stopped\"] and o[\"budget\"] is not False:\n        control_block = \"stopped\"",
+      "why": "C04: a known stopped state takes precedence over budget; an exhausted allowance must not turn a stop into a budget refusal. Detector: tests/factory/test_claim_scheduler.py"
+    },
+    {
+      "id": "scheduler-unobserved-control-proposes",
+      "file": "factory_kernel/claim_scheduler.py",
+      "find": "    if not o[\"control_observed\"]:\n        control_block = \"control_unobserved\"\n    elif",
+      "replace": "    if False:\n        control_block = \"control_unobserved\"\n    elif",
+      "why": "C04: an unavailable control observer blocks every action; proposing under an unobserved control plane is a defect. Detector: tests/factory/test_claim_scheduler.py"
+    },
+    {
+      "id": "scheduler-merge-without-full-closure",
+      "file": "factory_kernel/claim_scheduler.py",
+      "find": "        incomplete = tuple(f\"obligation_incomplete:{claim_id}\" for claim_id in policy_ids\n                           if not isinstance(proof.get(claim_id), Mapping) or proof[claim_id].get(\"status\") != CURRENT)",
+      "replace": "        incomplete = tuple(f\"obligation_incomplete:{claim_id}\" for claim_id in policy_ids\n                           if isinstance(proof.get(claim_id), Mapping) and proof[claim_id].get(\"status\") not in (CURRENT, \"stale\", \"insufficient\"))",
+      "why": "Merge requires every existing obligation current for the exact head, not merely the absence of rejections (C04). Detector: tests/factory/test_claim_scheduler.py"
+    },
+    {
+      "id": "scheduler-merge-exact-head-unchecked",
+      "file": "factory_kernel/claim_scheduler.py",
+      "find": "        exact = () if o[\"exact_head_checked\"].get(pr) == head else (\"exact_head_unverified\",)",
+      "replace": "        exact = ()",
+      "why": "Merge requires the exact-head check for the head the proof names (C04 'every existing obligation and exact-head check'). Detector: tests/factory/test_claim_scheduler.py"
+    },
+    {
+      "id": "scheduler-missing-predecessor-passes",
+      "file": "factory_kernel/claim_scheduler.py",
+      "find": "                    if proof is None or any(not isinstance(proof.get(c), Mapping) or proof[c].get(\"status\") != CURRENT for c in policy_ids):\n                        codes.append(f\"predecessor_incomplete:{blocker}\")",
+      "replace": "                    if False:\n                        codes.append(f\"predecessor_incomplete:{blocker}\")",
+      "why": "Missing predecessors block downstream actions (SPEC 4.1); a blocked programme item must not be proposed before its predecessor is proved. Detector: tests/factory/test_claim_scheduler.py"
+    },
+    {
+      "id": "scheduler-paid-action-without-allowance",
+      "file": "factory_kernel/claim_scheduler.py",
+      "find": "        if o[\"budget\"] is None:\n            return (\"budget_unobserved\",)\n        return () if o[\"budget\"] else (\"budget_required\",)",
+      "replace": "        return ()",
+      "why": "A paid action needs a declared, observed allowance; an unobserved or exhausted allowance blocks it (C04 'required resources declared'). Detector: tests/factory/test_claim_scheduler.py"
+    },
+    {
+      "id": "graph-unverified-proof-shown-green",
+      "file": "factory_kernel/project_graph.py",
+      "find": "                  currentness=currency if verified else \"unverified\",\n                  gaps=([] if verified else [\"verification-refused\"]) + ([] if item_id else [\"subject-unlinked\"]),",
+      "replace": "                  currentness=currency,\n                  gaps=([] if item_id else [\"subject-unlinked\"]),",
+      "why": "Stale or unverified proof is never shown as current (SPEC 10 'Prove' view: show all blockers, not a green badge). Detector: tests/factory/test_project_graph.py"
+    },
+    {
+      "id": "graph-proposed-component-shown-observed",
+      "file": "factory_kernel/project_graph.py",
+      "find": "        _node(nodes, comp_id, \"implementation-component\", subject, source_refs=[f\"binding:{row.get('source')}\"],\n              currentness=\"observed\" if standing == \"observed\" else \"proposed\",",
+      "replace": "        _node(nodes, comp_id, \"implementation-component\", subject, source_refs=[f\"binding:{row.get('source')}\"],\n              currentness=\"observed\",",
+      "why": "A model-proposed mapping stays a proposal; the graph must not show a predicted component as implemented (SPEC 10). Detector: tests/factory/test_project_graph.py"
+    },
+    {
+      "id": "graph-certifies-across-subjects",
+      "file": "factory_kernel/project_graph.py",
+      "find": "            item_id = heads.get(str(subject.get(\"candidate_commit\")))",
+      "replace": "            item_id = next(iter(items), None)",
+      "why": "An attestation certifies only the obligations of the item whose exact head it names; recorded dependency match is labelled separately from current trusted proof (WP04). Detector: tests/factory/test_project_graph.py"
+    },
+    {
+      "id": "graph-truncation-keeps-dangling-edges",
+      "file": "factory_kernel/project_graph.py",
+      "find": "    ordered_edges = [e for e in ordered_edges if e[\"source\"] in kept and e[\"target\"] in kept][:max_edges]",
+      "replace": "    ordered_edges = ordered_edges[:max_edges]",
+      "why": "A bounded snapshot must stay a graph over the nodes it carries; a dangling edge fabricates a relation to an absent node. Detector: tests/factory/test_project_graph.py"
+    },
+    {
+      "id": "claim-views-plan-record-unchecked",
+      "file": "factory_kernel/claim_views.py",
+      "find": "        if not isinstance(plan, dict) or plan.get(\"schema\") != \"dark-factory/dispatch-plan\":\n            raise ClaimViewRefused(\"dispatch plan is not a plan-dispatch record\")",
+      "replace": "        if not isinstance(plan, dict):\n            raise ClaimViewRefused(\"dispatch plan is not a plan-dispatch record\")",
+      "why": "The shadow comparison must compare against a recorded plan-dispatch decision, not any JSON object handed to it. Detector: tests/factory/test_claim_views.py"
+    },
+    {
+      "id": "claim-views-unverified-proof-counted",
+      "file": "factory_kernel/claim_views.py",
+      "find": "        if subject.get(\"candidate_commit\") != head or not (verification.get(aid) or {}).get(\"verified\"):\n            continue",
+      "replace": "        if subject.get(\"candidate_commit\") != head:\n            continue",
+      "why": "Only verified companions enter the proof the scheduler sees; an unverified record cannot make merge proposable. Detector: tests/factory/test_claim_views.py"
     }
   ]
 }
