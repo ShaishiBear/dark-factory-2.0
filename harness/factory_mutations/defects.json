@@ -4183,6 +4183,13 @@
       "find": "        try:\n            retained = proof_store.get_by_digest(store, sha256_bytes(data))\n        except proof_store.ProofStoreRefused:\n            return None\n        return data if retained == data else None",
       "replace": "        return data",
       "why": "Verification loads retained objects; bytes on disk that the proof store does not hold are not retained evidence (SPEC 3.5 'no object address grants proof'). Detector: tests/factory/test_factory_attestation_companions.py"
+    },
+    {
+      "id": "worker-job-env-runner-context",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api\n    services:",
+      "replace": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api\n      FACTORY_DIAGNOSTICS_DIR: ${{ runner.temp }}/dark-factory/diagnostics\n    services:",
+      "why": "A job-level env may not use the runner context; GitHub refuses the whole workflow file at load time and the hourly schedule silently starts nothing (17 Sept 2026 outage after WP00). Detector: tests/factory/test_factory_workflow_contexts.py"
     }
   ]
 }
