@@ -94,6 +94,9 @@ class HostedJobBoundaryTests(unittest.TestCase):
 
         root = Path(__file__).resolve().parents[2]
         dispatch, merge = (root / ".github/workflows/dark-factory-worker.yml").read_text().split("\n  merge:\n")
+        # The read-only `plan` job precedes `dispatch` since WP00 and has its own short clock;
+        # the proof clock under test is the dispatch job's.
+        dispatch = dispatch.split("\n  dispatch:\n", 1)[1]
         record = budget.load()
         qualification = budget.budget_seconds(record, "evidence-spine")
         qualification += 5 * stage_timeout_seconds("holdout") + 900
