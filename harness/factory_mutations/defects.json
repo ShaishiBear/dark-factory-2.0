@@ -4057,6 +4057,13 @@
       "find": "            if (stage_tree.head_commit() != baseline_commit or stage_tree.head_tree() != baseline_tree\n                    or not stage_tree.is_clean()):\n                stage_tree.revert(baseline_commit, baseline_tree)",
       "replace": "            if not stage_tree.is_clean():\n                stage_tree.revert(stage_tree.head_commit(), stage_tree.head_tree())",
       "why": "Refusal recovery must restore the recorded baseline commit; anchoring to whatever HEAD is after a failed reset silently adopts a disposable candidate commit as the worker's baseline (C08 stage identity; evidence review 68ea493b F1). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "worker-job-env-runner-context",
+      "file": ".github/workflows/dark-factory-worker.yml",
+      "find": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api\n    services:",
+      "replace": "      ANTHROPIC_BASE_URL: https://openrouter.ai/api\n      FACTORY_DIAGNOSTICS_DIR: ${{ runner.temp }}/dark-factory/diagnostics\n    services:",
+      "why": "A job-level env may not use the runner context; GitHub refuses the whole workflow file at load time and the hourly schedule silently starts nothing (17 Sept 2026 outage after WP00). Detector: tests/factory/test_factory_workflow_contexts.py"
     }
   ]
 }

@@ -418,7 +418,12 @@ class WorkflowTests(unittest.TestCase):
 
     def test_every_probe_launch_is_retained_even_when_no_run_directory_exists(self):
         head = self.dispatch.split("    steps:", 1)[0]
-        self.assertIn("FACTORY_DIAGNOSTICS_DIR: ${{ runner.temp }}/dark-factory/diagnostics", head)
+        # Named from the first step, never from the job-level env: the `runner` context does not
+        # exist there and GitHub refuses the whole file (tests/factory/test_factory_workflow_contexts.py).
+        self.assertNotIn("FACTORY_DIAGNOSTICS_DIR: ${{ runner.temp }}", head)
+        first_step = self.dispatch.split("    steps:", 1)[1].split("- name:", 2)[1]
+        self.assertIn("Name the early diagnostics directory", first_step)
+        self.assertIn('echo "FACTORY_DIAGNOSTICS_DIR=$RUNNER_TEMP/dark-factory/diagnostics" >> "$GITHUB_ENV"', first_step)
         retain = self.dispatch.split("- name: Retain early diagnostic records", 1)[1].split("- name:", 1)[0]
         self.assertIn("if: always()", retain)
         self.assertIn("${{ runner.temp }}/dark-factory/diagnostics/*.json", retain)
