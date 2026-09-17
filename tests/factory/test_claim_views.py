@@ -125,6 +125,17 @@ class ClaimViewTests(unittest.TestCase):
         self.assertEqual((code, record["proposals"], record["comparison"]["classification"]), (0, [], "agree"))
         self.assertTrue(all(b["reason_codes"] == ["stopped"] for b in record["blocked"]))
 
+    def test_an_unverified_companion_is_not_proof_for_merge(self):
+        index = {"schema": "dark-factory/attestation-index", "schema_version": "1.0", **proof_index(self.claims, verified=False)}
+        (self.proof_root / "spine" / "attestations" / "index.json").write_bytes(canonical_bytes(index))
+        legacy = select_dispatch(DispatchObservation(control_observed=True, stopped=False, fenced=False, reconciliation_required=False,
+                                                     review=({"number": 5, "updatedAt": "1"},), budget=True))
+        code, out, record = self.plan(legacy.record())
+        self.assertEqual(code, 0, out)
+        self.assertEqual([p["kind"] for p in record["proposals"] if p["kind"] == "merge-pr"], [])
+        merge_blocks = [b["reason_codes"] for b in record["blocked"] if b["kind"] == "merge-pr"]
+        self.assertEqual(merge_blocks, [["proof_unavailable"]], "an unverified companion index carries no proof for its head")
+
     def test_plan_obligations_refuses_a_record_that_is_not_a_dispatch_plan(self):
         code, out, record = self.plan({"schema": "something-else"})
         self.assertEqual((code, record), (1, None))
