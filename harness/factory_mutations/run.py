@@ -245,6 +245,7 @@ COPY_FILES = (
     "tests/factory/test_evaluation_protocol.py",
     "tests/factory/test_code_experiments.py",
     "tests/factory/test_search_policy.py",
+    "tests/factory/test_factory_workflow_contexts.py",
     "tests/factory/test_replacement_intent.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",

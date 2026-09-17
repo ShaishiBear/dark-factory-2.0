@@ -139,11 +139,6 @@ jobs:
       # "there's an issue with the selected model" for every model (run 33876017910, D-010).
       # Defined once at job level so the preflight probes and the dispatch cannot diverge.
       ANTHROPIC_BASE_URL: https://openrouter.ai/api
-      # Every probe launch (route, effort, thinking-cap, read-scope) writes one bounded,
-      # secret-free `dark-factory/diagnostic-result` record here, before any run directory
-      # exists, so a refusal before launch and a provider failure after one are retained as
-      # different facts (WP00). Uploaded by "Retain early diagnostic records" on every outcome.
-      FACTORY_DIAGNOSTICS_DIR: ${{ runner.temp }}/dark-factory/diagnostics
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -160,6 +155,19 @@ jobs:
           --health-retries 5
 
     steps:
+      # Every probe launch (route, effort, thinking-cap, read-scope) writes one bounded,
+      # secret-free `dark-factory/diagnostic-result` record here, before any run directory
+      # exists, so a refusal before launch and a provider failure after one are retained as
+      # different facts (WP00). Uploaded by "Retain early diagnostic records" on every outcome.
+      # Named from a step, not the job-level `env`: the `runner` context does not exist there,
+      # and GitHub refused this whole file for `${{ runner.temp }}` at that level ("Unrecognized
+      # named-value: 'runner'"), so from 17 Sept 21:01 UTC the schedule started no run at all
+      # (tests/factory/test_factory_workflow_contexts.py). A step may name it; every later
+      # step inherits it through GITHUB_ENV.
+      - name: Name the early diagnostics directory
+        shell: bash
+        run: echo "FACTORY_DIAGNOSTICS_DIR=$RUNNER_TEMP/dark-factory/diagnostics" >> "$GITHUB_ENV"
+
       # The autonomous identity (docs/DARK_FACTORY_2_AUTONOMOUS_GITHUB_IDENTITY.md). GitHub
       # creates no workflow run for an event GITHUB_TOKEN caused, so a product PR opened with it
       # got no `pull_request_target` run at all and a `pull_request` run held for approval. Both
