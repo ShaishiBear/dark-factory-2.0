@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -650,6 +651,11 @@ class KernelRuntime:
                 context=f"Dispatched issue number is #{issue_number}. Build attempt is {attempt}.",
                 env=env,
             )
+            # The implementer's committed version is the baseline. If it also left a bounded
+            # investigation request, the host compares its exact alternatives under the frozen
+            # acceptance contract and commits a winner through the same authority; anything else
+            # keeps the baseline and is recorded (LINE_LEVEL_CLAIMS 4, R02).
+            self._host_investigation(worktree.path, paths, env, stage="implement")
             self._exec(
                 [
                     "python", "scripts/factory_proof.py", "green",
@@ -1772,6 +1778,9 @@ class KernelRuntime:
             context="Blocking review JSON:\n" + json.dumps(review, sort_keys=True),
             env=env,
         )
+        # A repairer may investigate a defect the same way an implementer does; it cannot edit
+        # frozen acceptance or consume extra retries: the investigation is one bounded step.
+        self._host_investigation(worktree.path, paths, env, stage="repair")
         self._exec(
             [
                 "python", "scripts/factory_proof.py", "green",
@@ -1788,6 +1797,115 @@ class KernelRuntime:
         )
         if second["verdict"] != "pass":
             raise NeedsHuman("fresh post-repair review still contains blockers")
+
+    # ---------- host-side code investigation (LINE_LEVEL_CLAIMS 4, C08, R02) ----------
+
+    def _investigation_evaluator(self, paths: RunPaths):
+        """The one trusted frozen evaluator of the vertical slice: the kernel's own proof program
+        replaying the RED proof's checkpoints on the committed candidate (clean tree, impact and
+        architecture guard included). Its closure digest binds the proof bytes and the program
+        bytes; the argv is identical for every candidate, so the protocol freezes it once."""
+        from . import code_experiments as experiments
+
+        proof_program = (self._kernel_checkout / "scripts" / "factory_proof.py").resolve()
+        argv = ("python", str(proof_program), "green",
+                "--proof", str((paths.artifacts / "red-proof.json").resolve()),
+                "--output", str((paths.artifacts / "investigation-green.json").resolve()))
+        return experiments.acceptance_evaluator(paths.artifacts / "red-proof.json", proof_program, argv)
+
+    def _host_investigation(self, cwd: Path, paths: RunPaths, env: Mapping[str, str], *, stage: str) -> dict | None:
+        """Compare an implementer's exact alternative patches against its committed baseline.
+
+        Runs only when the stage left `investigation_request.json`. The request is parsed
+        strictly; the plan is compiled against the design envelope and the RED proof's immutable
+        tests; every candidate is frozen (applied to the exact committed tree, resulting tree
+        derived by Git, reverted) before any measurement; the frozen evaluator is the kernel's
+        own proof program replaying the RED checkpoints; the comparison follows the frozen
+        protocol; a provisional non-baseline winner is applied and committed through the same
+        design-envelope authority as the worker's own change. Every other outcome, including a
+        refused request, keeps the baseline. The record is an artifact of this run and never a
+        merge authority; the fresh GREEN gate and independent qualification still follow.
+        """
+        from . import code_experiments as experiments
+        from .git_authority import commit_planned_changes
+
+        request_path = paths.artifacts / "investigation_request.json"
+        if not request_path.exists():
+            return None
+        self.check_stop()
+        raw = request_path.read_bytes()
+        record_path = paths.artifacts / f"investigation-{stage}.json"
+        outcome: dict[str, Any] = {
+            "schema": experiments.OUTCOME_SCHEMA, "schema_version": "1.0", "stage": stage,
+            "request_sha256": hashlib.sha256(raw).hexdigest(), "status": "kept-baseline", "reason": "",
+            "plan": None, "candidates": [], "observations": [], "selection": None, "lesson_proposal": None,
+            "applied_candidate_id": None, "merge_authorized": False,
+        }
+        if record_path.exists():
+            previous = self._read_json(record_path)
+            if previous.get("request_sha256") == outcome["request_sha256"] and previous.get("status") in {"applied", "kept-baseline", "refused"}:
+                return previous  # resumed: the same request was already decided; never re-run
+        stage_tree = experiments.WorktreeStage(cwd)
+        try:
+            request = experiments.parse_request(raw)
+            design = self._read_json(paths.artifacts / "design.json")
+            proof = self._read_json(paths.artifacts / "red-proof.json")
+            contract = self._read_json(paths.artifacts / "task-contract.json")
+            issue = contract.get("issue") if isinstance(contract, Mapping) else None
+            issue_number = issue.get("number") if isinstance(issue, Mapping) else None
+            if not isinstance(issue_number, int) or isinstance(issue_number, bool):
+                raise experiments.InvestigationRefused("compiled contract lacks issue number")
+            editable = [p for p in (design.get("planned_files") or []) if isinstance(p, str)]
+            immutable = sorted(str(p) for p in (proof.get("files") or {}))
+            if not stage_tree.is_clean():
+                raise experiments.InvestigationRefused("checkout is dirty after the worker's commit; nothing is compared")
+            baseline_commit, baseline_tree = stage_tree.head_commit(), stage_tree.head_tree()
+            evaluator = self._investigation_evaluator(paths)
+            plan = experiments.compile_code_experiment(
+                {"exact_baseline_tree": baseline_tree, "decision_id": f"issue-{issue_number}-{stage}",
+                 "parent_claims": sorted(request["acceptance_ids"]), "contamination_group_id": f"issue-{issue_number}"},
+                editable, request,
+                {"immutable_paths": immutable, "protected_paths": (), "evaluator": evaluator,
+                 "cost_and_resource_limits": {"evaluator_timeout_seconds": experiments.EVALUATOR_TIMEOUT_SECONDS},
+                 # The evaluator closure already binds the judge's bytes; the environment is the
+                 # interpreter that runs the checkpoints.
+                 "environment_digest": self._json_sha({"python": sys.version.split()[0], "platform": sys.platform}),
+                 "budget_ref": f"stage:{stage}"})
+            outcome["plan"] = plan.to_dict()
+            candidates = [experiments.freeze_candidate(plan, row, stage_tree, baseline_commit=baseline_commit)
+                          for row in request["candidates"]]
+            outcome["candidates"] = [c.to_dict() for c in candidates]
+            observations = experiments.execute_registered(
+                plan, candidates, stage_tree, baseline_commit=baseline_commit,
+                environment=scoped_environment(env, scope="none"), check_stop=self.check_stop)
+            outcome["observations"] = [o.to_dict() for o in observations]
+            selection = experiments.compare_candidates(plan, observations, candidates)
+            outcome["selection"] = selection.to_dict()
+            outcome["lesson_proposal"] = experiments.lesson_proposal(plan, selection, candidates)
+            proposed = experiments.prepare_selected_patch(selection, stage_tree.head_tree(), plan, candidates)
+            if isinstance(proposed, experiments.Refusal):
+                outcome["reason"] = f"{','.join(proposed.reason_codes)}: {proposed.detail}"
+            else:
+                stage_tree.apply(proposed.patch_bytes)
+                commit_planned_changes(
+                    cwd, design_path=paths.artifacts / "design.json", red_proof_path=paths.artifacts / "red-proof.json",
+                    subject=f"fix(factory): select measured alternative {proposed.candidate_id} for issue #{issue_number}",
+                    issue_number=issue_number)
+                outcome["status"] = "applied"
+                outcome["applied_candidate_id"] = proposed.candidate_id
+                outcome["reason"] = "provisional selection under the frozen acceptance contract; independent qualification follows"
+        except experiments.InvestigationRefused as exc:
+            outcome["status"] = "refused"
+            outcome["reason"] = str(exc)[:2000]
+            try:
+                if not stage_tree.is_clean():
+                    stage_tree.revert(stage_tree.head_commit(), stage_tree.head_tree())
+            except experiments.InvestigationRefused:
+                raise NeedsHuman(f"investigation left the checkout unrecoverable: {exc}") from exc
+        self._write_json(record_path, outcome)
+        print(f"FACTORY_INVESTIGATION stage={stage} status={outcome['status']} "
+              f"applied={outcome['applied_candidate_id'] or '-'} candidates={len(outcome['candidates'])}", flush=True)
+        return outcome
 
     # ---------- independent PR validator / merge authority ----------
 

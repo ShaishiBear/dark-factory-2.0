@@ -114,10 +114,32 @@ def _source_span(payload: dict) -> dict:
     return {"status": "resolved", "reason_codes": [], "text": result.text}
 
 
+def _select_candidate(payload: dict) -> dict:
+    """`select_candidate` -> `factory_kernel.code_experiments.select_finite` (C09 finite-contract-v1)."""
+    from factory_kernel.code_experiments import select_finite
+
+    result = select_finite(payload["baseline"], payload["candidates"])
+    return {"status": result.outcome, "reason_codes": list(result.reason_codes),
+            "selected": result.selected_candidate_id, "merge_authorized": result.merge_authorized}
+
+
+def _paired_sign(payload: dict) -> dict:
+    """`paired_sign` -> `factory_kernel.evaluation_protocol.paired_sign_test` (C09 exact test)."""
+    from factory_kernel.evaluation_protocol import paired_sign_test
+
+    result = paired_sign_test(payload["differences"])
+    if result["status"] != "computed":
+        return {"status": result["status"], "reason_codes": result["reason_codes"]}
+    return {"status": "computed", "reason_codes": [], "n": result["n"], "k": result["k"], "ties": result["ties"],
+            "numerator": result["numerator"], "denominator": result["denominator"]}
+
+
 OPERATIONS = {
     "plan_dispatch": _plan_dispatch,
     "event_replay": _event_replay,
     "source_span": _source_span,
+    "select_candidate": _select_candidate,
+    "paired_sign": _paired_sign,
 }
 
 

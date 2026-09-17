@@ -3973,6 +3973,83 @@
       "find": "            if by_key[dep].kind == \"proof-obligation\":\n                dep_proof, dep_currency, _ = proof(dep, seen + (key,))",
       "replace": "            if False:\n                dep_proof, dep_currency, _ = proof(dep, seen + (key,))",
       "why": "A stale or missing predecessor obligation propagates as insufficient to dependents (3.4). Detector: tests/factory/test_claims.py"
+    },
+    {
+      "id": "experiment-frozen-test-edit-accepted",
+      "file": "factory_kernel/code_experiments.py",
+      "find": "            if path in plan.unchanged_contract_refs:\n                raise InvestigationRefused(f\"candidate patch edits frozen acceptance test {path!r}\")",
+      "replace": "            if False:\n                raise InvestigationRefused(f\"candidate patch edits frozen acceptance test {path!r}\")",
+      "why": "Experiments may not edit frozen acceptance tests; a candidate that does is refused before any measurement (LINE_LEVEL 4). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "experiment-envelope-escape-accepted",
+      "file": "factory_kernel/code_experiments.py",
+      "find": "            if path not in plan.editable_subjects:\n                raise InvestigationRefused(f\"candidate patch touches {path!r} outside the design envelope\")",
+      "replace": "            if False:\n                raise InvestigationRefused(f\"candidate patch touches {path!r} outside the design envelope\")",
+      "why": "A candidate patch stays inside the compiled design envelope; widening it is not the experiment's to do (LINE_LEVEL 4). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "experiment-baseline-not-measured",
+      "file": "factory_kernel/code_experiments.py",
+      "find": "    order = [BASELINE_ID] + sorted(frozen)",
+      "replace": "    order = sorted(frozen)",
+      "why": "The unchanged baseline is always included in the comparison; without it a candidate cannot lose to the implementer's own version (C08). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "experiment-stage-not-reverted",
+      "file": "factory_kernel/code_experiments.py",
+      "find": "        finally:\n            stage.revert(baseline_commit, plan.exact_baseline_tree)\n        observations.append(validate_observation(plan.protocol, candidate_id, raw))",
+      "replace": "        finally:\n            pass\n        observations.append(validate_observation(plan.protocol, candidate_id, raw))",
+      "why": "Every candidate is measured on the exact baseline plus its own patch and the stage is reset after each run; leakage between candidates is a defect (C08). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "screening-hard-failure-selected",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "    eligible = [r for r in rows if r[\"hard_pass\"]]",
+      "replace": "    eligible = list(rows)",
+      "why": "Hard constraints are admission gates: a faster candidate that fails the contract cannot be selected (C09). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "screening-tie-exaggerated",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "    selected = baseline_id if baseline_id in best else None\n    return ComparisonResult(\"finite-contract-v1\", \"tie\",",
+      "replace": "    selected = best[0]\n    return ComparisonResult(\"finite-contract-v1\", \"provisional\",",
+      "why": "A tie is a tie: it retains an eligible baseline and never becomes a provisional selection of an arbitrary candidate (C09). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "sign-test-ties-counted",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "    nonzero = [v for v in values if v != 0]",
+      "replace": "    nonzero = list(values)",
+      "why": "Zero differences are ties, reported and excluded from n in the exact sign test (C09, NIST). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "protocol-evaluator-from-proposal",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "        if digest not in trusted:\n            raise ProtocolRefused(\"protocol names an evaluator outside the trusted registry\")\n        evaluators.append(trusted[digest])",
+      "replace": "        if digest not in trusted:\n            trusted[digest] = Evaluator(\"proposed\", \"0\", digest, \"unreviewed\", ())\n        evaluators.append(trusted[digest])",
+      "why": "Evaluators are resolved by digest from the trusted registry; a proposal cannot supply one (LINE_LEVEL 3). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "paired-inconclusive-called-supported",
+      "file": "factory_kernel/evaluation_protocol.py",
+      "find": "    if significant and practical:",
+      "replace": "    if significant or practical:",
+      "why": "A supported directional claim needs both the registered alpha and the preregistered practical threshold (C09). Detector: tests/factory/test_evaluation_protocol.py"
+    },
+    {
+      "id": "search-confirmation-results-steer-search",
+      "file": "factory_kernel/search_policy.py",
+      "find": "    rows = [o for o in public_observations if o.get(\"partition\") == \"public\" and o.get(\"complete\") is True and o.get(\"hard_pass\") is True]",
+      "replace": "    rows = [o for o in public_observations if o.get(\"complete\") is True and o.get(\"hard_pass\") is True]",
+      "why": "Confirmation results are never a candidate-generation score stream; only public search observations choose the next parent (LINE_LEVEL 5). Detector: tests/factory/test_search_policy.py"
+    },
+    {
+      "id": "runtime-investigation-request-ignored",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._host_investigation(worktree.path, paths, env, stage=\"implement\")",
+      "replace": "            pass  # investigation skipped",
+      "why": "The inner experiment loop is wired between the implementer and the GREEN gate; an implementer's bounded request must be honoured there, not dropped (LINE_LEVEL 4, R02). Detector: tests/factory/test_code_experiments.py"
     }
   ]
 }

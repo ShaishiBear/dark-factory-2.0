@@ -163,6 +163,37 @@ class GitTreeReader:
             yield path, mode, oid, raw
 
 
+class DirectoryTreeReader:
+    """Regular files under a directory (a disposable copy, never a working tree of record),
+    `.git` excluded, symlinks reported as gaps and never followed. Blob identities use Git's
+    formula so a copy of a committed file has its committed blob id."""
+
+    EXCLUDED = frozenset({".git", "node_modules", ".venv", "__pycache__"})
+
+    def __init__(self, root: Path, *, repository_id: str = "directory"):
+        self.root, self.repository_id = Path(root), repository_id
+        self.tree_oid = "directory-" + sha256_value(str(sorted(self._paths())))[:40]
+
+    def _paths(self) -> list[str]:
+        out = []
+        for path in sorted(self.root.rglob("*")):
+            rel = path.relative_to(self.root).as_posix()
+            if any(part in self.EXCLUDED for part in rel.split("/")):
+                continue
+            if path.is_symlink() or path.is_file():
+                out.append(rel)
+        return out
+
+    def entries(self) -> Iterable[tuple[str, str, str, bytes]]:
+        for rel in self._paths():
+            path = self.root / rel
+            if path.is_symlink():
+                yield rel, "120000", "0" * 40, b""
+                continue
+            raw = path.read_bytes()
+            yield rel, "100644", blob_oid(raw), raw
+
+
 def index_source(tree_reader: Any, language_registry: Mapping[str, str] = LANGUAGES) -> SourceIndex:
     """Index every regular blob of an exact tree. Symlinks, submodules and oversized blobs are
     recorded as gaps, never followed or partially read."""

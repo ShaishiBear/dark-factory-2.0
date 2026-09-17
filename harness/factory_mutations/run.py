@@ -241,6 +241,10 @@ COPY_FILES = (
     # R02 source subjects and WP04 claims, with their detectors.
     "tests/factory/test_code_subjects.py",
     "tests/factory/test_claims.py",
+    # R02 vertical slice: frozen protocols, candidate lifecycle and search policy.
+    "tests/factory/test_evaluation_protocol.py",
+    "tests/factory/test_code_experiments.py",
+    "tests/factory/test_search_policy.py",
     "tests/factory/test_replacement_intent.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",
