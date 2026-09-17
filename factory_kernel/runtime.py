@@ -1846,6 +1846,7 @@ class KernelRuntime:
             if previous.get("request_sha256") == outcome["request_sha256"] and previous.get("status") in {"applied", "kept-baseline", "refused"}:
                 return previous  # resumed: the same request was already decided; never re-run
         stage_tree = experiments.WorktreeStage(cwd)
+        baseline_commit = baseline_tree = None
         try:
             request = experiments.parse_request(raw)
             design = self._read_json(paths.artifacts / "design.json")
@@ -1897,15 +1898,32 @@ class KernelRuntime:
         except experiments.InvestigationRefused as exc:
             outcome["status"] = "refused"
             outcome["reason"] = str(exc)[:2000]
-            try:
-                if not stage_tree.is_clean():
-                    stage_tree.revert(stage_tree.head_commit(), stage_tree.head_tree())
-            except experiments.InvestigationRefused:
-                raise NeedsHuman(f"investigation left the checkout unrecoverable: {exc}") from exc
+            self._restore_investigation_baseline(stage_tree, baseline_commit, baseline_tree, exc)
+        except Exception as exc:
+            self._restore_investigation_baseline(stage_tree, baseline_commit, baseline_tree, exc)
+            raise
         self._write_json(record_path, outcome)
         print(f"FACTORY_INVESTIGATION stage={stage} status={outcome['status']} "
               f"applied={outcome['applied_candidate_id'] or '-'} candidates={len(outcome['candidates'])}", flush=True)
         return outcome
+
+    @staticmethod
+    def _restore_investigation_baseline(stage_tree: Any, baseline_commit: str | None,
+                                        baseline_tree: str | None, cause: BaseException) -> None:
+        """After a refusal or failure, the checkout must be the recorded baseline (the worker's
+        commit), never a disposable candidate commit that a failed reset left as HEAD. Before the
+        baseline was recorded nothing was staged, so the checkout is left exactly as found. Any
+        remaining difference is a NeedsHuman, never a silent continuation."""
+        from . import code_experiments as experiments
+
+        if baseline_commit is None or baseline_tree is None:
+            return
+        try:
+            if (stage_tree.head_commit() != baseline_commit or stage_tree.head_tree() != baseline_tree
+                    or not stage_tree.is_clean()):
+                stage_tree.revert(baseline_commit, baseline_tree)
+        except experiments.InvestigationRefused as exc:
+            raise NeedsHuman(f"investigation left the checkout off its baseline and unrecoverable: {cause}") from exc
 
     # ---------- independent PR validator / merge authority ----------
 

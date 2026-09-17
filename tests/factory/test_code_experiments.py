@@ -293,6 +293,45 @@ class RuntimeHookTests(unittest.TestCase):
         self.assertEqual(malformed["status"], "refused")
         self.assertIn("not valid JSON", malformed["reason"])
 
+    def _failing_candidate_and_reset(self, failures):
+        """A real candidate whose disposable commit moves HEAD, with the stage's reset failing the
+        first `failures` times (a locked file on Windows, a killed evaluator's child holding the
+        tree): the shape of the refusal-recovery defect the evidence review found."""
+        strict = diff(self.repo, "app/jobs.py", MODULE_RIGHT)
+        self.write_request([{"id": "strict", "mechanism_family": "operator", "patch": strict, "predicted_effects": []}])
+        real_revert = experiments.WorktreeStage.revert
+        calls = {"n": 0}
+
+        def flaky_revert(stage, baseline_commit, baseline_tree):
+            calls["n"] += 1
+            if calls["n"] <= failures:
+                raise experiments.InvestigationRefused("stage could not be reset to the exact baseline")
+            real_revert(stage, baseline_commit, baseline_tree)
+        return calls, flaky_revert
+
+    def test_a_failed_reset_after_a_disposable_commit_still_ends_on_the_workers_baseline(self):
+        before = git(self.repo, "rev-parse", "HEAD")
+        calls, flaky_revert = self._failing_candidate_and_reset(failures=1)
+        with patch("factory_kernel.runtime.scoped_environment", side_effect=lambda env, scope: dict(os.environ if env is None else env)), \
+                patch.object(experiments.WorktreeStage, "revert", flaky_revert):
+            outcome = self.rt._host_investigation(self.repo, self.paths, self.env, stage="implement")
+        self.assertEqual(outcome["status"], "refused")
+        self.assertIn("could not be reset", outcome["reason"])
+        self.assertEqual((git(self.repo, "rev-parse", "HEAD"), git(self.repo, "status", "--porcelain")), (before, ""),
+                         "the recovery anchors to the recorded baseline, never to the disposable commit that became HEAD")
+        self.assertEqual(git(self.repo, "rev-list", "--count", "HEAD"), "1")
+        self.assertGreaterEqual(calls["n"], 2, "recovery retried the reset against the recorded baseline")
+
+    def test_an_unrecoverable_stage_is_loud_not_a_silent_refusal(self):
+        calls, flaky_revert = self._failing_candidate_and_reset(failures=99)
+        with patch("factory_kernel.runtime.scoped_environment", side_effect=lambda env, scope: dict(os.environ if env is None else env)), \
+                patch.object(experiments.WorktreeStage, "revert", flaky_revert):
+            with self.assertRaises(NeedsHuman) as ctx:
+                self.rt._host_investigation(self.repo, self.paths, self.env, stage="implement")
+        self.assertIn("off its baseline", str(ctx.exception))
+        self.assertFalse((self.paths.artifacts / "investigation-implement.json").exists(),
+                         "no record claims a decision for a checkout the kernel could not restore")
+
     def test_the_default_evaluator_freezes_the_kernels_proof_program(self):
         rt = object.__new__(KernelRuntime)
         rt.repo_root = ROOT

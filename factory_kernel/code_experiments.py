@@ -270,8 +270,11 @@ def compile_code_experiment(claim: Mapping[str, Any], subjects: Iterable[str], p
 class WorktreeStage:
     """A committed checkout used as a disposable stage: apply one candidate patch, commit it as a
     disposable commit, measure, and hard-reset to the exact baseline commit. Git commit and tree
-    identities before and after every step are the proof that nothing leaked between candidates,
-    and a committed candidate is what a clean-tree evaluator (the proof program) can judge."""
+    identities before and after every step prove that the *tracked* tree is the exact baseline plus
+    one candidate for every measurement; a committed candidate is what a clean-tree evaluator (the
+    proof program) can judge. Isolation is tracked-tree isolation only: paths the repository ignores
+    (caches, build outputs, installed dependencies) are shared state between measurements, kept
+    deliberately so the stage does not reinstall the world, and invisible to these identities."""
 
     COMMITTER = ("-c", "user.name=Dark Factory investigation", "-c", "user.email=factory@invalid")
 
