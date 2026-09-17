@@ -254,6 +254,7 @@ COPY_FILES = (
     "tests/factory/test_claim_scheduler.py",
     "tests/factory/test_project_graph.py",
     "tests/factory/test_claim_views.py",
+    "tests/factory/test_lease_store.py",
     "tests/factory/test_replacement_intent.py",
     "tests/factory/test_frontdoor_hosted.py",
     "tests/factory/test_factory_continuation.py",

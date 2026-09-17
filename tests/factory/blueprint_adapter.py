@@ -165,8 +165,27 @@ def _proof_currency(payload: dict) -> dict:
     return {"status": result.status, "reason_codes": list(result.reason_codes)}
 
 
+def _lease_guard(payload: dict) -> dict:
+    """`lease_guard` -> `factory_kernel.lease_store.validate_generation` (C05).
+
+    The fixture presents one lease (epoch, generation, owner, expiry, active, consumed, uncertain)
+    against the store's current identities and a trusted `now`; the production guard orders
+    schema -> identity -> live state -> uncertainty/replay and has no side effect.
+    """
+    from factory_kernel.lease_store import validate_generation
+
+    lease = {"epoch": payload["epoch"], "generation": payload["generation"], "owner": payload["owner"],
+             "expires_at": payload["expires_at"], "active": payload["active"], "consumed": payload["consumed"],
+             "uncertain": payload["uncertain"]}
+    current = {"current_epoch": payload["current_epoch"], "current_generation": payload["current_generation"],
+               "current_owner": payload["current_owner"]}
+    result = validate_generation(lease, current, now=payload["now"])
+    return {"status": result.status, "reason_codes": list(result.reason_codes)}
+
+
 OPERATIONS = {
     "plan_dispatch": _plan_dispatch,
+    "lease_guard": _lease_guard,
     "proof_currency": _proof_currency,
     "event_replay": _event_replay,
     "source_span": _source_span,
