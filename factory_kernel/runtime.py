@@ -2271,6 +2271,8 @@ class KernelRuntime:
             stop_check=self.check_stop, epoch=str(DEFAULT_POLICY["revocation_epoch"]),
         )
         result = broker.merge_exact_head(grant, expected_head=head)
+        if result.state != "observed_success":
+            raise NeedsHuman(f"merge of #{pr_number} was not observed as merged: broker state {result.state}")
         print(
             f"FACTORY_EFFECT operation=merge_exact_head pr=#{pr_number} grant={grant.grant_id} "
             f"state={result.state} replayed={'yes' if result.replayed else 'no'}",

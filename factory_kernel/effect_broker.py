@@ -181,8 +181,10 @@ class EffectBroker:
         subject, the caller's expected head, and `merge_squash`'s own re-read plus GitHub's
         `--match-head-commit`."""
         state, prior = self.journal.state_of(grant.grant_id)
-        if state in ("observed_success", "observed_failure") and prior is not None and prior.get("request_sha256") == grant.request_sha256:
-            # An identical replay references what was observed; it never executes again.
+        if (state == "observed_success" and prior is not None and prior.get("semantic_operation") == "merge_exact_head"
+                and prior.get("request_sha256") == grant.request_sha256 and expected_head == grant.subject["head_sha"]):
+            # An identical replay of THIS operation's observed success references what was observed; it
+            # never executes again. Every other prior state goes through the gates and is refused there.
             return EffectResult(state, grant.grant_id, dict(prior.get("observation") or {}), replayed=True)
         observed_before = self._gate(grant, "merge_exact_head", expected_head=expected_head)
         started_at = self.clock()

@@ -151,6 +151,33 @@ class BrokerTests(unittest.TestCase):
         self.assertEqual([c[0] for c in gh.calls].count("merge_squash"), 1)
         self.assertEqual(self.states(), ["started", "observed_success"])
 
+    def test_a_grant_spent_on_observe_or_on_a_failed_merge_is_not_replayed_as_a_merge(self) -> None:
+        gh = FakeGitHub()
+        observer = grant_for(request={"operation": "observe", "caller_role": "observer"})
+        self.broker(gh).observe(observer)
+        with self.assertRaises(EffectRefused) as ctx:
+            self.broker(gh).merge_exact_head(observer, expected_head=HEAD)
+        self.assertTrue({"operation_mismatch", "grant_uses_exhausted"} & set(ctx.exception.reason_codes))
+        self.assertNotIn("merge_squash", [c[0] for c in gh.calls])
+        # A merge grant whose call was refused by a stop stays refused on replay: never a success.
+        stopped = FakeGitHub()
+        grant = grant_for()
+        self.stop_raises = RuntimeError("FACTORY_STOPPED")
+        with self.assertRaises(RuntimeError):
+            self.broker(stopped).merge_exact_head(grant, expected_head=HEAD)
+        self.stop_raises = None
+        with self.assertRaises(EffectRefused) as ctx:
+            self.broker(stopped).merge_exact_head(grant, expected_head=HEAD)
+        self.assertIn("grant_uses_exhausted", ctx.exception.reason_codes)
+        self.assertNotIn("merge_squash", [c[0] for c in stopped.calls])
+        # And a replay presented with a different expected head is not a replay at all.
+        merged = FakeGitHub()
+        fresh = grant_for(now=2000)
+        self.broker(merged).merge_exact_head(fresh, expected_head=HEAD)
+        with self.assertRaises(EffectRefused) as ctx:
+            self.broker(merged).merge_exact_head(fresh, expected_head="c" * 40)
+        self.assertIn("expected_head_differs_from_grant", ctx.exception.reason_codes)
+
     def test_a_started_or_uncertain_operation_refuses_reissue(self) -> None:
         gh = FakeGitHub(merge_effect="timeout")
         grant = grant_for()

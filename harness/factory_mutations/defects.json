@@ -323,9 +323,9 @@
     {
       "id": "runtime-stop-rechecked-before-programme-admission",
       "file": "factory_kernel/runtime.py",
-      "find": "        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(\n                self.github.issue(linked_issue)\n            )\n        self.check_stop()",
-      "replace": "        self.check_stop()\n        if linked_issue is not None:\n            ProgrammeQueue(self.github, self.config.default_branch).admit(\n                self.github.issue(linked_issue)\n            )",
-      "why": "A stop arriving during the final remote programme read would be missed if the last stop check ran before admission."
+      "find": "            stop_check=self.check_stop, epoch=str(DEFAULT_POLICY[\"revocation_epoch\"]),\n",
+      "replace": "            stop_check=lambda: None, epoch=str(DEFAULT_POLICY[\"revocation_epoch\"]),\n",
+      "why": "A stop arriving during the final remote programme read (admission) would be missed if the last stop observation ran before it. The runtime must hand the broker its own fresh stop check; a no-op check leaves the pre-admission check as the last observation. Detector: tests/factory/test_factory_programme.py"
     },
     {
       "id": "runtime-merges-even-when-merging-is-disabled",
