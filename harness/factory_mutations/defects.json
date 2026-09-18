@@ -3683,7 +3683,7 @@
     {
       "id": "execution-worker-probe-bypass",
       "file": "factory_kernel/execution_probe.py",
-      "find": "            if self.client is None:\n                state[\"phase\"] = \"launch\"",
+      "find": "            if self.client is None and self.scope is None:\n                state[\"phase\"] = \"launch\"",
       "replace": "            if True:\n                state[\"phase\"] = \"launch\"",
       "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
     },
@@ -3711,8 +3711,8 @@
     {
       "id": "execution-worker-probe-failed",
       "file": "factory_kernel/execution_probe.py",
-      "find": "len(receipts) == 1 and result.returncode == 0",
-      "replace": "len(receipts) == 1",
+      "find": "                cost = receipts[0].get(\"total_cost_usd\") if len(receipts) == 1 and result.returncode == 0 else None\n                state[\"phase\"] = \"observe\"",
+      "replace": "                cost = receipts[0].get(\"total_cost_usd\") if len(receipts) == 1 else None\n                state[\"phase\"] = \"observe\"",
       "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
     },
     {
@@ -3844,8 +3844,8 @@
     {
       "id": "test-author-probe-unmetered-runner",
       "file": "scripts/factory_test_author_probe.py",
-      "find": "    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)\n    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ, runner=runner)",
-      "replace": "    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ)",
+      "find": "    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)\n    scope = None",
+      "replace": "    runner = subprocess.run\n    scope = None",
       "why": "The three nested test-author calls are paid calls and must go through the metered ProbeRunner; a raw subprocess here is the unmetered paid path the critic review named (WP00, C06). Detector: tests/factory/test_factory_test_author_probe.py"
     },
     {
