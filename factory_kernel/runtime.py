@@ -2205,9 +2205,9 @@ class KernelRuntime:
             ProgrammeQueue(self.github, self.config.default_branch).admit(
                 self.github.issue(linked_issue)
             )
-        self.check_stop()
         self.github.cwd = str(cwd)
-        self.github.merge_squash(pr_number, expected_head=head)
+        # The stop/fence recheck immediately before the remote call lives in the broker now.
+        self._merge_squash_through_broker(pr_number, head=head, authorization=authorization, paths=paths)
         try:
             self._exec(
                 [
@@ -2234,6 +2234,49 @@ class KernelRuntime:
             self._carry_drop(paths, cwd, env, issue_number=linked_issue)
         print(f"FACTORY_MERGED_VERIFIED pr=#{pr_number} evidenced_head={head}")
         return paths.artifacts / "merge-verification.json"
+
+    def _merge_squash_through_broker(self, pr_number: int, *, head: str, authorization: Path, paths: RunPaths) -> dict:
+        """The exact-head merge as a brokered effect (SPECIFICATION 5, WP06).
+
+        A grant is derived from the merge authorization the authority wrote (`merge_verify.py
+        pre`: base, head, tree and evidence digest), so a caller that lies about the subject gets
+        no grant; the broker re-observes the PR itself, consumes the grant once in a durable
+        journal beside the artifacts, rechecks stop and fence immediately before the one remote
+        call, spends through the same `merge_squash` as before, and records what it observed.
+        In-process today: the broker is an object in this process, not the separate-identity
+        service SPEC 5 requires, so no TCB reduction is claimed (`.factory/tcb.json` says so).
+        """
+        from .capabilities import DEFAULT_POLICY, Refusal, authorize
+        from .effect_broker import EffectBroker, EffectJournal
+
+        authorized = self._read_json(authorization)
+        subject = {
+            "repository": self.config.repository, "pr_number": pr_number, "head_sha": head,
+            "base_sha": str(authorized.get("base_sha") or ""),
+            "head_tree_sha": str(authorized.get("head_tree_sha") or ""),
+            "evidence_sha256": str(authorized.get("evidence_sha256") or ""),
+        }
+        request = {
+            "operation": "merge_exact_head", "caller_role": "merge-executor",
+            "caller_instance": f"kernel:{paths.root.name}", "request_id": f"merge-{pr_number}-{head[:12]}",
+            "source_sha": subject["base_sha"],
+        }
+        grant = authorize(request, subject, DEFAULT_POLICY, authorized, None, None, now=int(time.time()))
+        if isinstance(grant, Refusal):
+            raise NeedsHuman(f"merge of #{pr_number} was not granted: {','.join(grant.reason_codes)}")
+        (paths.artifacts / "merge-grant.json").write_text(
+            json.dumps(grant.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        broker = EffectBroker(
+            self.github, EffectJournal(paths.artifacts / "effect-journal.jsonl"),
+            stop_check=self.check_stop, epoch=str(DEFAULT_POLICY["revocation_epoch"]),
+        )
+        result = broker.merge_exact_head(grant, expected_head=head)
+        print(
+            f"FACTORY_EFFECT operation=merge_exact_head pr=#{pr_number} grant={grant.grant_id} "
+            f"state={result.state} replayed={'yes' if result.replayed else 'no'}",
+            flush=True,
+        )
+        return result.to_dict()
 
     # ---------- merge, as its own step with its own identity ----------
 

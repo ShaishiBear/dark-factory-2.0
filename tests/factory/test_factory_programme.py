@@ -3,6 +3,8 @@ import base64
 from copy import deepcopy
 import json
 from pathlib import Path
+import shutil
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -601,12 +603,15 @@ class PostMergeRoutingTests(unittest.TestCase):
         runtime = object.__new__(WorkerControlledRuntime)
         runtime.repo_root = Path(__file__).resolve().parents[2]
         runtime.config = SimpleNamespace(runtime=SimpleNamespace(work_root=runtime.repo_root),
-                                         default_branch="main")
+                                         default_branch="main", repository=REPO)
         runtime.github = Mock()
-        runtime.github.pr.return_value = {"body": "Fixes #1"}
+        # What the broker re-observes before spending: an open PR at the authorised head.
+        runtime.github.pr.return_value = {"body": "Fixes #1", "state": "OPEN", "headRefOid": "a" * 40}
         runtime.github.issue.return_value = {"number": 1, "body": "ordinary issue"}
         runtime._exec = Mock()
-        runtime._read_json = Mock(return_value={})
+        # The merge authorization as `merge_verify.py pre` writes it: the grant is derived from it.
+        runtime._read_json = Mock(return_value={"base_sha": "b" * 40, "head_sha": "a" * 40,
+                                                "head_tree_sha": "d" * 40, "evidence_sha256": "e" * 64})
         runtime._create_safe_revert_pr = Mock(return_value=10)
         return runtime
 
@@ -673,7 +678,11 @@ class PostMergeRoutingTests(unittest.TestCase):
 
                 runtime.check_stop = check_stop
                 runtime.check_stop()  # Dispatch/validation saw a clear stop state earlier.
-                paths = SimpleNamespace(artifacts=Path("artifacts"), transcripts=Path("logs"))
+                run_root = Path(tempfile.mkdtemp(prefix="dark-factory-programme-merge-"))
+                self.addCleanup(shutil.rmtree, run_root, True)
+                artifacts = run_root / "artifacts"
+                artifacts.mkdir()
+                paths = SimpleNamespace(root=run_root, artifacts=artifacts, transcripts=run_root / "logs")
                 with patch.object(ProgrammeQueue, "admit", side_effect=admit):
                     def merge():
                         return runtime._merge_and_verify(
@@ -687,8 +696,12 @@ class PostMergeRoutingTests(unittest.TestCase):
                             merge()
                         runtime.github.merge_squash.assert_not_called()
                         runtime._exec.assert_not_called()
+                        # The broker consumed the grant and recorded the control change; no remote call.
+                        journal = (artifacts / "effect-journal.jsonl").read_text(encoding="utf-8").splitlines()
+                        self.assertEqual([json.loads(row)["state"] for row in journal], ["started", "observed_failure"])
+                        self.assertFalse(json.loads(journal[-1])["remote_call"])
                     else:
-                        self.assertEqual(merge(), Path("artifacts/merge-verification.json"))
+                        self.assertEqual(merge(), artifacts / "merge-verification.json")
                         runtime.github.merge_squash.assert_called_once_with(
                             9, expected_head="a" * 40,
                         )

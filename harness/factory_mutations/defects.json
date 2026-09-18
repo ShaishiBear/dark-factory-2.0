@@ -315,10 +315,10 @@
     },
     {
       "id": "runtime-stop-not-rechecked-before-merge",
-      "file": "factory_kernel/runtime.py",
-      "find": "        self.check_stop()\n        self.github.cwd = str(cwd)\n        self.github.merge_squash(pr_number, expected_head=head)",
-      "replace": "        self.github.cwd = str(cwd)\n        self.github.merge_squash(pr_number, expected_head=head)",
-      "why": "A stop pressed during programme admission would no longer prevent the shared inline/deferred irreversible merge. The earlier inline check cannot protect this later interval."
+      "file": "factory_kernel/effect_broker.py",
+      "find": "        try:\n            self.stop_check()\n        except Exception as exc:\n",
+      "replace": "        try:\n            pass\n        except Exception as exc:\n",
+      "why": "A stop pressed during programme admission would no longer prevent the shared inline/deferred irreversible merge: the broker's recheck immediately before the one remote call is the last observation of the controls, and the earlier inline check cannot protect this later interval. Detector: tests/factory/test_factory_programme.py, tests/factory/test_factory_merge_authorized.py"
     },
     {
       "id": "runtime-stop-rechecked-before-programme-admission",
@@ -4701,6 +4701,55 @@
       "find": "        env.update(self.gateway.process_environment(base_url_variable=\"OPENROUTER_BASE_URL\", key_variable=\"OPENROUTER_API_KEY\"))\n",
       "replace": "        env.update({\"OPENROUTER_BASE_URL\": self.gateway.base_url + \"/v1\"})\n",
       "why": "SPEC 6.2: the process under validation receives the channel token, never the credential; a launcher that only redirects the base URL leaves the real key in the child's environment. Detector: tests/factory/test_gateway_server.py"
+    },
+    {
+      "id": "capabilities-evidence-head-unchecked",
+      "file": "factory_kernel/capabilities.py",
+      "find": "            for key, evidence_key in ((\"head_sha\", \"head_sha\"), (\"base_sha\", \"base_sha\"), (\"head_tree_sha\", \"head_tree_sha\"),\n",
+      "replace": "            for key, evidence_key in ((\"base_sha\", \"base_sha\"), (\"head_tree_sha\", \"head_tree_sha\"),\n",
+      "why": "SPEC 5 / WP06 acceptance: orchestration that lies about the subject gets no grant; a grant issued for a head the authority never judged would let the broker merge an unjudged head. Detector: tests/factory/test_capabilities.py"
+    },
+    {
+      "id": "capabilities-expiry-ignored",
+      "file": "factory_kernel/capabilities.py",
+      "find": "    elif now >= grant.expires_at:\n        reasons.append(\"grant_expired\")\n",
+      "replace": "    elif False:\n        reasons.append(\"grant_expired\")\n",
+      "why": "SPEC 5: a grant carries an expiry so an old authorisation cannot be spent later against a moved world; an expired grant that still passes is a replayable credential. Detector: tests/factory/test_capabilities.py, tests/factory/test_effect_broker.py"
+    },
+    {
+      "id": "capabilities-uses-unbounded",
+      "file": "factory_kernel/capabilities.py",
+      "find": "    elif uses >= grant.max_uses:\n        reasons.append(\"grant_uses_exhausted\")\n",
+      "replace": "    elif False:\n        reasons.append(\"grant_uses_exhausted\")\n",
+      "why": "SPEC 5: maximum uses is a grant field; a grant that can be spent without bound is a standing capability, not an exact one-use authorisation. Detector: tests/factory/test_capabilities.py, tests/factory/test_effect_broker.py"
+    },
+    {
+      "id": "effect-broker-pending-reissued",
+      "file": "factory_kernel/effect_broker.py",
+      "find": "        if state in (\"started\", \"uncertain\"):\n            reasons.append(\"prior_operation_pending_or_uncertain\")\n",
+      "replace": "        if False:\n            reasons.append(\"prior_operation_pending_or_uncertain\")\n",
+      "why": "C05: a started or uncertain operation is never reissued; a broker that executes again after a lost response can merge twice or merge what an operator was reconciling. Detector: tests/factory/test_effect_broker.py"
+    },
+    {
+      "id": "effect-broker-head-not-reobserved",
+      "file": "factory_kernel/effect_broker.py",
+      "find": "                    if observed[\"headRefOid\"] != grant.subject[\"head_sha\"]:\n                        reasons.append(\"subject_head_moved\")\n",
+      "replace": "                    if False:\n                        reasons.append(\"subject_head_moved\")\n",
+      "why": "C05: the broker independently loads the subject before consuming the grant; trusting the caller's head means a moved PR is merged on a stale authorisation before merge_squash's own check even runs. Detector: tests/factory/test_effect_broker.py"
+    },
+    {
+      "id": "effect-broker-timeout-recorded-as-success",
+      "file": "factory_kernel/effect_broker.py",
+      "find": "        except subprocess.TimeoutExpired as exc:\n            self.journal.record(\"uncertain\", grant, at=self.clock(), remote_call=True, remote_state=\"unknown\",\n                                detail=f\"merge call timed out: {str(exc)[:300]}\")\n            raise EffectUncertain(f\"merge of PR #{number} at {head} timed out; the remote may have merged. Observe, do not replay.\") from exc\n",
+      "replace": "        except subprocess.TimeoutExpired as exc:\n            pass\n",
+      "why": "C05: a timeout or lost response is `uncertain`, never success and never a silent continue; recording it as returned would let the post-merge path report a merge nobody observed. Detector: tests/factory/test_effect_broker.py"
+    },
+    {
+      "id": "runtime-merge-bypasses-broker",
+      "file": "factory_kernel/runtime.py",
+      "find": "        self._merge_squash_through_broker(pr_number, head=head, authorization=authorization, paths=paths)\n",
+      "replace": "        self.github.merge_squash(pr_number, expected_head=head)\n",
+      "why": "SPEC 5 / WP06: the exact-head merge is a brokered effect: grant derived from the authority's artifact, consumed once in a durable journal, controls rechecked immediately before the call. A direct spend skips all three and leaves no effect journal. Detector: tests/factory/test_factory_programme.py, tests/factory/test_factory_merge_authorized.py"
     }
   ]
 }
