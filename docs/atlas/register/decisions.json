@@ -1,0 +1,3369 @@
+{
+  "schema": "dark-factory-decision-register/v1",
+  "generated": "2026-09-08",
+  "source_transcripts": [
+    "darkfactory_chatgpt_history__2_.txt (18 Aug - early Sep 2026)",
+    "ChatGPT-Evaluate_Repository_Progress (3-8 Sep 2026, 41532 lines)"
+  ],
+  "notes": {
+    "status_default": "PROPOSED. The corpus was produced outside the ACP process it defines; nothing in it is decided until adopted (see DFE-001).",
+    "tier_provenance": "Tiers are assigned by the 2026-09-08 evaluation, not by the source corpus. They are a proposal, not a record.",
+    "status_values": [
+      "PROPOSED",
+      "SETTLED",
+      "CONSTITUTIONAL",
+      "BUILT",
+      "PARTIAL",
+      "SUPERSEDED",
+      "OPEN",
+      "AMENDMENT"
+    ],
+    "status_meanings": {
+      "PROPOSED": "Written at implementation grade. No evidence yet. Default.",
+      "SETTLED": "Not to be reopened without new evidence. Evidence, not permission.",
+      "CONSTITUTIONAL": "Not to be reopened without an owner decision. Tier 3.",
+      "BUILT": "Merged and evidenced in the repository.",
+      "PARTIAL": "Partially implemented; named component exists, full decision does not.",
+      "SUPERSEDED": "Replaced. superseded_by names the replacement.",
+      "OPEN": "Deliberately undecided pending implementation evidence.",
+      "AMENDMENT": "A change to the corpus proposed by the 2026-09-08 evaluation."
+    },
+    "usage": "Every PR names the decision IDs it exercises. A PR that contradicts a SETTLED or CONSTITUTIONAL decision requires an ACP.",
+    "verification_2026_09_09": "Task 1 verification against origin/main f13219b. Every non-PROPOSED status was checked against the repository; entries carry `verified` and, where a repository claim exists, `evidence`. Nothing was downgraded: every error found ran in the direction of UNDERSTATING what exists, so no aspirational claim needed removing. Four corrections of substance: (1) factory_kernel/state.py no longer exists - audit finding B.4 was closed by PR #43, which DELETED the unexecuted state machine, and a regression test now forbids its return; (2) the holdout is genuinely builder-blind via sparse checkout since PR #42, so B.3 is closed; (3) per-stage timing instrumentation is substantially present (record_stage_timing / stage-timings.jsonl), not absent; (4) the merge verifier does enforce byte-identical tree equivalence. Two facts the corpus has no entry for: the measured floors now lag observed evidence by a wide margin (floor unit_tests=1033 and static_checks=5 against an observed UNIT_PASSED tests=2353 and STATIC_OK checks=6 on the same quick gate, run 34332642132), and the daily full-harness regression on main has failed every day since 2026-09-05 at GATE_FAILED: e2e (issue #119).",
+    "prediction_119_2026_09_10": "FALSIFIABLE PREDICTION, recorded before the 03:41 UTC main-regression of 2026-09-11 and before its result is known. CLAIM: issue #119's five days of GATE_FAILED: e2e were issue #103 -- the StrictMode effect re-run that aborts the first stream -- and PR #134, merged to main as 0ee413a on 2026-09-10, fixes it. The regression will therefore go green untouched. WHAT A GENUINE PASS LOOKS LIKE, and it must be this: `E2E_STREAM_UI states=[...]` contains at least one state carrying `stop-button`, and the verdict line reads `Stop response observed`. Expected shape roughly send-button -> stop-button (or stop-button+assistant-text) -> send-button+assistant-text, with polls > 1. That sequence is the claim, because ChatInput.tsx renders the Stop button only while `isStreaming` is true, and `isStreaming` never becoming true in the browser is exactly what #103 describes and what useStreamingResponse.ts was changed to fix. THE CONFOUND, which must not be counted as confirmation: harness/e2e.py's _stream_window_verdict has a SECOND pass route -- `arrived_at_once`, true when the predicate matched and polls <= 1. A run that passes with polls=1, no `stop-button` in states, and the verdict line `response arrived within one poll` is green on SPEED and proves nothing about the streaming flag. If that is the result, the prediction is UNCONFIRMED, not confirmed, and #119 should stay open until a slower run discriminates. WHAT FALSIFIES IT: the same failure returns -- `Stop response never observed and the response did not arrive within one poll`, states=[send-button,send-button+assistant-text]. That means isStreaming still never becomes true in the browser, #134 did not fix the browser-observable behaviour, and #119 is independent of #103. Consequence: something unrelated blocks the only post-merge route to the 193 kernel mutations (DFE-026), which is worse than the prediction being right and moves #119 from first in the queue to urgent. A FOURTH OUTCOME: red at a marker other than GATE_FAILED: e2e. That would mean the E2E journey is fixed and something else on main broke, and neither confirms nor falsifies this. ADDENDUM, recorded 2026-09-10 16:35 UTC, BEFORE the run and before its result. (1) THIS RUN IS workflow_dispatch, NOT schedule. It was triggered by hand rather than waited for. The workflow hardcodes `ref: main`, so it tests exactly the tree the prediction is about and the trigger is not part of any of the four outcomes -- but if the result is surprising in EITHER direction, the event type belongs on the list of things to check first, rather than being reconstructed afterwards once it matters. (2) THE DECLARED SCHEDULE IS NOT THE OBSERVED ONE. dark-factory-main-regression.yml declares `cron: '41 3 * * *'`. The last five scheduled runs actually started at 08:23, 08:23, 08:19, 08:38 and 08:07 UTC -- consistently about four hours forty minutes late. Anything reasoning about when the daily regression runs, including anyone diagnosing a gap in coverage or a window during which main is unverified, will be four and a half hours wrong if it reads the cron line. This author quoted 03:41 twice from the cron before checking the runs. RESOLVED 2026-09-10 17:44 UTC: OUTCOME 1, CONFIRMED. Run 34505370936 against main at adc8145 returned conclusion=success, the first green main-regression since 2026-09-05. E2E_STREAM_UI states=[send-button,stop-button+assistant-text,send-button+assistant-text+citation] polls=43; E2E_PASSED steps=21; GATE_OK mode=full. `stop-button` is present and polls=43, so the run passed on the PROPERTY and not on the confound -- `arrived_at_once` requires polls <= 1 and is ruled out by an order of magnitude. The state sequence is the shape the prediction described, with a `citation` flag in the final state that it did not. #119's five days of red were #103; PR #134 fixed it and the regression recovered untouched, with no change made to #119 or to the E2E journey. THE METHOD IS THE PART WORTH KEEPING. polls=43 means something only because the confound was written down BEFORE the result. Had it not been, any green would have been read as vindication -- including a green by the speed route, which would have proved nothing about the flag #134 changed. This is DFE-027's argument demonstrated on the day DFE-027 was filed, and it is stronger evidence for that entry than the entry's own reasoning: the first falsifiable claim made in this sequence resolved on its own terms, and could not have without the marker's ambiguity being named in advance. The workflow_dispatch caveat recorded above turned out not to matter, which is the outcome one wants from a caveat rather than a reason not to have made it.",
+    "boundary_2026_09_10": "DFE-024 BOUNDARY, MEASURED. The line, accepted by the owner: every NON-NESTED, NON-DUNDER function under factory_kernel/, harness/ or scripts/ -- _private INCLUDED -- must be ENTERED by at least one test. 909 functions. `_private` is in because the rule is about entering the code, not testing through a seam: a private function reached via its public caller passes with no test naming it, and one that nothing reaches through any public path is precisely the finding worth having (_check_identity_age, _merge_and_verify). ENTERING VIA A SUBPROCESS COUNTS. A rule that is true and awkward beats one that is checkable and declares 17 deterministic authorities untested. MEASURED 2026-09-10 by sys.monitoring PY_START over the factory suite (1843 tests, 32 platform failures): 678 entered, 231 not. THIS IS AN UPPER BOUND, NOT AN ANSWER. CONFIDENT -- factory_kernel, 44 never entered. In-process, importable, no subprocess boundary. Real gaps. UNMEASURABLE -- scripts/, 98. These are invoked as subprocesses by the kernel and in-process tracing cannot see them; under the accepted rule most probably pass. DELIBERATELY LEFT UNCLASSIFIED rather than exempted: an exemption written down becomes permanent, an unmeasured population stays visible as work. Measuring them needs a different instrument. MIXED -- harness/, 89. merge_verify.py (9) and e2e.py (9) are subprocess-invoked like scripts/. mutations/run.py (7) was a real gap and is closed. genesis_collect.py (6) and genesis_validate.py (6) are inflated by the 32 Windows genesis failures, whose paths never ran. CHARACTERISATION COMPLETED 2026-09-11. The 231 resolve into THREE categories, not two, and the third was not anticipated. (1) REAL GAPS -- in-process, importable, nothing enters them: factory_kernel 44, and harness/mutations+factory_mutations 7, the latter closed by PR #169. (2) SUBPROCESS-ENTERED -- run as subprocesses by the kernel or the harness, so they pass under the accepted rule while in-process tracing cannot see it: scripts/ 98 (invoked by factory_kernel), harness/merge_verify.py 9 and harness/post_merge.py 7 (invoked by the kernel), harness/bootstrap_verify.py 12 (run as a subprocess by tests/factory/test_factory_bootstrap.py, and DOUBLY invisible here because those are the 32 tests that fail on this Windows machine), harness/serve.py 8 (launched by harness.config.json's `start` command during the E2E rung). (3) LADDER-ENTERED BUT NOT UNIT-ENTERED -- called IN-PROCESS, but only from harness/ci.py's full ladder, which the factory unit suite never runs: harness/e2e.py 9, harness/appproc.py 3. Not subprocess artefacts and not gaps either. They are proved, but only at ninety-nine minutes a time, by the lane that cannot change them -- which is DFE-028's finding about github_cli.py arriving at a second place, and DFE-026's asymmetry underneath both. CONSEQUENCE FOR THE RULE: category 3 is the one to watch. Category 2 is a measurement problem with a known answer; category 1 is work; category 3 is code that passes the rule honestly and is still discoverable only by a full lap. The invocation rule as accepted does not distinguish it, and probably should not -- but whoever reads a green from that rule should know which of the three it means.",
+    "experiment_test_author_2026_09_11": "FALSIFIABLE EXPERIMENT, recorded BEFORE the run and before its result. This is a rebuild of issue #49 run AS AN EXPERIMENT ABOUT test_author, not as an attempt to merge it. If it merges, that is a by-product. THE QUESTION: DFE-029 rests on two hand-backs with DIFFERENT proximate causes -- #49 declared a red checkpoint that PASSED on the unchanged tree (a wrong test), #134 declared an `expected_failure` string the test never printed (a wrong description of a correct test). Two samples is not a pattern about which, and a fix chosen now would be a guess with a fifty-percent prior. OUTCOME A -- a checkpoint again passes on the unchanged tree: the stage cannot tell whether its test expresses the bug, and the fix belongs in what it is required to VERIFY before declaring. It writes tests it has not established are failing. OUTCOME B -- a wrong `expected_failure` string again: the stage CAN write a failing test and cannot describe its own failure, and the fix belongs in the DECLARATION step, not in test authorship. OUTCOME C -- a third, different cause: three causes in three builds, the problem is broader than either hypothesis, and neither narrow fix is warranted. The honest reading would be that the stage is unreliable in general rather than defective in one specific way. OUTCOME D -- A CLEAN FIRST PASS, no hand-back at all: hand-backs are NOT two-for-two, the sample was three builds rather than two, and DFE-029's constraint on ACP-003 -- that a hand-back is normal and a ceiling must accommodate stage_run=2 -- IS WEAKENED AND MUST BE RECORDED AS SUCH. This outcome is to be reported as readily as the other three. The prior belief was formed on two builds and a single clean run is real evidence against it. ALSO CAPTURED, and the reason a full build is the right instrument: EVENTS PER TURN FOR EVERY ROLE, not only test_author. The bound DFE-029 names as its candidate must be PER-ROLE -- review-spec ran healthy at 686 ev/turn while test_author's healthy maximum is 145, a factor of five between two roles in the same build. One full build yields ten roles' worth of distribution in a single run, which is the data a bound needs before anyone sets a number. No number will be set from this run either; it is the second observation of a distribution, not the distribution.",
+    "lap_49_2026_09_11": "ISSUE #49 -> PR #173 -> MERGED ca71347, and the scope matters more than the headline. WHAT IS SUPPORTED: the PR was opened and merged by app/shaishibear-dark-factory, carried ZERO dark-factory comments (no refusal, no hand-back, no re-head), and went build -> validate -> merge with NO HUMAN ACTION INSIDE THE LOOP. The merge spent an App token 3 s old and FACTORY_MERGED_VERIFIED confirmed the merged tree against the authorised one. No maintainer pull request was involved at any point. WHAT IS NOT SUPPORTED, and was claimed in conversation before review corrected it. (1) `NOBODY HAND-HOLDING IT` IS FALSE. Three human actions immediately preceded the lap: #49 was relabelled from factory:needs-human to factory:accepted, PR #170 was closed, and THE BUILD WAS TRIGGERED BY workflow_dispatch. The build run (34596429955) has event=workflow_dispatch; only the validate-and-merge run (34609884857) has event=schedule. Half the lap was human-initiated. (2) `ON THE FIRST ATTEMPT` NEEDS ITS SCOPE. The merged branch is factory/issue-49-a2-e4f733361b -- attempt series TWO. The a1 series produced PR #112 (still open) and PR #170 (closed by hand). Issue #49 carries 42 comments. What is true is that WITHIN build run 34596429955 the RED gate passed first try and the resulting PR validated and merged without a rebuild. (3) unattended-merge reported SKIPPED on #173. The merge was performed by the kernel's own merge_squash, not by the job named for unattended merging. DEFINITIONAL QUESTION LEFT OPEN FOR THE OWNER: whether a human-dispatched build followed by a scheduled validation counts as `unattended`. The register should state the definition rather than leave it to the adjective. Until it does, describe laps by WHICH EVENTS triggered which runs, which is unambiguous and costs one clause."
+  },
+  "registers": {
+    "DFA": "Target architecture directive, 7 Sep, 49 decisions",
+    "DFC": "Canonical contracts / schema specification, 7 Sep, 76 decisions",
+    "DFP": "Preflight algorithm directive, 7 Sep, 81 decisions",
+    "DFF": "Front Door algorithm directive, 7 Sep, 87 decisions",
+    "DFM": "Repository migration directive, 7 Sep, Parts I-XV, 67 items",
+    "DFV": "v3 claim-centric locked decisions, 7 Sep evening, 21 items",
+    "DFG": "Architecture governance / self-modification, commit d2eeda7",
+    "DFE": "Amendments proposed by the 2026-09-08 evaluation and subsequent proposals"
+  },
+  "decisions": [
+    {
+      "id": "DFA-001",
+      "n": 1,
+      "title": "Five-layer system split is decided",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-002",
+      "n": 2,
+      "title": "The kernel has one conceptual job: is this exact transition authorised",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Root position. See DFV-002."
+    },
+    {
+      "id": "DFA-003",
+      "n": 3,
+      "title": "Formalise a machine-readable TCB manifest",
+      "tier": 2,
+      "status": "PROPOSED",
+      "falsifier": "Manifest cannot classify existing modules without ambiguity"
+    },
+    {
+      "id": "DFA-004",
+      "n": 4,
+      "title": "Separate orchestration from authorisation",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-005",
+      "n": 5,
+      "title": "Authorities emit narrow typed attestations",
+      "tier": 2,
+      "status": "PARTIAL",
+      "note": "Partly wrong as written. A typed envelope DOES exist for deterministic commands (authority.py CommandEvidence, carrying authority_id and hashed streams), and the spine emits versioned claim rows (claim_id, stage, artifact_sha256, deterministic_sha256, independent_sha256, exact_head_sha, bindings, completion_level). What is absent is an authority-identified attestation carrying an authority VERSION - which is precisely what DFE-009's revocation proposal needs.",
+      "evidence": "factory_kernel/authority.py (CommandEvidence); factory_kernel/spine.py (compile_evidence_index claim rows)",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFA-006",
+      "n": 6,
+      "title": "Separate action adapters from trusted observations",
+      "tier": 2,
+      "status": "SETTLED",
+      "note": "An untrusted adapter must not both act and be the only observer"
+    },
+    {
+      "id": "DFA-007",
+      "n": 7,
+      "title": "Capability-based execution is the target permission model",
+      "tier": 2,
+      "status": "PARTIAL",
+      "note": "Understated as written. Beyond the App-token split there is a per-role capability surface on main: allowed_tools(role), PathScope(read/write/deny) per role, a tool-less JUDGE_SCOPE, per-role thinking caps, and BUILDER_BLIND_PATHS enforced by sparse checkout. Still PARTIAL because it is a hand-maintained policy table, not the capability-broker model the decision describes. See DFV-005, DFV-004.",
+      "evidence": "factory_kernel/credential_env.py; factory_kernel/worker_policy.py; factory_kernel/worktree.py",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFA-008",
+      "n": 8,
+      "title": "Canonical history is append-only; current state is a materialised view",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-009",
+      "n": 9,
+      "title": "Every durable object carries explicit identity and version context",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-010",
+      "n": 10,
+      "title": "Specification versioning is authoritative; approved spec is immutable",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-011",
+      "n": 11,
+      "title": "User input defaults to exploration, not scope mutation",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-012",
+      "n": 12,
+      "title": "The Front Door produces one authoritative specification",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-013",
+      "n": 13,
+      "title": "Programme synthesis is propose then deterministically compile",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-014",
+      "n": 14,
+      "title": "Programme state is not product intent",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-015",
+      "n": 15,
+      "title": "Preflight is a separate trust domain",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-016",
+      "n": 16,
+      "title": "Candidate exploration uses the F0-F4 fidelity ladder",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-017",
+      "n": 17,
+      "title": "Measured facts, predictions and judgements are different types",
+      "tier": 2,
+      "status": "SETTLED",
+      "note": "Do not convert judgement into fake precision"
+    },
+    {
+      "id": "DFA-018",
+      "n": 18,
+      "title": "Recommendations require explicit assumptions",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-019",
+      "n": 19,
+      "title": "Reactive impact follows recorded graph edges, not model guesswork",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-020",
+      "n": 20,
+      "title": "Rejected alternatives remain durable",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-021",
+      "n": 21,
+      "title": "User candidates get equal evaluation, asymmetric reporting",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-022",
+      "n": 22,
+      "title": "User steering does not command implementation",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-023",
+      "n": 23,
+      "title": "Concurrency uses leases plus optimistic graph versioning",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-024",
+      "n": 24,
+      "title": "Graph mutation is command then event then materialised state",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-025",
+      "n": 25,
+      "title": "Core Project Decision Graph ontology, compact and extensible",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-026",
+      "n": 26,
+      "title": "The graph connects ideas to code end-to-end",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-027",
+      "n": 27,
+      "title": "Factory handoff is a narrow non-authoritative contract",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-028",
+      "n": 28,
+      "title": "Implementation-level vs strategy-level failure are distinct paths",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-029",
+      "n": 29,
+      "title": "Cost is hierarchical and first-class across five budget scopes",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "Structure only; no values. See DFE-005."
+    },
+    {
+      "id": "DFA-030",
+      "n": 30,
+      "title": "Learning has three layers: trajectories, lessons, models",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-031",
+      "n": 31,
+      "title": "Learning never enters blind judges",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Absolute. Structural enforcement, not convention."
+    },
+    {
+      "id": "DFA-032",
+      "n": 32,
+      "title": "Prediction must be calibrated against the real factory",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "See DFE-007 on coverage bias"
+    },
+    {
+      "id": "DFA-033",
+      "n": 33,
+      "title": "Live UI is projection, not authority",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-034",
+      "n": 34,
+      "title": "The UI supports direct graph steering with provenance",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-035",
+      "n": 35,
+      "title": "Implemented architecture is a persistent graph layer",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-036",
+      "n": 36,
+      "title": "Future incidents feed the same graph",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFA-037",
+      "n": 37,
+      "title": "The UI event transport is replaceable; define an abstract contract",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFA-038",
+      "n": 38,
+      "title": "Storage technology deliberately not pre-decided; semantics are",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFA-039",
+      "n": 39,
+      "title": "Front Door, Preflight and Learning are never in the TCB",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFA-040",
+      "n": 40,
+      "title": "Preflight and programme reasoning may use cheaper models",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-041",
+      "n": 41,
+      "title": "Avoid premature distributed architecture",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFA-042",
+      "n": 42,
+      "title": "Avoid premature genericisation across domains",
+      "tier": 2,
+      "status": "SETTLED",
+      "note": "Generic primitive Explore/Gather/Prune/Escalate/Select/Prove/Learn deferred until a second domain proves commonality"
+    },
+    {
+      "id": "DFA-043",
+      "n": 43,
+      "title": "26-step migration dependency order",
+      "tier": 1,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFV-018",
+      "note": "Retain as a dependency reference only",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
+    },
+    {
+      "id": "DFA-044",
+      "n": 44,
+      "title": "One integration benchmark before building the whole UI",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "The 17-step end-to-end story including assumption invalidation and candidate revival"
+    },
+    {
+      "id": "DFA-045",
+      "n": 45,
+      "title": "Add an adversarial benchmark proving Preflight can be overruled",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Proves the trust boundary is genuine"
+    },
+    {
+      "id": "DFA-046",
+      "n": 46,
+      "title": "Twenty questions not to be reopened casually",
+      "tier": 3,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFE-003",
+      "note": "Amended: list split into CONSTITUTIONAL and SETTLED; one item demoted",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
+    },
+    {
+      "id": "DFA-047",
+      "n": 47,
+      "title": "Eleven decisions intentionally left open for implementation evidence",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFA-048",
+      "n": 48,
+      "title": "How to use this directive: compare, record via ADR, compile to bounded items",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "48.3 ADR recording is what this register implements"
+    },
+    {
+      "id": "DFA-049",
+      "n": 49,
+      "title": "Desired result: the user-facing experience",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFC-001",
+      "n": 1,
+      "title": "Compatibility rule",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-002",
+      "n": 2,
+      "title": "Canonical JSON rules",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-003",
+      "n": 3,
+      "title": "ID strategy: opaque, type-prefixed, never reused",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-004",
+      "n": 4,
+      "title": "Common provenance object",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-005",
+      "n": 5,
+      "title": "Reference object",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-006",
+      "n": 6,
+      "title": "Approved Specification schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-007",
+      "n": 7,
+      "title": "Front Door Interview Ledger schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-008",
+      "n": 8,
+      "title": "Graph command schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-009",
+      "n": 9,
+      "title": "Canonical graph event schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-010",
+      "n": 10,
+      "title": "Graph node materialised envelope",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-011",
+      "n": 11,
+      "title": "Graph edge schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-012",
+      "n": 12,
+      "title": "Question schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-013",
+      "n": 13,
+      "title": "User-added question event",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-014",
+      "n": 14,
+      "title": "Assumption schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3,
+      "note": "Assumptions are first-class; see DFA-020"
+    },
+    {
+      "id": "DFC-015",
+      "n": 15,
+      "title": "Assumption invalidation event",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-016",
+      "n": 16,
+      "title": "Candidate schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-017",
+      "n": 17,
+      "title": "User-added direction",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-018",
+      "n": 18,
+      "title": "Evidence schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-019",
+      "n": 19,
+      "title": "Prediction schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-020",
+      "n": 20,
+      "title": "Disposable probe schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-021",
+      "n": 21,
+      "title": "Candidate evaluation record",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-022",
+      "n": 22,
+      "title": "Recommendation schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-023",
+      "n": 23,
+      "title": "Recommendation decision rule",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-024",
+      "n": 24,
+      "title": "Rejection record",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-025",
+      "n": 25,
+      "title": "Programme schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-026",
+      "n": 26,
+      "title": "Compiled programme DAG schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-027",
+      "n": 27,
+      "title": "Factory handoff schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-028",
+      "n": 28,
+      "title": "Factory handoff binding to the current issue system",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-029",
+      "n": 29,
+      "title": "Factory run schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 2
+    },
+    {
+      "id": "DFC-030",
+      "n": 30,
+      "title": "Kernel state-transition request",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-031",
+      "n": 31,
+      "title": "Authority attestation schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-032",
+      "n": 32,
+      "title": "Authority independence metadata",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-033",
+      "n": 33,
+      "title": "Capability grant schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-034",
+      "n": 34,
+      "title": "Lease v2 semantics with generation fencing",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-035",
+      "n": 35,
+      "title": "Lease acquisition result",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-036",
+      "n": 36,
+      "title": "Exploration budget schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-037",
+      "n": 37,
+      "title": "User cost approval command",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 3
+    },
+    {
+      "id": "DFC-038",
+      "n": 38,
+      "title": "Trajectory schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-039",
+      "n": 39,
+      "title": "Trajectory stage attempt",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 1
+    },
+    {
+      "id": "DFC-040",
+      "n": 40,
+      "title": "Prediction outcome schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-041",
+      "n": 41,
+      "title": "Strategy failure schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-042",
+      "n": 42,
+      "title": "Implementation component schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-043",
+      "n": 43,
+      "title": "Observation schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-044",
+      "n": 44,
+      "title": "Incident schema",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-045",
+      "n": 45,
+      "title": "Reconsideration schema",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-046",
+      "n": 46,
+      "title": "Engineering lesson schema, with falsifier",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-047",
+      "n": 47,
+      "title": "Lesson retrieval packet (ExperiencePacket)",
+      "tier": 2,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-048",
+      "n": 48,
+      "title": "External source evidence",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 5
+    },
+    {
+      "id": "DFC-049",
+      "n": 49,
+      "title": "Schema evolution rules",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-050",
+      "n": 50,
+      "title": "Unknown field handling",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-051",
+      "n": 51,
+      "title": "Hashing rule: never self-hash inside the hashed bytes",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFC-052",
+      "n": 52,
+      "title": "Time and ordering: wall clock is not the concurrency order",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFC-053",
+      "n": 53,
+      "title": "Deletion semantics",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-054",
+      "n": 54,
+      "title": "Privacy boundaries",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-055",
+      "n": 55,
+      "title": "Event types initial registry",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-056",
+      "n": 56,
+      "title": "Status vocabulary rule",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-057",
+      "n": 57,
+      "title": "Trust class field is explanatory, never authorising",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFC-058",
+      "n": 58,
+      "title": "Materialised project snapshot",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-059",
+      "n": 59,
+      "title": "Live UI event envelope",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-060",
+      "n": 60,
+      "title": "Frontend action semantics",
+      "tier": 1,
+      "status": "PROPOSED",
+      "phase": 4
+    },
+    {
+      "id": "DFC-061",
+      "n": 61,
+      "title": "Worked example: full question flow",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-062",
+      "n": 62,
+      "title": "Worked example: promotion flow",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-063",
+      "n": 63,
+      "title": "Worked example: strategy handoff",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-064",
+      "n": 64,
+      "title": "Worked example: real-world rejection",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-065",
+      "n": 65,
+      "title": "Worked example: future incident reconsideration",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-066",
+      "n": 66,
+      "title": "Where schemas live",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-067",
+      "n": 67,
+      "title": "Code generation from schemas",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-068",
+      "n": 68,
+      "title": "Schema tests",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-069",
+      "n": 69,
+      "title": "Cross-schema invariant tests",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-070",
+      "n": 70,
+      "title": "Do not over-normalise text",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-071",
+      "n": 71,
+      "title": "Schema ownership",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-072",
+      "n": 72,
+      "title": "Security principle: references are not authority",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Declared metadata is not an independently enforced fact"
+    },
+    {
+      "id": "DFC-073",
+      "n": 73,
+      "title": "Phased schema rollout, foundation first",
+      "tier": 1,
+      "status": "SETTLED",
+      "note": "Treat as binding. See DFE-004."
+    },
+    {
+      "id": "DFC-074",
+      "n": 74,
+      "title": "Before adopting: compare every schema to existing repo artefacts",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Blocking precondition. Becomes the evidence section of DFE-001."
+    },
+    {
+      "id": "DFC-075",
+      "n": 75,
+      "title": "Acceptance benchmark: full chain representable without destructive mutation",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFC-076",
+      "n": 76,
+      "title": "Final principle: append-only memory around a small authorisation kernel",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFP-001",
+      "n": 1,
+      "title": "Preflight core principle",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFP-002",
+      "n": 2,
+      "title": "Preflight may never qualify; verdict is always UNPROVEN",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFP-003",
+      "n": 3,
+      "title": "Determine whether exploration is needed at all",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-004",
+      "n": 4,
+      "title": "Three exploration modes: Direct, Light, Deep",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-005",
+      "n": 5,
+      "title": "Candidate generation rule",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-006",
+      "n": 6,
+      "title": "Candidate count",
+      "tier": 0,
+      "status": "OPEN",
+      "note": "To be learned, not specified"
+    },
+    {
+      "id": "DFP-007",
+      "n": 7,
+      "title": "Always include the baseline candidate",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-008",
+      "n": 8,
+      "title": "User-proposed candidates enter the same process",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-009",
+      "n": 9,
+      "title": "Freeze hard constraints before candidate comparison",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-010",
+      "n": 10,
+      "title": "Pre-register the decision policy",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-011",
+      "n": 11,
+      "title": "Do not create a fake universal score",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-012",
+      "n": 12,
+      "title": "Fidelity ladder F0-F4",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-013",
+      "n": 13,
+      "title": "Candidate state machine",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-014",
+      "n": 14,
+      "title": "Cheap invalidity screening first",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-015",
+      "n": 15,
+      "title": "Dominance pruning",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-016",
+      "n": 16,
+      "title": "Preserve the Pareto frontier",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-017",
+      "n": 17,
+      "title": "Uncertainty registry",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-018",
+      "n": 18,
+      "title": "Value-of-information rule for probes",
+      "tier": 1,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFE-005",
+      "note": "V1 replaced with fixed budgets plus logging",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
+    },
+    {
+      "id": "DFP-019",
+      "n": 19,
+      "title": "Probe execution threshold",
+      "tier": 1,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFE-005",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
+    },
+    {
+      "id": "DFP-020",
+      "n": 20,
+      "title": "Cost control and the three-conjunct escalation predicate",
+      "tier": 2,
+      "status": "SETTLED",
+      "note": "Strongest decision rule in the corpus"
+    },
+    {
+      "id": "DFP-021",
+      "n": 21,
+      "title": "Cost estimates must be calibrated",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-022",
+      "n": 22,
+      "title": "Candidate population is dynamic",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-023",
+      "n": 23,
+      "title": "Candidate novelty test",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-024",
+      "n": 24,
+      "title": "Exploration breadth versus depth",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-025",
+      "n": 25,
+      "title": "Model diversity",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-026",
+      "n": 26,
+      "title": "Long-Horizon Architect participation",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-027",
+      "n": 27,
+      "title": "Reversibility is an explicit criterion",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-028",
+      "n": 28,
+      "title": "Complexity should use observable proxies",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-029",
+      "n": 29,
+      "title": "Expected engineering cost",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-030",
+      "n": 30,
+      "title": "Stop rule: clear winner",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-031",
+      "n": 31,
+      "title": "Stop rule: sufficient confidence",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-032",
+      "n": 32,
+      "title": "Stop rule: budget exhaustion",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-033",
+      "n": 33,
+      "title": "Stop rule: genuine subjective trade-off",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-034",
+      "n": 34,
+      "title": "Do not escalate technical uncertainty prematurely",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "User escalation is for product ownership, not engineering ignorance"
+    },
+    {
+      "id": "DFP-035",
+      "n": 35,
+      "title": "User preference hierarchy",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-036",
+      "n": 36,
+      "title": "Requirement sufficiency",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-037",
+      "n": 37,
+      "title": "Diminishing returns",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-038",
+      "n": 38,
+      "title": "Search exhaustion is not required",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-039",
+      "n": 39,
+      "title": "Recommendation contents",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-040",
+      "n": 40,
+      "title": "Recommendations cannot hide uncertainty",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-041",
+      "n": 41,
+      "title": "Handoff rule",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-042",
+      "n": 42,
+      "title": "Implementation-level failure stays in the factory repair path",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-043",
+      "n": 43,
+      "title": "Strategy-level failure returns to Preflight",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-044",
+      "n": 44,
+      "title": "A failed winner teaches more than a normal failure",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-045",
+      "n": 45,
+      "title": "Reviving rejected candidates",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-046",
+      "n": 46,
+      "title": "Re-evaluation after assumption invalidation",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-047",
+      "n": 47,
+      "title": "Question decomposition",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-048",
+      "n": 48,
+      "title": "Hierarchical exploration",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-049",
+      "n": 49,
+      "title": "Detect coupled choices",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-050",
+      "n": 50,
+      "title": "Candidate graph rather than flat list",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-051",
+      "n": 51,
+      "title": "Historical retrieval must be scoped",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-052",
+      "n": 52,
+      "title": "External research",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-053",
+      "n": 53,
+      "title": "Security-sensitive candidates",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-054",
+      "n": 54,
+      "title": "Migration-sensitive candidates",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-055",
+      "n": 55,
+      "title": "Operational candidates",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-056",
+      "n": 56,
+      "title": "Dependency addition",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-057",
+      "n": 57,
+      "title": "Candidate rejection reason codes",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-058",
+      "n": 58,
+      "title": "Do not prune solely on model preference",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-059",
+      "n": 59,
+      "title": "Exploration telemetry",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-060",
+      "n": 60,
+      "title": "Learn when tournaments are valuable",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-061",
+      "n": 61,
+      "title": "Learn ideal candidate count",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-062",
+      "n": 62,
+      "title": "Learn probe value",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-063",
+      "n": 63,
+      "title": "Learn reasoning-model routing",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-064",
+      "n": 64,
+      "title": "User-facing presentation",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-065",
+      "n": 65,
+      "title": "Candidate animation states",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-066",
+      "n": 66,
+      "title": "Decision completeness rule",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-067",
+      "n": 67,
+      "title": "Direct-mode record",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-068",
+      "n": 68,
+      "title": "Failed direct-mode detection",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-069",
+      "n": 69,
+      "title": "Preflight must avoid architecture astronautics",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-070",
+      "n": 70,
+      "title": "Novel approaches need higher evidence",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-071",
+      "n": 71,
+      "title": "Architecture optionality",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-072",
+      "n": 72,
+      "title": "Default convergence policy",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-073",
+      "n": 73,
+      "title": "Success criterion: the factory rarely disproves it, but still can",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-074",
+      "n": 74,
+      "title": "Minimum viable Preflight: do not wait for learning models",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "Implementation target for V1"
+    },
+    {
+      "id": "DFP-075",
+      "n": 75,
+      "title": "Preflight V2 after trajectories accumulate",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-076",
+      "n": 76,
+      "title": "Preflight V3",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-077",
+      "n": 77,
+      "title": "Canonical Preflight benchmark",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-078",
+      "n": 78,
+      "title": "Anti-benchmark cheating",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFP-079",
+      "n": 79,
+      "title": "What remains deliberately open in Preflight",
+      "tier": 0,
+      "status": "OPEN"
+    },
+    {
+      "id": "DFP-080",
+      "n": 80,
+      "title": "Final Preflight algorithm summary",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFP-081",
+      "n": 81,
+      "title": "Preflight architectural invariant",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-001",
+      "n": 1,
+      "title": "Front Door core mission",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-002",
+      "n": 2,
+      "title": "Separate intent detection from interviewing",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-003",
+      "n": 3,
+      "title": "Nine ownership classes for unknowns; only three are the user's",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-004",
+      "n": 4,
+      "title": "The default is not to ask",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-005",
+      "n": 5,
+      "title": "Detect ambiguity through interpretation divergence",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-006",
+      "n": 6,
+      "title": "Ambiguity must be material",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-007",
+      "n": 7,
+      "title": "One question at a time",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-008",
+      "n": 8,
+      "title": "Rank questions by decision value",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-009",
+      "n": 9,
+      "title": "Do not manufacture fake question scores",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-010",
+      "n": 10,
+      "title": "Ask questions that distinguish behaviours",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-011",
+      "n": 11,
+      "title": "Recommendations accompany questions where useful",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-012",
+      "n": 12,
+      "title": "Recommendations are not decisions",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-013",
+      "n": 13,
+      "title": "Avoid technical jargon in user questions",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-014",
+      "n": 14,
+      "title": "Preserve original user wording",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-015",
+      "n": 15,
+      "title": "Support explicit delegation",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-016",
+      "n": 16,
+      "title": "Support deferral",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-017",
+      "n": 17,
+      "title": "Maintain an append-only interview ledger",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-018",
+      "n": 18,
+      "title": "Maintain a provisional intent model",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-019",
+      "n": 19,
+      "title": "Use an internal topic coverage map",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Amended by DFE-006: coverage map is policy, not learnable"
+    },
+    {
+      "id": "DFF-020",
+      "n": 20,
+      "title": "Scenario synthesis is mandatory before completion",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-021",
+      "n": 21,
+      "title": "Off-nominal scenarios expose hidden requirements",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-022",
+      "n": 22,
+      "title": "Distinguish product behaviour from implementation",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-023",
+      "n": 23,
+      "title": "Detect solution masquerading as requirement",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-024",
+      "n": 24,
+      "title": "Optional features default out",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-025",
+      "n": 25,
+      "title": "Existing behaviour is a strong default",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-026",
+      "n": 26,
+      "title": "Research before asking factual questions",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-027",
+      "n": 27,
+      "title": "Front Door research remains bounded",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-028",
+      "n": 28,
+      "title": "Feasibility sanity check before approval",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-029",
+      "n": 29,
+      "title": "Infeasibility becomes a user question only when necessary",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-030",
+      "n": 30,
+      "title": "Requirement quality audit",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-031",
+      "n": 31,
+      "title": "Acceptance criteria are behaviour anchors",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-032",
+      "n": 32,
+      "title": "Acceptance must not over-specify design",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-033",
+      "n": 33,
+      "title": "Traceability is mandatory",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-034",
+      "n": 34,
+      "title": "Contradiction audit",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-035",
+      "n": 35,
+      "title": "Question generation may use counterfactual specs",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-036",
+      "n": 36,
+      "title": "Ask a minimal sufficient question",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-037",
+      "n": 37,
+      "title": "Avoid binary questions where the space is broader",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-038",
+      "n": 38,
+      "title": "Do not burden the user with exhaustive edge cases",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-039",
+      "n": 39,
+      "title": "Security and privacy questioning",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-040",
+      "n": 40,
+      "title": "Performance questioning",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-041",
+      "n": 41,
+      "title": "Scale questioning",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-042",
+      "n": 42,
+      "title": "User interaction depth is adaptive",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-043",
+      "n": 43,
+      "title": "The system should learn user burden",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Constrained by DFE-006"
+    },
+    {
+      "id": "DFF-044",
+      "n": 44,
+      "title": "Question-value telemetry",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-045",
+      "n": 45,
+      "title": "Questions not asked should also be learnable",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Constrained by DFE-006"
+    },
+    {
+      "id": "DFF-046",
+      "n": 46,
+      "title": "Keep assumptions explicit",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-047",
+      "n": 47,
+      "title": "Product assumptions versus engineering assumptions",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-048",
+      "n": 48,
+      "title": "Identify decision authority",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-049",
+      "n": 49,
+      "title": "Draft-spec readiness",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-050",
+      "n": 50,
+      "title": "Fully specified input may require zero questions",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-051",
+      "n": 51,
+      "title": "The final review is not another interrogation",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-052",
+      "n": 52,
+      "title": "Approval must be explicit",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-053",
+      "n": 53,
+      "title": "Validate before asking for approval",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-054",
+      "n": 54,
+      "title": "Spec approval does not mean feasibility proved",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-055",
+      "n": 55,
+      "title": "Known likely infeasibility should still be surfaced",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-056",
+      "n": 56,
+      "title": "After approval, no silent mutation",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-057",
+      "n": 57,
+      "title": "Spec amendment is delta-oriented",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-058",
+      "n": 58,
+      "title": "User steering after approval remains exploration by default",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-059",
+      "n": 59,
+      "title": "Front Door must not create GitHub work directly",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-060",
+      "n": 60,
+      "title": "Front Door must be replayable",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-061",
+      "n": 61,
+      "title": "Front Door trust boundary",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-062",
+      "n": 62,
+      "title": "Front Door cost behaviour",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-063",
+      "n": 63,
+      "title": "Anti-pattern: questionnaire mode",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-064",
+      "n": 64,
+      "title": "Anti-pattern: consultant upsell",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-065",
+      "n": 65,
+      "title": "Anti-pattern: solution anchoring",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-066",
+      "n": 66,
+      "title": "Anti-pattern: confirmation bias",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-067",
+      "n": 67,
+      "title": "Anti-pattern: treating the user as an engineer",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-068",
+      "n": 68,
+      "title": "Anti-pattern: endless completeness",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-069",
+      "n": 69,
+      "title": "Anti-pattern: silent defaults",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-070",
+      "n": 70,
+      "title": "Questions should expose consequences",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-071",
+      "n": 71,
+      "title": "Conflict resolution format",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-072",
+      "n": 72,
+      "title": "Edge-case discovery may produce a default, not a question",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-073",
+      "n": 73,
+      "title": "Avoid requiring fake quantitative precision from users",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-074",
+      "n": 74,
+      "title": "Derived technical requirements are not user-authored requirements",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-075",
+      "n": 75,
+      "title": "Scenario-derived product requirements need approval",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFF-076",
+      "n": 76,
+      "title": "System-derived technical safeguards need not become user questions",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFF-077",
+      "n": 77,
+      "title": "Interview learning dataset",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Constrained by DFE-006"
+    },
+    {
+      "id": "DFF-078",
+      "n": 78,
+      "title": "Measure question usefulness",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-079",
+      "n": 79,
+      "title": "Measure missed questions",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Metric amended by DFE-006"
+    },
+    {
+      "id": "DFF-080",
+      "n": 80,
+      "title": "Front Door benchmark suite, 14 cases A-N",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-081",
+      "n": 81,
+      "title": "Front Door success metrics",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-082",
+      "n": 82,
+      "title": "The desired behavioural balance",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-083",
+      "n": 83,
+      "title": "Minimum viable Front Door",
+      "tier": 1,
+      "status": "PROPOSED",
+      "note": "Implementation target for V1"
+    },
+    {
+      "id": "DFF-084",
+      "n": 84,
+      "title": "Front Door V2",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-085",
+      "n": 85,
+      "title": "Front Door V3",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-086",
+      "n": 86,
+      "title": "Final Front Door algorithm",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFF-087",
+      "n": 87,
+      "title": "Front Door architectural invariant",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFM-001",
+      "n": 1,
+      "title": "Do not build a second state machine",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Part I. The most important repo-specific correction."
+    },
+    {
+      "id": "DFM-002",
+      "n": 2,
+      "title": "factory_kernel/canonical.py assessment",
+      "tier": 0,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/canonical.py (25 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-003",
+      "n": 3,
+      "title": "factory_kernel/manifest.py assessment",
+      "tier": 0,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/manifest.py (256 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-004",
+      "n": 4,
+      "title": "factory_kernel/spine.py assessment",
+      "tier": 0,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/spine.py (258 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-005",
+      "n": 5,
+      "title": "factory_kernel/independence.py assessment",
+      "tier": 0,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/independence.py (306 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-006",
+      "n": 6,
+      "title": "factory_kernel/evidence_closure.py assessment",
+      "tier": 0,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/evidence_closure.py (475 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-007",
+      "n": 7,
+      "title": "factory_kernel/provenance.py assessment",
+      "tier": 0,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/provenance.py (233 lines).",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-008",
+      "n": 8,
+      "title": "factory_kernel/authority.py assessment",
+      "tier": 0,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: factory_kernel/authority.py (63 lines). Defines CommandEvidence(authority_id, cwd, argv, exit_code, stdout_sha256, stderr_sha256) - a typed, hashed attestation envelope for deterministic commands. See DFA-005.",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-009",
+      "n": 9,
+      "title": "harness/merge_verify.py assessment",
+      "tier": 0,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118)",
+      "note": "Present on main: harness/merge_verify.py (251 lines). Enforces tree equivalence, not head equivalence: the merged-commit check dies with 'merged commit tree is not byte-identical to the authorized PR head tree' when merge_tree != auth_tree (merge_verify.py:173). Resolves the M-ADV-3 hedge in 07-ADVERSARIAL-BENCHMARKS.md.",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-010",
+      "n": 10,
+      "title": "runtime.py is nine systems merged",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Part III diagnosis"
+    },
+    {
+      "id": "DFM-011",
+      "n": 11,
+      "title": "Target logical architecture and responsibility map",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-012",
+      "n": 12,
+      "title": "providers.py migration",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-013",
+      "n": 13,
+      "title": "Prefer a worker view over prompt-based filesystem trust",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-014",
+      "n": 14,
+      "title": "worker_policy.py",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-015",
+      "n": 15,
+      "title": "credential_env.py",
+      "tier": 2,
+      "status": "PARTIAL",
+      "note": "App-token scope shipped and tested. scoped_environment() grants DARK_FACTORY_APP_TOKEN only at scope 'github-mutation' and strips GH_TOKEN/GITHUB_TOKEN there, so no silent fallback exists. ClaudeCliProvider._worker_env is a construct-by-inclusion allowlist (exact set + provider prefixes + a separate REQUEST_ENV whitelist) with a test asserting a model worker receives neither GitHub credential. This settles uncertainty-list item 8 and makes CAP-ADV-4 largely redundant. Still PARTIAL: it is one module, not the capability model of DFA-007.",
+      "evidence": "PR #150 (287683f); tests/factory/test_factory_workflow_hygiene.py",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFM-016",
+      "n": 16,
+      "title": "github_cli.py",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-017",
+      "n": 17,
+      "title": "Exact-head merge",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "status_note": "BUILT and constitutional"
+    },
+    {
+      "id": "DFM-018",
+      "n": 18,
+      "title": "git_authority.py",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-019",
+      "n": 19,
+      "title": "RED/guard semantics become typed evidence",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-020",
+      "n": 20,
+      "title": "worktree.py",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-021",
+      "n": 21,
+      "title": "trusted_programs.py",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-022",
+      "n": 22,
+      "title": "static_gate.py",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-023",
+      "n": 23,
+      "title": "runtime.py knows far too much about re-head semantics",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-024",
+      "n": 24,
+      "title": "Target claim-driven kernel API",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-025",
+      "n": 25,
+      "title": "Merge is the most privileged transition",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFM-026",
+      "n": 26,
+      "title": "Trajectory retention is the immediate low-risk speed win",
+      "tier": 0,
+      "status": "PROPOSED",
+      "note": "7 to 90 days. Cheapest item in the corpus. Blocks all of DFC phase 5."
+    },
+    {
+      "id": "DFM-027",
+      "n": 27,
+      "title": "One compact trajectory record per attempt",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-028",
+      "n": 28,
+      "title": "Trajectory finalisation on every exit path",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-029",
+      "n": 29,
+      "title": "Trajectory and trusted evidence remain distinct",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-030",
+      "n": 30,
+      "title": "Current workflow cannot meaningfully parallelise",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-031",
+      "n": 31,
+      "title": "Target workflow topology",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-032",
+      "n": 32,
+      "title": "Coordinator: serial and short-lived",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-033",
+      "n": 33,
+      "title": "Executor",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-034",
+      "n": 34,
+      "title": "Workflow dispatch",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-035",
+      "n": 35,
+      "title": "Lease v2 with generation fencing",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "Stale generation may compute but not mutate"
+    },
+    {
+      "id": "DFM-036",
+      "n": 36,
+      "title": "Initial persistence for issue execution",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-037",
+      "n": 37,
+      "title": "Four concurrency levels A-D",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-038",
+      "n": 38,
+      "title": "Validation fan-out",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-039",
+      "n": 39,
+      "title": "Global compute semaphore",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-040",
+      "n": 40,
+      "title": "Dedicated architecture-adversarial benchmark programme",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-041",
+      "n": 41,
+      "title": "Kernel adversarial tests K-ADV-1..5",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-042",
+      "n": 42,
+      "title": "Provider/sandbox tests CAP-ADV-1..4",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-043",
+      "n": 43,
+      "title": "Git tests GIT-ADV-1..3",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-044",
+      "n": 44,
+      "title": "Merge tests M-ADV-1..3",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-045",
+      "n": 45,
+      "title": "Lease tests L-ADV-1..4",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-046",
+      "n": 46,
+      "title": "Do not introduce a graph database simply because this is a graph",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-047",
+      "n": 47,
+      "title": "Abstract store contract",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-048",
+      "n": 48,
+      "title": "Event application",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-049",
+      "n": 49,
+      "title": "Materialised graph tables",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-050",
+      "n": 50,
+      "title": "Assumption invalidation query",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-051",
+      "n": 51,
+      "title": "Specification and graph history",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-052",
+      "n": 52,
+      "title": "Do not build graph rendering before backend event semantics",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-053",
+      "n": 53,
+      "title": "Main screen",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-054",
+      "n": 54,
+      "title": "Trust must be visible",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-055",
+      "n": 55,
+      "title": "Node detail panel",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-056",
+      "n": 56,
+      "title": "User steering in the UI",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-057",
+      "n": 57,
+      "title": "Cost UI",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-058",
+      "n": 58,
+      "title": "Timeline",
+      "tier": 0,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-059",
+      "n": 59,
+      "title": "Raw trajectory store first",
+      "tier": 1,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-060",
+      "n": 60,
+      "title": "Build the learner offline and read-only first",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFM-061",
+      "n": 61,
+      "title": "Factory knowledge before broad software knowledge",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-062",
+      "n": 62,
+      "title": "Blind judge isolation structurally enforced",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFM-063",
+      "n": 63,
+      "title": "Benchmark 1: fully specified request",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-064",
+      "n": 64,
+      "title": "Benchmark 2: genuine product ambiguity",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-065",
+      "n": 65,
+      "title": "Benchmark 3: programme",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-066",
+      "n": 66,
+      "title": "Benchmark 4: Preflight",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFM-XIV",
+      "n": null,
+      "title": "16-phase concrete programme order, Phase 0 finish present qualification",
+      "tier": 1,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFV-018",
+      "note": "Part XIV. The floor rule survives: no architecture rewrite before the qualification floor.",
+      "verified": "2026-09-09 against origin/main f13219b",
+      "evidence": "register-internal supersession; no repository claim to verify"
+    },
+    {
+      "id": "DFV-001",
+      "n": 1,
+      "title": "Intelligence does not equal authority",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-002",
+      "n": 2,
+      "title": "The kernel gets smaller, not merely better organised",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-003",
+      "n": 3,
+      "title": "No second lifecycle state machine",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-004",
+      "n": 4,
+      "title": "Privileged actions become explicit capabilities",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFV-005",
+      "n": 5,
+      "title": "Autonomous GitHub identity is a dedicated GitHub App",
+      "tier": 2,
+      "status": "BUILT",
+      "note": "Do not reopen PAT vs App without a real constraint. credential_env.py carries DARK_FACTORY_APP_TOKEN under scope 'github-mutation' with no GH_TOKEN/GITHUB_TOKEN fallback. An AST test pins exactly {create_pr, push_branch, merge_squash} as the operations that spend it. PR #151 was opened AND merged by app/shaishibear-dark-factory; PR #149 proved the event shape and was closed, not merged. CAVEAT on the strength of PR #151: it is one file, +6/-0, a disposable markdown note, run from dark-factory-identity-canary.yml (not the worker), whole lifecycle 5m04s. It proves the identity and merge-lane MECHANICS and nothing about a Level-4 lap - no triage, no build, no full harness, no evidence spine. It merged because it was fast enough to beat the App token's 60-minute expiry, which is exactly what refused PR #134 three hours later (run 34151427980: evidence stage 4970s ok, merge-pre ok, then `gh pr merge` 401 Bad credentials). Do not cite #151 as evidence for A.6.",
+      "evidence": "PR #150 (287683f) merged 2026-09-07; PR #151 (app-authored) merged unattended 2026-09-07",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFV-006",
+      "n": 6,
+      "title": "Programme planning is propose then deterministically compile",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFV-007",
+      "n": 7,
+      "title": "Preflight stays outside the trusted factory; verdict always UNPROVEN",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-008",
+      "n": 8,
+      "title": "Qualification becomes dependency-aware",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "The attestation dependency model. Highest-value decision in the corpus."
+    },
+    {
+      "id": "DFV-009",
+      "n": 9,
+      "title": "Mutation testing becomes detector-specific",
+      "tier": 2,
+      "status": "PARTIAL",
+      "note": "Wrong as written - 'four injected defects on the App branch' is badly stale. main carries 428 factory defects across eight catalogues and 9 application defects. 26 distinct detector test files are named in defect `why` fields and statically verified to be in the runner's copy set (PR #141). Still PARTIAL because detector-SPECIFIC catching is asserted for only 3 defects (must_catch=['security']); no factory defect declares must_catch at all, so for 428 of 437 the named detector is prose plus a presence check, not an enforced attribution.",
+      "evidence": "harness/mutation_anchors.py -> MUTATION_ANCHORS_OK factory=428 application=9 detectors=26; PR #139, PR #141",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFV-010",
+      "n": 10,
+      "title": "Independent authorities fan out concurrently where independent",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFV-011",
+      "n": 11,
+      "title": "Re-head becomes a deterministic authority",
+      "tier": 2,
+      "status": "SUPERSEDED",
+      "superseded_by": "DFE-008",
+      "note": "Amended by DFE-008: derive from the dependency model rather than knowing claim types. Note for whoever implements DFE-008: a model-free re-head already ships on main for the `stale_base` refusal, gated by a comment-marker budget in refusal.py, not by a dependency query. DFE-008 is therefore a change to existing code, not a greenfield design.",
+      "evidence": "factory_kernel/cli.py (rehead command); factory_kernel/refusal.py (rehead_eligible, rehead_budget_allows); PR #143",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFV-012",
+      "n": 12,
+      "title": "Concurrency uses coordinator plus executors plus leases",
+      "tier": 2,
+      "status": "PROPOSED",
+      "note": "FIRST MEASURED INSTANCE of maintainer-lane versus factory-lane contention, 2026-09-09: three individually trivial register-only PRs (#156, #157, #158) merged while PR #134 was being driven back into the queue. Cost: one full re-head cycle (8m35s) and very nearly an 83-minute validation that would have died at merge pre-authorization with `main moved after evidence`. This is not a factory defect -- both lanes behaved correctly -- it is contention for main between a lane that merges in minutes and a lane that validates in hours. The operational fix used on the day was discipline: merge nothing else while a lap runs. That does not scale, which is what makes it evidence for this decision."
+    },
+    {
+      "id": "DFV-013",
+      "n": 13,
+      "title": "Long-horizon architecture has three roles: architect, governor, holdout",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFV-014",
+      "n": 14,
+      "title": "The Project Decision Graph is the durable project memory",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFV-015",
+      "n": 15,
+      "title": "Losing alternatives are retained",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFV-016",
+      "n": 16,
+      "title": "Learning starts with immutable trajectories; blind judges never see lessons",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-017",
+      "n": 17,
+      "title": "UI is a projection, never authority",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFV-018",
+      "n": 18,
+      "title": "Six-phase implementation ordering, Phase 0 prove the factory can observe itself",
+      "tier": 1,
+      "status": "PROPOSED",
+      "supersedes": [
+        "DFA-043",
+        "DFM-XIV"
+      ],
+      "note": "Current ordering"
+    },
+    {
+      "id": "DFV-019",
+      "n": 19,
+      "title": "Dark Factory is claim-centric, not task-centric",
+      "tier": 3,
+      "status": "CONSTITUTIONAL",
+      "note": "Commit 56e1497"
+    },
+    {
+      "id": "DFV-020",
+      "n": 20,
+      "title": "The claim lifecycle UNKNOWN to REJECTED/SUPERSEDED",
+      "tier": 2,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFV-021",
+      "n": 21,
+      "title": "Foundation build order: claim, attestation, dependency graph, capability, leases, brokers",
+      "tier": 1,
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DFG-001",
+      "n": 1,
+      "title": "Constitution: eleven clauses",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-002",
+      "n": 2,
+      "title": "Four change tiers 0-3",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-003",
+      "n": 3,
+      "title": "Tier 2 requires an Architecture Change Proposal",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-004",
+      "n": 4,
+      "title": "Architect predicts, Governor enforces, Holdout challenges",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFG-005",
+      "n": 5,
+      "title": "A new authority cannot declare itself valid",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-006",
+      "n": 6,
+      "title": "Shadow and equivalence first, cutover second",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFG-007",
+      "n": 7,
+      "title": "Escalation examples: never PostgreSQL vs SQLite, always weaker-guarantee trades",
+      "tier": 3,
+      "status": "CONSTITUTIONAL"
+    },
+    {
+      "id": "DFG-008",
+      "n": 8,
+      "title": "Do not silently drift the architecture; use the six-field amendment format",
+      "tier": 2,
+      "status": "SETTLED"
+    },
+    {
+      "id": "DFG-009",
+      "n": 9,
+      "title": "Architecture Governor bound to exact contract/context/design/policy hashes",
+      "tier": 2,
+      "status": "BUILT",
+      "evidence": "PR #33 (2c5f118), scripts/factory_architecture.py",
+      "note": "The compiled governor artifact binds policy_sha256, contract_sha256, context_sha256 and design_sha256, and the compiler dies when context/design do not carry the hashes they were produced against.",
+      "verified": "2026-09-09 against origin/main f13219b"
+    },
+    {
+      "id": "DFE-001",
+      "n": 1,
+      "title": "AMENDMENT: adopt the corpus via a Tier 2 ACP using DFC-074 as its evidence section",
+      "tier": 3,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-048",
+        "DFC-074",
+        "DFG-003"
+      ],
+      "rationale": "The corpus arrived outside the governance regime it defines. Adoption must be legitimate.",
+      "cost": "half a day"
+    },
+    {
+      "id": "DFE-002",
+      "n": 2,
+      "title": "AMENDMENT: add supersession headers to all three roadmaps; declare DFV-018 current",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-043",
+        "DFM-XIV",
+        "DFV-018"
+      ],
+      "rationale": "Three conflicting roadmaps with no supersession record reproduces the documentation-drift defect one day after it was diagnosed.",
+      "cost": "minutes"
+    },
+    {
+      "id": "DFE-003",
+      "n": 3,
+      "title": "AMENDMENT: split the lock list into CONSTITUTIONAL and SETTLED; demote one-candidate-at-a-time to a default",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-046"
+      ],
+      "rationale": "Twenty undifferentiated locks of uneven evidentiary support will be over-respected or ignored. Concurrent trusted candidates with disjoint blast radii may be correct and should stay empirical.",
+      "cost": "minutes"
+    },
+    {
+      "id": "DFE-004",
+      "n": 4,
+      "title": "AMENDMENT: split canonical contracts into normative phase 1 and proposed phases 2-5",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFC-073"
+      ],
+      "rationale": "49 schemas with no consumer exert gravity. Documents make things look decided.",
+      "cost": "minutes"
+    },
+    {
+      "id": "DFE-005",
+      "n": 5,
+      "title": "AMENDMENT: replace V1 value-of-information with fixed probe budgets plus logging",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-029",
+        "DFP-018",
+        "DFP-019"
+      ],
+      "rationale": "An economic rule with no calibration data is the fake precision DFA-017 forbids. Fit the rule after 100 logged probes.",
+      "cost": "an hour"
+    },
+    {
+      "id": "DFE-006",
+      "n": 6,
+      "title": "AMENDMENT: interview learning may not modify the topic coverage map; change the metric",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFF-019",
+        "DFF-043",
+        "DFF-045",
+        "DFF-077",
+        "DFF-079"
+      ],
+      "rationale": "The Front Door's output is the approved spec. Learning to optimise for approval rather than correctness degrades trust without crossing any trust boundary. Metric should be defects and reconsiderations traced to an unasked question, not user satisfaction.",
+      "cost": "an hour"
+    },
+    {
+      "id": "DFE-007",
+      "n": 7,
+      "title": "AMENDMENT: add runner-up sampling to Preflight calibration",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-032",
+        "DFA-045",
+        "DFP-044",
+        "DFP-077"
+      ],
+      "rationale": "Existing benchmarks test whether Preflight picks a loser, not whether it ever generated the winner. Calibration conditioned on its own generation bias will look excellent while being systematically narrow.",
+      "cost": "cheap to specify, real compute to run"
+    },
+    {
+      "id": "DFE-008",
+      "n": 8,
+      "title": "AMENDMENT: ReheadAuthority becomes a query over the dependency model, not a knower of claim types",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFV-011",
+        "DFM-023",
+        "DFV-008"
+      ],
+      "rationale": "Claim-by-claim reissuance requires claim-type expertise inside a trusted judge. That is TCB regrowth. Preserve exactly those claims whose dependency digests are unchanged.",
+      "cost": "design change; cheap now, expensive later"
+    },
+    {
+      "id": "DFE-009",
+      "n": 9,
+      "title": "AMENDMENT: specify attestation revocation and authority-disagreement resolution",
+      "tier": 3,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFC-031",
+        "DFC-032",
+        "DFV-008"
+      ],
+      "rationale": "Staleness is specified for dependency change but not authority defect. If an authority version is found buggy, every attestation it issued is suspect, including on merged work. No revocation event, no policy, no disagreement procedure.",
+      "cost": "genuinely new design work"
+    },
+    {
+      "id": "DFE-010",
+      "n": 10,
+      "title": "AMENDMENT: generate per-issue decision extracts rather than wholesale references",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-048",
+        "DFC-047"
+      ],
+      "rationale": "300 decisions delivered wholesale is the context-window decay named in the 1.0 diagnostic. Apply the ExperiencePacket pattern to the corpus itself.",
+      "cost": "tooling, once"
+    },
+    {
+      "id": "DFE-011",
+      "n": 11,
+      "title": "AMENDMENT: Preflight self-optimisation loop — specify the mechanism for the four learned decisions",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFP-060",
+        "DFP-061",
+        "DFP-062",
+        "DFP-063",
+        "DFE-007",
+        "DFM-026"
+      ],
+      "rationale": "DFP-060..063 are marked OPEN with the instruction that they be learned rather than specified, and no mechanism is given. Apply the autoresearch pattern to the Preflight algorithm itself: frozen historical decisions as the immutable evaluator, exploration budget fixed, decision quality optimised. Safe because Preflight is outside the TCB, its verdict is permanently UNPROVEN, and the factory is an external referee. Makes DFE-007 and DFM-026 blocking preconditions.",
+      "cost": "month-six capability; preconditions due now",
+      "note": "See 09-ACP-002-PREFLIGHT-LOOP.md. Third of three optimisation proposals; best target, worst readiness. Replay searches, shadow validates. Records the acceleration/Preflight tension."
+    },
+    {
+      "id": "DFE-012",
+      "n": 12,
+      "title": "AMENDMENT: complete the ratchet family with a conditional cost ceiling",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003",
+        "DFM-026",
+        "DFE-011"
+      ],
+      "rationale": "The system has floors that only rise and a TCB that only shrinks, but nothing that stops qualification getting slower. The named accelerations are intentions with no enforcement; the next feature can give them back silently. A ceiling from observed p50, conditional on identical qualification outcome, completes the family using the mechanism the floors already prove. Requires no agent, no corpus, no new concept.",
+      "cost": "instrumentation is the work; the ratchet is a few lines",
+      "note": "See 10-ACP-003-COST-RATCHET.md. Cheapest high-value item available and the only one that could land this month."
+    },
+    {
+      "id": "DFE-013",
+      "n": 13,
+      "title": "AMENDMENT: unify the value-of-information rule and the search-worth test as one principle",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFP-018",
+        "DFP-060",
+        "DFP-061",
+        "DFP-062",
+        "DFE-005",
+        "DFE-012"
+      ],
+      "rationale": "Probe scale and search scale ask the same question: will the evidence change what I do, by more than it costs to get? The discriminator at both scales is the strength of existing priors, not the size of the prize. Stated once in the constitution rather than reinvented per subsystem. Its immediate consequence: do not search a space whose head of distribution is already written down.",
+      "cost": "a paragraph in the constitution; changes what gets built",
+      "note": "See 01-CONSTITUTION.md, 'When search is worth running', and 02 Part M.3."
+    },
+    {
+      "id": "DFE-014",
+      "n": 14,
+      "title": "AMENDMENT: never attribute a refusal to an authority that did not produce it",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-017",
+        "DFV-005",
+        "DFM-015"
+      ],
+      "rationale": "The Honesty invariant forbids displaying passed/verified unless the real authority produced that result. Its mirror is missing, and the asymmetry has a measured cost. runtime.py sets stage='merge_preauth' before the merge_verify.py pre call and never advances it; merge_squash is invoked ~20 lines later with the cursor unchanged. The failure was a RuntimeError from run_as_app, not a ToolRefused, so refusal.classify() skipped the isinstance branch - including the correct discriminator sitting in it (exc.tool == 'merge_verify.py' and exc.phase == 'pre') - and fell through to `if stage in STAGE_CODES: return stage`. The system named an authority that had already recorded outcome=ok in the same run. This mis-attributes ANY non-ToolRefused exception raised after the last cursor assignment in a stage sequence: structural, not a one-off. Four minutes of diagnosis became four days; issue #119 collected four repeat reports while the 401 sat in the logs. Every guarantee in this system points at proving success honestly and nothing points at reporting failure honestly. MEASURED COST, the strongest argument this amendment has: four days of diagnosis, and then two more with the PR parked. The artifacts said retry the merge -- merge-authorization.json written, the spine closed, merge-pre outcome=ok -- so the correct action was one command. The label said merge pre-authorization refused it, which reads as evidence work. Six days and four repeat reports on issue #119, from one wrong word in a refusal that was itself correct. A wrong diagnosis is not a smaller defect than a wrong verdict; it is the same defect pointed at whoever reads it next.",
+      "cost": "an hour, plus the constitutional paragraph",
+      "note": "Asks for three things. (1) The invariant stated in 01-CONSTITUTION.md beside Honesty. (2) classify() must not name an authority on the fallthrough path: unattributed failures report the stage as CONTEXT, not attribution - `stage=merge_preauth authority=unattributed`. (3) An adversarial test that injects a non-ToolRefused exception after a passing authority and asserts the refusal does not name it. DELIBERATELY EXCLUDED: an earlier draft proposed validating attribution against the stage-timings artifact. Rejected - timings are observability only ('nothing reads this file to decide anything'), and making the classifier depend on them would turn an observational artifact into a semi-trusted input, which is DFC-072 (references are not authority) in a new place. Not naming an authority on the fallthrough path is structural rather than heuristic, and is the whole fix. OBSERVABLE SIGNATURE, confirmed live in run 34371899263: the refusal record carries both `stage` and `stage_context`, and they AGREE exactly when the cursor is open and DIVERGE when it is closed (`stage` empty, `stage_context` naming the last authority entered). That gives the invariant a field test, not just a suite test: any refusal whose two fields agree was attributed by an authority that was still executing, and any refusal naming an authority with an empty `stage` is the defect returning. The stale_base refusal at 0.622 s into trust_root_currency read stage=trust_root_currency stage_context=trust_root_currency reason_code=stale_base -- the half that must keep working, proven before the expensive half was run."
+    },
+    {
+      "id": "DFE-015",
+      "n": 15,
+      "title": "AMENDMENT: split the unit floor three ways - factory, backend, frontend",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003",
+        "DFM-002"
+      ],
+      "rationale": "1798 of the 2353 tests the unit rung counts are the factory's own trust-root suite. Welded into one number, a product PR is gated on a count dominated by maintainer hardening; conversely product tests can be deleted while the total still rises. Trust-root tests grow when the factory is hardened, product tests when features ship. They ratchet on different clocks and belong in different keys.",
+      "cost": "half a day across three files",
+      "note": "floor.json gains unit_tests_factory / unit_tests_backend / unit_tests_frontend; unit_tests is retired or kept transitionally as the sum. Three coordinated edits: harness/ci.py must stop discarding unit.py's stdout on success (unit.py has emitted `backend= frontend= factory=` all along and nothing has ever seen it); scripts/factory_evidence.py must parse the three fields - the `semantic_markers` block there already shows how to make a floor key optional ('when present here'), so this lands additively with no flag day; floor.json gains the keys. SETTLES A LIVE CONTRADICTION in the same change: unit.py's docstring still says the ratchet is 'based on the last measured backend+frontend total ... factory tests are mandatory immediately without inventing a higher floor'. True at 549; falsified when the 2026-09-04 note moved the floor to the all-three total without touching it. SEQUENCING: do not ratchet to 1798/430/125. Those are inferred from arithmetic (they reproduce both 1033 at d038e93 and 2353 at f13219b exactly) but no run has ever printed them. Land the ci.py change, take the observed values from the next green gate, then ratchet with zero slack, per floor.json's own _raise_these rule."
+    },
+    {
+      "id": "DFE-016",
+      "n": 16,
+      "title": "AMENDMENT: raise static_checks 5 -> 6, finishing the job PR #139 started",
+      "tier": 0,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003"
+      ],
+      "rationale": "PR #139 (d90bac3) added `mutation-anchors` as a sixth check at the head of harness/static.py CHECKS and left static_checks at 5. floor.json's own _structural_ratchet_2026_08_24 note says to raise measured counts 'in the same human-reviewed change'. One line. Registered rather than corrected silently so the ratchet-lag pattern stays visible; see DFE-017.",
+      "cost": "one line"
+    },
+    {
+      "id": "DFE-017",
+      "n": 17,
+      "title": "AMENDMENT: a PR that changes the number of checks or tests must touch floor.json",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003",
+        "DFE-012",
+        "DFE-015",
+        "DFE-016"
+      ],
+      "rationale": "Three instances of one defect in three weeks: floor 549 against an observed 766 (audit finding B.5, diagnosed and corrected); unit_tests 1033 against an observed 2353; static_checks 5 against an observed 6. Three is a pattern, not three accidents. DFE-015 and DFE-016 are each symptomatic of it. The ratchet mechanism is assumed to be self-enforcing and demonstrably is not: it depends on a human remembering, on the same change, and the memory has failed every time it was tested. BEARS DIRECTLY ON DFE-012: ACP-003's argument assumes the ratchet family works as a mechanism. Adding a fourth dial to a mechanism that is not being turned is the wrong order. This lands first.",
+      "cost": "a deterministic check plus its mutation",
+      "note": "Shape: a check that refuses a PR which changes the count a floor measures without changing floor.json. Cheap for static (the CHECKS list is enumerable statically); for unit it needs the observed count, so the honest form is probably a comparison of observed against floor with a required acknowledgement in the diff rather than a purely static test. Belongs in the security guard's ratchet_regressions neighbourhood, which already asserts floor(head) >= floor(base) on both lanes - the missing half is that a floor may not stay still while what it measures moves."
+    },
+    {
+      "id": "DFE-018",
+      "n": 18,
+      "title": "AMENDMENT: the autonomous identity is minted per operation, not once per job",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFV-005",
+        "DFM-015",
+        "DFA-007",
+        "DFE-014"
+      ],
+      "rationale": "The App installation token is minted once per job and read per operation. Tokens live 60 minutes; the three operations that spend the identity span up to 95 minutes and the exact-head merge is by construction the latest. No autonomous PR can merge, because the credential authorising the merge expires before the validation that earns it finishes. Measured: create_pr for PR #134 fired at +56m27s (3m33s of credential life left); merge_squash fired at +94m38s and returned 401 Bad credentials, after the evidence stage (4970.989s) and merge-pre both recorded outcome=ok. A credential-lifetime defect that surfaced at the last spend point, not a merge defect - fixing only the merge leaves a live fault two spend points upstream.",
+      "cost": "bounded; a workflow step split plus a refusal code",
+      "note": "See 12-ACP-004-AUTONOMOUS-IDENTITY-LIFETIME.md. Tier 2 because it lands in the credential broker, NOT because the design is in question: re-minting costs nothing and weakens nothing, and the capability stays narrow, scoped, one-shot and fallback-free. Rejects giving the kernel the App private key (TCB widening to fix a clock). The exact-head guarantee survives a step split because merge_verify.py pre already writes merge-authorization.json binding base/head/tree/evidence hash and the post check re-verifies against the actual merge commit. Refusal margin 20 minutes, set against observed spend-point ages rather than the 60-minute limit - a five-minute margin would have permitted the 56m27s spend that nearly failed. Falsifier: a build whose validation exceeds TWO HOURS merges successfully with every spend point verifiably younger than its own mint. Makes no claim that wall time is a correctness constraint; that is true only while the credential is misused."
+    },
+    {
+      "id": "DFE-019",
+      "n": 19,
+      "title": "AMENDMENT: split the build's push/PR handoff behind its own mint",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-018",
+        "DFV-005",
+        "DFM-015"
+      ],
+      "rationale": "ACP-004 protected the spend with 95 minutes of headroom and left unprotected the one that came within 3m33s. On run 34061371205 the build called push_branch and create_pr at +56m27s against a 3600s token. merge_squash now runs behind its own mint; push_branch and create_pr still run at the end of one long dispatch step, on the identity minted before it. THE CURRENT FAILURE MODE IS A PUSHED BRANCH WITH NO PR: push_branch spends the identity first, so a build that crosses the hour between the two calls leaves a branch on the remote that no pull request references, and the run that could have finished it is gone. That is worse than the merge failure it mirrors, because the merge at least refused with the evidence intact.",
+      "cost": "a design question, then a workflow step",
+      "note": "Why it was not done inside ACP-004: item 1 was cheap because merge-authorization.json already existed, so the merge step's entire input was on disk and the split cost a CLI entry point. The build handoff has no equivalent artifact - it carries worktree, env, paths, attempt, branch and issue in memory - and inventing one is the actual work. THE OPEN QUESTION IS THE OVERLAP WITH RESUME: `resume_pr` (D-033/D-034) already finishes a build from its uploaded artifacts, but at a LATER seam, after the PR exists. This needs the seam one step earlier, before push_branch. Either the handoff artifact is designed so resume becomes a special case of it, or there are two near-identical recovery paths and the second one will drift from the first. Decide that before writing either. Until this lands, github_cli.SPLIT_OPERATIONS holds only merge_squash and the two unsplit operations print FACTORY_IDENTITY_AGE and proceed rather than refusing - refusing at 1200s what currently succeeds at 3387s would be a regression dressed as a fix. Those age lines are the evidence that will size this work. SCOPE NARROWED by run 34374035444: this is a BUILD-PATH exposure, not a general unsplit-spend exposure. The re-head's push_branch spent an identity 451 s old, comfortably inside the 1200 s margin, because the re-head is a short path -- red gate, green gate, conformance, final green, quick gate, then push. The build is long because it runs nine model stages before its handoff, which is why create_pr fired at 3387 s there. So the work is to split the BUILD's handoff; the re-head's push is already safe by construction and needs no artifact, no new seam and no resume overlap. That halves the design question: only build_issue needs a handoff artifact, and rehead_pr can be left alone."
+    },
+    {
+      "id": "DFE-020",
+      "n": 20,
+      "title": "AMENDMENT: only stale_base has a model-free recovery path; every other refusal is terminal",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-014",
+        "DFE-018",
+        "DFV-011"
+      ],
+      "rationale": "rehead_eligible requires the latest refusal to be stale_base, so a PR refused for any other reason is skipped by the dispatcher and refused by `rehead` when run by hand. PR #134 passed the entire ladder on 2026-09-07, was refused at the merge by an expired credential, and has been inert since: not eligible for validation (needs-fix, not needs-review) and not eligible for re-head (reason code merge_preauth, not stale_base). Neither DFE-014 nor DFE-018 changes that -- they would have classified the same failure `unknown` and `identity_expired`, and neither is stale_base either. The gap is in the recovery model, not the classifier: a refusal whose cause is infrastructure rather than evidence has no automatic path back, and a human must drive it.",
+      "cost": "a design question: which reason codes admit a model-free repair, and what each repair is",
+      "note": "Filed 2026-09-09 while hand-driving #134 back into the queue -- a PR the factory could have recovered itself had the reason code been different. The demonstration is the evidence. Not to be folded into DFE-014 or DFE-018: both are about naming a failure correctly, this is about what the system may do once it has. Candidate shape: identity_expired admits a model-free retry (the evidence is intact and bound; only the credential was stale), which is a strictly smaller repair than a re-head. Do not generalise past the codes whose repair can be shown to preserve every binding."
+    },
+    {
+      "id": "DFE-021",
+      "n": 21,
+      "title": "AMENDMENT: a condition detectable early must be checked early -- starting with whole-base movement",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-017",
+        "DFE-020",
+        "DFV-011"
+      ],
+      "rationale": "The stale-base guard is asymmetric. scripts/factory_evidence.py --currency-only runs in the first seconds of validation and checks trust_root_drift(head): TRUST-ROOT files only. harness/merge_verify.py:149 checks whole-main movement -- `current_base != base` -- and runs only at merge pre-authorization, after the full ladder. A base moved by a commit that touches no trust-root file therefore passes every early check and refuses at the end, so the PR pays ~83 minutes to learn something knowable in one gh call at second zero. Observed 2026-09-09: PR #134 was re-headed onto c19546e, then #157 (one line of docs/atlas/register/decisions.json) merged. Nothing early would have caught it; the run was not started, and a second re-head was paid instead. SECOND REASON, and it strengthens with time: this check is what would have prevented the livelock of 2026-09-09, where three individually trivial register PRs moved main under PR #134 and cost a full re-head cycle plus very nearly an 83-minute run. The window during which main can move underneath a lap is exactly the lap's duration. The first complete lap took 99 minutes (run 34467184805). EVERY FUTURE LAP WIDENS THAT WINDOW, so the cost of not having this check grows with the thing the factory is trying to get better at. A defect whose expected cost rises as the system improves should not wait behind defects whose cost is flat.",
+      "cost": "one gh call at an existing rung",
+      "note": "FIX: run the whole-base comparison at the same rung as --currency-only, not only at merge pre-authorization. merge_verify keeps its check -- it is the authority and must re-ask -- but it stops being the FIRST asker. THE CLASS, which matters more than this instance: a condition that is cheap and detectable early being checked late. This is the second recorded instance. The first was mutation injectability, which reported not_injected only in the full harness fifty minutes in until PR #139 moved it to the head of the static rung -- thirteen maintainer PRs had moved anchors in the meantime because nothing a maintainer met could see the drift. Both have the same shape: the authority that can answer cheaply is not asked until something expensive has already run. A third instance is likelier than not; look for it wherever a late gate reads state that was available at the start. DFE-017 reaches for this class from the other direction -- it asks that a floor move when what it measures moves; this asks that a check run when its input is first knowable. Neither subsumes the other and both are about a gate that exists but fires at the wrong time. SEPARATE FROM DFE-020: that is recovery (what a PR may do after a refusal), this is detection (when the refusal arrives). PARENT: DFE-026 -- this is one of four symptoms of the maintenance lane proving less than the lane it judges."
+    },
+    {
+      "id": "DFE-022",
+      "n": 22,
+      "title": "AMENDMENT: a rung's observed measurement must survive a later rung's failure",
+      "tier": 1,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-003",
+        "DFE-015",
+        "DFE-017",
+        "DFM-026"
+      ],
+      "rationale": "Every observed floor value is written once, at the end, by scripts/factory_evidence.py. parse_harness dies unless the text carries `GATE_OK mode=full`, so a lap that fails at any rung discards the measurements of every rung that passed before it. Observed 2026-09-09, run 34379226169: E2E PASSED for the first time under this kernel -- provably, because the mutation rung runs after it and ran -- and `E2E_PASSED steps=N` is GONE. It was printed to evidence.log, which is deliberately excluded from artifact upload because that program holds credentials, and the refusal record's detail is capped at 2000 characters of tail. No bundle was written because mutations failed twenty minutes later, for an unrelated reason (an immunity text assertion pinning a signature DFE-014 had changed). The one number .factory/locks/floor.json has been waiting months for was observed and thrown away.",
+      "cost": "a scrubbed per-rung measurements file; the ratcheting question is separate",
+      "note": "DIFFERENT SHAPE from its neighbours, which is why it is its own entry. DFE-021 is a check that runs too late. DFE-017 is a floor that does not move when what it measures moves. This is a RESULT THAT DOES NOT SURVIVE AN UNRELATED LATER FAILURE -- the rung passed, the measurement existed, and nothing kept it. PROPOSED FIX: each rung appends its observed counts to a scrubbed, uploadable measurements file as it passes, rather than the bundle being assembled once at the end. Such a file is integers and rung names by construction, so it carries no secret and needs no exclusion. It must be OBSERVABILITY, like stage-timings.jsonl: the evidence bundle stays the sole authority and nothing reads the file to decide anything. Its purpose is that a failed lap still says what it proved. DELIBERATELY LEFT OPEN, because it is a judgement about proof and not about plumbing: whether a measurement from a lap that later failed may SET a floor. The floor file's own rule says the value comes from a complete cycle, and parse_harness reads measurements only behind GATE_OK. Recording the number is unambiguously right; ratcheting from it is not, and this amendment does not claim it. Decide that separately or the fix quietly weakens the floors it was meant to serve."
+    },
+    {
+      "id": "DFE-023",
+      "n": 23,
+      "title": "AMENDMENT: a defanged detector reports protection it is not providing, and MUTATION_ANCHORS_OK cannot tell",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFA-017",
+        "DFE-014",
+        "DFE-021",
+        "DFV-009"
+      ],
+      "rationale": "THE POINT: an escape is visible; a defanged-but-caught defect is invisible. harness/mutation_anchors.py verifies each defect's `find` string occurs exactly once in the file it names. It does not verify the defect still tests what it was written to test. So a defect whose anchor was moved onto adjacent text can go on being CAUGHT -- by something incidental to the property it guards -- and the catalogue will report an invariant as protected while nothing checks that invariant. The failure mode is silence, and no number of laps surfaces it. That inverts what the catalogue is for: a mutation suite exists to prove a detector would notice, and this one can now assert a protection it is not providing. MUTATION_ANCHORS_OK reads as `the catalogue is intact` and means `every find string is present exactly once`. That is the constitution's honesty rule pointed inward -- an authority displaying OK for a property it never examined. THE GAP WAS KNOWN AND UNENFORCED: the program's own docstring names both correct branches (re-anchor onto the code that carries the property today, or say the property is gone and remove the defect deliberately) and checks neither. OBSERVED 2026-09-09. Nine defects were re-anchored on 746aac7 after DFE-014 moved the text they pinned. TWO were defanged. (1) worker-resume-also-dispatches: its `why` says the dispatch step would lose its inverse guard and run after a resume too. The anchor was moved onto the adjacent `id: dispatch` line and the replace renames the step id to `dispatch2`, leaving `if: inputs.resume_pr == '' && ...` intact. ESCAPED in run 34385357401 after 2072 s, 427 of 428 caught. (2) pack-verified-after-holdout: its `why` says verify_pack must precede the judge that relies on it. The original find spanned the pack call, the stage line and the whole _holdout_proof_summary block, and its replace MOVED THE PACK FETCH AFTER THE HOLDOUT. The re-anchor truncated find to two lines and produced a replace that changes one cursor label from attached_evidence to code_holdout. The pack call does not move. The mutation no longer tests ordering at all -- and it was CAUGHT, by something label-sensitive, so it is green and would have stayed green indefinitely. TODAY'S TWO VISIBLE FAILURES WERE THE LUCKY ONES. The immunity assertion and the escape both failed loudly and cost one lap each. The second defanged defect cost nothing, said nothing, and was found by reading.",
+      "cost": "unknown; the decidable part is small, the rest may not be decidable at all",
+      "note": "COMPLETE EXPOSURE, not a sample. A defect can only be defanged by someone moving its anchor, so the population at risk is every defect whose find/replace has ever changed after creation. A git walk of both catalogues across all 82 commits that touched them gives 37 defects: 22 in d90bac3e (PR #139, which re-pointed twenty-three anchors in one change so the mutation rung would stop reporting not_injected), 7 in 746aac7 (PR #155, audited -- 2 defanged), and 8 across six other commits. Under fifty, enumerable, and nobody has ever checked any of them for preserved meaning. THE REVIEW STEP THAT FOUND IT, which is the tractable part and is currently never asked: do not compare the mutation to prose. Compare WHAT THE REPLACE DOES against WHAT THE `why` CLAIMS THE DEFECT TESTS. For pack-verified-after-holdout the `why` names an ordering and the replace moves nothing -- visible at a glance, answerable by a human in seconds. It generalises: a `why` that names an ordering needs a replace that reorders; one that names a removed guard needs a replace that removes it; one that names a credential needs a replace that touches it. Make it a required question on any PR that changes a find or a replace. THE DULLER ALTERNATIVE, which answers the real question instead of approximating it: require a re-anchored defect to be RE-RUN before its PR merges. Expensive per change, exact. WHY NEITHER BECOMES A STATIC REFUSAL: the mechanisable form -- does the replace alter anything the `why` names -- is a heuristic over prose. It can warn. A gate that refuses on it would be asserting a judgement about meaning with the confidence of a measurement, which is the fake precision DFA-017 forbids, and it would be the same error this entry is about one level up. The general question, does this mutation still test what it was written to test, asks whether a program change defeats an unspecified set of detectors. That IS the mutation run. Do not specify a static check claiming to answer it. THE CHEAP INSTRUMENT IS CURRENTLY UNAVAILABLE, which is why today cost four laps. harness/factory_mutations/run.py refuses with `focused baseline is red` before mutating anything, because the 32 pre-existing genesis-ceremony failures make the local baseline red (BOOTSTRAP_REFUSED harness/genesis_validate.py does not match the validation_driver_sha256 the policy pins). The refusal is correct -- mutating against a red baseline proves nothing -- but the consequence is that the catalogue cannot be tested anywhere except inside a full lap. Those failures are not on the critical path and are not caused by any change here; they have nonetheless removed the only tool that could have made today cheaper. Worth its own entry if it persists. PARENT: DFE-026 -- see it for why this and its three siblings are one finding. APPLIED BY ITS AUTHOR, 2026-09-10: PR #165 moved a line that `currency-only-falls-through-to-the-bundle` anchors on. The re-anchor was checked by this entry's own review step rather than by matching a string -- the `why` names the early return being removed, so the replace must still delete that block -- and verified by PARSING THE MUTATED SOURCE and confirming the `return` was gone. An entry that has been used once is different evidence from one that has only been written: the review step is now known to be answerable in seconds by the person making the change, which was the claim and is no longer only a claim."
+    },
+    {
+      "id": "DFE-024",
+      "n": 24,
+      "title": "AMENDMENT: a test that reads source is not a test that ran it",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-023",
+        "DFA-017",
+        "DFV-009",
+        "DFE-015"
+      ],
+      "rationale": "SECOND INSTANCE IN TWO DAYS OF ONE SHAPE: a green check that examined SPELLING where BEHAVIOUR was the question, contradicted only by an expensive run at the end of a long ladder. 2026-09-08, DFE-023: MUTATION_ANCHORS_OK verified that a defect's anchor TEXT was present exactly once. Two defects had been defanged; the marker was green. 2026-09-09, this entry: every test written for KernelRuntime.merge_authorized asserts that the method's SOURCE contains the right strings -- `merge-authorization.json`, `head moved after authorization`, `merge_verify.py`. Not one of them calls it. The method contained `worktree = create(...)` where the name is `create_detached`, so it raised NameError on its first real invocation, in the merge step of lap 34399514537, after an 89-minute ladder that had gone green on every rung. A method with an undefined name passed its entire suite. Nothing in the repository calls merge_authorized: its five references are one CLI call site and four source reads. The two mechanisms are unrelated -- a mutation catalogue and a unit suite -- which is what makes the shape worth naming rather than either instance.",
+      "cost": "the rule is cheap; the audit of existing coverage is not yet scoped",
+      "note": "MEASURED SURFACE, by AST walk of tests/factory on 2026-09-09: 254 of 1825 test methods (13.9%) contain a source read (`read_text`, `getsource`, `read_bytes`), across 64 of 91 files. Treat that as an UPPER bound on purely source-assertion tests and a LOWER bound on tests touching source text -- a method may both read source and execute, and the walk cannot tell. Heaviest: test_factory_lifecycle_authority.py and test_factory_single_publisher.py at 100%, test_factory_github_e2e_bootstrap.py at 92%. The two files written for DFE-014/DFE-018 are 3/8 and 4/16, so this is not a legacy problem being discovered; it is a habit still in use. THE DISTINCTION THAT MATTERS, because source assertions are not wrong in themselves: a source assertion about STRUCTURE THAT CANNOT BE EXECUTED is legitimate and several here are load-bearing -- that no authority cursor is opened between merge-pre and the merge, that the workflow mints twice, that `_exec` closes the cursor after the refusal raise and not before. None of those is reachable by calling anything. A source assertion standing in for BEHAVIOUR THAT COULD HAVE BEEN RUN is the defect: it reports that a path is covered while never entering it. PROPOSED RULE, cheap and checkable: every function on a trusted path must be INVOKED by at least one test. Not `is mentioned by` -- invoked. That is mechanisable without judging prose, unlike DFE-023's harder half, because it asks about call graphs rather than meaning. LEFT OPEN: whether the 254 are audited, and in what order. The honest first cut is the subset that reads source for a function which no test ever calls -- that is the exact population this instance came from, and it is smaller than 254. PARENT: DFE-026 -- the judge's only behavioural check, in a lane with no other. #169'S FIGURES, AT THE SCOPE THE EVIDENCE SUPPORTS. Run 34609884857's bundle reports factory_mutations 428/428 with not_injected 0, and application mutations 9/9 with independent 9 and security 9. SUPPORTED: those counters are now backed by tests of the runner's injection and catch accounting -- test_a_successful_apply_leaves_the_file_different, test_a_missing_anchor_returns_false_and_writes_nothing, test_a_green_channel_is_not_reported_as_a_catch, test_a_red_channel_before_injection_refuses_the_family. NOT ESTABLISHED: that earlier 428 figures were WRONG. They were unverified, which is a statement about confidence rather than about their correctness, and `they mean something for the first time` elides that distinction. NOR IS THE LINK DIRECT: the counters come from the MUTATION rung while these tests execute in the UNIT rung, and nothing in the bundle connects them beyond same-revision co-execution. SMALLEST NEXT CHECK, from the review: emit the mutation runner's sha or a rung-level marker into the bundle, so the figure and the tested runner are linked inside one artifact instead of by revision inference."
+    },
+    {
+      "id": "DFE-025",
+      "n": 25,
+      "title": "AMENDMENT: a refusal must distinguish an authority's verdict from an authority that never ran",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-014",
+        "DFE-020",
+        "DFA-032",
+        "DFV-016"
+      ],
+      "rationale": "A REFUSAL THAT SAYS MORE THAN IT KNOWS. Run 34420297852, 2026-09-10: the architecture holdout returned unparseable output after 2.023 s with outcome=failed, no turns, no cost and no events -- the model did not answer. The kernel recorded `reason_code=architecture_holdout`, `authority=independent architecture holdout`, and posted `Refused by: independent architecture holdout`. Nothing examined the change. DIFFERENT DEFECT FROM DFE-014, which is why it is not folded into it. DFE-014 was the WRONG authority named -- a cursor left open past the authority that closed it. Here the attribution is CORRECT by DFE-014's own rule: the cursor was genuinely open, the kernel was genuinely inside that stage, and stage and stage_context agree exactly as the field signature requires. DFE-014 is closed and behaving. What is missing is one rung down: the right authority is credited with a JUDGEMENT IT NEVER MADE. THE DISTINCTION IS THE ONE THE WHOLE SYSTEM RESTS ON. `REASON_CODES` has no `provider_failed`, no `transient`, no `authority_unavailable`. So `the holdout examined this change and rejected it` and `the holdout could not be reached` produce an identical code and an identical human sentence. That is evidence versus the ABSENCE of evidence, recorded as the same fact.",
+      "cost": "a reason code and the classification behind it",
+      "note": "THREE CONSEQUENCES, each worse than the wording. (1) PERMANENT RECORD. A two-second provider hiccup is indistinguishable from an architectural rejection in the refusal record, which is the durable artifact and the one a human reads first. On 2026-09-09 a wrong attribution cost four days of diagnosis and two more parked; this is the same failure mode with a subtler wrong word. (2) TERMINAL STATE. `architecture_holdout` is not `stale_base`, so the PR has no automatic recovery and a human must relabel it. A two-second model failure therefore costs a human intervention. This is the THIRD distinct route into DFE-020's terminal state in two days (merge_preauth, evidence_spine, architecture_holdout) and is now that entry's strongest evidence: the terminal state is not reached by rare catastrophes but by ordinary weather. (3) POISONED LEARNING INPUT, the one that compounds. DFA-032 and DFP-044 propose calibrating on recorded outcomes. Any model learning over refusal records will read provider flakiness as architectural rejection -- and since flakiness is uncorrelated with the change, it is noise labelled as signal, in the exact field a calibrator would treat as ground truth. DFV-016 keeps lessons away from blind judges; nothing keeps a mislabelled refusal out of the trajectory that feeds them. SHAPE OF THE FIX: the kernel already knows. `outcome=failed` with no turns, no cost and no events is a provider failure and is recorded as such in the stage timings; the refusal path throws that away and keeps only the stage. Give the vocabulary a code for `the authority did not run` and set it from the provider result, not from the stage cursor. Note this is NOT the stage-timings-as-authority mistake DFE-014 rejected: the provider result is already an input to the kernel's own control flow, not an observability artifact being promoted. OPEN: whether such a refusal should be retryable rather than terminal. It is the one class where retrying is obviously safe -- nothing was judged, so nothing is being re-judged -- but that is DFE-020's question and belongs there once the code exists to name the class. THE SAME PROBLEM FROM THE OTHER SIDE, found in PR #165: `refusal.is_stale_base` detects the stale-base class by matching PROSE -- `any(pattern in text ...)` over STALE_BASE_PATTERNS. So the only model-free recovery path in the system depends on the wording of a message. Adding an early base check nearly made things strictly worse: a refusal whose text no pattern matched would not be `stale_base`, `rehead_eligible` would stay false, and an 83-minute discovery would have become a permanent stall (DFE-020). Four tests and a new producer/pattern pair hold it now. But DFE-025 asks for a reason code that says `the authority did not run`, and this asks why a reason code is INFERRED FROM A MESSAGE rather than carried as data by the program that refused. Both are the same gap: the vocabulary is reconstructed downstream instead of being emitted upstream. Whoever implements either should look at the other first. THIRD INSTANCE, 2026-09-11, run 34545179520: the architecture holdout again returned unparseable JSON, after 4.082 s, again on deepseek/deepseek-v4-pro-0813. TWO OF THREE INSTANCES ARE THE SAME MODEL ON THE SAME STAGE, which makes this an UNRELIABLE ROUTE rather than weather. It has now cost a recovery intervention twice -- architecture_holdout is not stale_base, so there is no model-free path back and a human must act (DFE-020). CONSEQUENCE THAT CHANGES THE ENTRY'S PRIORITY: if a judge fails unparseably at a few percent per run, the missing reason code stops being a clarity problem and becomes an AVAILABILITY one. A class that cannot be named cannot be retried, and a stage that fails a few percent of the time with no automatic recovery converts a routine model hiccup into a stalled queue every time it fires."
+    },
+    {
+      "id": "DFE-026",
+      "n": 26,
+      "title": "AMENDMENT: the only lane that proves the judge is the lane forbidden from changing it",
+      "tier": 3,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-021",
+        "DFE-023",
+        "DFE-024",
+        "DFA-018",
+        "DFV-002",
+        "DFM-001"
+      ],
+      "rationale": "THE WHOLE FINDING IN ONE SENTENCE: the lane that writes the judge proves the least, and the lane that proves the most is forbidden from writing it. Every defect of 2026-09-08/09/10 entered through Lane A -- expired credential, immunity assertion, defanged mutation defect, undefined name -- and Lane B caught all four, at 21, 57, 89 and 4 minutes each, ONE PER ATTEMPT. That pairing is the entry. STRUCTURAL, NOT AN OVERSIGHT. Two lanes reach main. The autonomous lane pays the evidence spine: 21 required claims, eleven independent authorities, 437 mutations, E2E, holdout, conformance, ratchet, immunity, exact-head merge and post-merge tree verification -- 89 minutes. It is FORBIDDEN by the security guard from touching factory_kernel/**. The human maintenance lane may change anything, and is proved by two required checks: trust-root-authority (base-anchored identity and provenance) and quick-authority (`harness/ci.py --quick`, which is static, then unit, then `return 0`). scripts/factory_security.py evaluate() for a maintainer PR on protected paths examines commit provenance, lockfile parity, dependency justification and source, secret patterns in added lines, and floor monotonicity when floor.json is in the diff. NOT ONE OF THOSE EXAMINES WHAT THE CODE DOES. The static rung lints app/backend and app/frontend only. So the entire behavioural proof of a kernel change is tests/factory -- the suite DFE-024 measured at 13.9% source-assertion, which nothing obliges to invoke new code. THE NUMBER THAT SETTLES IT: of the 428 factory mutation defects, 193 mutate factory_kernel. They are reached at rung 5 of the full ladder, through harness/mutations/run.py. `ci.py --quick` returns at rung 2. So the 193 mutations that prove the kernel's detectors work RUN ONLY ON PULL REQUESTS THAT MAY NOT CHANGE THE KERNEL. This is not a gap in coverage; it is a consequence of how the two lanes were defined, which is why four separate-looking findings turned out to be one.",
+      "cost": "the cheap end is hours; the structural question is a Tier 3 decision",
+      "note": "THE FOUR SYMPTOMS. DFE-021 (the judge's cheap checks run after its expensive ones, or never), DFE-023 (the judge's mutation catalogue can assert protection it is not providing), DFE-024 (the judge's only behavioural check may read rather than run), and the lint gap (the judge gets NO static analysis while the product gets ruff and mypy: verified 2026-09-10, `ruff --select F821` over factory_kernel/harness/scripts/tests is clean and has never once been run by any gate). Each is a hole in the maintenance lane specifically. None can bite the autonomous lane, which pays for eleven authorities on top. EVIDENCE: every defect of 2026-09-08/09/10 entered through the maintenance lane -- expired credential, immunity assertion, defanged mutation defect, undefined name. Four for four, all merged on static-plus-unit. The autonomous lane caught all four, afterwards, at 21, 57, 89 and 4 minutes apiece, one defect per attempt. CAUTION 1, TO BE READ BEFORE ACTING: THIS IS A PROOF ASYMMETRY, NOT AN AUTHORISATION ONE. The maintenance lane requires a human with a repository role; the trust-root veto keyed to platform identity (PR #37) works exactly as designed and the bypass list stays empty. Nothing here says the wrong actors can reach the judge. It says the right actors reach it with less proof than they need. CAUTION 2: THE FIX IS NOT THE FULL LADDER ON THE MAINTENANCE LANE. An 89-minute gate on trust-root maintenance recreates audit finding B.1 in slow motion -- the deadlock where nobody can safely maintain the judge -- and B.1 was closed by keying the veto to identity rather than by widening what maintenance must pay. Do not propose it without answering B.1 first. THE TRACTABLE END, and its honest score: lint the trust root, oblige every new trusted function to be invoked by some test, and move the millisecond checks to the static rung. Those three would have caught THREE of this week's four defects on their own PRs. The fourth, the expired App installation token, was not a code defect and no static check would have found it -- it was a credential lifetime, invisible to any analysis of the source. Three of four from milliseconds of checking is the claim; it does not need rounding up. WHAT #119 ACTUALLY IS. The daily main-regression is the ONLY post-merge route to the 193. It has failed at GATE_FAILED: e2e -- rung 3 of 5 -- every day since 2026-09-05, so it has never reached the mutation rung. Its failure did not merely stop a daily job: it silently removed the last verification that the kernel's own detectors still work. NOTHING HAS VERIFIED THE KERNEL'S DETECTORS AGAINST ANYTHING FOR FIVE DAYS, and issue #119 has sat at factory:needs-human throughout, read as a stuck browser test. HALF RESOLVED 2026-09-10, and only half. THE LIVE CONDITION IS CLOSED: run 34505370936 reached GATE_OK mode=full, so the mutation rung ran and the 193 factory_kernel defects were verified against main for the first time since 2026-09-05. Issue #119 was #103; PR #134 fixed it and the daily regression recovered untouched. The five-day window in which nothing verified the kernel's detectors has ended. THE STRUCTURAL FINDING IS UNTOUCHED, and nothing about the recovery bears on it. The lane that writes the judge is still proved by identity, provenance, hygiene, static and unit, and still may change anything. The lane that runs the 193 is still forbidden from touching factory_kernel. The only post-merge route to those mutations is still a SINGLE DAILY JOB, whose failure for any reason silently removes the last verification of the judge -- and which was down for five days before anyone read its redness as more than a stuck browser test. That the cause turned out to be a product bug rather than something exotic makes the fragility worse, not better: an ordinary application defect took out the kernel's only post-merge proof and nothing said so. Do not let the urgent part going away soften the entry. The queue position changed; the finding did not. CATEGORY 3 HAS A NAME: ENTERED ONLY BY THE LADDER. Code that is genuinely executed, by something real, in-process -- but only by harness/ci.py's full run, which the unit suite never performs. Three sites now: factory_kernel/github_cli.py (DFE-028), harness/e2e.py and harness/appproc.py. It is neither a tracing artefact nor an untested gap, and the invocation rule passes it honestly. Three sites make it a PROPERTY OF THE SYSTEM rather than a quirk of one file: wherever code is reachable only through the ladder, it is proved only at ninety-nine minutes a time, by the lane that cannot change it. Whoever reads a green from the invocation rule should know which of the three categories it means, and `entered only by the ladder` is the phrase for the third."
+    },
+    {
+      "id": "DFE-027",
+      "n": 27,
+      "title": "AMENDMENT: a marker must not name more than the check behind it proves",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-023",
+        "DFE-024",
+        "DFE-022",
+        "DFA-017"
+      ],
+      "rationale": "A THIRD SPECIES, and it is found differently from the other two. DFE-023 and DFE-024 are found by reading a check against WHAT IT CLAIMS TO TEST -- a defanged anchor, a test that reads instead of running. This one is found by reading a check against ITS OWN NAME AND MARKER. Nothing is defanged. The code is correct. The tests pass. The entire gap is between what the check proves and what its name implies to whoever reads the result. THE INSTANCE: harness/e2e.py `_stream_window_verdict` reports through `E2E_STREAM_UI states=[...]` and is read, by everyone including this author, as the streaming-UI check. It has TWO independent pass routes. `stop_seen` proves the property -- ChatInput renders Stop only while `isStreaming` is true, so observing it proves the streaming flag became true in the browser. `arrived_at_once` is true whenever `polls <= 1`: the answer arrived before the second snapshot. That is a fact about SPEED. A run passing by the second route proves nothing whatever about the streaming UI, and its marker says E2E_STREAM_UI and its verdict says the journey passed. Neither route is a bug. The docstring is honest -- it says the Stop button is transient and an answer landing between the click and the first poll never shows it, which is true and is why the second route exists. The defect is that one name covers both, so a reader of the evidence bundle cannot tell which fact was established.",
+      "cost": "the instance is small; the general question is unscoped",
+      "note": "LIVE, NOT HISTORICAL. The 2026-09-11 03:41 regression is the test of the prediction that issue #119's five days of red were issue #103 (see notes.prediction_119_2026_09_10). If that run passes by `arrived_at_once` -- polls=1, no `stop-button` in states -- the prediction is UNCONFIRMED and #119 must stay open, because a green by the speed route says nothing about the flag #134 changed. The confound had to be written down BEFORE the result precisely because the marker does not distinguish the routes. THE FIX FOR THE INSTANCE is small and is not the point of this entry: make the marker carry which route passed, so `E2E_STREAM_UI` states `verdict=stop-observed` or `verdict=arrived-within-one-poll`. The bundle then records which fact was established rather than that something was. THE OPEN QUESTION, which is the point and is deliberately not a task: EVERY marker in the evidence bundle is a name attached to a claim, and NOTHING ANYWHERE CHECKS THAT THE NAME IS NOT BROADER THAN THE CHECK BEHIND IT. STATIC_OK, UNIT_PASSED, E2E_PASSED, HOLDOUT_PASSED, MUTATIONS_CAUGHT, IMMUNITY_OK, MUTATION_ANCHORS_OK -- each is read as a statement about a property and each is produced by a specific program with specific passing conditions. MUTATION_ANCHORS_OK was already shown to be one of these (DFE-023): it reads as `the catalogue is intact` and means `every find string occurs exactly once`. That is two of seven found by accident, neither by looking. Whether the rest are sound is unknown, and the honest first step is to read each marker's name against its producer's passing condition -- an afternoon, and cheaper than finding the third one the way the first two were found. WHY NOT FOLDED INTO DFE-024: the remedy is shared discipline but the detection is not, and a note inside another entry would not tell anyone to go looking. This class is invisible to every method that finds the other two. DEMONSTRATED THE DAY IT WAS FILED. Run 34505370936 (2026-09-10) passed the streaming-UI check with polls=43 and `stop-button` in states -- the property route, not `arrived_at_once`. Because both routes had been written down beforehand, that green is readable as evidence about the streaming flag. Had the marker been taken at face value, a green by either route would have read identically and the #119 prediction would have been recorded as confirmed without being tested. The entry's claim is that a marker can name more than its check proves; the day's evidence is that knowing WHICH route passed was the whole difference between a result and an assumption. THIRD INSTANCE, AND THE BEST ONE, 2026-09-11: `validate_register.py` printed `Register valid.` on a register whose DECISION_REGISTER.md said 417 decisions and 27 open amendments while decisions.json held 418 and 28. The program validated the JSON and never looked at the prose beside it, so its marker read as `the register is sound` and meant `the JSON is structurally well-formed`. WHY IT IS THE BEST INSTANCE: it was found in the tooling built to POLICE THE REGISTER THAT HOLDS THIS ENTRY. Two of seven evidence-bundle markers were already known unsound, and then the checker of the entries about unsound markers turned out to be one. That is the entry's open question -- whether the species is common wherever a green is emitted -- answered in the affirmative at the one site nobody would have thought to look. FIXED in the same pass, because it is one comparison: `prose_agrees()` now compares the markdown's totals, amendment count and tier counts against the data, and requires every open amendment to be mentioned. Counts only -- whether the prose is RIGHT is not checkable, whether it contradicts the data it summarises is, and that was the whole defect. ON ITS FIRST RUN IT FOUND TWO PRE-EXISTING DRIFTS NOBODY HAD INTRODUCED: DFE-011 and DFE-013 had never appeared in the amendments table since the atlas was written. THE SPECIES APPLIES TO REASONING ABOUT THE SYSTEM, NOT ONLY TO THE SYSTEM'S CHECKS. 2026-09-11: the experiment recorded for DFE-029 returned outcome D, and correcting that entry required withdrawing THREE claims its own author had written -- `a hand-back is normal, two out of two` (n=2), `once RED is right GREEN is nearly free` (n=1), and a thirty-fold ev/turn headroom that nine roles showed to be six- to nine-fold. Each was a statement read as broader than the evidence behind it, which is this entry's defect with a person or a model in the place of a marker. A claim formed on n=2 and written without its n is the same species as a marker whose name is broader than its check. Worth stating because it widens the entry's scope: the open question asked whether the species is common wherever a green is EMITTED, and the answer appears to be that it is common wherever thin evidence is SUMMARISED -- including in the register itself."
+    },
+    {
+      "id": "DFE-028",
+      "n": 28,
+      "title": "AMENDMENT: the GitHub client is nineteen-twentieths faked, and it is where the identity is spent",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-024",
+        "DFE-018",
+        "DFV-005",
+        "DFM-015"
+      ],
+      "rationale": "The 2026-09-10 boundary trace found 44 functions in factory_kernel never entered by any test, and 19 of them are in ONE FILE: factory_kernel/github_cli.py. Every test fakes the GitHub client, including the FakeGitHub written the same week for merge_authorized. So `run_as_app`, `merge_squash`, `create_pr`, `pr`, `pr_author`, `pr_comments`, `list_prs`, every label and comment method, and `run` itself are executed by nothing. THE PRECISE SHAPE, and it is uncomfortable: `_autonomous_identity` and `_check_identity_age` ARE entered -- the tests written for ACP-004 call them directly. THE CREDENTIAL DECISION IS EXECUTED. THE CREDENTIAL SPEND IS NOT. Everything proved about the identity this week -- the age check, the margin, the scope stripping, the refusal -- was the decision. The three operations that actually spend it are proved by source assertions over github_cli.py's text (test_factory_workflow_hygiene.py), which is DFE-024's shape exactly, on the highest-privilege surface in the kernel. Nineteen of twenty faked is DEFENSIBLE DESIGN -- a unit test must not call `gh` -- and it is simultaneously the largest single source-assertion surface in the trust root. Both are true and the second does not follow from the first being reasonable.",
+      "cost": "unknown; the question is how to prove a client you cannot call",
+      "note": "FILED, NOT FIXED, and deliberately so. This needs a considered answer rather than a quick one, and the quick ones are all wrong: mocking `subprocess.run` proves argv construction and nothing about GitHub's semantics; hitting the real API from a unit test is out of the question; and asserting harder on the source is more of the thing this entry objects to. WHAT IS ALREADY TRUE and should be weighed before anything is built: the merge path is covered end to end by the FULL LADDER rather than by units -- run 34467184805 spent the identity for real, merged, and verified the merged tree against the authorised one (FACTORY_MERGED_VERIFIED). That is stronger evidence than any unit test of `merge_squash` could be. The gap is not that the spend is unproven; it is that it is proven ONLY at ninety-nine minutes a time, by the lane that cannot change the code (DFE-026), so a defect in github_cli.py is discoverable only by a full lap. That is the same asymmetry, arriving at the most privileged file in the kernel. A LIVE PRECEDENT: the NameError in merge_authorized was exactly this -- caught by a lap rather than a unit, 89 minutes in. github_cli.py is the file where the next one would be most expensive. OPEN QUESTIONS, in the order they should be answered: is a recorded-response fixture (the pattern CLAUDE.md already mandates for Supadata and OpenRouter) the right answer for `gh` too; does the harness's own rehearsal path already exercise any of these; and is the honest position simply that this file is ladder-proved and should be marked as such rather than unit-tested badly."
+    },
+    {
+      "id": "DFE-029",
+      "n": 29,
+      "title": "AMENDMENT: test_author's output is most often wrong at its own core purpose, and no limit bounds what it generates",
+      "tier": 2,
+      "status": "AMENDMENT",
+      "affects": [
+        "DFE-012",
+        "DFA-003",
+        "DFM-026",
+        "DFP-060"
+      ],
+      "rationale": "IT IS NOT THE EXPENSIVE STAGE. IT IS THE STAGE WHOSE OUTPUT IS MOST OFTEN WRONG AT THE ONE THING IT EXISTS TO DO, and the cost finding and the correctness finding are the same finding. BOTH HAND-BACKS, TWO BUILDS OUT OF TWO, ARE THE STAGE FAILING TO PRODUCE A TEST THAT FAILS FOR THE STATED REASON. #49: `FACTORY_RED_HANDBACK acceptance_id=AC-2 reason='AC-2 RED command unexpectedly passed'`. The declared red checkpoint PASSED ON THE UNCHANGED TREE -- it did not express the bug at all. #134: the declared `expected_failure` was the message `getByRole` prints while the test's own query printed another, so the test failed correctly and the declaration was wrong. THE GATE AND THE STAGE DO NOT DISAGREE ABOUT WHAT A VALID RED PROOF IS. The gate is right in both cases. A stage that must write a failing test wrote, twice, something that did not fail for the reason it declared. THE MECHANICAL HALF, and it is clean. Five observations across three laps; the field that separates a healthy run from a runaway one is neither time nor turns but EVENTS PER TURN. #134 r1: 789 s, 31 turns, 136017 events, 4387 ev/turn, cap_reached. #134 r2: 97 s, 19 turns, 1266 events, 66 ev/turn, ok. #49 r1: 160 s, 15 turns, 2181 events, 145 ev/turn, ok but RED refused. #49 r2: 444 s, 30 turns, 713 events, 23 ev/turn, ok. #49 rebuild: 4035 s, 18 turns, 80665 events, 4481 ev/turn, TIMED OUT, over_budget. Healthy runs sit at 23-145; the two that hit a limit at ~4400. A thirty- to one-hundred-and-ninety-fold separation, and the only field that separates them. SO `cap_reached` AND `timed_out` ARE THE SAME FAILURE CAUGHT BY DIFFERENT LIMITS: #134 reached the turn cap, the rebuild hit the wall at 18 turns because the clock arrived first. NOTHING BOUNDS HOW MUCH A SINGLE TURN MAY GENERATE. The turn cap bounds turns, the wall bounds seconds, and the failure mode walks past both.",
+      "cost": "diagnosis is done; the fix is a design question about bounding generation",
+      "note": "CORRECTED 2026-09-11 BY THE EXPERIMENT THIS ENTRY ASKED FOR. Run 34596429955 rebuilt #49 and produced OUTCOME D: `red-gate seconds=9.499 outcome=ok` on the FIRST attempt, no FACTORY_RED_HANDBACK anywhere, test_author once at 264 s / 23 turns / 1762 events / 77 ev/turn / ok. Three corrections follow, and the entry is weaker than it was. (1) WITHDRAWN: `a hand-back is normal, two builds out of two`. CORRECTED AGAIN 2026-09-13 after evidence review: the first correction said `a majority of three builds`, which silently dropped a build THIS SAME ENTRY cites as evidence -- the #49 rebuild whose test_author timed out at 4035 s before ever reaching the RED gate. FOUR BUILDS ARE OBSERVED: two handed back (#134, #49-a1), one timed out before a hand-back decision could occur (#49 rebuild), one was clean (#49-a2). So the honest statements are: TWO OF THE THREE BUILDS THAT REACHED A HAND-BACK DECISION handed back, and THREE OF FOUR BUILDS produced a defective or failed RED proof. Not `a majority of three`. Choosing the denominator that fitted the claim is the same defect this entry's other corrections were about, committed while correcting them. The original was formed on two observations and stated with more confidence than two observations carry. (2) THE MARGIN COLLAPSE, and this is the number that decides whether a bound is buildable. The two-role comparison behind the original entry implied roughly THIRTY-FOLD headroom between healthy and runaway. Nine roles in one build give healthy ev/turn of: contract 495, investigate 434, review-spec 267, architecture 193, review-standards 193, implement 177, conformance 122, context 98, test_author 77 -- and review-spec reached 686 on the previous build. Against runaway at 4387 and 4481 the real headroom over the healthiest observed role is about SIX- TO NINE-FOLD, not thirty. THAT IS NOT `PER-ROLE IS BETTER`. It is the difference between a bound that catches runaway and one that refuses legitimate work. A single global bound set from the earlier two-role view would have been placed inside the healthy range of at least two roles. (3) EVENTS-PER-TURN AND COST ARE DIFFERENT FIELDS FOR DIFFERENT PURPOSES, and this entry had been treating them as one. In run 34596429955 test_author was the LOWEST ev/turn role in the build (77) and STILL THE MOST EXPENSIVE BY 2.4x ($3.63 against implement's $1.50). So ev/turn discriminates RUNAWAY and is useless as a proxy for COST. DFE-029's mechanical half needs ev/turn; DFE-012 / ACP-003's ceiling needs cost and turns. Conflating them would have produced a ceiling that ignores the most expensive stage in the build because that stage looks quiet on the field being watched. ALSO CORRECTED: `once RED is right, GREEN is nearly free` was drawn from ONE observation of implement at 18.4 s. The second is 128.5 s and $1.50 -- seven times longer. The DIRECTION holds (implement remains cheaper than test_author in both builds) but `nearly free` was over-claimed from n=1 and is withdrawn. And `test_author is 60% of build cost` was one build; here it is 43%, still the largest single stage. WHAT SURVIVES INTACT: test_author failed outright once (4035 s, timed out, over budget); two of three builds handed back; and when it hands back, both recorded causes are the stage failing to produce a test that fails for the stated reason. It remains the least reliable stage in the ladder. The runaway mode is real and nothing bounds it. THE SPECIES TURNED ON ITS AUTHOR. Three claims in this entry -- the hand-back rate, the ev/turn headroom, and `nearly free` -- were each a marker read as broader than the evidence behind it, which is DFE-027's defect applied to the reasoning ABOUT the system rather than to the system's own checks. That is the first evidence the species is not confined to emitted greens: it applies to anyone, human or model, summarising thin evidence in a confident sentence. A claim formed on n=2 and written without its n is the same defect as a marker whose name is broader than its check."
+    }
+  ]
+}
