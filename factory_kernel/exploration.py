@@ -183,7 +183,7 @@ class Exploration:
                         claim_observations.append({"claim_id": target["falsifies_claim"],
                             "outcome": "contradicted" if value > ceilings[target["criterion_id"]] else "supported-in-probe",
                             "receipt_sha256": sha256_value(receipt), "context_identity": session["context"]["identity"],
-                            "qualification_status": "UNPROVEN", "scope": "finite-declared-workload"})
+                            "qualification_status": "UNPROVEN", "scope": receipt["scope"]})
             return "observed", {"reservation_id": reservation["id"], "round": session["round"],
                 "context_identity": session["context"]["identity"], "status": status, "failure": failure,
                 "receipt": receipt, "receipt_sha256": sha256_value(receipt), "measurements": measurements,

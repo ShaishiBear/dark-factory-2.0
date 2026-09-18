@@ -50,7 +50,8 @@ FAMILIES: Mapping[str, Mapping[str, Any]] = {
         "claim_scope": "selected-committed-source-only", "environment": "in-process analysis of the frozen repository context",
         "strategy_binding": "spec.strategies[candidate.id]",
         "limitations": ["lexical-imports-only-not-a-semantic-call-graph", "dynamic-imports-and-runtime-dispatch-not-resolved",
-                        "touched-paths-are-declared-by-the-candidate-not-measured", "files-outside-the-context-are-unanalysed",
+                        "touched-paths-are-declared-by-the-candidate-not-measured",
+                        "imports-are-those-of-the-frozen-base-not-the-proposed-change", "files-outside-the-context-are-unanalysed",
                         "no-candidate-code-is-executed"],
     },
     "public-contract-probe-v1": {
@@ -181,9 +182,18 @@ def _js_resolve(spec: str, importer: str, files: Mapping[str, Any]) -> str | Non
     return None
 
 
+def _prefix_matches(path: str, prefix: str) -> bool:
+    """A prefix names a directory (with or without its trailing slash) or an exact file, never a
+    partial segment: `app/backend/routes` does not claim `app/backend/routes_v2/x.py`."""
+    prefix = prefix.rstrip("/")
+    return path == prefix or path.startswith(prefix + "/")
+
+
 def _layer_of(path: str, layers: list[Mapping[str, Any]]) -> int | None:
+    """The first declared layer whose prefix claims the path; overlapping prefixes resolve to the
+    earlier layer, which is the spec's own ordering."""
     for index, layer in enumerate(layers):
-        if any(path.startswith(prefix) for prefix in layer["prefixes"]):
+        if any(_prefix_matches(path, prefix) for prefix in layer["prefixes"]):
             return index
     return None
 

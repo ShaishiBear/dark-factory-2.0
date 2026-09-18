@@ -144,6 +144,8 @@ class ExplorationTests(unittest.TestCase):
         outcomes = {row["claim_id"]: row["outcome"] for row in observation["claim_observations"]}
         self.assertEqual(outcomes, {"clean-assumption": "supported-in-probe", "loop-assumption": "contradicted"})
         self.assertEqual(observation["receipt"]["qualification_status"], "UNPROVEN")
+        # The claim observation carries the family's admissible claim scope, not the lookup probe's.
+        self.assertEqual({row["scope"] for row in observation["claim_observations"]}, {"selected-committed-source-only"})
         self.assertEqual(self.inspect("layers")["comparison"]["preferred"], "clean")
 
     def test_a_boundary_target_binds_candidates_by_id_and_units_by_family(self):

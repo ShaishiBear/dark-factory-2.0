@@ -129,6 +129,15 @@ class BoundaryTests(unittest.TestCase):
         row = run_boundary_analysis(spec, context=REPO)["results"]["svc"]
         self.assertEqual((row["unknown_layer_files"], row["layer_violations"], row["import_edges"]), (1, 1, 1))
 
+    def test_a_layer_prefix_claims_whole_segments_only(self) -> None:
+        repo = context({"app/backend/routes/messages.py": [], "app/backend/routes_v2/messages.py": [], "app/backend/routes": []})
+        spec = {"kind": BOUNDARY_VERSION, "layers": [{"name": "routes", "prefixes": ["app/backend/routes"]}],
+                "strategies": {"in": {"touched_paths": ["app/backend/routes/messages.py", "app/backend/routes"]},
+                               "out": {"touched_paths": ["app/backend/routes_v2/messages.py"]}}}
+        rows = run_boundary_analysis(spec, context=repo)["results"]
+        self.assertEqual((rows["in"]["unknown_layer_files"], rows["out"]["unknown_layer_files"]), (0, 1))
+        self.assertIn("imports-are-those-of-the-frozen-base-not-the-proposed-change", FAMILIES[BOUNDARY_VERSION]["limitations"])
+
     def test_spec_refusals(self) -> None:
         cases = {
             "no layers": {"kind": BOUNDARY_VERSION, "layers": [], "strategies": {"a": {"touched_paths": ["x.py"]}}},
