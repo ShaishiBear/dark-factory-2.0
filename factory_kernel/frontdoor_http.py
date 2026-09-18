@@ -23,6 +23,7 @@ from .execution_budget import ExecutionBudget
 from .execution_exchange import ExecutionProtocol, ExecutionExchange
 from .execution_authority import ExecutionAuthority
 from .frontdoor_intent import IntentRefused, IntentStore, Principal
+from .graph_transport import GraphRefused, graph_view, node_details
 from .frontdoor_programme import prepare_programme
 from .frontdoor_prepare import IntentPreparation, api_provider, protected_repository_context
 from .frontdoor_synthesis import ProgrammePreparation
@@ -45,6 +46,24 @@ from . import publication_policy
 
 ASSETS = Path(__file__).with_name("frontdoor_static")
 MAX_BODY = 250000
+
+
+GRAPH_ROUTES = frozenset({"/api/project-graph", "/api/project-graph/details"})
+
+
+def _graph_query(path, raw):
+    """The one query shape each graph route accepts, or None. No other parameter, no repeat."""
+    pairs = raw.split("&")
+    if len(pairs) != 1 or "=" not in pairs[0]:
+        return None
+    key, value = pairs[0].split("=", 1)
+    if path == "/api/project-graph" and key == "after_version" and value.isdigit() and len(value) <= 12:
+        return {"after_version": int(value)}
+    if path == "/api/project-graph/details" and key == "id" and 1 <= len(value) <= 200 and all(
+            c.isalnum() or c in "-_:.%" for c in value):
+        from urllib.parse import unquote
+        return {"id": unquote(value)}
+    return None
 
 
 class FrontDoorApplication:
@@ -161,8 +180,16 @@ class FrontDoorApplication:
         if environ.get("HTTP_HOST") != self.host or environ.get("HTTP_ORIGIN", self.origin) != self.origin:
             return send("403 Forbidden", {"error": "request origin refused"})
         method, path = environ.get("REQUEST_METHOD"), environ.get("PATH_INFO", "")
+        # Query parameters are refused everywhere except the two read-only graph routes, whose
+        # cursor and node id are the only parameters any route accepts (SPECIFICATION 10, C11).
+        graph_query = None
         if environ.get("QUERY_STRING"):
-            return send("400 Bad Request", {"error": "query parameters are not supported"})
+            if method == "GET" and path in GRAPH_ROUTES:
+                graph_query = _graph_query(path, environ["QUERY_STRING"])
+                if graph_query is None:
+                    return send("400 Bad Request", {"error": "unsupported graph query"})
+            else:
+                return send("400 Bad Request", {"error": "query parameters are not supported"})
         assets = {"/": ("index.html", "text/html; charset=utf-8"),
                   "/frontdoor.js": ("frontdoor.js", "text/javascript; charset=utf-8"),
                   "/exploration.js": ("exploration.js", "text/javascript; charset=utf-8"),
@@ -201,6 +228,22 @@ class FrontDoorApplication:
                 return send("200 OK", self._snapshot())
             if method == "GET" and path == "/api/history":
                 return send("200 OK", explain_history(self.store, self.project, principal=self.principal))
+            if method == "GET" and path == "/api/project-graph":
+                # Read-only: the intent store under its lock, no job, no paid call, no observation
+                # fetched here (the observation cursor stays None until an observer supplies one).
+                after = (graph_query or {}).get("after_version")
+                try:
+                    return send("200 OK", graph_view(self.store, self.project, principal=self.principal, after_version=after))
+                except GraphRefused as exc:
+                    return send("400 Bad Request", {"error": str(exc)})
+            if method == "GET" and path == "/api/project-graph/details":
+                node_id = (graph_query or {}).get("id")
+                if node_id is None:
+                    return send("400 Bad Request", {"error": "details need a node id"})
+                try:
+                    return send("200 OK", node_details(self.store, self.project, principal=self.principal, node_id=node_id))
+                except GraphRefused as exc:
+                    return send("404 Not Found", {"error": str(exc)})
             if method == "POST" and path == "/api/execution-budget":
                 result = self.execution_budget.approve(self.project, self._body(environ),
                     principal=self.principal, github=self.github, app_login=self.app_login)

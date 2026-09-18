@@ -279,6 +279,10 @@
       "class": "privilege-enforcement",
       "reason": "holds or materialises credentials, or performs a mutation with them"
     },
+    "graph_transport": {
+      "class": "ui",
+      "reason": "authenticated projections for people: views over records; never write proven, current or completed"
+    },
     "hosted_exploration_call": {
       "class": "orchestration",
       "reason": "sequences work and calls authorities; holds no authority of its own"
@@ -586,7 +590,7 @@
       "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
     }
   ],
-  "graph_sha256": "886453d6fccc53d6fa6d8c5be34ee65a7abd139d2a46c55cc0fb23f229be4cf4",
+  "graph_sha256": "361c8e1b4efde99427e53d196db3384af6ae99a769f7b65193a4dbe2cdcbe5a1",
   "closure_bounds": {
     "authority": {
       "files": [
