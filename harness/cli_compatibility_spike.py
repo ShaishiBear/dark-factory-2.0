@@ -246,7 +246,11 @@ def run_scenario(server_port: int, scenario: Scenario, *, binary: str, timeout: 
         out, err = proc.communicate(timeout=timeout)
         timed_out = False
     except subprocess.TimeoutExpired:
-        proc.kill(); out, err = proc.communicate(); timed_out = True
+        _kill_tree(proc); timed_out = True
+        try:
+            out, err = proc.communicate(timeout=30)  # bounded: a child holding the pipes cannot hang the spike
+        except subprocess.TimeoutExpired:
+            out, err = "", "spike: the process tree kept the pipes open after the kill"
     combined = (out or "") + (err or "")
     result_text = None
     for line in (out or "").splitlines():
@@ -342,8 +346,16 @@ def main() -> int:
         args.output.write_text(json.dumps(record, indent=2), encoding="utf-8")
         print(f"CLI_COMPATIBILITY_FAILED reason=binary_missing binary={args.binary}")
         return 1
-    version = subprocess.run(([sys.executable, binary] if binary.endswith(".py") else [binary]) + ["--version"], capture_output=True, text=True,
-                             shell=os.name == "nt" and not binary.endswith(".py")).stdout.strip()
+    # Even the version call runs in the rebuilt environment (no upstream base URL, no credential) and under a bound.
+    version_env = {k: v for k, v in os.environ.items() if not k.startswith(("ANTHROPIC_", "CLAUDE_CODE_USE_"))}
+    # Loopback port 1: nothing listens there, so even a version call that tried the network would fail locally.
+    version_env.update({"ANTHROPIC_BASE_URL": "http://127.0.0.1:1", "ANTHROPIC_API_KEY": FAKE_KEY,
+                        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1", "DISABLE_AUTOUPDATER": "1"})
+    try:
+        version = subprocess.run(([sys.executable, binary] if binary.endswith(".py") else [binary]) + ["--version"], capture_output=True, text=True,
+                                 shell=os.name == "nt" and not binary.endswith(".py"), env=version_env, timeout=60).stdout.strip()
+    except subprocess.TimeoutExpired:
+        version = "unknown (the version call exceeded 60 s)"
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeProvider)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
