@@ -1,0 +1,28 @@
+{
+  "schema": "dark-factory/lesson-policy",
+  "schema_version": "1.0",
+  "policy_id": "example-lesson-policy",
+  "version": "2026-09-18.0",
+  "installed": false,
+  "note": "An EXAMPLE, not an installed policy. The real admission thresholds are a registered decision about acceptable evidence, and this repository has not made it. `.factory/lesson-policy.json` deliberately does not exist: an absent policy makes every admission insufficient, which is the correct state while no cross-task study has run. This file exists so the protected-path rule, the schema and the gate wiring have something concrete to test against.",
+  "admission": {
+    "requires_independent_study": true,
+    "minimum_confirmation_groups": 100,
+    "maximum_confirmation_exposures": 1,
+    "error_budget_alpha": 0.05,
+    "required_arms": ["incumbent", "candidate", "memory_off", "mechanism_challenger"],
+    "negative_transfer_bound": 0.05,
+    "evidence_classes_admitted": ["observed_outcome"],
+    "synthetic_scope_only": ["synthetic"]
+  },
+  "retrieval": {
+    "maximum_records": 3,
+    "maximum_text_bytes": 8192,
+    "blind_roles_receive_nothing": true
+  },
+  "retraction": {
+    "hard_constraint_violation": "suspend",
+    "invalid_provenance": "retract",
+    "benefit_drift": "open_study"
+  }
+}

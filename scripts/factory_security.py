@@ -185,6 +185,11 @@ def commit_provenance_problems(commits: list[dict] | None) -> list[dict[str, str
     return problems
 
 
+def _policy_file(path: str) -> bool:
+    """`.factory/<name>-policy.json`: a kernel policy, never product data."""
+    return re.fullmatch(r"\.factory/[a-z0-9]+(?:-[a-z0-9]+)*-policy\.json", path) is not None
+
+
 def protected_path(path: str) -> bool:
     name = Path(path).name
     return (
@@ -201,6 +206,14 @@ def protected_path(path: str) -> bool:
         or path.startswith(".factory/methods/")
         or path.startswith(".factory/holdout/")
         or path.startswith(".factory/benchmark/")
+        # Kernel policy files the factory reads to decide what it may do to itself: the
+        # maintenance policy that names the (currently empty) autonomous lanes, and the lesson
+        # policy that will gate learned-method admission. A PR that could edit its own
+        # admission thresholds or open a lane would be granting itself authority, which is the
+        # one thing the autonomous lane can never do. `.factory/<name>-policy.json` is the
+        # shape, so a policy added later is protected on the day it is added rather than on
+        # the day someone remembers.
+        or _policy_file(path)
         or path.startswith(".github/")
         or path.startswith("deploy/systemd/")
         or path.startswith("harness/")

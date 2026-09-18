@@ -302,6 +302,11 @@ class FactoryRunnerTests(unittest.TestCase):
         self.runner = load_module("factory_mutations_budget",
                                   HARNESS / "factory_mutations" / "run.py")
 
+    def result(self, mutant_id: str, state: str):
+        """A `MutationResult` in the runner's own vocabulary, so tests cannot invent a state."""
+        detector = "tests/factory/test_claims.py" if state == "caught" else ""
+        return self.runner.MutationResult(mutant_id, "a" * 64, state, detector, "b" * 64, 1_000, "")
+
     def test_only_test_modules_are_run_as_tests(self):
         """`startswith('tests/')` also selected recorded fixtures, which are not programs."""
         for rel in self.runner.TEST_FILES:
@@ -356,25 +361,25 @@ class FactoryRunnerTests(unittest.TestCase):
         self.assertEqual(order[-1], self.runner.TEST_FILES[0])
 
     def test_every_defect_is_evaluated_and_reported_in_manifest_order(self):
-        """Concurrency may not drop a result, reorder the report, or lose an escape."""
+        """Concurrency may not drop a result, reorder the report, or lose a survivor."""
         defects = [{"id": f"d{n}", "why": "why"} for n in range(12)]
-        outcomes = {"d3": "escaped", "d7": "not_injected"}
+        states = {"d3": "survived", "d7": "infra_error"}
         seen: list[str] = []
 
-        def fake_evaluate(defect, order):
+        def fake_evaluate(defect, order, baseline=None, causal=None, target=None):
             seen.append(defect["id"])
-            return {"id": defect["id"], "outcome": outcomes.get(defect["id"], "caught"),
-                    "detail": "", "seconds": 0.1}
+            state = states.get(defect["id"], "caught")
+            return self.result(defect["id"], state)
 
         for workers in (1, 4):
             seen.clear()
             with mock.patch.object(self.runner, "evaluate", fake_evaluate):
                 results = self.runner.evaluate_all(defects, (), workers)
-            self.assertEqual([r["id"] for r in results], [d["id"] for d in defects])
+            self.assertEqual([r.mutant_id for r in results], [d["id"] for d in defects])
             self.assertEqual(sorted(seen), sorted(d["id"] for d in defects))
             self.assertEqual(
-                [r["outcome"] for r in results],
-                [outcomes.get(d["id"], "caught") for d in defects],
+                [r.state for r in results],
+                [states.get(d["id"], "caught") for d in defects],
                 f"an outcome was lost with workers={workers}",
             )
 
@@ -387,68 +392,86 @@ class FactoryRunnerTests(unittest.TestCase):
         """
         defects = [{"id": f"d{n:04d}", "why": "why"} for n in range(420)]
 
-        def fake_evaluate(defect, order):
-            return {"id": defect["id"], "outcome": "caught", "detail": "", "seconds": 0.0}
+        def fake_evaluate(defect, order, baseline=None, causal=None, target=None):
+            return self.result(defect["id"], "caught")
 
         for workers in (1, 4):
             with mock.patch.object(self.runner, "evaluate", fake_evaluate):
                 results = self.runner.evaluate_all(defects, (), workers)
-            self.assertEqual([r["id"] for r in results], [d["id"] for d in defects],
+            self.assertEqual([r.mutant_id for r in results], [d["id"] for d in defects],
                              f"a defect was skipped with workers={workers}")
 
     def test_a_worker_failure_is_not_a_silently_dropped_defect(self):
-        def boom(defect, order):
-            raise RuntimeError("copy failed")
+        """A raising worker used to unwind the pool and discard every other verdict.
 
-        with mock.patch.object(self.runner, "evaluate", boom),                 self.assertRaises(RuntimeError):
-            self.runner.evaluate_all([{"id": "d", "why": "w"}], (), 4)
+        It now becomes that mutant's own `infra_error`: nothing was observed about it, so it
+        is neither a kill nor an escape, and the 902 defects beside it keep their results.
+        """
+        def boom(defect, order, baseline=None, causal=None, target=None):
+            if defect["id"] == "d":
+                raise RuntimeError("copy failed")
+            return self.result(defect["id"], "caught")
+
+        defects = [{"id": "c", "why": "w"}, {"id": "d", "why": "w"}, {"id": "e", "why": "w"}]
+        with mock.patch.object(self.runner, "evaluate", boom):
+            results = self.runner.evaluate_all(defects, (), 4)
+        self.assertEqual([r.mutant_id for r in results], ["c", "d", "e"])
+        self.assertEqual([r.state for r in results], ["caught", "infra_error", "caught"])
 
     def test_a_defect_copy_is_removed_however_it_ends(self):
         trees: list[Path] = []
 
-        def fake_run_tests(root, order=None):
-            trees.append(Path(root))
-            return subprocess.CompletedProcess([], 0, "", ""), {}
+        def fake_detector(argv, *, cwd, env, seconds):
+            trees.append(Path(cwd))
+            return "passed", 0, "Ran 1 test\n\nOK\n", 1_000
 
         defect = {"id": "probe", "file": "harness/harness.config.json",
                   "find": "\"driver\"", "replace": "\"driver\"", "why": "probe"}
-        with mock.patch.object(self.runner, "run_tests", fake_run_tests):
-            result = self.runner.evaluate(defect, ())
-        self.assertEqual(result["outcome"], "escaped")
-        self.assertGreaterEqual(result["seconds"], 0.0)
+        with mock.patch.object(self.runner, "run_detector", fake_detector), \
+                mock.patch.object(self.runner, "TEST_FILES", ("tests/factory/test_claims.py",)):
+            result = self.runner.evaluate(defect, ("tests/factory/test_claims.py",))
+        self.assertEqual(result.state, "survived")
+        self.assertGreater(result.elapsed_ns, 0)
         self.assertEqual(len(trees), 1)
         self.assertFalse(trees[0].exists(), "the copied tree outlived its defect")
 
-    def test_an_escaped_defect_fails_the_run(self):
-        escaped = [{"id": "d", "outcome": "escaped", "detail": "<-- why", "seconds": 1.0}]
-        with mock.patch.object(self.runner, "load_defects", lambda: [{"id": "d", "why": "w"}]), \
+    def run_main(self, results):
+        """`main()` over a stubbed catalogue: real reporting, no 167-file copies."""
+        green = {"baseline_ref": "b" * 64, "source_ref": "s", "environment_ref": "e",
+                 "detectors": {rel: {"status": "passed", "exit_code": 0, "seconds": 0.1,
+                                     "tail": ""} for rel in self.runner.TEST_FILES}}
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.dict(os.environ, {"FACTORY_MUTATION_RESULTS": tmp}), \
+             mock.patch.object(self.runner, "load_defects", lambda: [{"id": "d", "why": "w"}]), \
              mock.patch.object(self.runner, "immunity_is_green", lambda: True), \
              mock.patch.object(self.runner, "build_copy", lambda parent: Path(parent)), \
-             mock.patch.object(self.runner, "run_tests",
-                               lambda root, order=None: (
-                                   subprocess.CompletedProcess([], 0, "", ""), {})), \
-             mock.patch.object(self.runner, "evaluate_all", lambda *a: escaped):
+             mock.patch.object(self.runner, "run_baseline", lambda root: green), \
+             mock.patch.object(self.runner, "evaluate_all", lambda *a, **k: results):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 rc = self.runner.main()
+        return rc, out.getvalue()
+
+    def test_an_escaped_defect_fails_the_run(self):
+        rc, text = self.run_main([self.result("d", "survived")])
         self.assertEqual(rc, 1)
-        self.assertIn("FACTORY_MUTATIONS_FAILED", out.getvalue())
-        self.assertIn("FACTORY_MUTATIONS_SECONDS=", out.getvalue())
+        self.assertIn("FACTORY_MUTATIONS_FAILED", text)
+        self.assertIn("FACTORY_MUTATIONS_ESCAPED=d", text)
+        self.assertIn("FACTORY_MUTATIONS_SECONDS=", text)
+
+    def test_an_unobserved_defect_is_incomplete_rather_than_a_bypass(self):
+        """A timeout is an absence of evidence: not green, and not a reported escape."""
+        for state, marker in (("timeout", "FACTORY_MUTATIONS_TIMED_OUT=d"),
+                              ("infra_error", "FACTORY_MUTATIONS_UNINJECTED=d")):
+            rc, text = self.run_main([self.result("d", state)])
+            self.assertEqual(rc, 1, state)
+            self.assertIn("FACTORY_MUTATIONS_INCOMPLETE", text)
+            self.assertNotIn("FACTORY_MUTATIONS_FAILED", text)
+            self.assertNotIn("FACTORY_MUTATIONS_OK", text)
+            self.assertIn(marker, text)
 
     def test_a_caught_run_reports_its_clock_against_the_budget(self):
-        caught = [{"id": "d", "outcome": "caught", "detail": "focused suite went red",
-                   "seconds": 1.0}]
-        with mock.patch.object(self.runner, "load_defects", lambda: [{"id": "d", "why": "w"}]), \
-             mock.patch.object(self.runner, "immunity_is_green", lambda: True), \
-             mock.patch.object(self.runner, "build_copy", lambda parent: Path(parent)), \
-             mock.patch.object(self.runner, "run_tests",
-                               lambda root, order=None: (
-                                   subprocess.CompletedProcess([], 0, "", ""), {})), \
-             mock.patch.object(self.runner, "evaluate_all", lambda *a: caught):
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                rc = self.runner.main()
-        text = out.getvalue()
+        rc, text = self.run_main([self.result("d", "caught")])
         self.assertEqual(rc, 0)
         self.assertRegex(text, r"FACTORY_MUTATIONS_OK defects=1 seconds=\d+\.\d budget=\d+")
         self.assertIn(f"budget={self.runner.FAMILY_BUDGET_SECONDS}", text)

@@ -79,6 +79,25 @@ class SecurityGuardTests(unittest.TestCase):
                 self.assertEqual(result["verdict"], "fail")
                 self.assertEqual(result["protected_paths"], [path])
 
+    def test_kernel_policy_files_are_trust_root(self):
+        """The policy that decides the factory's authority over itself.
+
+        `.factory/maintenance-policy.json` names the maintenance lanes that may run unattended
+        and `.factory/lesson-policy.json` will say what evidence admits a learned method. Both
+        classified as `product` until 2026-09-18, so an autonomous PR could have opened itself
+        a lane or lowered its own admission threshold. No lane was ever active, so nothing was
+        bypassed; the gap was reachable, which is enough.
+        """
+        for path in (".factory/maintenance-policy.json", ".factory/lesson-policy.json",
+                     ".factory/broker-policy.json"):
+            with self.subTest(path=path):
+                result = self.evaluate(changed_files=[path])
+                self.assertEqual(result["verdict"], "fail")
+                self.assertEqual(result["protected_paths"], [path])
+        ordinary = self.evaluate(changed_files=[".factory/experiment-results.json"])
+        self.assertEqual(ordinary["protected_paths"], [],
+                         "the rule is the -policy suffix, not every file the kernel reads")
+
     def test_factory_detector_tests_are_trust_root(self):
         """The tests are what turn an injected trust-root mutation into a red suite."""
         for path in (

@@ -71,10 +71,21 @@ class MaintenanceRefused(ValueError):
     pass
 
 
+def policy_file(path: str) -> bool:
+    """`.factory/<name>-policy.json`: a kernel policy file, mirroring the security guard.
+
+    These decide what the factory may do to itself -- which maintenance lanes exist, and what
+    evidence admits a learned method -- so a change to one is a trust-root change even though
+    the file holds no code.
+    """
+    return re.fullmatch(r"\.factory/[a-z0-9]+(?:-[a-z0-9]+)*-policy\.json", path) is not None
+
+
 def path_tier(path: str) -> str:
     """The minimum tier a path derives, from the protected path policy alone."""
     name = Path(path).name
-    if (path in TRUST_ROOT_FILES or any(path.startswith(p) for p in TRUST_ROOT_PREFIXES)):
+    if (path in TRUST_ROOT_FILES or any(path.startswith(p) for p in TRUST_ROOT_PREFIXES)
+            or policy_file(path)):
         return "trust-root-authority"
     if path.startswith("deploy/systemd/") or name == "Dockerfile" or re.fullmatch(r"docker-compose(?:\.[^.]+)?\.ya?ml", name) or name.startswith(".env"):
         return "protected-deploy"
