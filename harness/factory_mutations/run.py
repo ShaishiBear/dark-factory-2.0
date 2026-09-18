@@ -325,6 +325,9 @@ COPY_FILES = (
     # Merged from the replayed branch during rebase.
     "tests/factory/test_lessons.py",
     "tests/factory/test_tcb.py",
+    "tests/factory/test_cli_compatibility_spike.py",
+    "tests/factory/cli_stub.py",
+    "harness/cli_compatibility_spike.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

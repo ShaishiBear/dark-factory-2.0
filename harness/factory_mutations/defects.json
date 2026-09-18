@@ -4617,6 +4617,34 @@
       "find": "        if total > bounds[\"total_max_bytes\"]:\n",
       "replace": "        if False:\n",
       "why": "SPEC 15.1: the authority closure the host reads is bounded in total bytes; exceeding it becomes a host refusal, not a silent pass. Detector: tests/factory/test_tcb.py"
+    },
+    {
+      "id": "cli-spike-credential-leak-ignored",
+      "file": "harness/cli_compatibility_spike.py",
+      "find": "        if r[\"credential_in_output\"] or any(q[\"credential_in_body\"] for q in r[\"requests\"]):\n",
+      "replace": "        if False:\n",
+      "why": "SPEC 5: the spike checks authentication redaction; a CLI that prints or posts the credential must fail the gate. Detector: tests/factory/test_cli_compatibility_spike.py"
+    },
+    {
+      "id": "cli-spike-off-channel-path-ignored",
+      "file": "harness/cli_compatibility_spike.py",
+      "find": "        if any(q[\"path\"].split(\"?\", 1)[0].rstrip(\"/\") != \"/v1/messages\" for q in r[\"requests\"]):\n",
+      "replace": "        if False:\n",
+      "why": "SPEC 5: the channel permits only the configured model API operation; a request to another route must fail the gate. Detector: tests/factory/test_cli_compatibility_spike.py"
+    },
+    {
+      "id": "cli-spike-tool-exchange-not-required",
+      "file": "harness/cli_compatibility_spike.py",
+      "find": "    if not tool or not any(q[\"tool_result\"] for q in tool[\"requests\"]):\n",
+      "replace": "    if False:\n",
+      "why": "SPEC 5: tool exchanges are part of the compatibility contract; a CLI that never returns a tool_result through the channel is incompatible. Detector: tests/factory/test_cli_compatibility_spike.py"
+    },
+    {
+      "id": "cli-spike-missing-binary-passes",
+      "file": "harness/cli_compatibility_spike.py",
+      "find": "        print(f\"CLI_COMPATIBILITY_FAILED reason=binary_missing binary={args.binary}\")\n        return 1\n",
+      "replace": "        print(f\"CLI_COMPATIBILITY_FAILED reason=binary_missing binary={args.binary}\")\n        return 0\n",
+      "why": "SPEC 5: the gate fails explicitly; a missing CLI cannot pass it. Detector: tests/factory/test_cli_compatibility_spike.py"
     }
   ]
 }
