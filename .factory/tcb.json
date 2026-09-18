@@ -319,6 +319,10 @@
       "class": "proof-policy",
       "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
     },
+    "programme_transition": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
     "programme_turnover": {
       "class": "trusted-observer",
       "reason": "independently observes a source, platform or run and reports without deciding"
@@ -480,6 +484,14 @@
       "class": "ui",
       "reason": "authenticated projections for people: views over records; never write proven, current or completed"
     },
+    "transition_journal": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "transition_views": {
+      "class": "ui",
+      "reason": "authenticated projections for people: views over records; never write proven, current or completed"
+    },
     "triage": {
       "class": "orchestration",
       "reason": "sequences work and calls authorities; holds no authority of its own",
@@ -546,7 +558,7 @@
       "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
     }
   ],
-  "graph_sha256": "9730bfb3d8bef7cf3a6eb18621f00d64844aeab8dcdc56ee31b7a9d9fca3ffc0",
+  "graph_sha256": "555fcf120e6bad9fa262b658de1a32f75839759421468c010cf0317bed5ec292",
   "closure_bounds": {
     "authority": {
       "files": [
