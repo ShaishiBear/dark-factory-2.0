@@ -239,7 +239,7 @@ class ReconsiderationTests(unittest.TestCase):
         def interrupted(*args, **kwargs):
             self.fixture.stop.side_effect = IntentRefused("stopped")
             raise IntentRefused("stopped")
-        with patch("factory_kernel.exploration.run_experiment", side_effect=interrupted):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=interrupted):
             with self.assertRaises(IntentRefused):
                 self.engine.experiment("citations", self.fixture.command(self.fixture.experiment_request()), principal=OWNER)
         self.fixture.stop.side_effect = None

@@ -353,6 +353,8 @@ COPY_FILES = (
     ".factory/maintenance-policy.json",
     # WP10B decision graph UI: the static assets are inside factory_kernel/ (copied as a directory).
     "tests/factory/test_decision_graph_ui.py",
+    # WP08 contained experiment execution under a lease.
+    "tests/factory/test_experiment_runner.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

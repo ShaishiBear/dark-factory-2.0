@@ -157,7 +157,7 @@ class CalibrationTests(unittest.TestCase):
 
     def test_a_failed_experiment_is_retained_as_a_failure_with_no_sample(self) -> None:
         self.fixture.add()
-        with patch("factory_kernel.exploration.run_experiment", side_effect=RuntimeError("runner crashed")):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=RuntimeError("runner crashed")):
             self.engine.experiment("citations", self.fixture.command(self.fixture.experiment_request()), principal=OWNER)
         join = join_outcomes(self.events(), project="citations")
         self.assertEqual(join["rows"], [])

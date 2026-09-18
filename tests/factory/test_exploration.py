@@ -245,7 +245,7 @@ class ExplorationTests(unittest.TestCase):
         command = self.command(self.experiment_request())
         first = self.engine.experiment("citations", command, principal=OWNER)
         self.engine = Exploration(self.store, lambda: deepcopy(self.context), check_stop=self.stop, app_login="factory[bot]")
-        with patch("factory_kernel.exploration.run_experiment", side_effect=AssertionError("must not run again")):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=AssertionError("must not run again")):
             second = self.engine.experiment("citations", command, principal=OWNER)
         self.assertEqual(first, second)
         with self.assertRaisesRegex(IntentRefused, "already reserved"):
@@ -253,19 +253,19 @@ class ExplorationTests(unittest.TestCase):
 
     def test_reservation_is_durable_before_execution(self):
         self.add()
-        real = run_experiment
+        real = lambda spec, **kw: run_experiment(spec, context=kw["context"], check_stop=kw["check_stop"])  # the in-process runner behind the contained seam
         def inspect(spec, **kwargs):
             state = self.inspect()
             self.assertEqual(len(state["session"]["reservations"]), 1)
             self.assertGreater(state["budget"]["probe_units"], 0)
             self.assertEqual(next(iter(state["session"]["reservations"].values()))["status"], "pending")
             return real(spec, **kwargs)
-        with patch("factory_kernel.exploration.run_experiment", side_effect=inspect):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=inspect):
             self.engine.experiment("citations", self.command(self.experiment_request()), principal=OWNER)
 
     def test_failed_experiment_never_becomes_measurement(self):
         self.add()
-        with patch("factory_kernel.exploration.run_experiment", side_effect=RuntimeError("environment failed")):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=RuntimeError("environment failed")):
             result = self.engine.experiment("citations", self.command(self.experiment_request()), principal=OWNER)
         observation = result["sessions"]["lookup"]["observations"][-1]
         self.assertEqual(observation["status"], "failed")
@@ -275,16 +275,16 @@ class ExplorationTests(unittest.TestCase):
     def test_stopped_completion_stays_pending_and_replay_never_spends_again(self):
         self.add()
         command = self.command(self.experiment_request())
-        real = run_experiment
+        real = lambda spec, **kw: run_experiment(spec, context=kw["context"], check_stop=kw["check_stop"])  # the in-process runner behind the contained seam
         def stopping(spec, **kwargs):
             receipt = real(spec, **kwargs)
             self.stop.side_effect = IntentRefused("stop")
             return receipt
-        with patch("factory_kernel.exploration.run_experiment", side_effect=stopping):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=stopping):
             with self.assertRaises(IntentRefused):
                 self.engine.experiment("citations", command, principal=OWNER)
         self.stop.side_effect = None
-        with patch("factory_kernel.exploration.run_experiment", side_effect=AssertionError("replayed")):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=AssertionError("replayed")):
             self.engine.experiment("citations", command, principal=OWNER)
         with self.assertRaisesRegex(IntentRefused, "uncertain reserved"):
             self.recommend()
@@ -325,12 +325,12 @@ class ExplorationTests(unittest.TestCase):
 
     def test_concurrent_project_change_keeps_result_pending_without_false_observation(self):
         self.add()
-        real = run_experiment
+        real = lambda spec, **kw: run_experiment(spec, context=kw["context"], check_stop=kw["check_stop"])  # the in-process runner behind the contained seam
         def changed(spec, **kwargs):
             result = real(spec, **kwargs)
             self.open("concurrent")
             return result
-        with patch("factory_kernel.exploration.run_experiment", side_effect=changed):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=changed):
             with self.assertRaisesRegex(IntentRefused, "stale project version"):
                 self.engine.experiment("citations", self.command(self.experiment_request()), principal=OWNER)
         state = self.inspect()["session"]
@@ -433,7 +433,7 @@ class ExplorationTests(unittest.TestCase):
     def test_uncertain_experiment_can_be_abandoned_without_releasing_reserved_budget(self):
         self.add()
         command = self.command(self.experiment_request())
-        with patch("factory_kernel.exploration.run_experiment", side_effect=KeyboardInterrupt):
+        with patch("factory_kernel.exploration.execute_registered", side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 self.engine.experiment("citations", command, principal=OWNER)
         before = self.inspect()
@@ -457,7 +457,7 @@ class ExplorationTests(unittest.TestCase):
                 claim("index-assumption")], "candidates": [candidate("scan", "linear", 1, 2), candidate("index", "hash", 3, 4)]})
             engine.add_candidates("citations", command, principal=OWNER)
             command.update(idempotency_key="probe", expected_project_version=5, request=self.experiment_request())
-            with patch("factory_kernel.exploration.run_experiment", side_effect=AssertionError("must not spend")):
+            with patch("factory_kernel.exploration.execute_registered", side_effect=AssertionError("must not spend")):
                 with self.assertRaisesRegex(IntentRefused, "cumulative experiment budget"):
                     engine.experiment("citations", command, principal=OWNER)
         finally:
