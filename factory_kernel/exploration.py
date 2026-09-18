@@ -9,6 +9,7 @@ from .frontdoor_programme import prepare_programme
 from .programme import compile_programme
 from .exploration_policy import comparison, validate_addition, validate_policy, validate_predictions
 from .experiments import metrics_for, run_experiment, strategy_of, validate_experiment
+from .predictions import outcomes_for
 from .exploration_records import ExplorationRecords
 
 
@@ -184,10 +185,17 @@ class Exploration:
                             "outcome": "contradicted" if value > ceilings[target["criterion_id"]] else "supported-in-probe",
                             "receipt_sha256": sha256_value(receipt), "context_identity": session["context"]["identity"],
                             "qualification_status": "UNPROVEN", "scope": receipt["scope"]})
+            # The forecasts in force for these subjects were frozen before this result existed (the
+            # candidates' registrations or this round's assessment); each measurement is matched to
+            # its forecast by exact subject and measurement contract, and the outcome says only what
+            # can be said. Nothing here revises a forecast after the fact.
+            prediction_outcomes = outcomes_for(session, measurements=measurements,
+                                               context_identity=session["context"]["identity"],
+                                               receipt_sha256=sha256_value(receipt))
             return "observed", {"reservation_id": reservation["id"], "round": session["round"],
                 "context_identity": session["context"]["identity"], "status": status, "failure": failure,
                 "receipt": receipt, "receipt_sha256": sha256_value(receipt), "measurements": measurements,
-                "claim_observations": claim_observations}
+                "claim_observations": claim_observations, "prediction_outcomes": prediction_outcomes}
 
         # A stopped/stale/concurrent completion remains pending and charged. Never rerun it.
         return self._append(project, principal, completion, "experiment-result", finish)[0]

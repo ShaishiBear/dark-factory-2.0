@@ -4827,6 +4827,41 @@
       "find": "                        or strategy_of(request[\"probe\"], candidate) is None\n",
       "replace": "                        or False\n",
       "why": "SPEC 8: every measurement target binds a candidate to the strategy the spec measures for it; an unbound candidate has no result to read and must be refused before reservation, not discovered after the run. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "predictions-stale-context-still-applicable",
+      "file": "factory_kernel/predictions.py",
+      "find": "    if not record[\"applicability\"][\"applicable\"] or record[\"applicability\"][\"context_identity\"] != context_identity:\n        return {**base, \"outcome\": \"inapplicable\",",
+      "replace": "    if False:\n        return {**base, \"outcome\": \"inapplicable\",",
+      "why": "SPEC 8.3: actuals are matched by exact subject and measurement contract under the forecast's data cutoff; a forecast made under another repository context cannot be scored within or outside by a measurement taken under this one. Detector: tests/factory/test_predictions.py"
+    },
+    {
+      "id": "predictions-judgment-scored-as-number",
+      "file": "factory_kernel/predictions.py",
+      "find": "    if record[\"kind\"] != \"interval\":\n        return {**base, \"outcome\": \"not-comparable\", \"detail\": \"a judgment is not a number\"}\n",
+      "replace": "    if False:\n        return {**base, \"outcome\": \"not-comparable\", \"detail\": \"a judgment is not a number\"}\n",
+      "why": "SPEC 8.3: a qualitative judgment is stored as an uncalibrated judgment and is never compared to a measured number; scoring it would turn an opinion into a measurement outcome. Detector: tests/factory/test_predictions.py"
+    },
+    {
+      "id": "predictions-unit-mismatch-compared",
+      "file": "factory_kernel/predictions.py",
+      "find": "    if record[\"measurement_contract\"][\"unit\"] != unit:\n        return {**base, \"outcome\": \"not-comparable\", \"detail\": \"measured unit differs from the forecast's contract\"}\n",
+      "replace": "    if False:\n        return {**base, \"outcome\": \"not-comparable\", \"detail\": \"measured unit differs from the forecast's contract\"}\n",
+      "why": "SPEC 8.3: the measurement contract (the criterion's unit) is part of what a forecast is matched by; a value in another unit is not the actual the forecast was about. Detector: tests/factory/test_predictions.py"
+    },
+    {
+      "id": "predictions-later-round-assessment-taken-as-frozen",
+      "file": "factory_kernel/predictions.py",
+      "find": "            if assessment[\"round\"] == session[\"round\"] and key in assessment[\"candidates\"]:\n                predictions = assessment[\"candidates\"][key]\n                source = \"round-assessment\"\n",
+      "replace": "            if key in assessment[\"candidates\"]:\n                predictions = assessment[\"candidates\"][key]\n                source = \"round-assessment\"\n",
+      "why": "SPEC 8.3: the forecast in force is the one frozen for the current round before its results; an assessment from another round is not it, so a stale or post-hoc revision must not be scored as the forecast. Detector: tests/factory/test_predictions.py"
+    },
+    {
+      "id": "exploration-prediction-outcomes-dropped",
+      "file": "factory_kernel/exploration.py",
+      "find": "            prediction_outcomes = outcomes_for(session, measurements=measurements,\n                                               context_identity=session[\"context\"][\"identity\"],\n                                               receipt_sha256=sha256_value(receipt))\n",
+      "replace": "            prediction_outcomes = []\n",
+      "why": "SPEC 8.3 / WP11: every measured actual is matched against the forecast frozen before it and both are retained side by side; an observation that records measurements without their forecast outcomes loses the calibration record the learning layer needs. Detector: tests/factory/test_exploration.py"
     }
   ]
 }
