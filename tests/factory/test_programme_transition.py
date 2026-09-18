@@ -6,7 +6,6 @@ from __future__ import annotations
 import unittest
 
 from factory_kernel.programme_transition import (
-    ACTIVATION_EVENTS,
     EVENTS,
     PHASES,
     RECONCILIATION_REQUIRED,
@@ -62,7 +61,6 @@ class PhaseMachineTests(unittest.TestCase):
                 advance(before, event, stop=True)
         # Every new remote effect and retirement is refused under stop; nothing else is.
         self.assertEqual(STOP_REFUSED_EVENTS, {"request_fence", "request_successor", "request_release", "retire_predecessor"})
-        self.assertIs(ACTIVATION_EVENTS, STOP_REFUSED_EVENTS)
         for event in set(EVENTS) - STOP_REFUSED_EVENTS:
             self.assertEqual(advance(EVENTS[event][0], event, stop=True), EVENTS[event][1], event)
 

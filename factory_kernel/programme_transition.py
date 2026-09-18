@@ -72,7 +72,6 @@ EVENTS: dict[str, tuple[str, str]] = {
 # permits. This is the phase machine's own gate; the broker re-observes stop before every
 # effect (SPEC 4.3) and the fence lane refuses acquisition under stop on its own (fence_request).
 STOP_REFUSED_EVENTS = frozenset({"request_fence", "request_successor", "request_release", "retire_predecessor"})
-ACTIVATION_EVENTS = STOP_REFUSED_EVENTS  # compatibility name
 # Recovery events on an uncertain remote request.
 RECOVERY_EVENTS = frozenset({"observe_effect", "observe_no_effect"})
 OBSERVE_EVENT_OF = {"fence_requested": "observe_fence", "successor_requested": "observe_successor",
@@ -294,6 +293,6 @@ def compare_stores(journal_phase: str, store_state: str | None) -> str:
     return RECONCILIATION_REQUIRED
 
 
-__all__ = ["ACTIVATION_EVENTS", "EVENTS", "PHASES", "RECONCILIATION_REQUIRED", "RELEASE_FIELDS", "RELEASE_ORDER",
-           "REMOTE_REQUESTS", "TransitionIdentity", "TransitionRefused", "advance", "compare_stores", "is_uncertain",
+__all__ = ["EVENTS", "PHASES", "RECONCILIATION_REQUIRED", "RELEASE_FIELDS", "RELEASE_ORDER", "REMOTE_REQUESTS",
+           "STOP_REFUSED_EVENTS", "TransitionIdentity", "TransitionRefused", "advance", "compare_stores", "is_uncertain",
            "replay", "request_of", "request_release", "transition_identity", "validate_phase"]

@@ -4518,7 +4518,7 @@
       "file": "factory_kernel/programme_transition.py",
       "find": "    if stop and event in STOP_REFUSED_EVENTS:\n        raise TransitionRefused(f\"stop is asserted: {event!r} starts a new effect or retires work and is refused\")\n",
       "replace": "",
-      "why": "SPEC 7: stop permits read-only reconciliation but prohibits new activation/release. Detector: tests/factory/test_programme_transition.py"
+      "why": "SPEC 7: stop permits read-only reconciliation but prohibits every new remote request (fence, successor, release) and retirement. Detector: tests/factory/test_programme_transition.py"
     },
     {
       "id": "transition-uncertain-recovered-by-any-event",
