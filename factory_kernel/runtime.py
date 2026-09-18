@@ -1807,7 +1807,7 @@ class KernelRuntime:
         bytes; the argv is identical for every candidate, so the protocol freezes it once."""
         from . import code_experiments as experiments
 
-        proof_program = (self._kernel_checkout / "scripts" / "factory_proof.py").resolve()
+        proof_program = (self._kernel_checkout() / "scripts" / "factory_proof.py").resolve()
         argv = ("python", str(proof_program), "green",
                 "--proof", str((paths.artifacts / "red-proof.json").resolve()),
                 "--output", str((paths.artifacts / "investigation-green.json").resolve()))
@@ -1884,9 +1884,11 @@ class KernelRuntime:
             outcome["selection"] = selection.to_dict()
             outcome["lesson_proposal"] = experiments.lesson_proposal(plan, selection, candidates)
             # Admission is a separate evaluated step (WP11): the proposal is judged against the
-            # installed protected policy over this run's own verified record. A single
-            # comparison never carries the cohort coverage a policy demands, and without a policy
-            # only proposals and offline reports exist, so the evaluation is recorded, not acted on.
+            # installed protected policy over this run's own record. Without a policy only
+            # proposals and offline reports exist (policy_missing); with one, this run's evidence
+            # is outside the policy's task families (reject) or, when inside them, not the
+            # preregistered cohort (its cohort digest is this plan's digest), so it is insufficient.
+            # Either way the evaluation is recorded, never acted on.
             outcome["lesson_admission"] = self._evaluate_lesson(outcome["lesson_proposal"], plan, selection)
             proposed = experiments.prepare_selected_patch(selection, stage_tree.head_tree(), plan, candidates)
             if isinstance(proposed, experiments.Refusal):
@@ -1915,8 +1917,11 @@ class KernelRuntime:
     def _evaluate_lesson(self, proposal, plan, selection) -> dict:
         """Deterministic admission evaluation of one proposed lesson under the protected
         `.factory/lesson-policy.json` of the kernel checkout, or `policy_missing` when none is
-        installed. Observations come from the run record: the investigation's own frozen plan
-        and selection (authenticated by the kernel that produced them), one cohort of one."""
+        installed (a malformed installed policy raises LessonRefused: fail loud). Observations
+        come from the run record: the investigation's own frozen plan and selection, produced by
+        this kernel (that is what `authenticated` attests here, not an independent attestation).
+        The cohort digest offered is this plan's digest, so a policy's preregistered cohort never
+        matches a single run and the record explains why the proposal stays a proposal."""
         from . import lessons
 
         policy = None
@@ -1927,7 +1932,7 @@ class KernelRuntime:
             "authenticated": True,  # kernel-produced record of this run, digest-bound in the plan
             "role": "implement", "task_family": ",".join(sorted(proposal.get("mechanism_families") or [])) or "unknown",
             "cohort_digest": plan.digest(), "contaminated": False,
-            "families_covered": 1, "samples": 1,  # one comparison, never a cohort
+            "families_covered": 1, "samples": 1,  # one comparison
             "regressions": [] if selection.outcome != "regression" else ["acceptance-regression"],
             "negative_transfer": 0.0, "effect": 1.0 if selection.outcome == "provisional" else 0.0,
             "total_cost_microusd": 0, "uncertainty_rule_met": False, "observations_since_admission": 0,
