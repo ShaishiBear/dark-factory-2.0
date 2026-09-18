@@ -34,13 +34,18 @@ AUTHENTICATED_PROVENANCE = "canonical-worker-artifact-and-kernel-receipt"
 
 # The reason codes of factory_kernel.refusal, partitioned by what refused. An authority that judged
 # the candidate (guard, holdouts, certifiers, spine, merge pre-authorisation, provenance, attached
-# evidence, currency) reports a defect in what was built; the identity broker and a base that
-# moved report the environment; `unknown` reports nothing.
-IMPLEMENTATION_CODES = frozenset({"security_guard", "attached_evidence", "code_holdout", "provenance", "trust_root_currency",
+# evidence) reports a defect in what was built. The identity broker, a base that moved, and the
+# early trust-root currency check (a base-move pre-check that can only refuse sooner, never judge
+# the build: its residue after the stale-base texts is not a verdict on the candidate) report the
+# environment; `unknown` reports nothing. `reconsideration.py` uses the same unjudged set, so the
+# two modules cannot disagree about which refusals judged the candidate.
+IMPLEMENTATION_CODES = frozenset({"security_guard", "attached_evidence", "code_holdout", "provenance",
                                   "architecture_holdout", "certifier:contract", "certifier:design", "certifier:governor",
                                   "evidence_spine", "merge_preauth"})
-ENVIRONMENT_CODES = frozenset({"identity", "identity_expired", "stale_base"})
-assert IMPLEMENTATION_CODES | ENVIRONMENT_CODES | {"unknown"} == set(AUTHORITY), "every reason code must be partitioned"
+ENVIRONMENT_CODES = frozenset({"identity", "identity_expired", "stale_base", "trust_root_currency"})
+UNJUDGED_CODES = ENVIRONMENT_CODES | {"unknown"}
+assert IMPLEMENTATION_CODES | UNJUDGED_CODES == set(AUTHORITY), "every reason code must be partitioned"
+assert not IMPLEMENTATION_CODES & UNJUDGED_CODES
 
 
 def _sha(value: Any) -> bool:
@@ -114,4 +119,4 @@ def route_outcome(authenticated_receipt: Mapping[str, Any], admitted_handoff: An
     return record("unknown", detail="no authority reported this failure; nothing is attributed")
 
 
-__all__ = ["AUTHENTICATED_PROVENANCE", "CLASSIFICATIONS", "ENVIRONMENT_CODES", "IMPLEMENTATION_CODES", "SCHEMA", "route_outcome"]
+__all__ = ["AUTHENTICATED_PROVENANCE", "CLASSIFICATIONS", "ENVIRONMENT_CODES", "IMPLEMENTATION_CODES", "SCHEMA", "UNJUDGED_CODES", "route_outcome"]

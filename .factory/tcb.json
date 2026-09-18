@@ -586,7 +586,7 @@
       "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
     }
   ],
-  "graph_sha256": "fd1bbcd05cc94c828d3c2eca41acfa9a17c94087d4c54a6a955a4bf0a7d5046e",
+  "graph_sha256": "886453d6fccc53d6fa6d8c5be34ee65a7abd139d2a46c55cc0fb23f229be4cf4",
   "closure_bounds": {
     "authority": {
       "files": [

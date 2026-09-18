@@ -11,7 +11,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from factory_kernel.outcome_router import (AUTHENTICATED_PROVENANCE, CLASSIFICATIONS, ENVIRONMENT_CODES, IMPLEMENTATION_CODES,  # noqa: E402
-                                           route_outcome)
+                                           UNJUDGED_CODES, route_outcome)
+from factory_kernel import reconsideration  # noqa: E402
 from factory_kernel.refusal import AUTHORITY  # noqa: E402
 
 HANDOFF = "a" * 64
@@ -41,6 +42,12 @@ def facts(status: str = "supported", *, policy: str = POLICY, claim: str = "laye
 class RouterTests(unittest.TestCase):
     def test_every_reason_code_is_partitioned_and_every_classification_is_reachable(self) -> None:
         self.assertEqual(IMPLEMENTATION_CODES | ENVIRONMENT_CODES | {"unknown"}, set(AUTHORITY))
+        self.assertEqual(UNJUDGED_CODES, ENVIRONMENT_CODES | {"unknown"})
+        # The early trust-root currency check is a base-move pre-check, not a verdict on the build.
+        self.assertIn("trust_root_currency", ENVIRONMENT_CODES)
+        # Reconsideration decides "unjudged" from the same set: the two modules cannot drift apart.
+        self.assertIs(reconsideration.UNJUDGED_CODES, UNJUDGED_CODES)
+        self.assertIn("in UNJUDGED_CODES", Path(reconsideration.__file__).read_text(encoding="utf-8"))
         reached = set()
         reached.add(route_outcome(observation("security_guard"), HANDOFF, [], None)["classification"])
         reached.add(route_outcome(observation("identity_expired"), HANDOFF, [], None)["classification"])
