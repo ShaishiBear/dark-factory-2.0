@@ -702,6 +702,16 @@ def evaluate(defect: dict, order: tuple[str, ...], baseline: dict | None = None,
     # remove, so it is an absence of observation instead.
     named = associated_detectors(defect)
     blinded = [rel for rel in named if statuses.get(rel, {}).get("status") != PASSED]
+    # Whether the suite that a survivor is measured against was complete at all. Not every
+    # defect's `why` names a detector -- 94 of the 957 references cover a subset of the
+    # catalogue -- so the named-detector rule alone leaves a gap, and the local 2026-09-18 run
+    # walked straight into it: `worker-scheduler-persists-checkout-token` ran all 151 usable
+    # detectors, none went red, and it was reported as a surviving trust-root bypass. Its
+    # actual detector is tests/factory/test_factory_worker_authority.py, which was red on that
+    # host's baseline for environment reasons; injected against that detector alone the mutant
+    # is caught by an assertion. A survivor claims the WHOLE suite looked and none of it saw
+    # anything, so it needs the whole suite.
+    unusable_suite = sorted(rel for rel, row in statuses.items() if row.get("status") != PASSED)
     state, detector, injected_digest = SURVIVED, "", ""
     diagnostic: dict = {"mutant_id": defect["id"], "file": defect.get("file", ""),
                         "why": defect.get("why", ""), "detectors": [],
@@ -736,8 +746,14 @@ def evaluate(defect: dict, order: tuple[str, ...], baseline: dict | None = None,
                 if status == INFRA_ERROR:
                     state, detector, diagnostic["reason"] = INFRA_ERROR, rel, "detector could not run"
                     break
+    if state == SURVIVED and unusable_suite:
+        state, diagnostic["reason"] = INFRA_ERROR, (
+            f"no detector went red, but {len(unusable_suite)} of {len(statuses)} detectors were "
+            "unusable on this baseline, so the suite that would have to have looked did not: "
+            + ",".join(unusable_suite[:5]) + ("..." if len(unusable_suite) > 5 else ""))
     elapsed_ns = time.monotonic_ns() - started
-    diagnostic.update({"state": state, "elapsed_ns": elapsed_ns, "baseline_ref": reference})
+    diagnostic.update({"state": state, "elapsed_ns": elapsed_ns, "baseline_ref": reference,
+                       "unusable_suite": unusable_suite})
     reference_path = ""
     if target is not None:
         path = target / f"{defect['id']}.json"

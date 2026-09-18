@@ -5275,6 +5275,13 @@
       "find": "        if state != INFRA_ERROR and named and len(blinded) == len(named):\n            state, diagnostic[\"reason\"] = INFRA_ERROR, (\n                \"every detector this defect names was red on the baseline: \" + \",\".join(blinded))\n",
       "replace": "        if False:\n            pass\n",
       "why": "A defect whose named detector was red on the baseline had nothing looking for it; the rest of the suite passing says only that those files were not looking either. Dropping this branch reports that absence of observation as a surviving trust-root bypass, which is the one word this runner exists to make honest. Detector: tests/factory/test_mutation_execution_outcomes.py"
+    },
+    {
+      "id": "mutation-survivor-claimed-on-an-incomplete-suite",
+      "file": "harness/factory_mutations/run.py",
+      "find": "    if state == SURVIVED and unusable_suite:\n        state, diagnostic[\"reason\"] = INFRA_ERROR, (\n",
+      "replace": "    if False:\n        state, diagnostic[\"reason\"] = INFRA_ERROR, (\n",
+      "why": "A survivor claims the whole suite looked and none of it saw anything, so it needs the whole suite. With part of the baseline unusable that claim is an absence of observation wearing the word bypass; a local run reported worker-scheduler-persists-checkout-token that way while its actual detector was environment-red. Detector: tests/factory/test_mutation_execution_outcomes.py"
     }
   ]
 }
