@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from factory_kernel.canonical import sha256_value
 from factory_kernel.decision_history import explain_history
 from factory_kernel.exploration import Exploration
+from factory_kernel.experiments import run_experiment
 from factory_kernel.exploration_probe import run_probe, validate_probe
 from factory_kernel.exploration_repository import inspect_repository
 from factory_kernel.frontdoor_intent import IntentRefused
@@ -89,6 +90,99 @@ class ExplorationTests(unittest.TestCase):
     def inspect(self, session="lookup"):
         return self.engine.inspect("citations", session, principal=OWNER)
 
+    # ---- repository-boundary-v1: a second registered family through the same experiment path ----
+
+    def boundary_context(self):
+        files = {
+            "app/backend/routes/messages.py": ["backend.services.chat", "backend.db.repository"],
+            "app/backend/services/chat.py": ["backend.db.repository"],
+            "app/backend/db/repository.py": [],
+            "app/backend/services/loop_a.py": ["backend.services.loop_b"],
+            "app/backend/services/loop_b.py": ["backend.services.loop_a", "backend.routes.messages"],
+            "app/backend/tests/test_messages.py": ["backend.routes.messages"],
+        }
+        self.context["files"] = {path: {"sha256": "0" * 64, "bytes": 1, "lines": 1, "imports": imports, "definitions": [],
+                                        "gaps": ["dynamic-imports-and-runtime-dispatch-not-resolved"]} for path, imports in files.items()}
+        self.rehash()
+
+    def boundary_policy(self):
+        return {"criteria": [{"id": "layering", "question": "How many declared layer boundaries does the change cross upward?",
+                              "kind": "measurement", "unit": "layer_violations", "ceiling": 0}],
+                # The same frozen budget as policy(): every question under one approved scope shares it.
+                "priorities": ["layering"], "budget": {"calls": 4, "usd": 4, "probe_units": 1000000},
+                "max_candidates": 8, "max_rounds": 4}
+
+    def boundary_request(self):
+        return {"probe": {"kind": "repository-boundary-v1",
+                          "layers": [{"name": "routes", "prefixes": ["app/backend/routes/"]},
+                                     {"name": "services", "prefixes": ["app/backend/services/"]},
+                                     {"name": "db", "prefixes": ["app/backend/db/"]}],
+                          "strategies": {"clean": {"touched_paths": ["app/backend/routes/messages.py"]},
+                                         "loop": {"touched_paths": ["app/backend/services/loop_a.py", "app/backend/services/loop_b.py"]}}},
+                "targets": [{"candidate_id": key, "criterion_id": "layering", "metric": "layer_violations",
+                             "falsifies_claim": key + "-assumption"} for key in ("clean", "loop")],
+                "question": "Does either change cross a layer upward?",
+                "would_change_decision_if": "A candidate that imports an outer layer from an inner one is refuted.",
+                "claim_ids": ["clean-assumption", "loop-assumption"]}
+
+    def test_the_boundary_family_measures_declared_paths_and_falsifies_the_upward_import(self):
+        self.boundary_context()
+        self.engine = Exploration(self.store, lambda: deepcopy(self.context), check_stop=self.stop, app_login="factory[bot]")
+        self.open("layers", frozen=self.boundary_policy())
+        self.engine.add_candidates("citations", self.command({
+            "claims": [claim("clean-assumption"), claim("loop-assumption")],
+            "candidates": [{**candidate("clean", "linear", 0, 0), "predictions": {"layering": {"low": 0, "high": 0, "basis": "Estimate."}}},
+                           {**candidate("loop", "hash", 0, 1), "predictions": {"layering": {"low": 0, "high": 1, "basis": "Estimate."}}}]},
+            "layers"), principal=OWNER)
+        result = self.engine.experiment("citations", self.command(self.boundary_request(), "layers"), principal=OWNER)
+        observation = result["sessions"]["layers"]["observations"][-1]
+        self.assertEqual(observation["status"], "complete")
+        self.assertEqual(observation["receipt"]["runner"], "repository-boundary-v1")
+        self.assertEqual(observation["receipt"]["context_identity"], self.context["identity"])
+        values = {row["candidate_id"]: row["value"] for row in observation["measurements"]}
+        self.assertEqual(values, {"clean": 0, "loop": 1})
+        outcomes = {row["claim_id"]: row["outcome"] for row in observation["claim_observations"]}
+        self.assertEqual(outcomes, {"clean-assumption": "supported-in-probe", "loop-assumption": "contradicted"})
+        self.assertEqual(observation["receipt"]["qualification_status"], "UNPROVEN")
+        # The claim observation carries the family's admissible claim scope, not the lookup probe's.
+        self.assertEqual({row["scope"] for row in observation["claim_observations"]}, {"selected-committed-source-only"})
+        self.assertEqual(self.inspect("layers")["comparison"]["preferred"], "clean")
+
+    def test_a_boundary_target_binds_candidates_by_id_and_units_by_family(self):
+        # A criterion whose unit is a lookup metric cannot be measured by a boundary spec, even though
+        # the target's metric matches the unit: the family that runs must be the family that measures.
+        self.add()  # scan/index under the default session (unchanged context), criterion unit `comparisons`
+        crossed = self.boundary_request()
+        crossed["probe"]["strategies"] = {"scan": {"touched_paths": ["app/backend/routes/messages.py"]},
+                                          "index": {"touched_paths": ["app/backend/db/repository.py"]}}
+        crossed["targets"] = [{"candidate_id": key, "criterion_id": "lookup", "metric": "comparisons", "falsifies_claim": key + "-assumption"}
+                              for key in ("scan", "index")]
+        crossed["claim_ids"] = ["scan-assumption", "index-assumption"]
+        with self.assertRaisesRegex(IntentRefused, "not bound"):
+            self.engine.experiment("citations", self.command(crossed), principal=OWNER)
+        self.assertEqual(self.inspect()["session"]["reservations"], {})
+        self.boundary_context()
+        self.engine = Exploration(self.store, lambda: deepcopy(self.context), check_stop=self.stop, app_login="factory[bot]")
+        self.open("layers", frozen=self.boundary_policy())
+        self.engine.add_candidates("citations", self.command({
+            "claims": [claim("clean-assumption"), claim("loop-assumption")],
+            "candidates": [{**candidate("clean", "linear", 0, 0), "predictions": {"layering": {"low": 0, "high": 0, "basis": "Estimate."}}},
+                           {**candidate("loop", "hash", 0, 1), "predictions": {"layering": {"low": 0, "high": 1, "basis": "Estimate."}}}]},
+            "layers"), principal=OWNER)
+        unbound = self.boundary_request()
+        unbound["probe"]["strategies"].pop("loop")  # the candidate has no touched paths in this spec
+        with self.assertRaisesRegex(IntentRefused, "not bound"):
+            self.engine.experiment("citations", self.command(unbound, "layers"), principal=OWNER)
+        wrong_unit = self.boundary_request()
+        wrong_unit["targets"][0]["metric"] = "comparisons"  # a lookup metric on a boundary spec
+        with self.assertRaisesRegex(IntentRefused, "not bound"):
+            self.engine.experiment("citations", self.command(wrong_unit, "layers"), principal=OWNER)
+        reserved = self.boundary_request()
+        reserved["probe"]["kind"] = "public-contract-probe-v1"
+        with self.assertRaisesRegex(IntentRefused, "not runnable"):
+            self.engine.experiment("citations", self.command(reserved, "layers"), principal=OWNER)
+        self.assertEqual(self.inspect("layers")["session"]["reservations"], {})  # nothing was reserved
+
     def recommend(self, session="lookup"):
         return self.engine.recommend("citations", self.command({"stop_reason": "sufficient-support",
             "rationale": "Registered criteria distinguish the viable strategies for this workload.",
@@ -131,7 +225,7 @@ class ExplorationTests(unittest.TestCase):
         command = self.command(self.experiment_request())
         first = self.engine.experiment("citations", command, principal=OWNER)
         self.engine = Exploration(self.store, lambda: deepcopy(self.context), check_stop=self.stop, app_login="factory[bot]")
-        with patch("factory_kernel.exploration.run_probe", side_effect=AssertionError("must not run again")):
+        with patch("factory_kernel.exploration.run_experiment", side_effect=AssertionError("must not run again")):
             second = self.engine.experiment("citations", command, principal=OWNER)
         self.assertEqual(first, second)
         with self.assertRaisesRegex(IntentRefused, "already reserved"):
@@ -139,19 +233,19 @@ class ExplorationTests(unittest.TestCase):
 
     def test_reservation_is_durable_before_execution(self):
         self.add()
-        real = run_probe
+        real = run_experiment
         def inspect(spec, **kwargs):
             state = self.inspect()
             self.assertEqual(len(state["session"]["reservations"]), 1)
             self.assertGreater(state["budget"]["probe_units"], 0)
             self.assertEqual(next(iter(state["session"]["reservations"].values()))["status"], "pending")
             return real(spec, **kwargs)
-        with patch("factory_kernel.exploration.run_probe", side_effect=inspect):
+        with patch("factory_kernel.exploration.run_experiment", side_effect=inspect):
             self.engine.experiment("citations", self.command(self.experiment_request()), principal=OWNER)
 
     def test_failed_experiment_never_becomes_measurement(self):
         self.add()
-        with patch("factory_kernel.exploration.run_probe", side_effect=RuntimeError("environment failed")):
+        with patch("factory_kernel.exploration.run_experiment", side_effect=RuntimeError("environment failed")):
             result = self.engine.experiment("citations", self.command(self.experiment_request()), principal=OWNER)
         observation = result["sessions"]["lookup"]["observations"][-1]
         self.assertEqual(observation["status"], "failed")
@@ -161,16 +255,16 @@ class ExplorationTests(unittest.TestCase):
     def test_stopped_completion_stays_pending_and_replay_never_spends_again(self):
         self.add()
         command = self.command(self.experiment_request())
-        real = run_probe
+        real = run_experiment
         def stopping(spec, **kwargs):
             receipt = real(spec, **kwargs)
             self.stop.side_effect = IntentRefused("stop")
             return receipt
-        with patch("factory_kernel.exploration.run_probe", side_effect=stopping):
+        with patch("factory_kernel.exploration.run_experiment", side_effect=stopping):
             with self.assertRaises(IntentRefused):
                 self.engine.experiment("citations", command, principal=OWNER)
         self.stop.side_effect = None
-        with patch("factory_kernel.exploration.run_probe", side_effect=AssertionError("replayed")):
+        with patch("factory_kernel.exploration.run_experiment", side_effect=AssertionError("replayed")):
             self.engine.experiment("citations", command, principal=OWNER)
         with self.assertRaisesRegex(IntentRefused, "uncertain reserved"):
             self.recommend()
@@ -211,12 +305,12 @@ class ExplorationTests(unittest.TestCase):
 
     def test_concurrent_project_change_keeps_result_pending_without_false_observation(self):
         self.add()
-        real = run_probe
+        real = run_experiment
         def changed(spec, **kwargs):
             result = real(spec, **kwargs)
             self.open("concurrent")
             return result
-        with patch("factory_kernel.exploration.run_probe", side_effect=changed):
+        with patch("factory_kernel.exploration.run_experiment", side_effect=changed):
             with self.assertRaisesRegex(IntentRefused, "stale project version"):
                 self.engine.experiment("citations", self.command(self.experiment_request()), principal=OWNER)
         state = self.inspect()["session"]
@@ -319,7 +413,7 @@ class ExplorationTests(unittest.TestCase):
     def test_uncertain_experiment_can_be_abandoned_without_releasing_reserved_budget(self):
         self.add()
         command = self.command(self.experiment_request())
-        with patch("factory_kernel.exploration.run_probe", side_effect=KeyboardInterrupt):
+        with patch("factory_kernel.exploration.run_experiment", side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 self.engine.experiment("citations", command, principal=OWNER)
         before = self.inspect()
@@ -343,7 +437,7 @@ class ExplorationTests(unittest.TestCase):
                 claim("index-assumption")], "candidates": [candidate("scan", "linear", 1, 2), candidate("index", "hash", 3, 4)]})
             engine.add_candidates("citations", command, principal=OWNER)
             command.update(idempotency_key="probe", expected_project_version=5, request=self.experiment_request())
-            with patch("factory_kernel.exploration.run_probe", side_effect=AssertionError("must not spend")):
+            with patch("factory_kernel.exploration.run_experiment", side_effect=AssertionError("must not spend")):
                 with self.assertRaisesRegex(IntentRefused, "cumulative experiment budget"):
                     engine.experiment("citations", command, principal=OWNER)
         finally:

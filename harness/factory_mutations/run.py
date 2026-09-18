@@ -336,6 +336,8 @@ COPY_FILES = (
     "tests/factory/test_capabilities.py",
     "tests/factory/test_effect_broker.py",
     "tests/factory/test_factory_merge_authorized.py",
+    # WP08 experiment registry: the deterministic boundary family and the registry's refusals.
+    "tests/factory/test_experiments.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

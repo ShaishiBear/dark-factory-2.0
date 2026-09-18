@@ -8,7 +8,7 @@ from .frontdoor_intent import IntentRefused, _shape, _text, _texts
 from .frontdoor_programme import prepare_programme
 from .programme import compile_programme
 from .exploration_policy import comparison, validate_addition, validate_policy, validate_predictions
-from .exploration_probe import METRICS, run_probe, validate_probe
+from .experiments import metrics_for, run_experiment, strategy_of, validate_experiment
 from .exploration_records import ExplorationRecords
 
 
@@ -121,7 +121,8 @@ class Exploration:
             claims = _texts(request["claim_ids"])
             if not claims or not set(claims) <= state["claims"].keys():
                 raise IntentRefused("experiment must investigate recorded claims")
-            units = validate_probe(request["probe"])
+            units = validate_experiment(request["probe"])
+            metrics = metrics_for(request["probe"]["kind"])
             criteria = {row["id"]: row for row in session["policy"]["criteria"]}
             if not isinstance(request["targets"], list) or not 1 <= len(request["targets"]) <= 30:
                 raise IntentRefused("experiment needs bounded pre-registered measurement targets")
@@ -131,9 +132,9 @@ class Exploration:
                 candidate = session["candidates"].get(target["candidate_id"])
                 criterion = criteria.get(target["criterion_id"])
                 identity = (target["candidate_id"], target["criterion_id"])
-                if (candidate is None or criterion is None or criterion["kind"] != "measurement" or target["metric"] not in METRICS
+                if (candidate is None or criterion is None or criterion["kind"] != "measurement" or target["metric"] not in metrics
                         or criterion["unit"] != target["metric"] or identity in seen
-                        or candidate["probe_strategy"] not in request["probe"]["strategies"]
+                        or strategy_of(request["probe"], candidate) is None
                         or not set(candidate["claim_ids"]).intersection(claims)
                         or (target["falsifies_claim"] is not None and (criterion["ceiling"] is None
                             or target["falsifies_claim"] not in candidate["claim_ids"]
@@ -153,9 +154,11 @@ class Exploration:
         if not created:
             return state
         reservation = event["data"]
-        # No model-supplied runner or callback is accepted. Only the fixed data-only runner.
+        # No model-supplied runner or callback is accepted: the registry dispatches the spec's
+        # family to its reviewed runner, over this session's frozen repository context.
         try:
-            receipt = run_probe(request["probe"], check_stop=self.check_stop)
+            receipt = run_experiment(request["probe"], context=state["sessions"][command["session_id"]]["context"],
+                                     check_stop=self.check_stop)
             status, failure = "complete", None
         except Exception as exc:
             receipt, status, failure = None, "failed", type(exc).__name__
@@ -174,13 +177,13 @@ class Exploration:
                 ceilings = {row["id"]: row["ceiling"] for row in session["policy"]["criteria"]}
                 for target in request["targets"]:
                     candidate = session["candidates"][target["candidate_id"]]
-                    value = receipt["results"][candidate["probe_strategy"]][target["metric"]]
+                    value = receipt["results"][strategy_of(request["probe"], candidate)][target["metric"]]
                     measurements.append({**target, "value": value})
                     if target["falsifies_claim"] is not None:
                         claim_observations.append({"claim_id": target["falsifies_claim"],
                             "outcome": "contradicted" if value > ceilings[target["criterion_id"]] else "supported-in-probe",
                             "receipt_sha256": sha256_value(receipt), "context_identity": session["context"]["identity"],
-                            "qualification_status": "UNPROVEN", "scope": "finite-declared-workload"})
+                            "qualification_status": "UNPROVEN", "scope": receipt["scope"]})
             return "observed", {"reservation_id": reservation["id"], "round": session["round"],
                 "context_identity": session["context"]["identity"], "status": status, "failure": failure,
                 "receipt": receipt, "receipt_sha256": sha256_value(receipt), "measurements": measurements,

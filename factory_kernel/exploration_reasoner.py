@@ -9,6 +9,7 @@ from .agents import AgentRequest
 from .canonical import canonical_bytes, sha256_value
 from .frontdoor_intent import IntentRefused, _shape, _text
 from .programme import parse_json
+from .experiments import registry_record
 from .exploration_policy import comparison, number
 from .worker_policy import allowed_tools, effort, max_turns, max_budget_usd, stage_timeout_seconds
 
@@ -126,15 +127,20 @@ class ExplorationReasoner:
                 "Do not map unrelated quality, performance or implementation claims to this predicate. "
                 "Do not assume a missing excerpt grants permission; report a material policy evidence gap. "
                 "Do not invent measurements. Investigate only "
-                "uncertainties that could change the decision. The only executable experiment currently available "
-                "is lookup-workload-v1 on integer data, measuring comparisons, build_items, retained_items, matches. "
-                "Do not use it to claim production latency or probe unrelated architectures. If it cannot answer "
-                "the material uncertainty, stop and state the missing capability. Units must match criteria. "
+                "uncertainties that could change the decision. The executable experiments currently available are "
+                "the registered families in experiment_registry: lookup-workload-v1 on integer data (comparisons, "
+                "build_items, retained_items, matches) and repository-boundary-v1 (deterministic import, layer, cycle "
+                "and affected-test counts over the frozen repository context for each candidate's declared touched "
+                "paths; the imports measured are the frozen base's, not the candidate's proposed edits; no code "
+                "runs). Registered families marked not runnable cannot be requested. Do not use a probe "
+                "to claim production latency or probe unrelated architectures. If no family can answer the material "
+                "uncertainty, stop and state the missing capability. Units must match criteria. "
                 "All candidates must meet approved scope through later independent factory qualification. "
                 "A bounded-decision stop may retain uncertainty with explicit rationale; it cannot waive proof. "
                 "After a current recommendation, partition approved acceptance into a programme via handoff. "
                 "No approval, qualification, policy change, shell command or external effect is an available action.\n"
-                + json.dumps({"action_shapes": ACTION_SHAPES, "context": reservation["payload"]}))
+                + json.dumps({"action_shapes": ACTION_SHAPES, "experiment_registry": registry_record(),
+                              "context": reservation["payload"]}))
             with tempfile.TemporaryDirectory(prefix="factory-exploration-reasoner-") as directory:
                 role = ("preflight-challenger" if reservation["payload"]["session"]["candidates"]
                         and reservation["payload"]["session"]["status"] == "exploring" else "preflight-proposer")

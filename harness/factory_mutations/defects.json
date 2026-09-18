@@ -4778,6 +4778,55 @@
       "find": "            stop_check=self.check_stop, epoch=str(DEFAULT_POLICY[\"revocation_epoch\"]), git=self._git,\n",
       "replace": "            stop_check=lambda: None, epoch=str(DEFAULT_POLICY[\"revocation_epoch\"]), git=self._git,\n",
       "why": "A stop or fence arriving between the publication step's first check and the push would be missed if the runtime handed the broker a no-op control check; the broker's recheck is the last observation before the branch and PR exist. Detector: tests/factory/test_factory_merge_handoff.py"
+    },
+    {
+      "id": "experiments-unrunnable-family-runs",
+      "file": "factory_kernel/experiments.py",
+      "find": "    if not row[\"runnable\"]:\n        raise IntentRefused(f\"experiment family {spec['kind']} is registered but not runnable: {row['not_runnable_because']}\")\n",
+      "replace": "    if False:\n        raise IntentRefused(f\"experiment family {spec['kind']} is registered but not runnable: {row['not_runnable_because']}\")\n",
+      "why": "SPEC 8.2: a registration is not a capability; a family that needs an isolated probe view or a disposable database must refuse before any budget is reserved and say why, never fall through to another family's validator. Detector: tests/factory/test_experiments.py"
+    },
+    {
+      "id": "experiments-unanalysed-paths-dropped",
+      "file": "factory_kernel/experiments.py",
+      "find": "        unanalysed = [p for p in strategy[\"touched_paths\"] if p not in files]\n",
+      "replace": "        unanalysed = []\n",
+      "why": "SPEC 8.2: coverage gaps are explicit; a touched path the frozen context does not hold is counted as unanalysed, never silently dropped so the metrics look complete. Detector: tests/factory/test_experiments.py"
+    },
+    {
+      "id": "experiments-upward-import-not-a-violation",
+      "file": "factory_kernel/experiments.py",
+      "find": "            if src_layer is None or dst_layer is None or dst_layer < src_layer:\n",
+      "replace": "            if src_layer is None or dst_layer is None:\n",
+      "why": "repository-boundary-v1: an import from an inner layer to an outer one is the layer violation the family measures; without it the metric cannot falsify a layering claim. Detector: tests/factory/test_experiments.py, tests/factory/test_exploration.py"
+    },
+    {
+      "id": "experiments-cycles-not-counted",
+      "file": "factory_kernel/experiments.py",
+      "find": "            if len(component) > 1 or node in edges.get(node, ()):\n                cycles[0] += 1\n",
+      "replace": "            if False:\n                cycles[0] += 1\n",
+      "why": "repository-boundary-v1: import cycles among the touched files are a registered metric; a runner that never counts them reports a clean boundary for a cyclic change. Detector: tests/factory/test_experiments.py"
+    },
+    {
+      "id": "experiments-ambiguous-import-guessed",
+      "file": "factory_kernel/experiments.py",
+      "find": "        if matches:\n            return None\n",
+      "replace": "        if matches:\n            return matches[0]\n",
+      "why": "SPEC 8.2: lexical imports are never claimed to be a semantic module graph; a dotted name that matches several context modules names nothing rather than the first one found. Detector: tests/factory/test_experiments.py"
+    },
+    {
+      "id": "exploration-metrics-not-bound-to-family",
+      "file": "factory_kernel/exploration.py",
+      "find": "            metrics = metrics_for(request[\"probe\"][\"kind\"])\n",
+      "replace": "            metrics = metrics_for(request[\"probe\"][\"kind\"]) | metrics_for(\"lookup-workload-v1\")\n",
+      "why": "SPEC 8: units must match criteria and the family that measures them; a target naming another family's metric on this spec would bind a measurement the runner never produces. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "exploration-candidate-not-bound-to-strategy",
+      "file": "factory_kernel/exploration.py",
+      "find": "                        or strategy_of(request[\"probe\"], candidate) is None\n",
+      "replace": "                        or False\n",
+      "why": "SPEC 8: every measurement target binds a candidate to the strategy the spec measures for it; an unbound candidate has no result to read and must be refused before reservation, not discovered after the run. Detector: tests/factory/test_exploration.py"
     }
   ]
 }
