@@ -821,9 +821,10 @@ class KernelRuntime:
             encoding="utf-8",
         )
         # Push and PR creation are one brokered effect (SPECIFICATION 5): the grant binds the
-        # branch, head, tree, base and the digest of this run's publication artifacts, the broker
-        # re-derives them from the worktree before pushing, and the created PR is re-observed at
-        # the granted head. In-process, as for the merge; no TCB reduction is claimed.
+        # branch, head, tree, base and the digest of this run's publication artifacts; the broker
+        # re-derives head, tree, branch and a clean status from the worktree before pushing (the
+        # base is bound, not re-derived), and the created PR is re-observed at the granted head.
+        # In-process, as for the merge; no TCB reduction is claimed.
         pr = self._publish_candidate_through_broker(
             paths, cwd, branch=branch,
             title=f"factory: {str(issue.get('title') or '').strip()}", body_file=body,

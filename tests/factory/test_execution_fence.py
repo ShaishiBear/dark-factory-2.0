@@ -108,11 +108,27 @@ class FenceTests(unittest.TestCase):
         self.assertEqual(self.github.calls, [])
 
     def test_fence_blocks_last_build_publication_before_branch_or_pr_effect(self):
+        """The fence is observed before the publication step renders, pushes or opens anything.
+
+        The step's first check is the one this pins; the broker rechecks immediately before the
+        push, so a run with a real worktree and artifacts is needed to tell the two apart: with
+        the first check gone the fence would still stop the push, but only after the PR body had
+        been rendered.
+        """
         self.fence()
         runtime = self.runtime()
-        with patch("factory_kernel.runtime.subprocess.run", return_value=Mock(returncode=0)):
-            with self.assertRaises(FactoryStopped):
-                runtime._publish_build(None, Path.cwd(), {}, {"number": 1}, 1, "factory/example")
+        runtime._read_json = Mock(return_value={})
+        # The worktree answers as a clean checkout of the branch would; every object id is "a" * 40.
+        runtime._git = Mock(side_effect=lambda *args, cwd=None: "" if args[0] == "status"
+                            else "factory/example" if args[0] == "branch" else "a" * 40)
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RunPaths.create(Path(tmp), "fenced")
+            with patch("factory_kernel.runtime.subprocess.run", return_value=Mock(returncode=0)),                     patch("factory_kernel.runtime.render_pr_body", return_value="body") as render:
+                with self.assertRaises(FactoryStopped):
+                    runtime._publish_build(paths, Path.cwd(), {}, {"number": 1}, 1, "factory/example")
+            render.assert_not_called()
+            self.assertFalse((paths.root / "pr-body.md").exists())
+            self.assertFalse((paths.artifacts / "publish-grant.json").exists())
         self.github.push_branch.assert_not_called()
         self.github.create_pr.assert_not_called()
 
