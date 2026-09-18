@@ -212,6 +212,32 @@ The triage worker returns only `accept` or `reject`. The kernel validates that t
 
 No external `/opt/.../orchestrator.sh` contains hidden policy anymore.
 
+## Blueprint modules (2026-09-17 transformation)
+
+The repository transformation blueprint (`docs/implementation-blueprint-2026-09-17/`) landed its first packages on
+2026-09-17/18. Each line below says what exists on `main` and what does not; the per-package checkpoints under
+`docs/atlas/reviews/BLUEPRINT-*.md` and `docs/factory-capability-matrix-2026-09-18.md` carry the evidence and the
+implemented / tested / merged / deployed / observed status. Nothing here changes who judges a merge.
+
+| Module or record | What it does today | Real caller | Not yet |
+|---|---|---|---|
+| `factory_kernel/project_events.py` | The one append primitive over the Front Door intent journal (lock, chain, capacity, replay by registered operation) | intake, exploration, execution budget, replacement intent, transition receipts | a second journal never |
+| `.factory/project-profile.json`, `factory_kernel/project_profile.py` | The repository's identity (numeric id, visibility, default branch, publication origin) in the host's authority closure | `publication_policy`, `execution_authority` | portability to a second product |
+| `factory_kernel/code_subjects.py`, `claims.py`, `claim_scheduler.py`, `project_graph.py`, `claim_views.py` | Exact source subjects; requirement/obligation claims; the pure allowed-actions compiler; the decision graph; `explain-claims` / `plan-obligations` CLI | CLI reads only; `plan-obligations` compares with a recorded dispatch plan in shadow | the plan job running the shadow compiler; any action taken from it |
+| `factory_kernel/code_experiments.py`, `evaluation_protocol.py` | The bounded investigation loop inside a build: frozen candidates measured against a frozen evaluator, one provisional winner committed through the design envelope | `runtime._host_investigation` | performance predicates, registered workloads |
+| `factory_kernel/attestations.py`, `proof_dependencies.py`, `proof_store.py`, `.factory/authority-profiles.json` | Typed attestation companions beside every spine claim, currency assessment, a partitioned proof store | `scripts/factory_evidence_spine.py` emits companions | reuse cutover of an attestation across candidates |
+| `factory_kernel/validation_meter.py`, `provider_gateway.py`, `billing_reconciliation.py` | Spend classes and one ledger reservation per validation bundle; a route-fixed, credential-stripping gateway contract with an injected transport; per-invocation receipt reconciliation that fails closed | `execution_probe.ProbeRunner` meters diagnostic launches; `scripts/factory_test_author_probe.py` opens one bundle | the gateway transport behind `harness/appproc.py`; the metered lane while the credential is withheld |
+| `harness/cli_compatibility_spike.py` | Offline spike: the installed CLI against a local fake provider through a restricted channel; explicit gate; recorded run per CLI version | its test with a stub CLI; the author's recorded run | a hosted-runner run before gateway activation |
+| `factory_kernel/lease_store.py` | Atomic lease/grant store over SQLite with per-resource generations and a pure guard behind the public `lease_guard` vectors | tests and the conformance adapter only | the coordinator and executor (WP07) |
+| `factory_kernel/programme_transition.py`, `transition_journal.py`, `transition_views.py` | The governed-replacement phase machine, receipts as decision events, the fence-release decision behind the public `transition_release` vectors, `transition-status` CLI | the `transition-status` CLI only; no workflow or runtime path | the transition service and its workflows (with the Front Door task's fence lane) |
+| `factory_kernel/lessons.py` | Strict protected lesson-admission policy, nine gates in one order, unknown never admits, retrieval eligibility | `runtime._host_investigation` records every proposal's evaluation (no policy is installed: `policy_missing`) | trajectory capture, cohorts, the challenger experiment, lesson packets |
+| `.factory/tcb.json`, `factory_kernel/tcb.py` | Every kernel module classified; roots, permitted importers and known violations recorded; import graph pinned; the host's authority closure bounded | `execution_authority.POLICY_FILES` (the host refuses a drifted record); `tests/factory/test_tcb.py` | any TCB reduction: legacy orchestration still holds credentials and says so |
+
+Conformance: the 68 public vectors under `docs/implementation-blueprint-2026-09-17/conformance/` pass through production
+code via `tests/factory/blueprint_adapter.py` (recorded at main d6bc4bb, after PR #248, in
+`docs/atlas/reviews/local/2026-09-18T0530Z-blueprint-docs/evidence/conformance-at-d6bc4bb.log`); passing them is necessary
+for the named interfaces and sufficient for nothing else.
+
 ## Protected trust root
 
 Ordinary autonomous product PRs may not modify the machinery that judges them. `scripts/factory_security.py` blocks changes to, among other things:
