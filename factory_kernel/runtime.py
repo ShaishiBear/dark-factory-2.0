@@ -3540,8 +3540,10 @@ class KernelRuntime:
         experience packet (a caller that smuggles the marker is refused before any model runs),
         and its own packet is empty before any record is read. A permitted role's packet is
         retrieved from this run's retained lesson records under the installed protected policy,
-        bounded, recorded beside the stage as `experience-<role>.json`, and appended to the
-        context only when it has items. Both `_agent` paths pass through here."""
+        bounded, recorded beside the stage as `experience-<role>.json` by reference only (no
+        lesson text reaches the artifacts directory, which later tool-bearing blind roles can
+        read), and appended to the context only when it has items. Both `_agent` paths pass
+        through here."""
         if role not in RETRIEVAL_ROLES and carries_learned_material(context):
             raise NeedsHuman(f"role {role!r} is blind to learned material; its context carried an experience packet")
         artifacts = getattr(paths, "artifacts", None)
@@ -3550,7 +3552,9 @@ class KernelRuntime:
         packet = retrieve(role, task_from_artifacts(artifacts) if artifacts else {}, (),
                           records=lambda: lesson_records(artifacts) if artifacts else [], policy=policy, current=True)
         if artifacts is not None and artifacts.is_dir():
-            self._write_json(artifacts / f"experience-{role}.json", packet.to_dict())
+            # By reference only: the artifacts directory is readable by the run's tool-bearing
+            # roles, two of which (`test_author`, `conformance`) are blind to learned material.
+            self._write_json(artifacts / f"experience-{role}.json", packet.record())
         return context + packet_context(packet)
 
     def _agent(

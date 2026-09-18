@@ -69,6 +69,8 @@ class RetrieveTests(unittest.TestCase):
         self.assertIn("The strict operator refuses equal values.", text)
         self.assertTrue(carries_learned_material(text))
         self.assertEqual(packet.to_dict()["authority"], "advisory-context-only")
+        self.assertNotIn("items", packet.record())
+        self.assertEqual(packet.record()["item_refs"][0]["record_sha256"], record["admission"]["record_sha256"])
         self.assertEqual(packet.input_digest, sha256_value({"role": "implement", "mode": "retrieval", "task_digest": packet.task_digest,
                                                             "items": [item]}))
         # A declared family, with no shared contract, is the other applicability route.
@@ -159,6 +161,17 @@ class PayloadFunnelTests(unittest.TestCase):
             self.assertIn("issue body", request.prompt)
             recorded = json.loads((paths.artifacts / "experience-implement.json").read_text(encoding="utf-8"))
             self.assertEqual((recorded["mode"], recorded["item_count"], recorded["authority"]), ("retrieval", 1, "advisory-context-only"))
+            # The record is by reference only: the artifacts directory is readable by the run's
+            # tool-bearing roles, and `test_author` and `conformance` are blind. No lesson text on disk.
+            raw = (paths.artifacts / "experience-implement.json").read_text(encoding="utf-8")
+            self.assertNotIn("strict operator", raw)
+            self.assertNotIn("items", recorded)
+            self.assertEqual(recorded["item_refs"], [{"lesson_id": "lesson-1", "proposal_sha256": admitted_record()["admission"]["proposal_sha256"],
+                                                      "record_sha256": admitted_record()["admission"]["record_sha256"]}])
+            self.assertEqual(recorded["input_digest"], retrieve("implement", TASK, (), records=lesson_records(paths.artifacts),
+                                                                policy=POLICY_IMPLEMENT).input_digest)
+            for path in paths.artifacts.iterdir():
+                self.assertTrue(path.name.startswith("investigation-") or "strict operator" not in path.read_text(encoding="utf-8"), path.name)
             for role in ("holdout", "architecture-holdout", "contract-certifier", "design-certifier", "governor-certifier", "test_author", "conformance"):
                 with self.subTest(role):
                     provider.requests.clear()

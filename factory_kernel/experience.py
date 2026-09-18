@@ -17,6 +17,10 @@ counter-evidence. The no-memory challenger route (`no_memory_packet`) records an
 whose digest says neither a learned packet nor a previous-winner exemplar was in the
 generation context; it is not proof the base model has no prior knowledge.
 
+The stage record beside each worker (`experience-<role>.json`) names the items by digest only:
+the artifacts directory is readable by every tool-bearing role of the run, including the blind
+`test_author` and `conformance`, so lesson text travels in the prompt and nowhere on disk.
+
 Today the only retained lesson records are the investigation records of the run itself
 (`lesson_records`), and no protected lesson policy is installed, so every production packet is
 empty and says so. The mechanism is exercised end to end by tests over a real admission.
@@ -70,6 +74,18 @@ class ExperiencePacket:
     def to_dict(self) -> dict:
         return {"schema": SCHEMA, "schema_version": SCHEMA_VERSION, "role": self.role, "mode": self.mode,
                 "task_digest": self.task_digest, "items": list(self.items), "item_count": len(self.items), "bytes": self.bytes,
+                "records_examined": self.records_examined, "skipped": dict(self.skipped), "input_digest": self.input_digest,
+                "limitations": list(self.limitations), "authority": "advisory-context-only"}
+
+    def record(self) -> dict:
+        """The stage record: what was retrieved, by reference only. The run's artifacts directory
+        is readable by every tool-bearing role of the run, including the blind `test_author` and
+        `conformance`, so no lesson text is written there; the prompt is the only carrier, and
+        the record names the items by their digests so the prompt's content is still auditable."""
+        return {"schema": SCHEMA + "-record", "schema_version": SCHEMA_VERSION, "role": self.role, "mode": self.mode,
+                "task_digest": self.task_digest, "item_count": len(self.items), "bytes": self.bytes,
+                "item_refs": [{"lesson_id": item.get("lesson_id"), "proposal_sha256": item["provenance"].get("proposal_sha256"),
+                               "record_sha256": item["provenance"].get("record_sha256")} for item in self.items],
                 "records_examined": self.records_examined, "skipped": dict(self.skipped), "input_digest": self.input_digest,
                 "limitations": list(self.limitations), "authority": "advisory-context-only"}
 

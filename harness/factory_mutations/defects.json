@@ -5044,6 +5044,13 @@
       "find": "        context = self._experience_context(role, paths, context)\n        prompt = render_prompt(\n",
       "replace": "        prompt = render_prompt(\n",
       "why": "R10: the worker-controlled path is the second `_agent` path; it must pass through the same funnel so a permitted role's packet arrives and a blind role's context is screened. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "runtime-experience-record-carries-lesson-text",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._write_json(artifacts / f\"experience-{role}.json\", packet.record())\n",
+      "replace": "            self._write_json(artifacts / f\"experience-{role}.json\", packet.to_dict())\n",
+      "why": "SPEC 11.1: blinding is enforced at sandbox visibility, not only in prompts. The run's artifacts directory is readable by the tool-bearing blind roles test_author and conformance; a stage record that carries lesson text puts learned material where they can read it. Detector: tests/factory/test_experience.py"
     }
   ]
 }
