@@ -343,6 +343,9 @@ COPY_FILES = (
     "tests/factory/test_outcome_router.py",
     # WP10A project graph transport and its Front Door routes.
     "tests/factory/test_project_graph_http.py",
+    # WP11 calibration: the strict join and the preregistered protocol it reads.
+    "tests/factory/test_calibration.py",
+    "harness/experiments/learning_protocol.json",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

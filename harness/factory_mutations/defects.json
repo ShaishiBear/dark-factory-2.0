@@ -4932,6 +4932,55 @@
       "find": "            else:\n                return send(\"400 Bad Request\", {\"error\": \"query parameters are not supported\"})\n",
       "replace": "            else:\n                pass\n",
       "why": "The Front Door refuses query parameters on every route except the two graph routes; dropping the refusal lets a query string reach routes whose handlers never validated one. Detector: tests/factory/test_project_graph_http.py, tests/factory/test_frontdoor_http.py"
+    },
+    {
+      "id": "calibration-forecast-joined-from-final-state",
+      "file": "factory_kernel/calibration.py",
+      "find": "        state = projection(list(events[:index]))\n",
+      "replace": "        state = projection(list(events))\n",
+      "why": "SPEC 11.1 / WP11 acceptance: a future outcome cannot leak into a prior forecast. Joining against the final projection lets an assessment recorded after the observation supply the forecast the outcome is scored against. Detector: tests/factory/test_calibration.py"
+    },
+    {
+      "id": "calibration-duplicate-trajectory-counted-twice",
+      "file": "factory_kernel/calibration.py",
+      "find": "            if key in seen:\n                duplicates += 1\n                continue\n",
+      "replace": "            if False:\n                duplicates += 1\n                continue\n",
+      "why": "WP11 acceptance: duplicated runs are counted once. A copy of the same observation must not add a sample. Detector: tests/factory/test_calibration.py"
+    },
+    {
+      "id": "calibration-unknown-cost-becomes-zero",
+      "file": "factory_kernel/calibration.py",
+      "find": "    if reservation.get(\"calls\") == 0 and reservation.get(\"usd\") == 0:\n        return 0\n    return None\n",
+      "replace": "    if reservation.get(\"calls\") == 0 and reservation.get(\"usd\") == 0:\n        return 0\n    return 0\n",
+      "why": "WP11 acceptance: missing cost stays unknown. An unreported cost after a paid call recorded as zero would make the known sum a fiction. Detector: tests/factory/test_calibration.py"
+    },
+    {
+      "id": "calibration-unknown-outcome-scored-as-covered",
+      "file": "factory_kernel/calibration.py",
+      "find": "    compared = counts[\"within\"] + counts[\"outside\"]\n",
+      "replace": "    compared = counts[\"within\"] + counts[\"outside\"] + counts[\"unknown\"]\n",
+      "why": "SPEC 11.1: unknown-outcome rates are reported beside coverage, never folded into it; an unknown is not a compared interval. Detector: tests/factory/test_calibration.py"
+    },
+    {
+      "id": "calibration-contamination-ignored",
+      "file": "factory_kernel/calibration.py",
+      "find": "    contaminated = any(receipts_by_cohort[a] & receipts_by_cohort[b] for i, a in enumerate(names) for b in names[i + 1:])\n",
+      "replace": "    contaminated = False\n",
+      "why": "SPEC 11.1: do not train/test on copies of the same task trajectory. The same receipt in two cohorts must mark the split contaminated so the admission evaluator's clean_split gate can refuse it. Detector: tests/factory/test_calibration.py"
+    },
+    {
+      "id": "calibration-brier-not-squared",
+      "file": "factory_kernel/calibration.py",
+      "find": "        total += (Fraction(probability) - int(outcome)) ** 2\n",
+      "replace": "        total += abs(Fraction(probability) - int(outcome))\n",
+      "why": "SPEC 11.1 names the Brier score for binary outcomes: the mean squared error, computed exactly. Detector: tests/factory/test_calibration.py"
+    },
+    {
+      "id": "calibration-unmeasured-candidate-invented",
+      "file": "factory_kernel/calibration.py",
+      "find": "    final = projection(list(events))\n    measured = {(r[\"session_id\"], r[\"candidate_id\"]) for r in rows} | {(u[\"session_id\"], u[\"candidate_id\"]) for u in unjoined}\n",
+      "replace": "    final = projection(list(events))\n    measured = {(r[\"session_id\"], r[\"candidate_id\"]) for r in rows} | {(u[\"session_id\"], u[\"candidate_id\"]) for u in unjoined}\n    for sid, session in final[\"sessions\"].items():\n        for cid in session[\"candidates\"]:\n            if (sid, cid) not in measured:\n                rows.append({\"project\": project, \"session_id\": sid, \"round\": session[\"round\"], \"event_index\": None, \"recorded_at\": None,\n                             \"receipt_sha256\": None, \"candidate_id\": cid, \"criterion_id\": None, \"task_family\": session[\"candidates\"][cid].get(\"family\"),\n                             \"method_version\": \"unknown\", \"model\": UNRECORDED_MODEL, \"status\": \"complete\", \"failure\": None,\n                             \"outcome\": \"within\", \"distance\": 0, \"actual\": {\"value\": 0}, \"cost_usd\": 0, \"forecast\": None})\n                measured.add((sid, cid))\n",
+      "why": "WP11 acceptance: an unbuilt or unmeasured candidate has no invented actual. A row fabricated for it would be a sample nothing measured. Detector: tests/factory/test_calibration.py"
     }
   ]
 }
