@@ -106,6 +106,33 @@ jobs:
           agent-browser install --with-deps
           agent-browser --help >/dev/null
 
+      - name: Record whether the pinned CLI can use a restricted channel
+        # SPECIFICATION 5 of the 2026-09-17 blueprint: before the provider gateway fronts the
+        # CLI, an offline spike shows that the pinned CLI version can complete routing, streaming,
+        # tool exchanges, retries, error envelopes and cancellation through a local restricted
+        # channel with its credential redacted. The harness rebuilds the CLI's environment with
+        # only a throwaway key and a loopback base URL (the job's ANTHROPIC_BASE_URL and no
+        # secret reach it), so no upstream call is possible. Record only: `continue-on-error`
+        # because this job's verdict is the harness on main, and the record is what a gateway
+        # activation reads (it fails the gate explicitly, CLI_COMPATIBILITY_FAILED, when the CLI
+        # cannot use the channel). The Windows run of 2026-09-18 against 2.1.259 is in
+        # docs/atlas/reviews/local/2026-09-18T0500Z-cli-compatibility-spike/ (local); this step is
+        # the first record for the pinned 2.1.245 on the hosted runner.
+        continue-on-error: true
+        shell: bash
+        run: |
+          python harness/cli_compatibility_spike.py --output "$RUNNER_TEMP/cli-compatibility-spike.json" --timeout 90 --workdir "$RUNNER_TEMP"
+
+      - name: Retain the CLI compatibility record
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dark-factory-cli-compatibility-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/cli-compatibility-spike.json
+
       - name: Create disposable validation environment
         shell: bash
         run: |
