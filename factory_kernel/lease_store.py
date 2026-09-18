@@ -179,6 +179,45 @@ class LeaseStore:
             if self._meta("last_now") is None:
                 self.connection.execute("INSERT INTO meta VALUES ('last_now', '0')")
 
+    def apply_migration(self, version: int, sql: str, sql_sha256: str, *, now_ms: int | None = None) -> bool:
+        """Apply an additive migration once, recording its version and its checksum.
+
+        Additive means the existing lease schema stays readable exactly as it was: this hook
+        runs CREATE TABLE IF NOT EXISTS statements beside it and never rewrites or drops a
+        lease, grant, generation or epoch. Re-applying the same version with the same bytes is
+        a no-op. Re-applying a version whose recorded checksum differs is a refusal, because
+        two processes would otherwise both believe they had migrated to incompatible schemas.
+
+        Returns True if this call applied it. Never called on the hot path.
+        """
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            raise LeaseRefused("a migration version is a positive integer")
+        if not isinstance(sql, str) or not sql.strip():
+            raise LeaseRefused("a migration needs its SQL")
+        if not isinstance(sql_sha256, str) or not SHA256.fullmatch(sql_sha256):
+            raise LeaseRefused("a migration records its own sha256")
+        self.connection.executescript(
+            "CREATE TABLE IF NOT EXISTS df_schema_migrations ("
+            "version INTEGER PRIMARY KEY, sql_sha256 TEXT NOT NULL CHECK(length(sql_sha256)=64), "
+            "applied_at_ms INTEGER NOT NULL CHECK(applied_at_ms>=0));")
+        row = self.connection.execute(
+            "SELECT sql_sha256 FROM df_schema_migrations WHERE version = ?", (version,)).fetchone()
+        if row is not None:
+            if str(row[0]) != sql_sha256:
+                raise LeaseRefused(
+                    f"migration {version} was applied from different bytes ({str(row[0])[:12]}...); "
+                    "refusing rather than migrating twice")
+            return False
+        # executescript commits on its own, so the DDL lands before the record of it. A crash
+        # between them re-runs IF NOT EXISTS statements and then records the version.
+        self.connection.executescript(sql)
+        applied_at_ms = 0 if now_ms is None else _int(now_ms, "now_ms")
+        with self._transaction():
+            self.connection.execute(
+                "INSERT OR IGNORE INTO df_schema_migrations(version, sql_sha256, applied_at_ms) "
+                "VALUES (?, ?, ?)", (version, sql_sha256, applied_at_ms))
+        return True
+
     def _meta(self, key: str) -> str | None:
         row = self.connection.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return None if row is None else str(row[0])
@@ -242,7 +281,26 @@ class LeaseStore:
 
     def acquire_many(self, *, owner: str, role: str, resources: Iterable[str], request_sha256: str, subject_sha256: str,
                      ttl_seconds: int, now: int) -> LeaseBundle:
-        """All sorted resources or none, in one immediate transaction."""
+        """All sorted resources or none, in one immediate transaction.
+
+        The guard lives in `_acquire_locked`, which assumes a transaction is already open.
+        Callers that must decide something else in the SAME transaction -- reserving an
+        attempt and taking its bundle is the case that matters -- call that primitive
+        directly rather than opening a second connection or nesting a second transaction.
+        This method is the standalone form and keeps its refusal semantics exactly.
+        """
+        with self._transaction():
+            return self._acquire_locked(owner=owner, role=role, resources=resources,
+                                        request_sha256=request_sha256, subject_sha256=subject_sha256,
+                                        ttl_seconds=ttl_seconds, now=now)
+
+    def _acquire_locked(self, *, owner: str, role: str, resources: Iterable[str], request_sha256: str,
+                        subject_sha256: str, ttl_seconds: int, now: int) -> LeaseBundle:
+        """The acquisition itself, inside a transaction the caller already opened.
+
+        Every check the public method made is made here, in the same order, and a refusal
+        still changes nothing: the caller's transaction rolls back with it.
+        """
         owner, role = _text(owner, "owner"), _text(role, "role")
         names = sorted({_text(r, "resource") for r in resources})
         if not names or len(names) > MAX_RESOURCES:
@@ -251,26 +309,25 @@ class LeaseStore:
             if not isinstance(value, str) or not SHA256.fullmatch(value):
                 raise LeaseRefused(f"{name} must be a sha256")
         ttl = _int(ttl_seconds, "ttl_seconds", minimum=1)
-        with self._transaction():
-            now = self._observe_now(now)
-            held = self._live_holders(names, now)
-            if held:
-                raise LeaseRefused("resource held by a live lease: " + ", ".join(sorted({f"{r}@{o}" for r, o, _ in held})))
-            pending = self._unresolved_operations(names)
-            if pending:
-                raise LeaseRefused("resource has an unresolved operation: " + ", ".join(sorted(str(r[0]) for r in pending)))
-            for name in names:
-                self.connection.execute("INSERT OR IGNORE INTO resources(resource, generation) VALUES (?, 0)", (name,))
-                self.connection.execute("UPDATE resources SET generation = generation + 1 WHERE resource = ?", (name,))
-            generations = self._generation_rows(names)
-            lease_id = secrets.token_hex(16)
-            epoch = self.epoch
-            self.connection.execute(
-                "INSERT INTO leases(lease_id, epoch, owner, role, request_sha256, subject_sha256, acquired_at, expires_at, active) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)", (lease_id, epoch, owner, role, request_sha256, subject_sha256, now, now + ttl))
-            for name in names:
-                self.connection.execute("INSERT INTO lease_resources(lease_id, resource, generation) VALUES (?, ?, ?)",
-                                        (lease_id, name, generations[name]))
+        now = self._observe_now(now)
+        held = self._live_holders(names, now)
+        if held:
+            raise LeaseRefused("resource held by a live lease: " + ", ".join(sorted({f"{r}@{o}" for r, o, _ in held})))
+        pending = self._unresolved_operations(names)
+        if pending:
+            raise LeaseRefused("resource has an unresolved operation: " + ", ".join(sorted(str(r[0]) for r in pending)))
+        for name in names:
+            self.connection.execute("INSERT OR IGNORE INTO resources(resource, generation) VALUES (?, 0)", (name,))
+            self.connection.execute("UPDATE resources SET generation = generation + 1 WHERE resource = ?", (name,))
+        generations = self._generation_rows(names)
+        lease_id = secrets.token_hex(16)
+        epoch = self.epoch
+        self.connection.execute(
+            "INSERT INTO leases(lease_id, epoch, owner, role, request_sha256, subject_sha256, acquired_at, expires_at, active) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)", (lease_id, epoch, owner, role, request_sha256, subject_sha256, now, now + ttl))
+        for name in names:
+            self.connection.execute("INSERT INTO lease_resources(lease_id, resource, generation) VALUES (?, ?, ?)",
+                                    (lease_id, name, generations[name]))
         return LeaseBundle(lease_id, epoch, owner, role, generations, request_sha256, subject_sha256, now + ttl)
 
     def _lease_view(self, lease_id: str) -> tuple[dict, dict] | None:
