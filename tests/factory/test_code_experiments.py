@@ -270,6 +270,12 @@ class RuntimeHookTests(unittest.TestCase):
         self.assertEqual({c["id"] for c in record["candidates"]}, {"strict", "unequal"})
         self.assertEqual(len(record["observations"]), 3)
         self.assertEqual(record["lesson_proposal"]["status"], "proposed")
+        # WP11: the proposal is evaluated, never admitted, and the reason is recorded. Without an
+        # installed policy the evaluator says so; with one, a single comparison is not a cohort.
+        admission = record["lesson_admission"]
+        self.assertEqual((admission["status"], admission["retrieval_eligible"], admission["authority"]), ("proposed", False, "admission-evaluator"))
+        self.assertIn(admission["evaluation"]["reason_codes"][0], ("policy_missing", "coverage_insufficient"))
+        self.assertEqual(admission["evaluation"]["status"], "insufficient")
         self.assertTrue(all(o["complete"] for o in record["observations"]))
         # Resumed with the same request: decided once, never re-measured.
         self.rt._investigation_evaluator = Mock(side_effect=AssertionError("must not re-run"))

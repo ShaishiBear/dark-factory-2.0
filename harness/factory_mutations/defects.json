@@ -3683,7 +3683,7 @@
     {
       "id": "execution-worker-probe-bypass",
       "file": "factory_kernel/execution_probe.py",
-      "find": "            if self.client is None and self.scope is None:\n                state[\"phase\"] = \"launch\"",
+      "find": "            if self.client is None:\n                state[\"phase\"] = \"launch\"",
       "replace": "            if True:\n                state[\"phase\"] = \"launch\"",
       "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
     },
@@ -3711,8 +3711,8 @@
     {
       "id": "execution-worker-probe-failed",
       "file": "factory_kernel/execution_probe.py",
-      "find": "                cost = receipts[0].get(\"total_cost_usd\") if len(receipts) == 1 and result.returncode == 0 else None\n                state[\"phase\"] = \"observe\"",
-      "replace": "                cost = receipts[0].get(\"total_cost_usd\") if len(receipts) == 1 else None\n                state[\"phase\"] = \"observe\"",
+      "find": "len(receipts) == 1 and result.returncode == 0",
+      "replace": "len(receipts) == 1",
       "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
     },
     {
@@ -3844,8 +3844,8 @@
     {
       "id": "test-author-probe-unmetered-runner",
       "file": "scripts/factory_test_author_probe.py",
-      "find": "    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)\n    scope = None",
-      "replace": "    runner = subprocess.run\n    scope = None",
+      "find": "    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)\n    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ, runner=runner)",
+      "replace": "    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ)",
       "why": "The three nested test-author calls are paid calls and must go through the metered ProbeRunner; a raw subprocess here is the unmetered paid path the critic review named (WP00, C06). Detector: tests/factory/test_factory_test_author_probe.py"
     },
     {
@@ -4456,6 +4456,55 @@
       "find": "        runner = runner.with_scope(scope)",
       "replace": "        close_validation_scope(scope); scope = None",
       "why": "The three nested calls run inside one prepaid bundle whose per-call ceilings sum within its reservation; falling back to per-call reservations after opening the bundle double-charges the ledger (WP02, C06). Detector: tests/factory/test_probe_bundle.py"
+    },
+    {
+      "id": "lesson-unknown-gate-admits",
+      "file": "factory_kernel/lessons.py",
+      "find": "        if value is None:\n            # Unknown never admits: an unobserved gate is insufficient, a prohibition class or not.\n            return AdmissionResult(\"insufficient\", (code,), gates, refs, policy_sha)",
+      "replace": "        if value is None:\n            continue",
+      "why": "C10: unknown sample sufficiency or any unobserved gate never admits; skipping an unknown gate lets a model-authored proposal through on missing evidence. Detector: tests/factory/test_lessons.py"
+    },
+    {
+      "id": "lesson-missing-policy-admits",
+      "file": "factory_kernel/lessons.py",
+      "find": "    gates[\"policy\"] = policy is not None and gates[\"policy\"] is not False",
+      "replace": "    gates[\"policy\"] = gates[\"policy\"] is not False",
+      "why": "Missing policy permits proposed lessons and offline reports only (SPEC 11.1); an observation cannot stand in for the protected policy object. Detector: tests/factory/test_lessons.py"
+    },
+    {
+      "id": "lesson-regression-after-benefit",
+      "file": "factory_kernel/lessons.py",
+      "find": "    (\"hard_regression\", \"reject\", \"hard_regression\"),\n    (\"benefit\", \"reject\", \"benefit_not_met\"),",
+      "replace": "    (\"benefit\", \"reject\", \"benefit_not_met\"),\n    (\"hard_regression\", \"reject\", \"hard_regression\"),",
+      "why": "The admission order is fixed (C10): hard regression and negative-transfer constraints are checked before practical benefit. Detector: tests/factory/test_lessons.py"
+    },
+    {
+      "id": "lesson-rejected-still-retrievable",
+      "file": "factory_kernel/lessons.py",
+      "find": "        \"retrieval_eligible\": result.status == \"admit\",",
+      "replace": "        \"retrieval_eligible\": result.status != \"reject\",",
+      "why": "Only an admitted lesson is retrieval-eligible; insufficient evidence keeps a proposal a proposal (C10). Detector: tests/factory/test_lessons.py"
+    },
+    {
+      "id": "lesson-blind-role-gets-packet",
+      "file": "factory_kernel/lessons.py",
+      "find": "    if policy is None or role not in policy.eligible_roles or not current:\n        return False",
+      "replace": "    if policy is None or not current:\n        return False",
+      "why": "Retrieval eligibility checks admitted status AND current applicability AND role; blind judge roles get nothing (C10). Detector: tests/factory/test_lessons.py"
+    },
+    {
+      "id": "lesson-benefit-without-equal-budget",
+      "file": "factory_kernel/lessons.py",
+      "find": "            gates[\"benefit\"] = float(observations[\"effect\"]) >= policy.minimum_meaningful_effect and equal_budget",
+      "replace": "            gates[\"benefit\"] = float(observations[\"effect\"]) >= policy.minimum_meaningful_effect",
+      "why": "Admission requires independently observed benefit under equal total budgets (WP11); an effect bought with more search cost is not benefit. Detector: tests/factory/test_lessons.py"
+    },
+    {
+      "id": "runtime-lesson-admission-skipped",
+      "file": "factory_kernel/runtime.py",
+      "find": "            outcome[\"lesson_admission\"] = self._evaluate_lesson(outcome[\"lesson_proposal\"], plan, selection)",
+      "replace": "            outcome[\"lesson_admission\"] = None",
+      "why": "Every investigation records the deterministic admission evaluation of its lesson proposal; without it a proposal has no recorded reason for staying a proposal (WP11). Detector: tests/factory/test_code_experiments.py"
     }
   ]
 }

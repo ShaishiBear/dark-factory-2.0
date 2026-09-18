@@ -1883,6 +1883,11 @@ class KernelRuntime:
             selection = experiments.compare_candidates(plan, observations, candidates)
             outcome["selection"] = selection.to_dict()
             outcome["lesson_proposal"] = experiments.lesson_proposal(plan, selection, candidates)
+            # Admission is a separate evaluated step (WP11): the proposal is judged against the
+            # installed protected policy over this run's own verified record. A single
+            # comparison never carries the cohort coverage a policy demands, and without a policy
+            # only proposals and offline reports exist, so the evaluation is recorded, not acted on.
+            outcome["lesson_admission"] = self._evaluate_lesson(outcome["lesson_proposal"], plan, selection)
             proposed = experiments.prepare_selected_patch(selection, stage_tree.head_tree(), plan, candidates)
             if isinstance(proposed, experiments.Refusal):
                 outcome["reason"] = f"{','.join(proposed.reason_codes)}: {proposed.detail}"
@@ -1906,6 +1911,31 @@ class KernelRuntime:
         print(f"FACTORY_INVESTIGATION stage={stage} status={outcome['status']} "
               f"applied={outcome['applied_candidate_id'] or '-'} candidates={len(outcome['candidates'])}", flush=True)
         return outcome
+
+    def _evaluate_lesson(self, proposal, plan, selection) -> dict:
+        """Deterministic admission evaluation of one proposed lesson under the protected
+        `.factory/lesson-policy.json` of the kernel checkout, or `policy_missing` when none is
+        installed. Observations come from the run record: the investigation's own frozen plan
+        and selection (authenticated by the kernel that produced them), one cohort of one."""
+        from . import lessons
+
+        policy = None
+        path = self._kernel_checkout() / ".factory" / "lesson-policy.json"
+        if path.is_file():
+            policy = lessons.load_policy(path)
+        observations = {
+            "authenticated": True,  # kernel-produced record of this run, digest-bound in the plan
+            "role": "implement", "task_family": ",".join(sorted(proposal.get("mechanism_families") or [])) or "unknown",
+            "cohort_digest": plan.digest(), "contaminated": False,
+            "families_covered": 1, "samples": 1,  # one comparison, never a cohort
+            "regressions": [] if selection.outcome != "regression" else ["acceptance-regression"],
+            "negative_transfer": 0.0, "effect": 1.0 if selection.outcome == "provisional" else 0.0,
+            "total_cost_microusd": 0, "uncertainty_rule_met": False, "observations_since_admission": 0,
+            "drift_events": [], "contradicted": False,
+            "evidence_refs": [f"plan:{plan.digest()}"],
+        }
+        result = lessons.evaluate(observations, policy)
+        return lessons.admit(dict(proposal, id=f"lesson-{plan.digest()[:16]}"), result)
 
     @staticmethod
     def _restore_investigation_baseline(stage_tree: Any, baseline_commit: str | None,

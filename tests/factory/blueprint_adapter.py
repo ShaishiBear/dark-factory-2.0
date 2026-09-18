@@ -183,9 +183,35 @@ def _lease_guard(payload: dict) -> dict:
     return {"status": result.status, "reason_codes": list(result.reason_codes)}
 
 
+def _lesson_admission(payload: dict) -> dict:
+    """`lesson_admission` -> `factory_kernel.lessons.evaluate` (C10).
+
+    The fixture supplies the nine gate results as booleans (synthetic observer outputs, not
+    production thresholds); `policy` true means a protected policy is installed, so a minimal
+    valid policy object is handed to the evaluator in that case and None otherwise. The
+    production evaluator applies the fixed admission order and classifies.
+    """
+    from factory_kernel.lessons import evaluate, parse_policy
+
+    policy = None
+    if payload.get("policy") is True:
+        policy = parse_policy({
+            "schema": "dark-factory/lesson-admission-policy", "schema_version": "1.0", "policy_id": "fixture-policy",
+            "version": "1.0", "eligible_roles": ["implement"], "task_families": ["fixture"], "cohort_digest": "0" * 64,
+            "baseline_method": "fixture", "equal_total_cost_cap_microusd": 1, "minimum_family_coverage": 1,
+            "minimum_samples": 1, "hard_regression_constraints": [], "benefit_metric": "fixture",
+            "minimum_meaningful_effect": 0.01, "uncertainty_rule": "fixture", "maximum_confirmation_exposures": 1,
+            "negative_transfer_limit": 0.01, "expiry_observations": 1, "drift_triggers": []})
+    observations = {gate: payload[gate] for gate in ("authenticated", "policy", "in_scope", "clean_split", "adequate",
+                                                     "hard_regression", "benefit", "uncertainty_supported", "current")}
+    result = evaluate(observations, policy)
+    return {"status": result.status, "reason_codes": list(result.reason_codes)}
+
+
 OPERATIONS = {
     "plan_dispatch": _plan_dispatch,
     "lease_guard": _lease_guard,
+    "lesson_admission": _lesson_admission,
     "proof_currency": _proof_currency,
     "event_replay": _event_replay,
     "source_span": _source_span,
