@@ -91,7 +91,8 @@ def _spawn(payload: bytes, *, wall_seconds: float, python: str) -> subprocess.Co
     """The one process launch. Environment allowlisted, cwd empty, fixed entry, bounded wall clock."""
     env = child_environment()
     with tempfile.TemporaryDirectory(prefix="dark-factory-experiment-") as cwd:
-        # -s: no user site-packages (a user's sitecustomize/usercustomize would run in the child);
+        # -s: no user site directory (a usercustomize there would run in the child; a sitecustomize in
+        # the interpreter's own site-packages still would, which -s does not prevent);
         # -B: no bytecode written into the kernel tree by the child.
         return subprocess.run([python, "-s", "-B", "-m", "factory_kernel.experiment_runner", "--child"], input=payload,
                               capture_output=True, cwd=cwd, env=env, timeout=wall_seconds)
