@@ -4652,6 +4652,55 @@
       "find": "    if not retry or sum(1 for q in retry[\"requests\"] if q[\"on_channel\"]) < 2 or retry[\"exit_code\"] != 0:\n",
       "replace": "    if not retry or len(retry[\"requests\"]) < 2 or retry[\"exit_code\"] != 0:\n",
       "why": "SPEC 5: the retry check counts model requests on the channel; counting every recorded request lets a CLI that probes once and never retries a 529 pass. Detector: tests/factory/test_cli_compatibility_spike.py"
+    },
+    {
+      "id": "gateway-server-token-unchecked",
+      "file": "factory_kernel/gateway_server.py",
+      "find": "        if not presented or sha256_bytes(presented.encode()) != sha256_bytes(value.shared_token.encode()):\n",
+      "replace": "        if False:\n",
+      "why": "SPEC 6.2: the channel token is the only thing the process under validation holds; a gateway that answers without it would transmit for anyone on the loopback. Detector: tests/factory/test_gateway_server.py"
+    },
+    {
+      "id": "gateway-server-redirect-followed",
+      "file": "factory_kernel/gateway_server.py",
+      "find": "        opener = urllib.request.build_opener(NoRedirect())\n",
+      "replace": "        opener = urllib.request.build_opener()\n",
+      "why": "SPEC 6.2: the transport never follows a redirect (the CLI spike showed a client forwarding its credential cross-origin on a 307); a gateway that follows one sends the injected credential wherever the upstream points. Detector: tests/factory/test_gateway_server.py"
+    },
+    {
+      "id": "gateway-server-credential-kept-after-close",
+      "file": "factory_kernel/gateway_server.py",
+      "find": "    sessions = {f\"{m} {p}\": close_session(c.session) for (m, p), c in value.channels.items()}\n",
+      "replace": "    sessions = {f\"{m} {p}\": c.session.to_dict() for (m, p), c in value.channels.items()}\n",
+      "why": "SPEC 6.2: closing the channels drops the credential closure; a close that only summarises leaves the credential reachable from the session objects. Detector: tests/factory/test_gateway_server.py"
+    },
+    {
+      "id": "gateway-server-query-widens-route",
+      "file": "factory_kernel/gateway_server.py",
+      "find": "        path = self.path.split(\"?\", 1)[0]\n",
+      "replace": "        path = self.path\n",
+      "why": "SPEC 6.2: a route is a method and path; the query string neither widens nor denies it (the CLI posts /v1/messages?beta=true). Detector: tests/factory/test_gateway_server.py"
+    },
+    {
+      "id": "gateway-server-plain-http-origin-accepted",
+      "file": "factory_kernel/gateway_server.py",
+      "find": "    if not isinstance(origin, str) or not origin.startswith(\"https://\") or origin.endswith(\"/\") or \"?\" in origin:\n",
+      "replace": "    if not isinstance(origin, str) or origin.endswith(\"/\") or \"?\" in origin:\n",
+      "why": "SPEC 6.2: the preregistered upstream is an https origin; a policy naming a plain-http origin would put the injected credential on the wire in clear. Detector: tests/factory/test_gateway_server.py"
+    },
+    {
+      "id": "appproc-gateway-missing-policy-falls-back",
+      "file": "harness/appproc.py",
+      "find": "        if policy is None:\n            raise AppDidNotStart(\"FACTORY_VALIDATION_GATEWAY=1 but .factory/kernel.json has no validation.gateway policy \"\n",
+      "replace": "        if policy is None:\n            return None\n            raise AppDidNotStart(\"FACTORY_VALIDATION_GATEWAY=1 but .factory/kernel.json has no validation.gateway policy \"\n",
+      "why": "SPEC 6.2: asking for the gateway without the owner's preregistered routes and ceilings refuses the run; a launcher that quietly starts the app with the credential instead has removed the boundary it was asked for. Detector: tests/factory/test_gateway_server.py"
+    },
+    {
+      "id": "appproc-gateway-child-keeps-real-key",
+      "file": "harness/appproc.py",
+      "find": "        env.update(self.gateway.process_environment(base_url_variable=\"OPENROUTER_BASE_URL\", key_variable=\"OPENROUTER_API_KEY\"))\n",
+      "replace": "        env.update({\"OPENROUTER_BASE_URL\": self.gateway.base_url + \"/v1\"})\n",
+      "why": "SPEC 6.2: the process under validation receives the channel token, never the credential; a launcher that only redirects the base URL leaves the real key in the child's environment. Detector: tests/factory/test_gateway_server.py"
     }
   ]
 }

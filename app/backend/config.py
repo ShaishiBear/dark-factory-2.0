@@ -83,7 +83,10 @@ if not CIRCLE_ADMIN_TOKEN or not CIRCLE_PAID_ACCESS_GROUP_ID:
 # when member_verified_at is NULL or older than this many seconds.
 MEMBERSHIP_REFRESH_SECONDS: int = int(os.environ.get("MEMBERSHIP_REFRESH_SECONDS", "3600"))
 
-OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+# The provider origin the chat and embedding clients call. Production keeps the default; the
+# factory's validation lane may point a process under validation at its metered loopback gateway
+# (harness/appproc.py, FACTORY_VALIDATION_GATEWAY=1), which holds the real credential itself.
+OPENROUTER_BASE_URL: str = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
 # OpenRouter slug for the chat model. Defaults to Sonnet 4.6 for prod; can be
 # overridden per-deploy to canary a different model (e.g. google/gemini-3-flash-preview).

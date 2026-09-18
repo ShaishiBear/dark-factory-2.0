@@ -328,6 +328,10 @@ COPY_FILES = (
     "tests/factory/test_cli_compatibility_spike.py",
     "tests/factory/cli_stub.py",
     "harness/cli_compatibility_spike.py",
+    # WP02 gateway transport: the loopback server, its tests and the stub child the launcher test starts.
+    "factory_kernel/gateway_server.py",
+    "tests/factory/test_gateway_server.py",
+    "tests/factory/gateway_stub_app.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

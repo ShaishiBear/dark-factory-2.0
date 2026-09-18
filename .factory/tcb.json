@@ -255,6 +255,10 @@
       "class": "proposal",
       "reason": "model-authored or model-shaped material: proposals, syntheses, explorations; never an authority"
     },
+    "gateway_server": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
     "git_authority": {
       "class": "privilege-enforcement",
       "reason": "holds or materialises credentials, or performs a mutation with them"
@@ -562,7 +566,7 @@
       "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
     }
   ],
-  "graph_sha256": "0c6b862657d5c19416789dcf7471d4ace8409f946788ae6871a4f093b1ae6566",
+  "graph_sha256": "3b8792426a26a67f3f4a1acdc1a82d4b6bc4e599a78ec81e11037e96317e1a41",
   "closure_bounds": {
     "authority": {
       "files": [
