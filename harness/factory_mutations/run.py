@@ -691,19 +691,32 @@ def evaluate(defect: dict, order: tuple[str, ...], baseline: dict | None = None,
     started = time.monotonic_ns()
     baseline = baseline or {"detectors": {rel: {"status": PASSED} for rel in TEST_FILES}}
     reference = baseline.get("baseline_ref", "")
+    statuses = baseline.get("detectors", {})
     usable = [rel for rel in detector_order(defect, order, causal)
-              if baseline.get("detectors", {}).get(rel, {}).get("status") == PASSED]
+              if statuses.get(rel, {}).get("status") == PASSED]
+    # The detectors this defect's catalogue entry names are the ones that can actually see it;
+    # the rest of the suite is the fallback that makes a survivor believable. If every named
+    # detector was red on the baseline, nothing in the suite was looking for this property, and
+    # the other 150 files passing says only that they were not looking either. Reporting that
+    # as a surviving trust-root bypass would be the exact mislabelling this rework exists to
+    # remove, so it is an absence of observation instead.
+    named = associated_detectors(defect)
+    blinded = [rel for rel in named if statuses.get(rel, {}).get("status") != PASSED]
     state, detector, injected_digest = SURVIVED, "", ""
     diagnostic: dict = {"mutant_id": defect["id"], "file": defect.get("file", ""),
-                        "why": defect.get("why", ""), "detectors": []}
+                        "why": defect.get("why", ""), "detectors": [],
+                        "named_detectors": list(named), "unusable_named_detectors": blinded}
     with tempfile.TemporaryDirectory(prefix=f"dark-factory-meta-{defect['id']}-") as tmp:
         root = build_copy(Path(tmp))
         if not inject(root, defect):
             state, diagnostic["reason"] = INFRA_ERROR, ANCHOR_REASON
         else:
-            mutated = (root / defect["file"]).read_bytes()
-            injected_digest = hashlib.sha256(mutated).hexdigest()
+            injected_digest = hashlib.sha256((root / defect["file"]).read_bytes()).hexdigest()
             env = suite_env(root)
+        if state != INFRA_ERROR and named and len(blinded) == len(named):
+            state, diagnostic["reason"] = INFRA_ERROR, (
+                "every detector this defect names was red on the baseline: " + ",".join(blinded))
+        elif state != INFRA_ERROR:
             for rel in usable:
                 if remaining(FAMILY_DEADLINE) <= 1:
                     state, diagnostic["reason"] = TIMEOUT, "family deadline reached"
@@ -875,14 +888,6 @@ def main() -> int:
     if warning:
         print(warning, flush=True)
 
-    if shard_count > 1:
-        print(f"FACTORY_MUTATIONS_SHARD_OK shard={shard_index + 1}/{shard_count} "
-              f"measured={len(selected)} results={target}", flush=True)
-        return 0 if counts[SURVIVED] == 0 and counts[INFRA_ERROR] == 0 and counts[TIMEOUT] == 0 else 1
-    if counts[CAUGHT] == total and not unusable:
-        print(f"FACTORY_MUTATIONS_OK defects={total} seconds={seconds} "
-              f"budget={FAMILY_BUDGET_SECONDS}", flush=True)
-        return 0
     # WHICH defects failed, at the tail, next to the marker that says the family failed. The
     # per-defect lines above are 950 of them and every consumer of this output keeps only the
     # end of it: the kernel stores the last characters of a refused tool's output
@@ -894,13 +899,33 @@ def main() -> int:
                           (INFRA_ERROR, "FACTORY_MUTATIONS_UNINJECTED"),
                           (TIMEOUT, "FACTORY_MUTATIONS_TIMED_OUT"),
                           (NOT_RUN, "FACTORY_MUTATIONS_MISSING")):
-        ids = [result.mutant_id for result in results if result.state == state]
+        ids = [result.mutant_id for result in results
+               if result.state == state and not (state == NOT_RUN and shard_count > 1)]
         if ids:
             print(f"{marker}={','.join(ids)}", flush=True)
+    unobserved = counts[INFRA_ERROR] + counts[TIMEOUT] + (
+        0 if shard_count > 1 else counts[NOT_RUN])
+    # Two different bad outcomes, always both reported when both happened. A survivor is a
+    # claim about the trust root; an unobserved mutant is a claim about this run. Naming only
+    # one of them would hide the other, and in shard mode the naming happens here too rather
+    # than under a marker that says the shard was fine.
+    if unobserved:
+        print("FACTORY_MUTATIONS_INCOMPLETE - the catalogue was not fully observed", flush=True)
     if counts[SURVIVED]:
         print("FACTORY_MUTATIONS_FAILED - factory trust-root bypass survived", flush=True)
-    else:
-        print("FACTORY_MUTATIONS_INCOMPLETE - the catalogue was not fully observed", flush=True)
+    if shard_count > 1:
+        if not counts[SURVIVED] and not unobserved:
+            print(f"FACTORY_MUTATIONS_SHARD_OK shard={shard_index + 1}/{shard_count} "
+                  f"measured={len(selected)} results={target}", flush=True)
+            return 0
+        return 1
+    if counts[CAUGHT] == total and not unusable:
+        print(f"FACTORY_MUTATIONS_OK defects={total} seconds={seconds} "
+              f"budget={FAMILY_BUDGET_SECONDS}", flush=True)
+        return 0
+    if not unobserved and not counts[SURVIVED] and unusable:
+        print("FACTORY_MUTATIONS_INCOMPLETE - detectors were unusable on this baseline",
+              flush=True)
     return 1
 
 

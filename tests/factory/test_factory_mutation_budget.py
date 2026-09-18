@@ -436,13 +436,19 @@ class FactoryRunnerTests(unittest.TestCase):
         self.assertFalse(trees[0].exists(), "the copied tree outlived its defect")
 
     def run_main(self, results):
-        """`main()` over a stubbed catalogue: real reporting, no 167-file copies."""
+        """`main()` over a stubbed catalogue: real reporting, no 167-file copies.
+
+        The catalogue is derived from the results, because `main` builds its report from the
+        defects it loaded: a result for a defect the catalogue does not contain would be
+        dropped, and a test that did not notice would be asserting on a shorter report.
+        """
         green = {"baseline_ref": "b" * 64, "source_ref": "s", "environment_ref": "e",
                  "detectors": {rel: {"status": "passed", "exit_code": 0, "seconds": 0.1,
                                      "tail": ""} for rel in self.runner.TEST_FILES}}
+        catalogue = [{"id": result.mutant_id, "why": "w"} for result in results]
         with tempfile.TemporaryDirectory() as tmp, \
              mock.patch.dict(os.environ, {"FACTORY_MUTATION_RESULTS": tmp}), \
-             mock.patch.object(self.runner, "load_defects", lambda: [{"id": "d", "why": "w"}]), \
+             mock.patch.object(self.runner, "load_defects", lambda: catalogue), \
              mock.patch.object(self.runner, "immunity_is_green", lambda: True), \
              mock.patch.object(self.runner, "build_copy", lambda parent: Path(parent)), \
              mock.patch.object(self.runner, "run_baseline", lambda root: green), \
@@ -469,6 +475,24 @@ class FactoryRunnerTests(unittest.TestCase):
             self.assertNotIn("FACTORY_MUTATIONS_FAILED", text)
             self.assertNotIn("FACTORY_MUTATIONS_OK", text)
             self.assertIn(marker, text)
+
+    def test_both_bad_outcomes_are_reported_when_both_happened(self):
+        """A survivor is a claim about the trust root; an unobserved mutant is a claim about
+        this run. Printing only one of them hides the other."""
+        rc, text = self.run_main([self.result("d", "survived"), self.result("e", "timeout")])
+        self.assertEqual(rc, 1)
+        self.assertIn("FACTORY_MUTATIONS_FAILED", text)
+        self.assertIn("FACTORY_MUTATIONS_INCOMPLETE", text)
+        self.assertIn("FACTORY_MUTATIONS_ESCAPED=d", text)
+        self.assertIn("FACTORY_MUTATIONS_TIMED_OUT=e", text)
+
+    def test_a_shard_names_its_own_members_before_claiming_it_is_fine(self):
+        with mock.patch.dict(os.environ, {"FACTORY_MUTATION_SHARDS": "2",
+                                          "FACTORY_MUTATION_SHARD": "0"}):
+            rc, text = self.run_main([self.result("d", "survived")])
+        self.assertEqual(rc, 1)
+        self.assertIn("FACTORY_MUTATIONS_ESCAPED=d", text)
+        self.assertNotIn("FACTORY_MUTATIONS_SHARD_OK", text)
 
     def test_a_caught_run_reports_its_clock_against_the_budget(self):
         rc, text = self.run_main([self.result("d", "caught")])
