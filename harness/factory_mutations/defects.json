@@ -5114,6 +5114,55 @@
       "find": "    if classification[\"lane\"] not in policy[\"autonomous_lanes\"]:\n        reasons.append(\"no-autonomous-lane-activated\")\n",
       "replace": "    if False:\n        reasons.append(\"no-autonomous-lane-activated\")\n",
       "why": "SPEC 11.2: activating autonomous protected-path maintenance is its own governance decision; while no lane is activated every cutover request is refused. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "decision-graph-gap-rendered-green",
+      "file": "factory_kernel/frontdoor_static/decision-graph.js",
+      "find": "  if (gaps.length === 0 && GREEN.has(currentness)) return { state: \"current\", reasons: [] };\n",
+      "replace": "  if (GREEN.has(currentness)) return { state: \"current\", reasons: [] };\n",
+      "why": "SPEC 10 Prove view: show why a claim is current, stale or insufficient and every blocker, never a green badge over a recorded gap. Detector: tests/factory/test_decision_graph_ui.py"
+    },
+    {
+      "id": "decision-graph-prediction-shown-as-built",
+      "file": "factory_kernel/frontdoor_static/decision-graph.js",
+      "find": "  built: { title: \"Built system\", kinds: [\"implementation-component\", \"implementation-claim\", \"programme-item\", \"run\"] },\n",
+      "replace": "  built: { title: \"Built system\", kinds: [\"implementation-component\", \"implementation-claim\", \"programme-item\", \"run\", \"candidate\", \"recommendation\"] },\n",
+      "why": "SPEC 10 / WP10 acceptance: a predicted candidate is never shown as implemented; the built-system view is source-bound components and qualified changes only. Detector: tests/factory/test_decision_graph_ui.py"
+    },
+    {
+      "id": "decision-graph-predicted-not-marked",
+      "file": "factory_kernel/frontdoor_static/decision-graph.js",
+      "find": "      predicted: node.currentness === \"predicted\" || node.currentness === \"proposed\" };\n",
+      "replace": "      predicted: false };\n",
+      "why": "SPEC 10: do not animate or render a prediction as fact; every predicted or proposed row is marked as such in the list alternative. Detector: tests/factory/test_decision_graph_ui.py"
+    },
+    {
+      "id": "decision-graph-poll-not-paused-when-hidden",
+      "file": "factory_kernel/frontdoor_static/decision-graph.js",
+      "find": "    if (!token || document.visibilityState === \"hidden\") return;  // paused while hidden\n",
+      "replace": "    if (!token) return;\n",
+      "why": "SPEC 10 transport: polling is paused while the page is hidden; a hidden tab that keeps polling is unbounded read load for no viewer. Detector: tests/factory/test_decision_graph_ui.py"
+    },
+    {
+      "id": "decision-graph-delta-ignores-removed-nodes",
+      "file": "factory_kernel/frontdoor_static/decision-graph.js",
+      "find": "  const nodes = graph.nodes.filter((n) => !removed.has(n.id)).map((n) => changed.get(n.id) || n).concat(added);\n",
+      "replace": "  const nodes = graph.nodes.map((n) => changed.get(n.id) || n).concat(added);\n",
+      "why": "SPEC 10: the client applies the server's exact delta; a merge that keeps removed nodes shows a graph the projection no longer supports. Detector: tests/factory/test_decision_graph_ui.py"
+    },
+    {
+      "id": "frontdoor-http-graph-assets-not-served",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "                  \"/decision-graph.js\": (\"decision-graph.js\", \"text/javascript; charset=utf-8\"),\n                  \"/decision-graph.css\": (\"decision-graph.css\", \"text/css; charset=utf-8\")}\n",
+      "replace": "                  }\n",
+      "why": "WP10B: the decision graph script and stylesheet are static assets of the Front Door under its CSP; unserved, the page has no graph. Detector: tests/factory/test_decision_graph_ui.py"
+    },
+    {
+      "id": "frontdoor-js-graph-not-refreshed",
+      "file": "factory_kernel/frontdoor_static/frontdoor.js",
+      "find": "async function refresh() { snapshot = await api(\"/api/snapshot\"); render(); await refreshExploration(); if (typeof refreshDecisionGraph === \"function\") await refreshDecisionGraph(); }\n",
+      "replace": "async function refresh() { snapshot = await api(\"/api/snapshot\"); render(); await refreshExploration(); }\n",
+      "why": "WP10B: the graph is refreshed with the workspace after every snapshot; a page whose refresh never reaches the graph shows a stale view after each owner action. Detector: tests/factory/test_decision_graph_ui.py"
     }
   ]
 }

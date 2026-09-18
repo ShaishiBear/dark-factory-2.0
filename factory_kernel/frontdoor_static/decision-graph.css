@@ -1,0 +1,25 @@
+#graph-views{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+#graph-views button[aria-selected="true"]{background:#102b37;color:#fff}
+#graph-svg{width:100%;height:auto;max-height:520px;background:#fff;border:1px solid #d5dde3;border-radius:6px}
+#graph-svg .edge{stroke:#7a8b99;stroke-width:1.2}
+#graph-svg .edge-depends_on{stroke-dasharray:4 3}
+#graph-svg .node rect{fill:#eef2f5;stroke:#7a8b99;stroke-width:1}
+#graph-svg .node text{font-size:11px;fill:#17283a;pointer-events:none}
+#graph-svg .node-current rect{fill:#dff3e8;stroke:#2f7a52}
+#graph-svg .node-insufficient rect{fill:#fff1d6;stroke:#b7791f}
+#graph-svg .node-stale rect{fill:#fde2e1;stroke:#b3261e}
+#graph-svg .node-unknown rect{fill:#e9e9e9;stroke:#666}
+#graph-svg .node-predicted rect{stroke-dasharray:3 2}
+#graph-svg .node-role-changed rect{stroke-width:2.5;stroke:#b3261e}
+#graph-svg .node:focus{outline:none}
+#graph-svg .node:focus rect,#graph-svg .node[aria-pressed="true"] rect{stroke:#0b57d0;stroke-width:2.5}
+#graph-svg .node{cursor:pointer;transition:transform .25s ease}
+#graph-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+#graph-table th,#graph-table td{text-align:left;padding:4px 6px;border-bottom:1px solid #e1e6ea;vertical-align:top}
+#graph-table tr.state-current td:nth-child(3){color:#2f7a52}
+#graph-table tr.state-insufficient td:nth-child(3){color:#b7791f}
+#graph-table tr.state-stale td:nth-child(3){color:#b3261e}
+#graph-table tr.predicted td:nth-child(2)::after{content:" (predicted)";color:#b7791f}
+#graph-blockers li{color:#b3261e}
+#graph-details{border-top:1px solid #e1e6ea;margin-top:8px;padding-top:8px}
+@media (prefers-reduced-motion: reduce){#graph-svg .node{transition:none}}

@@ -4,8 +4,10 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Dark Factory · Front Door</title>
   <link rel="stylesheet" href="/frontdoor.css">
+  <link rel="stylesheet" href="/decision-graph.css">
   <script src="/frontdoor.js" defer></script>
   <script src="/exploration.js" defer></script>
+  <script src="/decision-graph.js" defer></script>
 </head>
 <body>
   <header><div><span class="eyebrow">DARK FACTORY</span><h1>From intent to evidence.</h1></div><button id="logout" hidden>Lock workspace</button></header>
@@ -63,6 +65,23 @@
           <section class="card stop"><span class="eyebrow">OWNER CONTROL</span><h2>Stop the factory</h2><p id="stop-state">Read the current stop state before acting.</p>
             <form id="stop-form"><label for="stop-reason">Reason</label><input id="stop-reason" maxlength="2000" required placeholder="Why should execution pause?"><button class="danger" type="submit">Request stop</button></form>
             <p class="muted">A request is pending until GitHub confirms an open stop. Running work observes stop at its next checkpoint.</p>
+          </section>
+          <section class="card" id="graph-card"><span class="eyebrow">04 · DECISION GRAPH</span><h2>Intent, exploration, proof, built system, reconsideration</h2>
+            <p>A read-only projection of the records. Green means current with no recorded gap; everything else says why. Selecting a node changes nothing; approval, publication and stop stay with their own controls.</p>
+            <p id="graph-state" role="status" aria-live="polite"></p>
+            <div id="graph-views" role="tablist" aria-label="Graph views">
+              <button type="button" role="tab" data-view="intent" aria-selected="true">Intent</button>
+              <button type="button" role="tab" data-view="explore" aria-selected="false">Explore</button>
+              <button type="button" role="tab" data-view="prove" aria-selected="false">Prove</button>
+              <button type="button" role="tab" data-view="built" aria-selected="false">Built system</button>
+              <button type="button" role="tab" data-view="reconsider" aria-selected="false">Reconsider</button>
+              <button type="button" id="graph-refresh">Refresh graph</button>
+            </div>
+            <svg id="graph-svg" role="img" aria-label="Decision graph" viewBox="0 0 400 60"></svg>
+            <p id="graph-blockers-title" class="muted"></p><ul id="graph-blockers"></ul>
+            <table id="graph-table" aria-label="Decision graph as a list"><thead><tr><th>Kind</th><th>Label</th><th>State</th><th>Why</th><th></th></tr></thead><tbody id="graph-rows"></tbody></table>
+            <p id="graph-empty" class="muted">No node in this view yet.</p>
+            <div id="graph-details" aria-live="polite"></div>
           </section>
           <section class="card"><span class="eyebrow">DECISION HISTORY</span><h2>How scope evolved</h2>
             <p>Review saved intent, earlier proposals and the exact scope you approved.</p>

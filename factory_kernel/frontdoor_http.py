@@ -194,7 +194,9 @@ class FrontDoorApplication:
         assets = {"/": ("index.html", "text/html; charset=utf-8"),
                   "/frontdoor.js": ("frontdoor.js", "text/javascript; charset=utf-8"),
                   "/exploration.js": ("exploration.js", "text/javascript; charset=utf-8"),
-                  "/frontdoor.css": ("frontdoor.css", "text/css; charset=utf-8")}
+                  "/frontdoor.css": ("frontdoor.css", "text/css; charset=utf-8"),
+                  "/decision-graph.js": ("decision-graph.js", "text/javascript; charset=utf-8"),
+                  "/decision-graph.css": ("decision-graph.css", "text/css; charset=utf-8")}
         if method == "GET" and path in assets:
             name, mime = assets[path]
             return send("200 OK", (ASSETS / name).read_bytes(), mime)
