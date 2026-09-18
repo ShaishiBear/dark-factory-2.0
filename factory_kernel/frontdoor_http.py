@@ -57,7 +57,8 @@ def _graph_query(path, raw):
     if len(pairs) != 1 or "=" not in pairs[0]:
         return None
     key, value = pairs[0].split("=", 1)
-    if path == "/api/project-graph" and key == "after_version" and value.isdigit() and len(value) <= 12:
+    # ASCII decimal digits only: str.isdigit() also admits Unicode digit forms that int() rejects.
+    if path == "/api/project-graph" and key == "after_version" and value.isascii() and value.isdigit() and len(value) <= 12:
         return {"after_version": int(value)}
     if path == "/api/project-graph/details" and key == "id" and 1 <= len(value) <= 200 and all(
             c.isalnum() or c in "-_:.%" for c in value):

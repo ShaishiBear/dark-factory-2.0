@@ -86,9 +86,15 @@ class ProjectGraphHTTPTests(unittest.TestCase):
     def test_query_parameters_stay_refused_everywhere_else_and_only_the_graph_shape_is_accepted(self) -> None:
         self.assertEqual(self.call("/api/history", query="after_version=0")["status"], "400 Bad Request")
         self.assertEqual(self.call("/api/snapshot", query="id=x")["status"], "400 Bad Request")
-        for bad in ("after_version=-1", "after_version=abc", "after_version=1&id=2", "id=", "cursor=1", "after_version=" + "9" * 13):
+        # "²" (superscript two) satisfies str.isdigit() but not int(): a shape refusal, never an exception.
+        for bad in ("after_version=-1", "after_version=abc", "after_version=1&id=2", "id=", "cursor=1", "after_version=" + "9" * 13,
+                    "after_version=²", "after_version=1²"):
             with self.subTest(bad):
                 self.assertEqual(self.call("/api/project-graph", query=bad)["status"], "400 Bad Request")
+        # The shape rule is public and runs before authentication: a malformed query is 400 whoever asks,
+        # and says nothing about the graph. Well-formed queries reach authentication (401 in the first test).
+        self.assertEqual(self.call("/api/project-graph/details", query="id=../../etc", HTTP_AUTHORIZATION="")["status"], "400 Bad Request")
+        self.assertEqual(self.call("/api/project-graph", query="after_version=²", HTTP_AUTHORIZATION="")["status"], "400 Bad Request")
         self.assertEqual(self.call("/api/project-graph/details")["status"], "400 Bad Request")  # no id
         self.assertEqual(self.call("/api/project-graph/details", query="id=../../etc")["status"], "400 Bad Request")
 
