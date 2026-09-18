@@ -162,15 +162,24 @@ class EvaluationTests(unittest.TestCase):
         target = Path(parent) / "root"
         target.mkdir(parents=True, exist_ok=True)
         for name in self.files:
-            (target / name).write_text((self.suite / name).read_text(encoding="utf-8"),
-                                       encoding="utf-8")
+            destination = target / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text((self.suite / Path(name).name).read_text(encoding="utf-8"),
+                                   encoding="utf-8")
         (target / "subject.py").write_text("VALUE = 1\n", encoding="utf-8")
         return target
 
     def detector(self, name: str, body: str) -> str:
-        (self.suite / name).write_text(body, encoding="utf-8")
-        self.files.append(name)
-        return name
+        """A detector at the path shape the catalogue's `why` lines use.
+
+        `associated_detectors` matches `tests/factory/test_*.py` against `TEST_FILES`, so a
+        synthetic suite using bare filenames would silently never exercise the named-detector
+        path at all -- which is how the blinded-detector case went unnoticed until review.
+        """
+        relative = name if name.startswith("tests/") else f"tests/factory/{name}"
+        (self.suite / Path(relative).name).write_text(body, encoding="utf-8")
+        self.files.append(relative)
+        return relative
 
     def defect(self, **extra) -> dict:
         return {"id": "probe-defect", "file": "subject.py", "find": "VALUE = 1",
@@ -223,7 +232,7 @@ class EvaluationTests(unittest.TestCase):
         real = outcomes.run_detector
 
         def watched(argv, **kwargs):
-            seen.append(Path(argv[-1]).name)
+            seen.append(argv[-1])
             return real(argv, **kwargs)
 
         with mock.patch.object(runner, "run_detector", watched):
@@ -239,6 +248,44 @@ class EvaluationTests(unittest.TestCase):
                                           tuple(names), {"probe-defect": names[4]})
         self.assertEqual(sorted(order), sorted(names))
         self.assertEqual(order[0], names[4], "the remembered causal detector is asked first")
+
+    def test_a_mutant_whose_named_detectors_are_all_blind_is_unobserved_not_an_escape(self):
+        """The one word this rework exists to make honest.
+
+        A defect's `why` names the detector that is supposed to see it. If that detector was
+        red on the baseline, the other 150 files passing says only that they were not looking
+        for this property either. Calling that a surviving trust-root bypass would report an
+        absence of observation as a bypass.
+        """
+        blind = self.detector("test_named.py", FAILING)
+        others = [self.detector(f"test_p{n}.py", PASSING) for n in range(3)]
+        statuses = {blind: outcomes.FAILED}
+        statuses.update({name: outcomes.PASSED for name in others})
+        defect = self.defect(why=f"caught by {blind}")
+        with mock.patch.object(runner, "TEST_FILES", tuple(self.files)):
+            result = runner.evaluate(defect, tuple(self.files), self.baseline(statuses), None, None)
+        self.assertEqual(result.state, outcomes.INFRA_ERROR)
+        self.assertNotEqual(result.state, outcomes.SURVIVED)
+
+    def test_a_mutant_with_one_usable_named_detector_is_still_measured(self):
+        blind = self.detector("test_blind.py", PASSING)
+        seeing = self.detector("test_seeing.py", FAILING)
+        statuses = {blind: outcomes.FAILED, seeing: outcomes.PASSED}
+        defect = self.defect(why=f"caught by {blind} and {seeing}")
+        with mock.patch.object(runner, "TEST_FILES", tuple(self.files)):
+            result = runner.evaluate(defect, tuple(self.files), self.baseline(statuses), None, None)
+        self.assertEqual((result.state, result.detector), (outcomes.CAUGHT, seeing))
+
+    def test_the_result_file_records_which_named_detectors_were_blind(self):
+        blind = self.detector("test_named.py", PASSING)
+        statuses = {blind: outcomes.FAILED}
+        target = self.tmp / "blinded"
+        defect = self.defect(why=f"caught by {blind}")
+        with mock.patch.object(runner, "TEST_FILES", tuple(self.files)):
+            runner.evaluate(defect, tuple(self.files), self.baseline(statuses), None, target)
+        record = json.loads((target / "probe-defect.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["unusable_named_detectors"], [blind])
+        self.assertIn("red on the baseline", record["reason"])
 
     def test_each_mutant_publishes_its_own_immutable_result_file(self):
         killer = self.detector("test_killer.py", FAILING)
