@@ -1,8 +1,9 @@
 """Governed self-maintenance, proposals only (SPECIFICATION 11.2, C12, WP12, R10).
 
-Inputs are measured incidents (an authenticated outcome classification or a lesson admission
-record, verified by their own digests) plus an explicit bounded objective and the paths a change
-would touch. `classify_change` is deterministic against the protected path and effect policy:
+Inputs are incident records in the kernel's own shapes (an outcome classification or a lesson
+admission record whose content digest recomputes: digest-consistent, not authenticated, since the
+digests are keyless content hashes anyone can compute) plus an explicit bounded objective and the
+paths a change would touch. `classify_change` is deterministic against the protected path and effect policy:
 the tier a change lands in is the highest of the tiers its paths and its effects derive, a
 generated description can never lower it, and facts the classifier cannot see (a floor value, a
 capability grant) leave the classification unknown, which refuses autonomous activation and
@@ -16,6 +17,11 @@ Nothing here changes a file, opens a pull request, alters a judge, lowers a floo
 capability or suppresses evidence: those are exactly the changes it classifies as trust changes
 for the maintainer lane. A chat agent's maintainer PR is not relabelled as autonomous
 self-improvement; the proposal record names who proposed, who established and who delivered.
+
+What is not here: no candidate is evaluated. `prepare_shadow` and `compare_shadow` keep the
+records the shadow qualification of C12 needs (two references, two results, agreement or a
+blocker) over results a caller supplies; the authority references are labels this module does
+not verify against the trusted base, and no old-authority run is executed.
 """
 from __future__ import annotations
 
@@ -237,8 +243,10 @@ def classify_change(paths: Iterable[Any], *, policy: Mapping[str, Any], declared
 
 
 def verify_incident(incident: Any) -> dict:
-    """A measured incident is one of two records the kernel itself produced, verified by the
-    digest it carries. Free text, a log line or an unsigned mapping is refused."""
+    """An incident is one of two record shapes the kernel produces, accepted only when the content
+    digest it carries recomputes. This is integrity, not provenance: the digests are keyless, so a
+    fabricated record with a freshly computed digest passes. Free text, a log line, an undigested
+    mapping or a record edited after its digest was written is refused."""
     if not isinstance(incident, Mapping) or incident.get("schema") not in INCIDENT_SCHEMAS:
         raise MaintenanceRefused("an incident is an outcome classification or a lesson admission record")
     if incident["schema"] == "dark-factory/outcome-classification":
