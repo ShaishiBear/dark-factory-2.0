@@ -88,8 +88,7 @@ class RunnerTests(unittest.TestCase):
                             (b'{"status": "complete", "receipt": ' + _json({**good, "results": {"linear": good["results"]["linear"]}}) + b"}", "exactly the requested strategies"),
                             (b'{"status": "complete", "receipt": ' + _json({**good, "results": {**good["results"], "hash": {**good["results"]["hash"], "latency_ms": 1}}}) + b"}", "outside the family"),
                             (b'{"status": "complete", "receipt": ' + _json({**good, "input_sha256": "0" * 64}) + b"}", "another spec"),
-                            (b'{"status": "complete", "receipt": ' + _json({k: v for k, v in good.items() if k != "context_identity"}) + b"}", "frozen repository context"),
-                            (b'{"status": "complete", "receipt": ' + _json({**good, "context_identity": "f" * 64}) + b"}", "frozen repository context"),
+                            (b'{"status": "complete", "receipt": ' + _json({**good, "context_identity": "f" * 64}) + b"}", "context-free family"),
                             (b'{"status": "complete", "receipt": ' + _json({**good, "scope": "everything"}) + b"}", "scope or qualification")):
             with self.subTest(reason):
                 completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=bad, stderr=b"")
@@ -99,8 +98,30 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(attempt.get("status"), "refused")
                 self.assertEqual((attempt.get("lease_release") or {}).get("status"), "eligible", "the lease is released after a refused receipt")
         self.assertEqual(verify_receipt(SPEC, CONTEXT, good), good)
-        with self.assertRaisesRegex(ExperimentRefused, "frozen repository context"):
-            verify_receipt(SPEC, CONTEXT, {k: v for k, v in good.items() if k != "context_identity"})
+
+    def test_a_context_bound_family_must_bind_the_frozen_context_and_a_data_only_family_must_not_claim_one(self) -> None:
+        fixture = exploration_fixture.ExplorationTests(); fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        fixture.boundary_context()
+        spec, context = fixture.boundary_request()["probe"], deepcopy(fixture.context)
+        good = run_experiment(spec, context=context)
+        self.assertEqual(good["context_identity"], context["identity"])
+        self.assertEqual(verify_receipt(spec, context, good), good)
+        for forged, reason in (({k: v for k, v in good.items() if k != "context_identity"}, "does not bind the frozen"),
+                               ({**good, "context_identity": "f" * 64}, "does not bind the frozen")):
+            with self.subTest(reason), self.assertRaisesRegex(ExperimentRefused, reason):
+                verify_receipt(spec, context, forged)
+            completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=b'{"status": "complete", "receipt": ' + _json(forged) + b"}", stderr=b"")
+            with patch.object(experiment_runner, "_spawn", return_value=completed), self.assertRaises(Exception) as caught:
+                execute_registered(spec, context=context, leases=self.leases, session_id="layers", reservation_id="r1", now=100)
+            self.assertIsInstance(caught.exception, ExperimentRefused)
+        # The contained run of the context-bound family binds the context exactly as the in-process run does.
+        contained = execute_registered(spec, context=context, leases=self.leases, session_id="layers", reservation_id="r2", now=101)
+        contained.pop("attempt")
+        self.assertEqual(contained, good)
+        lookup = run_experiment(SPEC, context=CONTEXT)
+        self.assertNotIn("context_identity", lookup)  # data-only: no context claim, and verify_receipt requires none
+        self.assertTrue(experiment_runner.context_bound(spec["kind"]))
+        self.assertFalse(experiment_runner.context_bound(SPEC["kind"]))
 
     def test_one_experiment_per_session_at_a_time_and_the_runner_slot_is_shared(self) -> None:
         held = reserve(self.leases, session_id="lookup", reservation_id="r1", spec=SPEC, now=100)

@@ -97,6 +97,12 @@ def _spawn(payload: bytes, *, wall_seconds: float, python: str) -> subprocess.Co
                               capture_output=True, cwd=cwd, env=env, timeout=wall_seconds)
 
 
+def context_bound(kind: str) -> bool:
+    """Whether the family's receipt is measured over the frozen repository context (the registry's
+    own environment statement), as opposed to a data-only workload."""
+    return "frozen repository context" in str(FAMILIES[kind]["environment"])
+
+
 def verify_receipt(spec: Mapping[str, Any], context: Mapping[str, Any], receipt: Any) -> dict:
     """The child's receipt must be the requested experiment's: its family, its strategies, the
     family's metrics, the frozen context, and an identity that recomputes."""
@@ -117,8 +123,13 @@ def verify_receipt(spec: Mapping[str, Any], context: Mapping[str, Any], receipt:
             raise ExperimentRefused(f"strategy {name!r} reports metrics outside the family's contract")
     if receipt.get("input_sha256") != sha256_value(dict(spec)):
         raise ExperimentRefused("the receipt names another spec")
-    if receipt.get("context_identity") != context.get("identity"):
-        raise ExperimentRefused("the receipt does not bind the frozen repository context")
+    # A family that reads the frozen repository context must bind it in its receipt; a family that
+    # is data-only must not claim one. Either way the receipt says exactly what it was measured over.
+    if context_bound(spec["kind"]):
+        if receipt.get("context_identity") != context.get("identity"):
+            raise ExperimentRefused("the receipt does not bind the frozen repository context")
+    elif "context_identity" in receipt:
+        raise ExperimentRefused("a context-free family's receipt claims a repository context")
     if receipt.get("scope") != FAMILIES[spec["kind"]]["claim_scope"] or receipt.get("qualification_status") != "UNPROVEN":
         raise ExperimentRefused("the receipt's scope or qualification status is not the family's")
     return dict(receipt)
@@ -203,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = ["CHILD_ENVIRONMENT_KEYS", "CONTAINMENT", "ExperimentFailed", "ExperimentRefused", "ExperimentTimeout", "LEASE_TTL_SECONDS", "SCHEMA", "SCHEMA_VERSION",
-           "WALL_SECONDS", "cancel", "child_environment", "child_main", "execute_registered", "reserve", "verify_receipt"]
+           "WALL_SECONDS", "cancel", "child_environment", "child_main", "context_bound", "execute_registered", "reserve", "verify_receipt"]
 
 
 if __name__ == "__main__":

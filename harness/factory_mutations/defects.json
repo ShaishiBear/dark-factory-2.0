@@ -5223,8 +5223,8 @@
     {
       "id": "experiment-runner-context-binding-optional",
       "file": "factory_kernel/experiment_runner.py",
-      "find": "    if receipt.get(\"context_identity\") != context.get(\"identity\"):\n        raise ExperimentRefused(\"the receipt does not bind the frozen repository context\")\n",
-      "replace": "    if \"context_identity\" in receipt and receipt[\"context_identity\"] != context.get(\"identity\"):\n        raise ExperimentRefused(\"the receipt does not bind the frozen repository context\")\n",
+      "find": "    if context_bound(spec[\"kind\"]):\n        if receipt.get(\"context_identity\") != context.get(\"identity\"):\n            raise ExperimentRefused(\"the receipt does not bind the frozen repository context\")\n",
+      "replace": "    if context_bound(spec[\"kind\"]):\n        if \"context_identity\" in receipt and receipt[\"context_identity\"] != context.get(\"identity\"):\n            raise ExperimentRefused(\"the receipt does not bind the frozen repository context\")\n",
       "why": "C08 / WP08 acceptance (a changed context invalidates applicability): the verified receipt must bind the frozen repository context it was measured under; a receipt that omits the binding would later be indistinguishable from a bound one. Detector: tests/factory/test_experiment_runner.py"
     }
   ]
