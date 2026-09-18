@@ -3683,7 +3683,7 @@
     {
       "id": "execution-worker-probe-bypass",
       "file": "factory_kernel/execution_probe.py",
-      "find": "            if self.client is None:\n                state[\"phase\"] = \"launch\"",
+      "find": "            if self.client is None and self.scope is None:\n                state[\"phase\"] = \"launch\"",
       "replace": "            if True:\n                state[\"phase\"] = \"launch\"",
       "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
     },
@@ -3711,8 +3711,8 @@
     {
       "id": "execution-worker-probe-failed",
       "file": "factory_kernel/execution_probe.py",
-      "find": "len(receipts) == 1 and result.returncode == 0",
-      "replace": "len(receipts) == 1",
+      "find": "                cost = receipts[0].get(\"total_cost_usd\") if len(receipts) == 1 and result.returncode == 0 else None\n                state[\"phase\"] = \"observe\"",
+      "replace": "                cost = receipts[0].get(\"total_cost_usd\") if len(receipts) == 1 else None\n                state[\"phase\"] = \"observe\"",
       "why": "Canonical workers and every diagnostic leg consume durable project permission before a model call, without leaking authority or assigning unknown spend zero. Detector: tests/factory/test_execution_worker.py"
     },
     {
@@ -3844,8 +3844,8 @@
     {
       "id": "test-author-probe-unmetered-runner",
       "file": "scripts/factory_test_author_probe.py",
-      "find": "    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)\n    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ, runner=runner)",
-      "replace": "    record = diagnostic(ROOT / \".factory/kernel.json\", source=os.environ)",
+      "find": "    runner = ProbeRunner.from_environment(DIAGNOSTIC_ROLE)\n    scope = None",
+      "replace": "    runner = subprocess.run\n    scope = None",
       "why": "The three nested test-author calls are paid calls and must go through the metered ProbeRunner; a raw subprocess here is the unmetered paid path the critic review named (WP00, C06). Detector: tests/factory/test_factory_test_author_probe.py"
     },
     {
@@ -4344,6 +4344,118 @@
       "find": "        if now < last:\n            raise LeaseRefused(\"clock rollback observed; time-dependent authority blocked\")",
       "replace": "        if False:\n            raise LeaseRefused(\"clock rollback observed; time-dependent authority blocked\")",
       "why": "C05: clock rollback or unknown time blocks time-dependent authority. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "meter-ceilings-exceed-bundle",
+      "file": "factory_kernel/validation_meter.py",
+      "find": "    if scope.ceiling_sum() + microusd > scope.limit_microusd:\n        raise MeterRefused(\"call ceilings would exceed the bundle reservation\")",
+      "replace": "    if False:\n        raise MeterRefused(\"call ceilings would exceed the bundle reservation\")",
+      "why": "C06: nested per-call ceilings must sum within the parent reservation; a bundle cannot be overdrawn by its own calls. Detector: tests/factory/test_validation_meter.py"
+    },
+    {
+      "id": "meter-class-borrows-balance",
+      "file": "factory_kernel/validation_meter.py",
+      "find": "    if call_class != scope.scope_class:\n        raise MeterRefused(f\"scope {scope.scope_class!r} cannot spend for class {call_class!r}\")",
+      "replace": "    if call_class not in SPEND_CLASSES:\n        raise MeterRefused(f\"scope {scope.scope_class!r} cannot spend for class {call_class!r}\")",
+      "why": "SPEC 6.2: a scope cannot spend another scope's balance; classes are explicit and do not borrow. Detector: tests/factory/test_validation_meter.py"
+    },
+    {
+      "id": "meter-start-repeats",
+      "file": "factory_kernel/validation_meter.py",
+      "find": "    if call.state != \"reserved\":\n        raise MeterRefused(\"call was already started; a lost response cannot be reissued\")",
+      "replace": "    if call.state not in (\"reserved\", \"started\"):\n        raise MeterRefused(\"call was already started; a lost response cannot be reissued\")",
+      "why": "C06: durable start then at most one upstream transmission; a lost response after start cannot be reissued. Detector: tests/factory/test_validation_meter.py"
+    },
+    {
+      "id": "meter-unknown-receipt-summed-as-zero",
+      "file": "factory_kernel/validation_meter.py",
+      "find": "        elif call.state == \"observed\" and call.reported_microusd is None:\n            unknown += 1",
+      "replace": "        elif call.state == \"observed\" and call.reported_microusd is None:\n            known += 0",
+      "why": "An unknown receipt keeps the bundle unknown; summing it as zero would report a bill nobody observed (C06 'unknown bill freezes further spend'). Detector: tests/factory/test_validation_meter.py"
+    },
+    {
+      "id": "meter-never-started-call-refunded",
+      "file": "factory_kernel/validation_meter.py",
+      "find": "    def ceiling_sum(self) -> int:\n        return sum(call.microusd for call in self.calls.values())",
+      "replace": "    def ceiling_sum(self) -> int:\n        return sum(call.microusd for call in self.calls.values() if call.state != \"not_started\")",
+      "why": "C06: never optimise away the recorded attempted allocation; a reserved call that never started keeps its ceiling counted. Detector: tests/factory/test_validation_meter.py"
+    },
+    {
+      "id": "gateway-forwards-caller-auth",
+      "file": "factory_kernel/provider_gateway.py",
+      "find": "        if key in STRIPPED_HEADERS or key not in ALLOWED_HEADERS:\n            continue",
+      "replace": "        if key not in ALLOWED_HEADERS and key not in STRIPPED_HEADERS:\n            continue",
+      "why": "The gateway strips caller credentials and forwarding headers; a caller must never reach upstream with its own authorization (SPEC 5, C06). Detector: tests/factory/test_provider_gateway.py"
+    },
+    {
+      "id": "gateway-model-from-caller",
+      "file": "factory_kernel/provider_gateway.py",
+      "find": "            if payload.get(\"model\") not in (None, route.model):\n                raise GatewayRefused(\"request names a model the route does not permit\")\n            payload[\"model\"] = route.model",
+      "replace": "            payload.setdefault(\"model\", route.model)",
+      "why": "The model and endpoint are fixed by the protected route; a caller-named model would swap providers or tariffs silently (C06). Detector: tests/factory/test_provider_gateway.py"
+    },
+    {
+      "id": "gateway-replays-upstream-generation",
+      "file": "factory_kernel/provider_gateway.py",
+      "find": "    if previous is not None:\n        if previous.body_sha256 != body_sha:\n            raise GatewayRefused(\"request id collision with a different body\")\n        # A reconnect: what was recorded, never a second upstream generation.\n        return {**previous.to_dict(), \"replayed\": True, \"body\": previous.body}",
+      "replace": "    if previous is not None and previous.body_sha256 != body_sha:\n        raise GatewayRefused(\"request id collision with a different body\")",
+      "why": "C06: gateway stream reconnects cannot replay upstream generation; a reconnect returns the record, never a second transmission. Detector: tests/factory/test_provider_gateway.py"
+    },
+    {
+      "id": "gateway-follows-redirect",
+      "file": "factory_kernel/provider_gateway.py",
+      "find": "        if 300 <= int(response.status) < 400:\n            detail = \"redirect refused\"\n            raise GatewayRefused(detail)",
+      "replace": "        if False:\n            detail = \"redirect refused\"\n            raise GatewayRefused(detail)",
+      "why": "The gateway disallows redirects (C06); following one could send the credential elsewhere. Detector: tests/factory/test_provider_gateway.py"
+    },
+    {
+      "id": "gateway-partial-stream-reported-complete",
+      "file": "factory_kernel/provider_gateway.py",
+      "find": "    if partial:\n        record.outcome = \"partial\"\n        observe_call(session.scope, call.call_id, reported_microusd=None, outcome=\"partial\", telemetry={\"detail\": detail, \"bytes\": len(collected)})",
+      "replace": "    if False:\n        record.outcome = \"partial\"\n        observe_call(session.scope, call.call_id, reported_microusd=None, outcome=\"partial\", telemetry={\"detail\": detail, \"bytes\": len(collected)})",
+      "why": "C06: a cut stream is recorded as a partial with unknown spend; reporting it complete would invent a bounded receipt. Detector: tests/factory/test_provider_gateway.py"
+    },
+    {
+      "id": "billing-conflict-within-ceiling-called-complete",
+      "file": "factory_kernel/billing_reconciliation.py",
+      "find": "        elif reported is not None and matched[0].billed_microusd != reported:\n            verdict, reason = \"conflicting\", \"billed amount differs from reported telemetry\"",
+      "replace": "        elif False:\n            verdict, reason = \"conflicting\", \"billed amount differs from reported telemetry\"",
+      "why": "Reconciliation distinguishes a conflicting receipt from a complete one; telemetry that disagrees with the bill stays unresolved (C06). Detector: tests/factory/test_billing_reconciliation.py"
+    },
+    {
+      "id": "billing-adapter-enabled-by-default",
+      "file": "factory_kernel/billing_reconciliation.py",
+      "find": "    if not adapter[\"enabled\"] or not adapter[\"interface_verified\"]:\n        raise ReconciliationRefused(f\"billing adapter {adapter_id!r} is disabled: provider interface unverified\")",
+      "replace": "    if False:\n        raise ReconciliationRefused(f\"billing adapter {adapter_id!r} is disabled: provider interface unverified\")",
+      "why": "Provider reconciliation adapters are disabled by default until the actual interface is verified (WP02 'disabled-by-default provider reconciliation adapters'). Detector: tests/factory/test_billing_reconciliation.py"
+    },
+    {
+      "id": "probe-bundle-launch-unmetered",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "            if self.scope is not None:\n                return self._launch_metered(invocation_id, request, argv, kwargs, state)",
+      "replace": "            if self.scope is not None:\n                state[\"phase\"] = \"launch\"\n                result = self._launch(argv, kwargs, state)\n                state[\"phase\"] = \"returned\"\n                self._record(invocation_id, state)\n                return result",
+      "why": "A diagnostic launch under a bundle must take its per-call ceiling from the meter before a process exists; launching without reserving is the unmetered paid path WP00 removed (C06). Detector: tests/factory/test_probe_bundle.py"
+    },
+    {
+      "id": "probe-bundle-failure-unobserved",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "        except BaseException:\n            observe_call(self.scope, call.call_id, reported_microusd=None, outcome=\"failed\",\n                         telemetry={\"provider_started\": state[\"provider_started\"]})\n            raise",
+      "replace": "        except BaseException:\n            raise",
+      "why": "A launch that dies after its start is charged or unknown; leaving the call started forever hides that from the bundle receipt (C06). Detector: tests/factory/test_probe_bundle.py"
+    },
+    {
+      "id": "probe-bundle-nonzero-exit-receipted",
+      "file": "factory_kernel/execution_probe.py",
+      "find": "        cost = receipts[0].get(\"total_cost_usd\") if len(receipts) == 1 and result.returncode == 0 else None\n        try:\n            reported = microusd(cost) if cost is not None else None",
+      "replace": "        cost = receipts[0].get(\"total_cost_usd\") if len(receipts) == 1 else None\n        try:\n            reported = microusd(cost) if cost is not None else None",
+      "why": "A nonzero exit cannot turn unknown spend into a bounded receipt; only a clean single receipt is telemetry (C06). Detector: tests/factory/test_probe_bundle.py"
+    },
+    {
+      "id": "probe-script-three-reservations",
+      "file": "scripts/factory_test_author_probe.py",
+      "find": "        runner = runner.with_scope(scope)",
+      "replace": "        close_validation_scope(scope); scope = None",
+      "why": "The three nested calls run inside one prepaid bundle whose per-call ceilings sum within its reservation; falling back to per-call reservations after opening the bundle double-charges the ledger (WP02, C06). Detector: tests/factory/test_probe_bundle.py"
     }
   ]
 }

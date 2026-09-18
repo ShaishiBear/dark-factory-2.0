@@ -251,6 +251,11 @@ COPY_FILES = (
     "tests/factory/test_proof_dependencies.py",
     "tests/factory/test_proof_store.py",
     "tests/factory/test_factory_attestation_companions.py",
+    # WP02 accounting: the meter, the gateway contract, reconciliation and the probe bundle.
+    "tests/factory/test_validation_meter.py",
+    "tests/factory/test_provider_gateway.py",
+    "tests/factory/test_billing_reconciliation.py",
+    "tests/factory/test_probe_bundle.py",
     "tests/factory/test_claim_scheduler.py",
     "tests/factory/test_project_graph.py",
     "tests/factory/test_claim_views.py",

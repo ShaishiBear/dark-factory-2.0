@@ -383,6 +383,9 @@ DIAGNOSTIC_STATUS_REASONS: Mapping[str, frozenset[str]] = {
 PROVIDER_START: tuple[str, ...] = ("not_started", "started", "unknown")
 DIAGNOSTIC_METERING: tuple[str, ...] = (
     "metered", "unmetered-local", "unmetered-maintenance-scope", "unknown",
+    # Metered through one validation-meter bundle: the ledger holds one reservation for the
+    # scope and the meter holds the per-call ceilings inside it (WP02, C06).
+    "metered-bundle",
 )
 DIAGNOSTIC_UNCERTAINTY: tuple[str, ...] = ("cost_unknown", "provider_start_unknown")
 DIAGNOSTIC_COST_REASONS: tuple[str, ...] = (
