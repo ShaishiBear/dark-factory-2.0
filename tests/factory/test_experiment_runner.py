@@ -88,6 +88,8 @@ class RunnerTests(unittest.TestCase):
                             (b'{"status": "complete", "receipt": ' + _json({**good, "results": {"linear": good["results"]["linear"]}}) + b"}", "exactly the requested strategies"),
                             (b'{"status": "complete", "receipt": ' + _json({**good, "results": {**good["results"], "hash": {**good["results"]["hash"], "latency_ms": 1}}}) + b"}", "outside the family"),
                             (b'{"status": "complete", "receipt": ' + _json({**good, "input_sha256": "0" * 64}) + b"}", "another spec"),
+                            (b'{"status": "complete", "receipt": ' + _json({k: v for k, v in good.items() if k != "context_identity"}) + b"}", "frozen repository context"),
+                            (b'{"status": "complete", "receipt": ' + _json({**good, "context_identity": "f" * 64}) + b"}", "frozen repository context"),
                             (b'{"status": "complete", "receipt": ' + _json({**good, "scope": "everything"}) + b"}", "scope or qualification")):
             with self.subTest(reason):
                 completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=bad, stderr=b"")
@@ -97,6 +99,8 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(attempt.get("status"), "refused")
                 self.assertEqual((attempt.get("lease_release") or {}).get("status"), "eligible", "the lease is released after a refused receipt")
         self.assertEqual(verify_receipt(SPEC, CONTEXT, good), good)
+        with self.assertRaisesRegex(ExperimentRefused, "frozen repository context"):
+            verify_receipt(SPEC, CONTEXT, {k: v for k, v in good.items() if k != "context_identity"})
 
     def test_one_experiment_per_session_at_a_time_and_the_runner_slot_is_shared(self) -> None:
         held = reserve(self.leases, session_id="lookup", reservation_id="r1", spec=SPEC, now=100)
@@ -117,6 +121,9 @@ class RunnerTests(unittest.TestCase):
         completed = subprocess.run([sys.executable, "-m", "factory_kernel.experiment_runner", "--spec", "x"], capture_output=True, env=env, timeout=60)
         self.assertEqual(completed.returncode, 2)
         self.assertIn(b"only the --child entry", completed.stderr)
+        # The launch line runs the interpreter without the user site (-s) and without writing bytecode (-B).
+        source = Path(experiment_runner.__file__).read_text(encoding="utf-8")
+        self.assertIn('[python, "-s", "-B", "-m", "factory_kernel.experiment_runner", "--child"]', source)
         self.assertEqual(experiment_runner.main([]), 2)
 
 

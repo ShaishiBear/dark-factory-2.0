@@ -5219,6 +5219,13 @@
       "find": "            receipt = execute_registered(request[\"probe\"], context=state[\"sessions\"][command[\"session_id\"]][\"context\"],\n                                         check_stop=self.check_stop, leases=self.leases(), session_id=command[\"session_id\"],\n                                         reservation_id=reservation[\"id\"])\n",
       "replace": "            from .experiments import run_experiment as _run\n            receipt = _run(request[\"probe\"], context=state[\"sessions\"][command[\"session_id\"]][\"context\"], check_stop=self.check_stop)\n",
       "why": "SPEC 8 / WP08: the exploration service runs registered experiments through the contained runner under a lease, never in its own process; an in-process run records no attempt and holds no lease. Detector: tests/factory/test_experiment_runner.py"
+    },
+    {
+      "id": "experiment-runner-context-binding-optional",
+      "file": "factory_kernel/experiment_runner.py",
+      "find": "    if receipt.get(\"context_identity\") != context.get(\"identity\"):\n        raise ExperimentRefused(\"the receipt does not bind the frozen repository context\")\n",
+      "replace": "    if \"context_identity\" in receipt and receipt[\"context_identity\"] != context.get(\"identity\"):\n        raise ExperimentRefused(\"the receipt does not bind the frozen repository context\")\n",
+      "why": "C08 / WP08 acceptance (a changed context invalidates applicability): the verified receipt must bind the frozen repository context it was measured under; a receipt that omits the binding would later be indistinguishable from a bound one. Detector: tests/factory/test_experiment_runner.py"
     }
   ]
 }

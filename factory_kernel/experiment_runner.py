@@ -9,8 +9,8 @@ validated spec and the session's frozen repository context) on stdin, and reads 
 JSON object back. The child resolves the family through the registry (`experiments.run_experiment`);
 nothing a model supplies can name a command, an image, an import path or a file. The parent
 re-validates what comes back: the runner is the spec's family, the results cover exactly the
-spec's strategies with the family's metrics, and the receipt's identity is what the child
-claims. A child that does not finish within the wall clock is a timeout, which proves only
+spec's strategies with the family's metrics, the receipt binds the exact spec and the frozen
+context, and its scope is the family's. A child that does not finish within the wall clock is a timeout, which proves only
 that the bounded workload did not finish within the stated limit; a child that fails to start
 or exits non-zero is a failed attempt, never a measurement; a malformed or forged receipt is
 refused. Every attempt is recorded, including failures, and the lease is released whatever
@@ -91,8 +91,10 @@ def _spawn(payload: bytes, *, wall_seconds: float, python: str) -> subprocess.Co
     """The one process launch. Environment allowlisted, cwd empty, fixed entry, bounded wall clock."""
     env = child_environment()
     with tempfile.TemporaryDirectory(prefix="dark-factory-experiment-") as cwd:
-        return subprocess.run([python, "-m", "factory_kernel.experiment_runner", "--child"], input=payload, capture_output=True,
-                              cwd=cwd, env=env, timeout=wall_seconds)
+        # -s: no user site-packages (a user's sitecustomize/usercustomize would run in the child);
+        # -B: no bytecode written into the kernel tree by the child.
+        return subprocess.run([python, "-s", "-B", "-m", "factory_kernel.experiment_runner", "--child"], input=payload,
+                              capture_output=True, cwd=cwd, env=env, timeout=wall_seconds)
 
 
 def verify_receipt(spec: Mapping[str, Any], context: Mapping[str, Any], receipt: Any) -> dict:
@@ -115,8 +117,8 @@ def verify_receipt(spec: Mapping[str, Any], context: Mapping[str, Any], receipt:
             raise ExperimentRefused(f"strategy {name!r} reports metrics outside the family's contract")
     if receipt.get("input_sha256") != sha256_value(dict(spec)):
         raise ExperimentRefused("the receipt names another spec")
-    if "context_identity" in receipt and receipt["context_identity"] != context.get("identity"):
-        raise ExperimentRefused("the receipt names another repository context")
+    if receipt.get("context_identity") != context.get("identity"):
+        raise ExperimentRefused("the receipt does not bind the frozen repository context")
     if receipt.get("scope") != FAMILIES[spec["kind"]]["claim_scope"] or receipt.get("qualification_status") != "UNPROVEN":
         raise ExperimentRefused("the receipt's scope or qualification status is not the family's")
     return dict(receipt)
