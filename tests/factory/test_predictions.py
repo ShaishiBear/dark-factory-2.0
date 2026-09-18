@@ -76,6 +76,15 @@ class FreezeTests(unittest.TestCase):
         records = frozen_predictions(moved)
         self.assertTrue(all(not r["applicability"]["applicable"] for r in records))
         self.assertEqual(records[0]["applicability"]["reason"], "repository-context-changed-since-the-forecast")
+        # The record keeps the cutoff the forecast was made under, not the context it is stale against,
+        # so its identity is the same record as before the context moved, and match_actual's own
+        # context comparison is what makes it inapplicable.
+        self.assertEqual((records[0]["data_cutoff"], records[0]["applicability"]["context_identity"]), (CTX, CTX))
+        before = {r["subject"]["criterion_id"]: r["identity"] for r in frozen_predictions(session()) if r["subject"]["candidate_id"] == "scan"}
+        after = {r["subject"]["criterion_id"]: r["identity"] for r in records if r["subject"]["candidate_id"] == "scan"}
+        self.assertNotEqual(before, after)  # applicability is part of the record
+        self.assertEqual(match_actual({**records[0], "applicability": {**records[0]["applicability"], "applicable": True}},
+                                      value=15, unit="comparisons", context_identity=OTHER, receipt_sha256="r" * 64)["outcome"], "inapplicable")
         revised = session(context={"identity": OTHER}, assessments=[{"round": 1, "candidates": {"scan": {"lookup": {"low": 5, "high": 6, "basis": "now"}}}}])
         scan = [r for r in frozen_predictions(revised) if r["subject"]["candidate_id"] == "scan"][0]
         self.assertTrue(scan["applicability"]["applicable"])  # re-assessed under the current context

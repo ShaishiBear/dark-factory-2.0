@@ -60,23 +60,26 @@ def frozen_predictions(session: Mapping[str, Any]) -> list[dict]:
     is inapplicable when the repository context changed since it was made (the same rule the
     comparison applies)."""
     criteria = {row["id"]: row for row in session["policy"]["criteria"]}
-    context_identity = session["context"]["identity"]
+    current = session["context"]["identity"]
     records = []
     for key, candidate in session["candidates"].items():
         predictions = candidate["predictions"]
         source = "candidate-registration"
-        stale = candidate.get("predictions_context_identity") != context_identity
+        # A registration's data cutoff is the context it was made under, which the records keep as
+        # `predictions_context_identity`; a round's assessment is made under the current context.
+        made_under = candidate.get("predictions_context_identity") or current
         for assessment in session.get("assessments", ()):
             if assessment["round"] == session["round"] and key in assessment["candidates"]:
                 predictions = assessment["candidates"][key]
                 source = "round-assessment"
-                stale = False
+                made_under = current
+        stale = made_under != current
         for criterion_id, prediction in predictions.items():
             criterion = criteria.get(criterion_id)
             if criterion is None:
                 continue
             records.append(freeze_prediction(session_id=session["id"], round_number=session["round"], candidate_id=key,
-                                             criterion=criterion, prediction=prediction, context_identity=context_identity,
+                                             criterion=criterion, prediction=prediction, context_identity=made_under,
                                              source=source, applicable=not stale,
                                              inapplicable_reason="repository-context-changed-since-the-forecast" if stale else None))
     return records
