@@ -245,6 +245,34 @@ class RuntimeHookTests(unittest.TestCase):
     def write_request(self, candidates):
         (self.paths.artifacts / "investigation_request.json").write_text(json.dumps(request(candidates)), encoding="utf-8")
 
+    def test_an_installed_policy_decides_the_runs_own_lesson_in_the_fixed_order(self):
+        from factory_kernel.lessons import parse_policy
+        policy = {
+            "schema": "dark-factory/lesson-admission-policy", "schema_version": "1.0", "policy_id": "p1", "version": "1.0",
+            "eligible_roles": ["implement"], "task_families": ["operator"], "cohort_digest": "a" * 64,
+            "baseline_method": "no-memory-challenger", "equal_total_cost_cap_microusd": 1_000_000, "minimum_family_coverage": 2,
+            "minimum_samples": 12, "hard_regression_constraints": ["acceptance-regression"], "benefit_metric": "first-pass-green-rate",
+            "minimum_meaningful_effect": 0.1, "uncertainty_rule": "exact-sign-test-p<=0.05", "maximum_confirmation_exposures": 3,
+            "negative_transfer_limit": 0.05, "expiry_observations": 50, "drift_triggers": ["toolchain"]}
+        kernel = self.root / "kernel"; (kernel / ".factory").mkdir(parents=True)
+        strict = diff(self.repo, "app/jobs.py", MODULE_RIGHT)
+        self.write_request([{"id": "strict", "mechanism_family": "operator", "patch": strict, "predicted_effects": ["equality fails"]}])
+        for families, expected in ((["operator"], ("insufficient", ["cohort_contaminated"])),
+                                   (["boundary-operator"], ("reject", ["outside_applicability"]))):
+            with self.subTest(families=families):
+                (kernel / ".factory" / "lesson-policy.json").write_text(json.dumps({**policy, "task_families": families}), encoding="utf-8")
+                for stale in ("investigation-implement.json", "investigation-green.json"):
+                    (self.paths.artifacts / stale).unlink(missing_ok=True)
+                with patch("factory_kernel.runtime.scoped_environment", side_effect=lambda env, scope: dict(os.environ if env is None else env)), \
+                        patch.object(KernelRuntime, "_kernel_checkout", lambda rt: kernel):
+                    outcome = self.rt._host_investigation(self.repo, self.paths, self.env, stage="implement")
+                admission = outcome["lesson_admission"]
+                # This run's evidence is never the preregistered cohort: its cohort digest is the plan digest.
+                self.assertEqual((admission["status"], admission["retrieval_eligible"]), ("proposed", False))
+                self.assertEqual((admission["evaluation"]["status"], admission["evaluation"]["reason_codes"]), expected)
+                self.assertEqual(admission["evaluation"]["policy_sha256"], parse_policy({**policy, "task_families": families}).sha256)
+                git(self.repo, "reset", "-q", "--hard", "HEAD~1") if outcome["status"] == "applied" else None
+
     def test_no_request_means_the_old_direct_path(self):
         self.assertIsNone(self.rt._host_investigation(self.repo, self.paths, self.env, stage="implement"))
         self.rt.check_stop.assert_not_called()
@@ -270,6 +298,13 @@ class RuntimeHookTests(unittest.TestCase):
         self.assertEqual({c["id"] for c in record["candidates"]}, {"strict", "unequal"})
         self.assertEqual(len(record["observations"]), 3)
         self.assertEqual(record["lesson_proposal"]["status"], "proposed")
+        # WP11: the proposal is evaluated, never admitted, and the reason is recorded. No policy is
+        # installed in the kernel checkout, so the evaluator says exactly that.
+        admission = record["lesson_admission"]
+        self.assertEqual((admission["status"], admission["retrieval_eligible"], admission["authority"]), ("proposed", False, "admission-evaluator"))
+        self.assertEqual((admission["evaluation"]["status"], admission["evaluation"]["reason_codes"]), ("insufficient", ["policy_missing"]))
+        self.assertIsNone(admission["evaluation"]["policy_sha256"])
+        self.assertFalse((ROOT / ".factory" / "lesson-policy.json").exists(), "this branch installs no policy")
         self.assertTrue(all(o["complete"] for o in record["observations"]))
         # Resumed with the same request: decided once, never re-measured.
         self.rt._investigation_evaluator = Mock(side_effect=AssertionError("must not re-run"))
@@ -335,8 +370,7 @@ class RuntimeHookTests(unittest.TestCase):
     def test_the_default_evaluator_freezes_the_kernels_proof_program(self):
         rt = object.__new__(KernelRuntime)
         rt.repo_root = ROOT
-        with patch.object(KernelRuntime, "_kernel_checkout", ROOT):
-            evaluator = KernelRuntime._investigation_evaluator(rt, self.paths)
+        evaluator = KernelRuntime._investigation_evaluator(rt, self.paths)  # the real _kernel_checkout(), from repo_root
         self.assertEqual(evaluator.id, "acceptance-green-v1")
         self.assertEqual(evaluator.argv[1], str((ROOT / "scripts" / "factory_proof.py").resolve()))
         self.assertEqual(evaluator.argv[2:4], ("green", "--proof"))
@@ -344,8 +378,7 @@ class RuntimeHookTests(unittest.TestCase):
         again = KernelRuntime._investigation_evaluator.__wrapped__ if hasattr(KernelRuntime._investigation_evaluator, "__wrapped__") else None
         self.assertIsNone(again)
         (self.paths.artifacts / "red-proof.json").write_text("{\"version\": \"2.0\", \"checkpoints\": [], \"files\": {}}")
-        with patch.object(KernelRuntime, "_kernel_checkout", ROOT):
-            changed = KernelRuntime._investigation_evaluator(rt, self.paths)
+        changed = KernelRuntime._investigation_evaluator(rt, self.paths)
         self.assertNotEqual(changed.authority_closure_digest, evaluator.authority_closure_digest, "a changed proof is a different evaluator")
 
     def test_build_and_repair_call_the_hook_after_the_worker_commit(self):
