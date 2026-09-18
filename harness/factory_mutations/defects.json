@@ -4897,6 +4897,41 @@
       "find": "                \"classification\": deepcopy(classification),\n",
       "replace": "                \"classification\": None,\n",
       "why": "SPEC 9: the assessment records what the outcome is evidence of, from structure; an assessment without its classification leaves the reconsideration and the retained alternatives with a verdict but no cause class. Detector: tests/factory/test_strategy_rejection.py"
+    },
+    {
+      "id": "graph-transport-not-owner-only",
+      "file": "factory_kernel/graph_transport.py",
+      "find": "    if principal.role != \"owner\":\n        raise IntentRefused(\"the project graph is owner-only\")\n",
+      "replace": "    if False:\n        raise IntentRefused(\"the project graph is owner-only\")\n",
+      "why": "C11: the graph is a role-scoped projection; a proposal principal reading the owner's private intent and exploration wording is a privacy breach, not a view. Detector: tests/factory/test_project_graph_http.py"
+    },
+    {
+      "id": "graph-transport-cursor-ahead-served-as-delta",
+      "file": "factory_kernel/graph_transport.py",
+      "find": "    if after_version > current:\n        return {**base, \"kind\": \"resnapshot\", \"reason\": \"cursor-ahead-of-project\", \"after_version\": after_version,\n",
+      "replace": "    if False:\n        return {**base, \"kind\": \"resnapshot\", \"reason\": \"cursor-ahead-of-project\", \"after_version\": after_version,\n",
+      "why": "C11: a stale or impossible cursor returns an explicit resnapshot result rather than silently mixing snapshots; a cursor ahead of the project answered with an empty delta would tell the client its view is current when it is from another lineage. Detector: tests/factory/test_project_graph_http.py"
+    },
+    {
+      "id": "graph-transport-delta-span-unbounded",
+      "file": "factory_kernel/graph_transport.py",
+      "find": "    if current - after_version > MAX_DELTA_SPAN:\n",
+      "replace": "    if False:\n",
+      "why": "SPEC 10: a cursor gap beyond the bound returns a bounded resnapshot instruction; an unbounded delta re-projects arbitrarily old lineages on every poll. Detector: tests/factory/test_project_graph_http.py"
+    },
+    {
+      "id": "graph-transport-details-before-authorization",
+      "file": "factory_kernel/graph_transport.py",
+      "find": "    events = _events(store, project, principal=principal)\n    if not isinstance(node_id, str) or not 1 <= len(node_id) <= 200:\n        raise GraphRefused(\"node id must be an opaque string\")\n",
+      "replace": "    if not isinstance(node_id, str) or not 1 <= len(node_id) <= 200:\n        raise GraphRefused(\"node id must be an opaque string\")\n    events = _events(store, project, principal=principal)\n",
+      "why": "C11: detail lookup checks authorisation before object existence or shape; answering about the id first tells an unauthorised caller something about the graph. Detector: tests/factory/test_project_graph_http.py"
+    },
+    {
+      "id": "frontdoor-http-query-refusal-dropped",
+      "file": "factory_kernel/frontdoor_http.py",
+      "find": "            else:\n                return send(\"400 Bad Request\", {\"error\": \"query parameters are not supported\"})\n",
+      "replace": "            else:\n                pass\n",
+      "why": "The Front Door refuses query parameters on every route except the two graph routes; dropping the refusal lets a query string reach routes whose handlers never validated one. Detector: tests/factory/test_project_graph_http.py, tests/factory/test_frontdoor_http.py"
     }
   ]
 }
