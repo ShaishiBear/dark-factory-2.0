@@ -55,7 +55,8 @@ was 2996 tests with 32 failures and 3 errors: the 32 failures and 2 of the error
 `test_evidence_retention` set that every checkpoint's final recorded full run shows on this Windows machine (a run on a
 Linux host is not recorded in this series), and the third error was a test that patched the in-process experiment seam
 the runner had just removed; that seam was renamed before the commit and its families rerun green, and the full suite
-was not rerun after that test-only rename. The last full run with exactly the known set was 2976 tests at checkpoint 20.
+was not rerun after that test-only rename. The last full run with exactly the known set was 2988 tests at checkpoint 21
+(working tree over a1ff47f).
 
 ## Escalations: decisions that are the owner's, recorded and not taken
 
@@ -70,7 +71,7 @@ was not rerun after that test-only rename. The last full run with exactly the kn
    replacement: an Architecture Change Proposal for the maintainer lane.
 5. The Front Door host lane (intent store host, operational SQLite, fence acquisition, transition service, coordinator
    and executor): owned by the "Continue Dark Factory implementation" task, whose `transition-fence` worktree drafts were
-   left untouched.
+   left untouched (this task added only its coordination note there).
 6. The daily regression cron and the hourly worker cron did not fire on schedule during this window (recorded, not
    dispatched; never dispatched by hand because that lane is paid).
 
@@ -87,6 +88,9 @@ was not rerun after that test-only rename. The last full run with exactly the kn
 
 ## Coordination
 
-The Front Door task's `.worktrees/transition-fence` (fence admission, currency, effects, observation drafts and a
-coordination note) was read and never modified; its supervisor and deployment were never operated. Ownership
-boundaries were stated in the first checkpoint and held throughout.
+The Front Door task's `.worktrees/transition-fence` (seven untracked draft modules: fence admission, currency, effects,
+observation, policy, request and the transition source) was read and none of its drafts or tracked files was modified;
+the one file this task placed there is the untracked coordination note it wrote at the first checkpoint
+(`COORDINATION-NOTE-from-blueprint-task.md`, also kept in this task's own records). Its supervisor and deployment were
+never operated. Ownership boundaries were stated in the first checkpoint and held throughout; the worktree's state at
+this handoff is exactly those eight untracked paths at HEAD 0085b89.

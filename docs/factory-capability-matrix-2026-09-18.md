@@ -24,7 +24,7 @@ pointers; nothing here is a claim beyond them.
 | WP13 | This matrix, the FACTORY.md "Blueprint modules" section and the handoff `docs/blueprint-handoff-2026-09-18.md` (every package in the five states with evidence, the escalations that are the owner's, the remaining domain limitations). The integrated new-project demonstration, the task-cohort and metrics registration, the one-operator contract experiment and the coupled multi-file comparison on an unseen task are not built: they need the owner's product outcome and paid cap | documentation only | n/a | #249; handoff PR pending | n/a | n/a |
 
 Conformance: all 68 public vectors of `docs/implementation-blueprint-2026-09-17/conformance/` pass through production
-code via `tests/factory/blueprint_adapter.py`, recorded at main d6bc4bb after PR #248
+code via `tests/factory/blueprint_adapter.py`, recorded at 164c6c0 (main d6bc4bb plus one docs commit) after PR #248
 (`docs/atlas/reviews/local/2026-09-18T0530Z-blueprint-docs/evidence/conformance-at-d6bc4bb.log`; the #247 branch head
 ce97eaf recorded the same) (`python docs/implementation-blueprint-2026-09-17/conformance/run.py
 --adapter tests/factory/blueprint_adapter.py`). Passing them is necessary for the named interfaces and sufficient for
