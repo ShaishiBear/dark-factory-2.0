@@ -339,6 +339,8 @@ COPY_FILES = (
     # WP08 experiment registry: the deterministic boundary family and the registry's refusals.
     "tests/factory/test_experiments.py",
     "tests/factory/test_predictions.py",
+    # WP09 outcome routing: the structural classifier and the assessment that records it.
+    "tests/factory/test_outcome_router.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

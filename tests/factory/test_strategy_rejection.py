@@ -120,6 +120,10 @@ class RejectionTests(unittest.TestCase):
         self.assertEqual(assessment["decision"], "reconsider")
         self.assertEqual(assessment["invalidated_claim_ids"], ["scan-assumption"])
         self.assertEqual(assessment["failure_cause"], "unresolved")
+        classification = assessment["classification"]
+        self.assertEqual((classification["classification"], classification["invalidated_claim_ids"], classification["reopen_affected_question"]),
+                         ("strategy-contradiction", ["scan-assumption"], True))
+        self.assertFalse(classification["basis"]["refusal_text_consulted"])
         self.assertEqual(assessment["qualification_status"], "UNPROVEN")
         self.assertFalse(assessment["proof_reuse_allowed"])
         self.assertEqual(after["sessions"]["lookup"]["status"], "reconsideration-required")
@@ -137,6 +141,10 @@ class RejectionTests(unittest.TestCase):
         before = self.state()
         result = self.case.import_outcome()
         self.assertEqual(result["assessment"]["decision"], "no-contradiction-established")
+        # The refusal came from a judging authority and every registered predicate is supported:
+        # the defect is in the implementation, and repair stays within the frozen acceptance.
+        self.assertEqual(result["assessment"]["classification"]["classification"], "implementation-defect")
+        self.assertTrue(result["assessment"]["classification"]["repair_within_frozen_acceptance"])
         for key in ("sessions", "claims", "budgets"):
             self.assertEqual(self.state()[key], before[key])
 

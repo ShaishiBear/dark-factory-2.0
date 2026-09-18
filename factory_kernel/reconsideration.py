@@ -10,6 +10,7 @@ from .claim_explanation import _read, explain_run
 from .exploration_records import OPERATION, affected_claims, approved_scope, projection
 from .evidence_retention import _path
 from .frontdoor_intent import IntentRefused, _shape, _text, _texts
+from .outcome_router import UNJUDGED_CODES
 from .programme import _id, compile_programme, parse_json
 from .programme_strategy import strategy_from_session
 from .refusal import AUTHORITY, scrub
@@ -137,8 +138,7 @@ class Reconsideration:
                 "live-world-replay-not-assessed"}
             refusal = observation["refusal"]
             if ("validation-refusal" not in evidence or refusal["status"] != "intact"
-                    or refusal["record"]["reason_code"] in {
-                        "unknown", "identity", "identity_expired", "stale_base", "trust_root_currency"}
+                    or refusal["record"]["reason_code"] in UNJUDGED_CODES
                     or any(row["status"] == "stale"
                     for row in observation["evidence"]["dependency_comparisons"])
                     or any(rows[key]["changed_dependencies"] or set(rows[key]["gaps"]) - allowed_gaps

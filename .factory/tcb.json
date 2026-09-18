@@ -307,6 +307,10 @@
       "class": "proof-policy",
       "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
     },
+    "outcome_router": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
     "pr_body": {
       "class": "trusted-observer",
       "reason": "independently observes a source, platform or run and reports without deciding"
@@ -582,7 +586,7 @@
       "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
     }
   ],
-  "graph_sha256": "999216c65bb115779cf5adf927b1102c84ef18e62f3520b23be6a3027677e030",
+  "graph_sha256": "886453d6fccc53d6fa6d8c5be34ee65a7abd139d2a46c55cc0fb23f229be4cf4",
   "closure_bounds": {
     "authority": {
       "files": [
