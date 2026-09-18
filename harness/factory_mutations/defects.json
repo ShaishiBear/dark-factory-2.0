@@ -4505,6 +4505,76 @@
       "find": "            outcome[\"lesson_admission\"] = self._evaluate_lesson(outcome[\"lesson_proposal\"], plan, selection)",
       "replace": "            outcome[\"lesson_admission\"] = None",
       "why": "Every investigation records the deterministic admission evaluation of its lesson proposal; without it a proposal has no recorded reason for staying a proposal (WP11). Detector: tests/factory/test_code_experiments.py"
+    },
+    {
+      "id": "transition-phase-skip-allowed",
+      "file": "factory_kernel/programme_transition.py",
+      "find": "    if step[0] != current:\n        raise TransitionRefused(f\"{event!r} needs phase {step[0]!r}, transition is at {current!r}\")\n    return step[1]",
+      "replace": "    return step[1]",
+      "why": "C07: the phase sequence is the only legal forward order; an event applied from the wrong phase skips a durable phase. Detector: tests/factory/test_programme_transition.py"
+    },
+    {
+      "id": "transition-stop-permits-release",
+      "file": "factory_kernel/programme_transition.py",
+      "find": "    if stop and event in ACTIVATION_EVENTS:\n        raise TransitionRefused(f\"stop is asserted: {event!r} activates or releases and is refused\")\n",
+      "replace": "",
+      "why": "SPEC 7: stop permits read-only reconciliation but prohibits new activation/release. Detector: tests/factory/test_programme_transition.py"
+    },
+    {
+      "id": "transition-uncertain-recovered-by-any-event",
+      "file": "factory_kernel/programme_transition.py",
+      "find": "        if event == \"observe_no_effect\":\n            return before\n        raise TransitionRefused(f\"an uncertain {request!r} is resolved only by observing its effect or its definite absence\")",
+      "replace": "        return before",
+      "why": "C07: an uncertain remote request is resolved only by the recovery observer establishing the observed state or a definite no-effect refusal; any other event escaping uncertainty invents an outcome. Detector: tests/factory/test_programme_transition.py"
+    },
+    {
+      "id": "transition-release-unknown-passes",
+      "file": "factory_kernel/programme_transition.py",
+      "find": "def _known_bool(value: Any) -> bool | None:\n    return value if isinstance(value, bool) else None",
+      "replace": "def _known_bool(value: Any) -> bool | None:\n    return True if value is None else (value if isinstance(value, bool) else None)",
+      "why": "C07 last paragraph: if any release precondition becomes unknown, keep the fence. Detector: tests/factory/test_programme_transition.py"
+    },
+    {
+      "id": "transition-release-ignores-queued",
+      "file": "factory_kernel/programme_transition.py",
+      "find": "        \"drained\": queued == 0 and active == 0,",
+      "replace": "        \"drained\": active == 0,",
+      "why": "C07: drain requires independently observing queued AND active old-generation runs. Detector: tests/factory/test_programme_transition.py"
+    },
+    {
+      "id": "transition-release-consent-after-successor",
+      "file": "factory_kernel/programme_transition.py",
+      "find": "    (\"consent\", \"consent_invalid\"),\n    (\"successor\", \"successor_unobserved\"),",
+      "replace": "    (\"successor\", \"successor_unobserved\"),\n    (\"consent\", \"consent_invalid\"),",
+      "why": "Refusal precedence is fixed and reviewable (conformance/README transition_release): consent is judged before the successor. Detector: tests/factory/test_programme_transition.py"
+    },
+    {
+      "id": "transition-store-ahead-wins",
+      "file": "factory_kernel/programme_transition.py",
+      "find": "        if store_state in {\"started\", \"uncertain\"}:\n            return \"consistent\" if store_state == \"started\" else \"uncertain\"\n        return RECONCILIATION_REQUIRED",
+      "replace": "        if store_state in {\"started\", \"uncertain\"}:\n            return \"consistent\" if store_state == \"started\" else \"uncertain\"\n        return \"consistent\"",
+      "why": "C07: a journal/store mismatch after a crash means reconciliation_required, not selecting whichever store appears further ahead. Detector: tests/factory/test_programme_transition.py"
+    },
+    {
+      "id": "transition-journal-observation-under-other-request",
+      "file": "factory_kernel/transition_journal.py",
+      "find": "                if open_request[\"request_id\"] != request_id or open_request[\"request_sha256\"] != request_sha256:\n                    raise IntentRefused(\"an observation must reuse the pending request's id and digest; a different request is a new transition, not a recovery\")\n",
+      "replace": "",
+      "why": "C07: reuse the same request id/digest when observing; an observation recorded under another request id closes a request that was never made. Detector: tests/factory/test_transition_journal.py"
+    },
+    {
+      "id": "transition-verify-accepts-rewritten-phase",
+      "file": "factory_kernel/transition_journal.py",
+      "find": "        if receipt.get(\"phase_after\") != phase:\n            raise IntentRefused(f\"transition receipt {index} records phase {receipt.get('phase_after')!r}, derived {phase!r}\")\n",
+      "replace": "",
+      "why": "The verifier derives the phase from the legal sequence and refuses a receipt whose recorded phase differs; otherwise a rewritten receipt could advance a transition on paper. Detector: tests/factory/test_transition_journal.py"
+    },
+    {
+      "id": "transition-status-writes-on-refusal",
+      "file": "factory_kernel/transition_views.py",
+      "find": "        print(f\"FACTORY_TRANSITION_REFUSED reason={str(exc)[:300]!r}\", flush=True)\n        return 1",
+      "replace": "        print(f\"FACTORY_TRANSITION_REFUSED reason={str(exc)[:300]!r}\", flush=True)\n        _write(args.output, {\"schema\": \"dark-factory/transition-status\", \"refused\": str(exc)[:300]})\n        return 1",
+      "why": "A refused projection writes no record: a partial status file could be read as a phase or release decision. Detector: tests/factory/test_transition_views.py"
     }
   ]
 }

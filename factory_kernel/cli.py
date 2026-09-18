@@ -160,6 +160,17 @@ def main() -> int:
             if name == "plan-obligations":
                 command.add_argument("--dispatch-plan", type=Path, required=True, help="a plan-dispatch record to compare with")
 
+    # Transition status (WP03, read-only): derive a governed replacement's phase from its journal
+    # receipts and decide release eligibility from an observation file. No remote effect.
+    transition = sub.add_parser("transition-status", help="derive a programme transition's phase and release eligibility, without effects")
+    transition.add_argument("--state-dir", type=Path, required=True, help="the Front Door intent store directory")
+    transition.add_argument("--owner", required=True, help="the configured owner identity (host operator)")
+    transition.add_argument("--project", required=True)
+    transition.add_argument("--transition", required=True, help="the transition id (64 hex)")
+    transition.add_argument("--observation", type=Path, default=None, help="JSON of the independently observed release preconditions")
+    transition.add_argument("--store-state", default=None, help="the effect store's grant state for the pending request, if known")
+    transition.add_argument("--output", type=Path, required=True)
+
     dispatch = sub.add_parser("dispatch")
     dispatch.add_argument("--once", action="store_true", help="execute exactly one priority item")
     dispatch.add_argument("--no-merge", action="store_true")
@@ -249,6 +260,12 @@ def main() -> int:
         if args.command == "explain-claims":
             return explain_claims(args, cfg)
         return plan_obligations(args, cfg)
+
+    if args.command == "transition-status":
+        from .transition_views import transition_status
+
+        cfg = load_config(args.config)
+        return transition_status(args, cfg)
 
     if args.command == "programme-pulse":
         import json

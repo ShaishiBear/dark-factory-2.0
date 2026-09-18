@@ -208,10 +208,23 @@ def _lesson_admission(payload: dict) -> dict:
     return {"status": result.status, "reason_codes": list(result.reason_codes)}
 
 
+def _transition_release(payload: dict) -> dict:
+    """`transition_release` -> `factory_kernel.programme_transition.request_release` (C07).
+
+    The fixture presents the independently observed release preconditions; the production
+    decision lists every failing gate in its fixed precedence, keeps the fence on anything
+    unknown and makes no remote call.
+    """
+    from factory_kernel.programme_transition import request_release
+
+    return request_release(dict(payload))
+
+
 OPERATIONS = {
     "plan_dispatch": _plan_dispatch,
     "lease_guard": _lease_guard,
     "lesson_admission": _lesson_admission,
+    "transition_release": _transition_release,
     "proof_currency": _proof_currency,
     "event_replay": _event_replay,
     "source_span": _source_span,
