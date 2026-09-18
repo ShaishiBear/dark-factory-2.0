@@ -4981,6 +4981,13 @@
       "find": "    final = projection(list(events))\n    measured = {(r[\"session_id\"], r[\"candidate_id\"]) for r in rows} | {(u[\"session_id\"], u[\"candidate_id\"]) for u in unjoined}\n",
       "replace": "    final = projection(list(events))\n    measured = {(r[\"session_id\"], r[\"candidate_id\"]) for r in rows} | {(u[\"session_id\"], u[\"candidate_id\"]) for u in unjoined}\n    for sid, session in final[\"sessions\"].items():\n        for cid in session[\"candidates\"]:\n            if (sid, cid) not in measured:\n                rows.append({\"project\": project, \"session_id\": sid, \"round\": session[\"round\"], \"event_index\": None, \"recorded_at\": None,\n                             \"receipt_sha256\": None, \"candidate_id\": cid, \"criterion_id\": None, \"task_family\": session[\"candidates\"][cid].get(\"family\"),\n                             \"method_version\": \"unknown\", \"model\": UNRECORDED_MODEL, \"status\": \"complete\", \"failure\": None,\n                             \"outcome\": \"within\", \"distance\": 0, \"actual\": {\"value\": 0}, \"cost_usd\": 0, \"forecast\": None})\n                measured.add((sid, cid))\n",
       "why": "WP11 acceptance: an unbuilt or unmeasured candidate has no invented actual. A row fabricated for it would be a sample nothing measured. Detector: tests/factory/test_calibration.py"
+    },
+    {
+      "id": "calibration-cohort-overlap-order-dependent",
+      "file": "factory_kernel/calibration.py",
+      "find": "    for (project, session), name in seen_sessions.items():\n        if project in seen_projects and seen_projects[project] != name:\n",
+      "replace": "    for (project, session), name in seen_sessions.items():\n        if False:\n",
+      "why": "SPEC 11.1: cohorts are preregistered and must not overlap. A session written into one cohort while its project sits in another is a split that cannot separate development from evaluation, whichever cohort the protocol lists first. Detector: tests/factory/test_calibration.py"
     }
   ]
 }

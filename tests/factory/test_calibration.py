@@ -171,9 +171,10 @@ class CalibrationTests(unittest.TestCase):
         join = join_outcomes(self.events(), project="citations")
         # A session assigned to the evaluation cohort while its project is the development cohort
         # is refused by the protocol itself.
-        with self.assertRaises(CalibrationRefused):
-            parse_protocol(protocol(cohorts={"development": {"projects": ["citations"]},
-                                             "evaluation": {"sessions": [["citations", "lookup"]]}}))
+        for order in ({"development": {"projects": ["citations"]}, "evaluation": {"sessions": [["citations", "lookup"]]}},
+                      {"evaluation": {"sessions": [["citations", "lookup"]]}, "development": {"projects": ["citations"]}}):
+            with self.subTest(list(order)), self.assertRaises(CalibrationRefused):
+                parse_protocol(protocol(cohorts=order))  # whichever cohort is written first
         # The same receipt under two cohorts (two projects holding copies of one trajectory).
         copy = deepcopy(join)
         contaminated = calibration_report({"citations": join, "held-out": copy}, protocol=parse_protocol(protocol()))
@@ -190,6 +191,7 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual((gates["clean_split"], gates["adequate"]), (True, False))
         self.assertEqual(gate_results(contaminated["admission_observations"], policy)["clean_split"], False)
         self.assertNotIn("admit", json.dumps(clean["admission_observations"]))
+        self.assertEqual((clean["refusals"], clean["repairs"]), ("not-recorded-in-the-exploration-ledger",) * 2)
 
     def test_unassigned_sessions_are_reported_not_scored_in_a_cohort(self) -> None:
         self.run_experiment()

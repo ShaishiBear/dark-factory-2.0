@@ -3,8 +3,9 @@
 This module joins the forecasts the exploration ledger froze before each result with the
 outcomes it recorded, and reports what the join supports: interval coverage and absolute
 error for measured criteria, Brier scores for probability forecasts of binary outcomes (none
-are recorded by the ledger today, and the report says so), refusal counts and unknown-outcome
-rates, grouped by task family, method version and model, with sample counts and missingness
+are recorded by the ledger today, and the report says so), failed-experiment counts and
+unknown-outcome rates (refusal and repair counts are not recorded by the ledger, and the report
+says so), grouped by task family, method version and model, with sample counts and missingness
 kept. It decides nothing: the report is `report-only`, it never admits a lesson, ranks a
 candidate or turns an opinion into a measurement. `lessons.evaluate` may read the report's
 `admission_observations`; the protected policy decides what they mean.
@@ -98,9 +99,12 @@ def parse_protocol(raw: Any) -> dict:
             key = (project, session)
             if key in seen_sessions and seen_sessions[key] != name:
                 raise CalibrationRefused(f"session {project}/{session} is assigned to two cohorts")
-            if project in seen_projects and seen_projects[project] != name:
-                raise CalibrationRefused(f"session {project}/{session} lies in a project assigned to another cohort")
             seen_sessions[key] = name
+    # Checked after every cohort is collected, so the verdict does not depend on the order the
+    # cohorts are written in: a session cannot sit in one cohort while its project sits in another.
+    for (project, session), name in seen_sessions.items():
+        if project in seen_projects and seen_projects[project] != name:
+            raise CalibrationRefused(f"session {project}/{session} lies in a project assigned to another cohort")
     record = {k: raw[k] for k in sorted(PROTOCOL_FIELDS)}
     record["cohort_digest"] = sha256_value({"cohorts": raw["cohorts"], "grouping": grouping, "protocol_id": raw["protocol_id"],
                                             "version": raw["version"]})
@@ -320,6 +324,7 @@ def calibration_report(joins: Mapping[str, Mapping[str, Any]], *, protocol: Mapp
         "unassigned_sessions": [{"project": p, "session_id": s} for p, s in unassigned],
         "groups": group_reports, "cohorts": cohorts, "contaminated": contaminated,
         "binary_note": "the exploration ledger freezes intervals and judgments; no probability forecast is recorded, so Brier scores have no samples",
+        "refusals": "not-recorded-in-the-exploration-ledger",
         "repairs": "not-recorded-in-the-exploration-ledger",
         "admission_observations": {
             "cohort_digest": protocol["cohort_digest"], "contaminated": contaminated,
