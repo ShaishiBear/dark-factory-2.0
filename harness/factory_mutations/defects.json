@@ -4274,6 +4274,76 @@
       "find": "        if subject.get(\"candidate_commit\") != head or not (verification.get(aid) or {}).get(\"verified\"):\n            continue",
       "replace": "        if subject.get(\"candidate_commit\") != head:\n            continue",
       "why": "Only verified companions enter the proof the scheduler sees; an unverified record cannot make merge proposable. Detector: tests/factory/test_claim_views.py"
+    },
+    {
+      "id": "lease-guard-expiry-boundary",
+      "file": "factory_kernel/lease_store.py",
+      "find": "    if now >= expires_at:\n        return GuardResult(\"refused\", (\"lease_expired\",))",
+      "replace": "    if now > expires_at:\n        return GuardResult(\"refused\", (\"lease_expired\",))",
+      "why": "C05: the expiry boundary is now >= expires_at; a lease at its expiry instant has no permission. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-guard-identity-after-state",
+      "file": "factory_kernel/lease_store.py",
+      "find": "    if epoch != current_epoch or owner != current_owner or generations != current_generations:\n        return GuardResult(\"refused\", (\"lease_identity_mismatch\",))\n    if not lease[\"active\"]:\n        return GuardResult(\"refused\", (\"lease_inactive\",))",
+      "replace": "    if not lease[\"active\"]:\n        return GuardResult(\"refused\", (\"lease_inactive\",))\n    if epoch != current_epoch or owner != current_owner or generations != current_generations:\n        return GuardResult(\"refused\", (\"lease_identity_mismatch\",))",
+      "why": "The guard's priority is schema, identity, live state, uncertainty, replay (conformance/README lease_guard); reporting a state reason for a bundle that is not even the same identity misattributes the refusal. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-acquire-partial-bundle",
+      "file": "factory_kernel/lease_store.py",
+      "find": "            held = self._live_holders(names, now)\n            if held:\n                raise LeaseRefused(\"resource held by a live lease: \" + \", \".join(sorted({f\"{r}@{o}\" for r, o, _ in held})))",
+      "replace": "            held = self._live_holders(names, now)\n            if held:\n                names = [n for n in names if n not in {r for r, _, _ in held}]\n                if not names:\n                    raise LeaseRefused(\"resource held by a live lease: \" + \", \".join(sorted({f\"{r}@{o}\" for r, o, _ in held})))",
+      "why": "C05: acquire all sorted resources or none; acquiring the free subset breaks bundle atomicity. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-heartbeat-revives-stale",
+      "file": "factory_kernel/lease_store.py",
+      "find": "            result, _ = self._guard(bundle, now)\n            if result.status != \"eligible\":\n                return result\n            self.connection.execute(\"UPDATE leases SET expires_at = ? WHERE lease_id = ?\", (now + ttl, bundle.lease_id))",
+      "replace": "            result, _ = self._guard(bundle, now)\n            if result.status != \"eligible\" and result.reason_codes != (\"lease_expired\",):\n                return result\n            self.connection.execute(\"UPDATE leases SET expires_at = ? WHERE lease_id = ?\", (now + ttl, bundle.lease_id))",
+      "why": "C05: a heartbeat updates expiry only before expiry; a stale heartbeat can never recreate ownership. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-release-clears-in-flight",
+      "file": "factory_kernel/lease_store.py",
+      "find": "            if lease.get(\"in_flight\"):\n                return GuardResult(\"refused\", (\"effect_uncertain\",))\n            self.connection.execute(\"UPDATE leases SET active = 0, ended_at = ?, end_reason = 'released' WHERE lease_id = ?\",",
+      "replace": "            if False:\n                return GuardResult(\"refused\", (\"effect_uncertain\",))\n            self.connection.execute(\"UPDATE leases SET active = 0, ended_at = ?, end_reason = 'released' WHERE lease_id = ?\",",
+      "why": "C05: release cannot clear an ambiguous in-flight operation. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-grant-conflict-ignored",
+      "file": "factory_kernel/lease_store.py",
+      "find": "                if prior_sha != request_sha256:\n                    raise LeaseRefused(\"operation id reused with different request bytes (conflict)\")",
+      "replace": "                if False:\n                    raise LeaseRefused(\"operation id reused with different request bytes (conflict)\")",
+      "why": "C05: reusing an operation id with different request bytes is a conflict, never a replay. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-grant-replays-execution",
+      "file": "factory_kernel/lease_store.py",
+      "find": "                if state in {\"observed_success\", \"observed_failure\"}:\n                    return {\"grant_id\": grant_id, \"state\": state, \"replayed\": True, \"result\": json.loads(result) if result else None,\n                            \"execute\": False}",
+      "replace": "                if state in {\"observed_success\", \"observed_failure\"}:\n                    return {\"grant_id\": grant_id, \"state\": state, \"replayed\": True, \"result\": json.loads(result) if result else None,\n                            \"execute\": True}",
+      "why": "C05: a grant may reference a previously observed result on an identical replay; it never executes again. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-terminal-state-reopened",
+      "file": "factory_kernel/lease_store.py",
+      "find": "            if row[0] != \"started\" and not (row[0] == \"uncertain\" and outcome != \"uncertain\"):\n                raise LeaseRefused(f\"grant in state {row[0]!r} cannot be observed as {outcome!r}\")",
+      "replace": "            if False:\n                raise LeaseRefused(f\"grant in state {row[0]!r} cannot be observed as {outcome!r}\")",
+      "why": "C05: terminal grant states never return; an observed operation cannot be re-observed as something else. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-unresolved-resource-reacquired",
+      "file": "factory_kernel/lease_store.py",
+      "find": "            pending = self._unresolved_operations(names)\n            if pending:\n                raise LeaseRefused(\"resource has an unresolved operation: \" + \", \".join(sorted(str(r[0]) for r in pending)))",
+      "replace": "            pending = []\n            if pending:\n                raise LeaseRefused(\"resource has an unresolved operation: \" + \", \".join(sorted(str(r[0]) for r in pending)))",
+      "why": "C05: a resource with a pending or uncertain operation cannot be acquired by another owner; expiry removes permission, it does not prove remote absence. Detector: tests/factory/test_lease_store.py"
+    },
+    {
+      "id": "lease-clock-rollback-accepted",
+      "file": "factory_kernel/lease_store.py",
+      "find": "        if now < last:\n            raise LeaseRefused(\"clock rollback observed; time-dependent authority blocked\")",
+      "replace": "        if False:\n            raise LeaseRefused(\"clock rollback observed; time-dependent authority blocked\")",
+      "why": "C05: clock rollback or unknown time blocks time-dependent authority. Detector: tests/factory/test_lease_store.py"
     }
   ]
 }
