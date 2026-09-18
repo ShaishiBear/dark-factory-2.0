@@ -307,6 +307,10 @@
       "class": "proof-policy",
       "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
     },
+    "maintenance": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
     "manifest": {
       "class": "proof-policy",
       "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
@@ -598,7 +602,7 @@
       "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
     }
   ],
-  "graph_sha256": "263bfe1ba6f2477844690abe1a1eec1d258cf2912fd8f1425d1522abbd7f2c45",
+  "graph_sha256": "b44729d071980b0d43db9c5e3b0509487ac2c978001e863f936e8a7cebac9c38",
   "closure_bounds": {
     "authority": {
       "files": [

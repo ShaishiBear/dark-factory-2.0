@@ -5051,6 +5051,69 @@
       "find": "            self._write_json(artifacts / f\"experience-{role}.json\", packet.record())\n",
       "replace": "            self._write_json(artifacts / f\"experience-{role}.json\", packet.to_dict())\n",
       "why": "SPEC 11.1: blinding is enforced at sandbox visibility, not only in prompts. The run's artifacts directory is readable by the tool-bearing blind roles test_author and conformance; a stage record that carries lesson text puts learned material where they can read it. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "maintenance-declared-tier-downgrades-path-tier",
+      "file": "factory_kernel/maintenance.py",
+      "find": "    tier = max((path_minimum, effect_minimum), key=lambda t: rank[t])\n    downgrade = declared_tier is not None and (declared_tier not in rank or rank[declared_tier] < rank[tier])\n",
+      "replace": "    tier = max((path_minimum, effect_minimum), key=lambda t: rank[t])\n    downgrade = declared_tier is not None and (declared_tier not in rank or rank[declared_tier] < rank[tier])\n    if declared_tier in rank:\n        tier = declared_tier\n",
+      "why": "C12: a generated change description cannot downgrade the path-derived minimum tier; model-assigned low risk is never authority. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "maintenance-kernel-paths-not-trust-root",
+      "file": "factory_kernel/maintenance.py",
+      "find": "    if (path in TRUST_ROOT_FILES or any(path.startswith(p) for p in TRUST_ROOT_PREFIXES)):\n        return \"trust-root-authority\"\n",
+      "replace": "    if path in TRUST_ROOT_FILES:\n        return \"trust-root-authority\"\n",
+      "why": "C12 / FACTORY_RULES 5: the trust-root prefixes (factory_kernel/, harness/, tests/factory/, .github/, ...) are the judge; a classifier that leaves them at product tier lets a maintenance proposal route a judge change through the autonomous lane. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "maintenance-lowered-floor-not-refused",
+      "file": "factory_kernel/maintenance.py",
+      "find": "            if not isinstance(new, (int, float)) or isinstance(new, bool) or new < value:\n                return \"floor_lowered\"\n",
+      "replace": "            if False:\n                return \"floor_lowered\"\n",
+      "why": "WP12 acceptance: a candidate cannot lower floors; a floor that shrinks or disappears under a refactor label must be refused. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "maintenance-granted-capability-not-refused",
+      "file": "factory_kernel/maintenance.py",
+      "find": "        if not isinstance(operations, (list, tuple)) or not set(operations) <= allowed:\n            return \"capability_granted\"\n",
+      "replace": "        if False:\n            return \"capability_granted\"\n",
+      "why": "WP12 acceptance: a candidate cannot grant itself a capability; any role gaining an operation, or a new role, is refused. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "maintenance-unknown-facts-do-not-refuse-activation",
+      "file": "factory_kernel/maintenance.py",
+      "find": "        elif not (isinstance(facts.get(\"floor_before\"), Mapping) and isinstance(facts.get(\"floor_after\"), Mapping)):\n            unknown.append(\"floor_facts_missing\")\n",
+      "replace": "        elif False:\n            unknown.append(\"floor_facts_missing\")\n",
+      "why": "C12: unknown classification refuses autonomous activation and retains a maintainer proposal; a floor change whose values the classifier cannot see must be unknown, not a trust change silently treated as understood. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "maintenance-incident-identity-not-verified",
+      "file": "factory_kernel/maintenance.py",
+      "find": "        if incident.get(\"identity\") != expected:\n            raise MaintenanceRefused(\"outcome classification identity does not verify\")\n",
+      "replace": "        if False:\n            raise MaintenanceRefused(\"outcome classification identity does not verify\")\n",
+      "why": "R10: maintenance proposals consume measured incidents, not arbitrary untrusted instructions in a log; an outcome record whose identity does not recompute is not the kernel's record. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "maintenance-candidate-judges-itself",
+      "file": "factory_kernel/maintenance.py",
+      "find": "    if old_authority == candidate_ref:\n        raise MaintenanceRefused(\"the candidate cannot judge its own installation\")\n",
+      "replace": "    if False:\n        raise MaintenanceRefused(\"the candidate cannot judge its own installation\")\n",
+      "why": "SPEC 11.2 / C12: the new judge never judges its own installation; candidate policy is evaluated under old authority. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "maintenance-shadow-disagreement-not-a-blocker",
+      "file": "factory_kernel/maintenance.py",
+      "find": "    elif verdicts[\"old\"] != verdicts[\"candidate\"]:\n        status, blocker = \"blocked\", \"shadow-disagreement\"\n",
+      "replace": "    elif False:\n        status, blocker = \"blocked\", \"shadow-disagreement\"\n",
+      "why": "C12: shadow qualification stores both results; a disagreement is a blocker, not averaged away. Detector: tests/factory/test_maintenance.py"
+    },
+    {
+      "id": "maintenance-cutover-without-activated-lane",
+      "file": "factory_kernel/maintenance.py",
+      "find": "    if classification[\"lane\"] not in policy[\"autonomous_lanes\"]:\n        reasons.append(\"no-autonomous-lane-activated\")\n",
+      "replace": "    if False:\n        reasons.append(\"no-autonomous-lane-activated\")\n",
+      "why": "SPEC 11.2: activating autonomous protected-path maintenance is its own governance decision; while no lane is activated every cutover request is refused. Detector: tests/factory/test_maintenance.py"
     }
   ]
 }
