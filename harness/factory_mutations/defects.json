@@ -316,8 +316,8 @@
     {
       "id": "runtime-stop-not-rechecked-before-merge",
       "file": "factory_kernel/effect_broker.py",
-      "find": "        try:\n            self.stop_check()\n        except Exception as exc:\n",
-      "replace": "        try:\n            pass\n        except Exception as exc:\n",
+      "find": "        # Fresh controls immediately before the remote call: a stop or fence observed now means\n        # no call, recorded as a failure that spent nothing remote.\n        try:\n            self.stop_check()\n        except Exception as exc:\n",
+      "replace": "        # Fresh controls immediately before the remote call: a stop or fence observed now means\n        # no call, recorded as a failure that spent nothing remote.\n        try:\n            pass\n        except Exception as exc:\n",
       "why": "A stop pressed during programme admission would no longer prevent the shared inline/deferred irreversible merge: the broker's recheck immediately before the one remote call is the last observation of the controls, and the earlier inline check cannot protect this later interval. Detector: tests/factory/test_factory_programme.py, tests/factory/test_factory_merge_authorized.py"
     },
     {
@@ -3452,9 +3452,9 @@
     {
       "id": "execution-fence-late-publication",
       "file": "factory_kernel/runtime.py",
-      "find": "        self.github.cwd = str(cwd)\n        self.check_stop()\n        self.github.push_branch(branch)",
-      "replace": "        self.github.cwd = str(cwd)\n        self.github.push_branch(branch)",
-      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. Detector: tests/factory/test_execution_fence.py"
+      "find": "        self.github.cwd = str(cwd)\n        self.check_stop()\n\n        body = paths.root / \"pr-body.md\"\n",
+      "replace": "        self.github.cwd = str(cwd)\n\n        body = paths.root / \"pr-body.md\"\n",
+      "why": "A protected persistent fence must stop canonical paid work, retries and publication; missing or stale observations cannot open it. The publication step observes the fence before it renders or pushes anything, and the broker observes it again immediately before the push. Detector: tests/factory/test_execution_fence.py"
     },
     {
       "id": "execution-fence-retry",
@@ -4750,6 +4750,34 @@
       "find": "        self._merge_squash_through_broker(pr_number, head=head, authorization=authorization, paths=paths)\n",
       "replace": "        self.github.merge_squash(pr_number, expected_head=head)\n",
       "why": "SPEC 5 / WP06: the exact-head merge is a brokered effect: grant derived from the authority's artifact, consumed once in a durable journal, controls rechecked immediately before the call. A direct spend skips all three and leaves no effect journal. Detector: tests/factory/test_factory_programme.py, tests/factory/test_factory_merge_authorized.py"
+    },
+    {
+      "id": "effect-broker-dirty-candidate-published",
+      "file": "factory_kernel/effect_broker.py",
+      "find": "                if observed[\"dirty\"]:\n                    reasons.append(\"candidate_worktree_dirty\")\n",
+      "replace": "                if False:\n                    reasons.append(\"candidate_worktree_dirty\")\n",
+      "why": "WP06 acceptance: the broker re-derives dirty paths itself before publishing; a dirty worktree means the pushed commit is not what the run judged. Detector: tests/factory/test_effect_broker.py"
+    },
+    {
+      "id": "effect-broker-candidate-head-unchecked",
+      "file": "factory_kernel/effect_broker.py",
+      "find": "                if observed[\"head_sha\"] != grant.subject[\"head_sha\"]:\n                    reasons.append(\"candidate_head_differs\")\n",
+      "replace": "                if False:\n                    reasons.append(\"candidate_head_differs\")\n",
+      "why": "WP06 acceptance: commit identity is re-derived, never taken from the caller; a worktree whose HEAD moved after the grant would publish an unjudged commit under a judged grant. Detector: tests/factory/test_effect_broker.py"
+    },
+    {
+      "id": "effect-broker-created-pr-head-unchecked",
+      "file": "factory_kernel/effect_broker.py",
+      "find": "        if observation[\"headRefOid\"] not in (None, head):\n",
+      "replace": "        if False:\n",
+      "why": "C05: the effect is independently observed after the call; a PR reported at another head than the granted one is not the published candidate and must not be recorded as success. Detector: tests/factory/test_effect_broker.py"
+    },
+    {
+      "id": "runtime-publication-stop-check-noop",
+      "file": "factory_kernel/runtime.py",
+      "find": "            stop_check=self.check_stop, epoch=str(DEFAULT_POLICY[\"revocation_epoch\"]), git=self._git,\n",
+      "replace": "            stop_check=lambda: None, epoch=str(DEFAULT_POLICY[\"revocation_epoch\"]), git=self._git,\n",
+      "why": "A stop or fence arriving between the publication step's first check and the push would be missed if the runtime handed the broker a no-op control check; the broker's recheck is the last observation before the branch and PR exist. Detector: tests/factory/test_factory_merge_handoff.py"
     }
   ]
 }

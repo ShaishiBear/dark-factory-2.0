@@ -129,7 +129,10 @@ class BuildPublicationTests(unittest.TestCase):
         issue = {"number": 5, "title": "Approved task", "body": "scope"}
         rt.github.issue.return_value = issue
         rt.github.labels.return_value = {"factory:accepted"}
-        rt._git = Mock(side_effect=lambda *args, **kwargs: "factory/test" if args[0] == "branch" else "a" * 40)
+        # What the worktree answers: its branch, a clean status, and one object id for every rev-parse
+        # (head and tree alike; the broker compares each against the grant it derived them into).
+        rt._git = Mock(side_effect=lambda *args, **kwargs: "factory/test" if args[0] == "branch"
+                       else "" if args[0] == "status" else "a" * 40)
         value = {"version": "1.0", "issue": 5, "attempt": 1, "head": "a" * 40,
                  "base": "b" * 40, "kernel": "a" * 40, "branch": "factory/test",
                  "worktree": str(self.root / "worktrees" / "build"),
@@ -205,6 +208,43 @@ class BuildPublicationTests(unittest.TestCase):
         argv = publish.args[0]
         self.assertEqual(argv[argv.index("--base") + 1], "b" * 40)
         self.assertEqual(publish.kwargs["env"]["FACTORY_BASE_SHA"], "b" * 40)
+        # The push and the PR were one brokered effect: grant derived from the worktree, journaled
+        # started before the push, observed after the PR existed.
+        rt.github.push_branch.assert_called_once_with("factory/test")
+        rt.github.create_pr.assert_called_once()
+        artifacts = self.handoff.parent / "artifacts"
+        grant = json.loads((artifacts / "publish-grant.json").read_text(encoding="utf-8"))
+        self.assertEqual((grant["semantic_operation"], grant["subject"]["branch"], grant["subject"]["head_sha"], grant["lease_route"]),
+                         ("publish_candidate", "factory/test", "a" * 40, "legacy-serial-route"))
+        journal = [json.loads(row) for row in (artifacts / "effect-journal.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([row["state"] for row in journal], ["started", "observed_success"])
+        self.assertEqual(journal[-1]["observation"]["pr_number"], 17)
+
+    def test_a_stop_arriving_after_the_first_check_still_prevents_the_push(self):
+        rt = self.runtime
+        rt.config.repository = "owner/repo"
+        rt.config.labels["in_progress"] = "factory:in-progress"
+        rt._run_env = KernelRuntime._run_env.__get__(rt)
+        rt._publish_build = KernelRuntime._publish_build.__get__(rt)
+        rt._exec = Mock()
+        rt._hand_to_review = Mock()
+        (self.handoff.parent / "artifacts" / "task-contract.json").write_text('{}')
+        value = json.loads(self.handoff.read_text())
+        value["artifacts"] = rt._publication_artifacts(self.handoff.parent / "artifacts")
+        self.handoff.write_text(json.dumps(value))
+        digest = hashlib.sha256(self.handoff.read_bytes()).hexdigest()
+        # publish_prepared checks twice, _publish_build once at its top; the broker's recheck, immediately
+        # before the push, is the fourth observation and the one that sees the stop.
+        rt.check_stop.side_effect = [None, None, None, FactoryStopped("stop arrived before the push")]
+        with patch("factory_kernel.runtime.remove"), patch("factory_kernel.runtime.render_pr_body", return_value="body"), \
+                patch.object(rt, "_release_stopped_build"), patch.object(rt, "_mark_issue_human"):
+            with self.assertRaises(FactoryStopped):
+                rt.publish_prepared(self.handoff, expected_sha256=digest)
+        rt.github.push_branch.assert_not_called()
+        rt.github.create_pr.assert_not_called()
+        journal = [json.loads(row) for row in (self.handoff.parent / "artifacts" / "effect-journal.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([row["state"] for row in journal], ["started", "observed_failure"])
+        self.assertFalse(journal[-1]["remote_call"])
 
     def test_malformed_captured_base_refuses_before_any_publication_effect(self):
         value = json.loads(self.handoff.read_text())

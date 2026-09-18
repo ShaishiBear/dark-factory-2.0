@@ -9,11 +9,12 @@ subject and the controls itself, consumes the grant exactly once in a durable jo
 exactly one fixed remote operation bound to the expected head, and records what it observed.
 Timeouts stay `uncertain`; nothing replays.
 
-Fixed operations: `merge_exact_head` (wraps `GitHubClient.merge_squash`) and `observe`
-(read-only). The other four names of the contract (`commit_acceptance`, `commit_implementation`,
-`publish_candidate`, `publish_transition_data`) are reserved here and refuse with
-`operation_not_served`; their call sites still spend through `git_authority` and
-`GitHubClient` directly, as the TCB record says.
+Fixed operations: `merge_exact_head` (wraps `GitHubClient.merge_squash`), `publish_candidate`
+(wraps `push_branch` + `create_pr` for a branch the broker re-derives from its worktree: head,
+tree, branch name and a clean status, through an injected git reader) and `observe` (read-only).
+The other three names of the contract (`commit_acceptance`, `commit_implementation`,
+`publish_transition_data`) are reserved here and refuse with `operation_not_served`; their call
+sites still spend through `git_authority` and `GitHubClient` directly, as the TCB record says.
 
 Journal sequence for one effect (C05):
   refused  -> the grant or the re-observed subject failed a gate; no remote call
@@ -36,7 +37,7 @@ from typing import Any, Callable, Mapping
 from .canonical import sha256_value
 from .capabilities import FIXED_OPERATIONS, Grant, Refusal, validate_grant
 
-SERVED_OPERATIONS = ("merge_exact_head", "observe")
+SERVED_OPERATIONS = ("merge_exact_head", "publish_candidate", "observe")
 STATES = ("refused", "started", "observed_success", "observed_failure", "uncertain")
 
 
@@ -115,12 +116,15 @@ class EffectBroker:
     `epoch` is the current revocation epoch; `clock` returns integer seconds."""
 
     def __init__(self, github: Any, journal: EffectJournal, *, stop_check: Callable[[], None], epoch: str,
-                 clock: Callable[[], int] | None = None) -> None:
+                 clock: Callable[[], int] | None = None, git: Callable[..., str] | None = None) -> None:
         self.github = github
         self.journal = journal
         self.stop_check = stop_check
         self.epoch = epoch
         self.clock = clock or (lambda: int(time.time()))
+        # `git(*args, cwd=Path) -> str` reads the worktree a candidate is published from; the broker
+        # re-derives the candidate's identity with it and never takes the caller's word.
+        self.git = git
 
     # ---- gates ----------------------------------------------------------------------------
 
@@ -132,7 +136,21 @@ class EffectBroker:
                 "mergeCommit": (info.get("mergeCommit") or {}).get("oid") if isinstance(info.get("mergeCommit"), Mapping) else info.get("mergeCommit"),
                 "mergedAt": info.get("mergedAt")}
 
-    def _gate(self, grant: Grant, operation: str, *, expected_head: str | None) -> dict:
+    def _observe_candidate(self, grant: Grant, cwd: Any) -> dict:
+        """The candidate as the worktree reports it now: head, tree, branch, cleanliness."""
+        if self.git is None:
+            raise EffectRefused(("candidate_unobservable",), "no git reader was given to the broker")
+        try:
+            head = self.git("rev-parse", "HEAD", cwd=cwd)
+            tree = self.git("rev-parse", "HEAD^{tree}", cwd=cwd)
+            branch = self.git("branch", "--show-current", cwd=cwd)
+            status = self.git("status", "--porcelain", cwd=cwd)
+        except Exception as exc:
+            raise EffectRefused(("candidate_unobservable",), f"{type(exc).__name__}: {str(exc)[:200]}") from exc
+        return {"head_sha": str(head).strip(), "head_tree_sha": str(tree).strip(), "branch": str(branch).strip(),
+                "dirty": bool(str(status).strip())}
+
+    def _gate(self, grant: Grant, operation: str, *, expected_head: str | None, cwd: Any = None) -> dict:
         """Everything that must hold before the grant is consumed. Refusals are journaled."""
         now = self.clock()
         reasons: list[str] = []
@@ -149,7 +167,21 @@ class EffectBroker:
         if state in ("started", "uncertain"):
             reasons.append("prior_operation_pending_or_uncertain")
         observed = {}
-        if not reasons:
+        if not reasons and operation == "publish_candidate":
+            try:
+                observed = self._observe_candidate(grant, cwd)
+            except EffectRefused as exc:
+                reasons.extend(exc.reason_codes)
+            else:
+                if observed["head_sha"] != grant.subject["head_sha"]:
+                    reasons.append("candidate_head_differs")
+                if observed["head_tree_sha"] != grant.subject["head_tree_sha"]:
+                    reasons.append("candidate_tree_differs")
+                if observed["branch"] != grant.subject["branch"]:
+                    reasons.append("candidate_branch_differs")
+                if observed["dirty"]:
+                    reasons.append("candidate_worktree_dirty")
+        elif not reasons:
             try:
                 observed = self._observe_pr(grant)
             except EffectRefused as exc:
@@ -175,6 +207,64 @@ class EffectBroker:
         self.journal.record("started", grant, at=now)
         self.journal.record("observed_success", grant, at=now, observation=observed, remote_call=False)
         return EffectResult("observed_success", grant.grant_id, observed)
+
+    def publish_candidate(self, grant: Grant, *, cwd: Any, base_branch: str, title: str, body_file: Any) -> EffectResult:
+        """Push the candidate branch and open its PR, once. The branch, head and tree are the
+        grant's, re-derived from the worktree by the broker immediately before the push; the
+        PR is opened against `base_branch` and re-observed at the granted head."""
+        state, prior = self.journal.state_of(grant.grant_id)
+        if (state == "observed_success" and prior is not None and prior.get("semantic_operation") == "publish_candidate"
+                and prior.get("request_sha256") == grant.request_sha256):
+            return EffectResult(state, grant.grant_id, dict(prior.get("observation") or {}), replayed=True)
+        observed_before = self._gate(grant, "publish_candidate", expected_head=None, cwd=cwd)
+        if not isinstance(base_branch, str) or not base_branch.strip() or base_branch.startswith("-"):
+            self.journal.record("refused", grant, at=self.clock(), reason_codes=["base_branch_invalid"], observation=observed_before)
+            raise EffectRefused(("base_branch_invalid",))
+        self.journal.record("started", grant, at=self.clock(), observation=observed_before)
+        try:
+            self.stop_check()
+        except Exception as exc:
+            self.journal.record("observed_failure", grant, at=self.clock(), remote_call=False, remote_state="not_called",
+                                detail=f"control changed before the call: {type(exc).__name__}: {str(exc)[:300]}")
+            raise
+        branch = grant.subject["branch"]
+        head = grant.subject["head_sha"]
+        try:
+            self.github.push_branch(branch)
+        except subprocess.TimeoutExpired as exc:
+            self.journal.record("uncertain", grant, at=self.clock(), remote_call=True, remote_state="push_unknown",
+                                detail=f"push timed out: {str(exc)[:300]}")
+            raise EffectUncertain(f"push of {branch} at {head} timed out; the remote may hold the branch. Observe, do not replay.") from exc
+        except Exception as exc:
+            self.journal.record("observed_failure", grant, at=self.clock(), remote_call=True, remote_state="push_unverified",
+                                detail=f"{type(exc).__name__}: {str(exc)[:300]}")
+            raise
+        try:
+            created = self.github.create_pr(head=branch, base=base_branch, title=title, body_file=body_file)
+        except subprocess.TimeoutExpired as exc:
+            self.journal.record("uncertain", grant, at=self.clock(), remote_call=True, remote_state="pushed_pr_unknown",
+                                detail=f"PR creation timed out: {str(exc)[:300]}")
+            raise EffectUncertain(f"PR creation for {branch} timed out after the push; observe, do not replay.") from exc
+        except Exception as exc:
+            self.journal.record("observed_failure", grant, at=self.clock(), remote_call=True, remote_state="pushed_pr_unverified",
+                                detail=f"{type(exc).__name__}: {str(exc)[:300]}")
+            raise
+        observation = {"pr_number": created.get("number") if isinstance(created, Mapping) else None,
+                       "headRefOid": created.get("headRefOid") if isinstance(created, Mapping) else None,
+                       "baseRefOid": created.get("baseRefOid") if isinstance(created, Mapping) else None,
+                       "state": created.get("state") if isinstance(created, Mapping) else None,
+                       "url": created.get("url") if isinstance(created, Mapping) else None, "branch": branch}
+        if type(observation["pr_number"]) is not int or observation["pr_number"] <= 0:
+            self.journal.record("uncertain", grant, at=self.clock(), remote_call=True, remote_state="pushed_pr_unobserved",
+                                detail="PR creation returned no number", observation=observation)
+            raise EffectUncertain(f"PR creation for {branch} returned without a PR number; observe, do not replay.")
+        if observation["headRefOid"] not in (None, head):
+            self.journal.record("observed_failure", grant, at=self.clock(), remote_call=True, remote_state="pr_at_other_head",
+                                detail=f"created PR head {observation['headRefOid']} is not the granted head", observation=observation)
+            raise EffectRefused(("created_pr_head_differs",), f"PR #{observation['pr_number']} is at {observation['headRefOid']}, granted {head}")
+        self.journal.record("observed_success", grant, at=self.clock(), remote_call=True, remote_state="published",
+                            observation=observation, observation_sha256=sha256_value(observation))
+        return EffectResult("observed_success", grant.grant_id, observation)
 
     def merge_exact_head(self, grant: Grant, *, expected_head: str) -> EffectResult:
         """The one squash merge, bound to the exact authorised head three times: the grant's
