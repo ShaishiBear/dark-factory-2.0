@@ -16,12 +16,20 @@ Phases, in the only legal forward order (C07):
 
 The three `*_requested` phases are remote requests. Each may become `<phase>:uncertain` when
 the response is lost; the recovery observer resolves it by re-observing the SAME request id and
-digest to the observed phase, to a definite no-effect refusal (back to the phase before the
-request), or leaves it uncertain. No timeout implies absence. A mismatch between the journal and
-the effect store after a crash is `reconciliation_required`, never "whichever is further ahead".
+digest to the observed phase, to a definite no-effect refusal, or leaves it uncertain. No
+timeout implies absence. A mismatch between the journal and the effect store after a crash is
+`reconciliation_required`, never "whichever is further ahead".
 
-Stop permits read-only reconciliation (observations, marking uncertainty, reconcile) and
-prohibits new activation or release (the successor and release requests, retirement).
+Recorded interpretation of C07's "definite no-effect terminal refusal": terminal for the
+REQUEST, which is closed and can never be reused (the journal refuses its id again), not for
+the transition, which returns to the phase before the request so that the same transition may
+make a fresh request under a new id. The transition is never re-created to escape uncertainty.
+The phase list follows C07's eleven states; SPECIFICATION 7 names a shorter operational list
+(fenced-observed, successor-published, active) that this module treats as superseded by C07.
+
+Stop permits the reconciliation of effects that already happened (observations, marking
+uncertainty, reconcile, drain) and refuses every new remote request (fence, successor, release)
+and the retirement of predecessor work.
 """
 from __future__ import annotations
 
@@ -58,9 +66,13 @@ EVENTS: dict[str, tuple[str, str]] = {
     "request_release": ("successor_observed", "release_requested"),
     "observe_release": ("release_requested", "released"),
 }
-# Events that activate or release: refused under stop. Everything else is read-only
-# reconciliation of effects that already happened, which stop permits.
-ACTIVATION_EVENTS = frozenset({"request_successor", "request_release", "retire_predecessor"})
+# Events refused under stop: every NEW remote effect (the three remote requests) and the
+# retirement of predecessor work. What remains is the reconciliation of effects that already
+# happened (observations, marking uncertainty, reconcile, begin/observe drain), which stop
+# permits. This is the phase machine's own gate; the broker re-observes stop before every
+# effect (SPEC 4.3) and the fence lane refuses acquisition under stop on its own (fence_request).
+STOP_REFUSED_EVENTS = frozenset({"request_fence", "request_successor", "request_release", "retire_predecessor"})
+ACTIVATION_EVENTS = STOP_REFUSED_EVENTS  # compatibility name
 # Recovery events on an uncertain remote request.
 RECOVERY_EVENTS = frozenset({"observe_effect", "observe_no_effect"})
 OBSERVE_EVENT_OF = {"fence_requested": "observe_fence", "successor_requested": "observe_successor",
@@ -140,8 +152,8 @@ def advance(phase: str, event: str, *, stop: bool = False) -> str:
     step = EVENTS.get(event)
     if step is None:
         raise TransitionRefused(f"unknown transition event {event!r}")
-    if stop and event in ACTIVATION_EVENTS:
-        raise TransitionRefused(f"stop is asserted: {event!r} activates or releases and is refused")
+    if stop and event in STOP_REFUSED_EVENTS:
+        raise TransitionRefused(f"stop is asserted: {event!r} starts a new effect or retires work and is refused")
     if step[0] != current:
         raise TransitionRefused(f"{event!r} needs phase {step[0]!r}, transition is at {current!r}")
     return step[1]

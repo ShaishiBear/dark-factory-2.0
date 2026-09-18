@@ -12,6 +12,7 @@ from factory_kernel.programme_transition import (
     RECONCILIATION_REQUIRED,
     RELEASE_ORDER,
     REMOTE_REQUESTS,
+    STOP_REFUSED_EVENTS,
     TransitionRefused,
     advance,
     compare_stores,
@@ -55,11 +56,15 @@ class PhaseMachineTests(unittest.TestCase):
         self.assertEqual(advance("drained", "reconcile", stop=True), "reconciled")
         self.assertEqual(advance("successor_requested", "mark_uncertain", stop=True), "successor_requested:uncertain")
         self.assertEqual(advance("successor_requested:uncertain", "observe_effect", stop=True), "successor_observed")
-        for event in ACTIVATION_EVENTS:
+        for event in STOP_REFUSED_EVENTS:
             before = EVENTS[event][0]
             with self.subTest(event=event), self.assertRaises(TransitionRefused):
                 advance(before, event, stop=True)
-        self.assertEqual(ACTIVATION_EVENTS, {"request_successor", "request_release", "retire_predecessor"})
+        # Every new remote effect and retirement is refused under stop; nothing else is.
+        self.assertEqual(STOP_REFUSED_EVENTS, {"request_fence", "request_successor", "request_release", "retire_predecessor"})
+        self.assertIs(ACTIVATION_EVENTS, STOP_REFUSED_EVENTS)
+        for event in set(EVENTS) - STOP_REFUSED_EVENTS:
+            self.assertEqual(advance(EVENTS[event][0], event, stop=True), EVENTS[event][1], event)
 
     def test_uncertain_requests_recover_only_by_observing_the_same_request(self):
         for request, (before, observed) in REMOTE_REQUESTS.items():
