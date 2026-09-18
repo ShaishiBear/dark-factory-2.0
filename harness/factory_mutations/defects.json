@@ -4292,8 +4292,8 @@
     {
       "id": "lease-acquire-partial-bundle",
       "file": "factory_kernel/lease_store.py",
-      "find": "            held = self._live_holders(names, now)\n            if held:\n                raise LeaseRefused(\"resource held by a live lease: \" + \", \".join(sorted({f\"{r}@{o}\" for r, o, _ in held})))",
-      "replace": "            held = self._live_holders(names, now)\n            if held:\n                names = [n for n in names if n not in {r for r, _, _ in held}]\n                if not names:\n                    raise LeaseRefused(\"resource held by a live lease: \" + \", \".join(sorted({f\"{r}@{o}\" for r, o, _ in held})))",
+      "find": "        held = self._live_holders(names, now)\n        if held:\n            raise LeaseRefused(\"resource held by a live lease: \" + \", \".join(sorted({f\"{r}@{o}\" for r, o, _ in held})))",
+      "replace": "        held = self._live_holders(names, now)\n        if held:\n            names = [n for n in names if n not in {r for r, _, _ in held}]\n            if not names:\n                raise LeaseRefused(\"resource held by a live lease: \" + \", \".join(sorted({f\"{r}@{o}\" for r, o, _ in held})))",
       "why": "C05: acquire all sorted resources or none; acquiring the free subset breaks bundle atomicity. Detector: tests/factory/test_lease_store.py"
     },
     {
@@ -4334,8 +4334,8 @@
     {
       "id": "lease-unresolved-resource-reacquired",
       "file": "factory_kernel/lease_store.py",
-      "find": "            pending = self._unresolved_operations(names)\n            if pending:\n                raise LeaseRefused(\"resource has an unresolved operation: \" + \", \".join(sorted(str(r[0]) for r in pending)))",
-      "replace": "            pending = []\n            if pending:\n                raise LeaseRefused(\"resource has an unresolved operation: \" + \", \".join(sorted(str(r[0]) for r in pending)))",
+      "find": "        pending = self._unresolved_operations(names)\n        if pending:\n            raise LeaseRefused(\"resource has an unresolved operation: \" + \", \".join(sorted(str(r[0]) for r in pending)))",
+      "replace": "        pending = []\n        if pending:\n            raise LeaseRefused(\"resource has an unresolved operation: \" + \", \".join(sorted(str(r[0]) for r in pending)))",
       "why": "C05: a resource with a pending or uncertain operation cannot be acquired by another owner; expiry removes permission, it does not prove remote absence. Detector: tests/factory/test_lease_store.py"
     },
     {
