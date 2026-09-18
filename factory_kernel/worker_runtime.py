@@ -226,6 +226,9 @@ class WorkerControlledRuntime(BaseKernelRuntime):
         # turn the provider's reader records a stage that has written nothing by (D-066); any
         # other role's prompt may not name it (D-057).
         deadline = draft_deadline_turn(role)
+        # Learned material enters only through the base runtime's funnel: blind roles get none
+        # (and may not be handed any), permitted roles get a bounded, recorded packet.
+        context = self._experience_context(role, paths, context)
         prompt = render_prompt(
             prompt_text(
                 self.config.prompt_path(role, cwd),

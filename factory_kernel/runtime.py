@@ -21,6 +21,7 @@ from typing import Any, Mapping
 
 from .agents import AgentRequest, AgentResult
 from .canonical import canonical_bytes
+from .experience import RETRIEVAL_ROLES, carries_learned_material, lesson_records, packet_context, retrieve, task_from_artifacts
 from .carry import (
     CARRY_IDENTITY_ARTIFACT,
     CARRY_POLICY_PATHS,
@@ -1926,10 +1927,7 @@ class KernelRuntime:
         matches a single run and the record explains why the proposal stays a proposal."""
         from . import lessons
 
-        policy = None
-        path = self._kernel_checkout() / ".factory" / "lesson-policy.json"
-        if path.is_file():
-            policy = lessons.load_policy(path)
+        policy = self._lesson_policy()
         observations = {
             "authenticated": True,  # kernel-produced record of this run, digest-bound in the plan
             "role": "implement", "task_family": ",".join(sorted(proposal.get("mechanism_families") or [])) or "unknown",
@@ -1943,6 +1941,14 @@ class KernelRuntime:
         }
         result = lessons.evaluate(observations, policy)
         return lessons.admit(dict(proposal, id=f"lesson-{plan.digest()[:16]}"), result)
+
+    def _lesson_policy(self):
+        """The protected `.factory/lesson-policy.json` of the kernel checkout, or None when none
+        is installed (a malformed installed policy raises LessonRefused: fail loud)."""
+        from . import lessons
+
+        path = self._kernel_checkout() / ".factory" / "lesson-policy.json"
+        return lessons.load_policy(path) if path.is_file() else None
 
     @staticmethod
     def _restore_investigation_baseline(stage_tree: Any, baseline_commit: str | None,
@@ -3527,6 +3533,26 @@ class KernelRuntime:
             transcript=paths.transcripts / "frontend-sync.log",
         )
 
+    def _experience_context(self, role: str, paths: RunPaths, context: str) -> str:
+        """The one place learned material may enter a worker payload (SPECIFICATION 11.1, C10).
+
+        A role outside the retrieval allowlist is blind: its context may not carry an
+        experience packet (a caller that smuggles the marker is refused before any model runs),
+        and its own packet is empty before any record is read. A permitted role's packet is
+        retrieved from this run's retained lesson records under the installed protected policy,
+        bounded, recorded beside the stage as `experience-<role>.json`, and appended to the
+        context only when it has items. Both `_agent` paths pass through here."""
+        if role not in RETRIEVAL_ROLES and carries_learned_material(context):
+            raise NeedsHuman(f"role {role!r} is blind to learned material; its context carried an experience packet")
+        artifacts = getattr(paths, "artifacts", None)
+        artifacts = artifacts if isinstance(artifacts, Path) else None
+        policy = self._lesson_policy() if role in RETRIEVAL_ROLES else None
+        packet = retrieve(role, task_from_artifacts(artifacts) if artifacts else {}, (),
+                          records=lambda: lesson_records(artifacts) if artifacts else [], policy=policy, current=True)
+        if artifacts is not None and artifacts.is_dir():
+            self._write_json(artifacts / f"experience-{role}.json", packet.to_dict())
+        return context + packet_context(packet)
+
     def _agent(
         self,
         role: str,
@@ -3537,6 +3563,7 @@ class KernelRuntime:
         env: Mapping[str, str],
     ) -> None:
         self.check_stop()
+        context = self._experience_context(role, paths, context)
         prompt = prompt_text(
             self.config.prompt_path(role, cwd),
             preamble=(
