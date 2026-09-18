@@ -512,6 +512,7 @@ The deterministic security guard `scripts/factory_security.py` judges every PR a
 **Factory trust root** (the machinery that judges product PRs):
 
 - `factory_kernel/**`, `.factory/kernel.json`, `.factory/evidence-spine.json`, `.factory/architecture.json`, `.factory/locks/floor.json`, `.factory/prompts/**`, `.factory/methods/**`, `.factory/holdout/**`, `.factory/benchmark/**`
+- `.factory/<name>-policy.json` — kernel policy files (maintenance lanes, lesson admission). See FACTORY_RULES.md §5.
 - `harness/**`, `scripts/factory_*`, `scripts/frontier_filter.py`, `tests/factory/**`
 - `.github/**`, `deploy/systemd/**`, any `Dockerfile`, any `docker-compose*.yml`, any `.env*` file
 - `MISSION.md`, `FACTORY_RULES.md`, `CLAUDE.md`

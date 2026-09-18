@@ -1905,15 +1905,15 @@
     {
       "id": "factory-mutations-skip-defects-when-short-of-time",
       "file": "harness/factory_mutations/run.py",
-      "find": "    if workers <= 1:\n        return [evaluate(defect, order) for defect in defects]\n",
-      "replace": "    affordable = int(FAMILY_BUDGET_SECONDS // 12)\n    if len(defects) > affordable:\n        defects = defects[:affordable]\n    if workers <= 1:\n        return [evaluate(defect, order) for defect in defects]\n",
+      "find": "    if workers <= 1:\n        return [one(defect) for defect in defects]\n",
+      "replace": "    affordable = int(FAMILY_BUDGET_SECONDS // 12)\n    if len(defects) > affordable:\n        defects = defects[:affordable]\n    if workers <= 1:\n        return [one(defect) for defect in defects]\n",
       "why": "The clock is a budget, not a filter: a catalogue trimmed to what the runner thinks it can afford reports FACTORY_MUTATIONS_TOTAL for a smaller catalogue, and every dropped defect counts as neither caught nor escaped; caught by tests/factory/test_factory_mutation_budget.py (the whole catalogue is evaluated however long it takes) (D-073)."
     },
     {
       "id": "factory-mutations-lose-an-escape-under-concurrency",
       "file": "harness/factory_mutations/run.py",
-      "find": "        return list(pool.map(lambda defect: evaluate(defect, order), defects))\n",
-      "replace": "        results = list(pool.map(lambda defect: evaluate(defect, order), defects))\n        return [result for result in results if result[\"outcome\"] != \"escaped\"]\n",
+      "find": "        return list(pool.map(one, defects))\n",
+      "replace": "        results = list(pool.map(one, defects))\n        return [result for result in results if result.state != SURVIVED]\n",
       "why": "Running the copies concurrently must not change the verdict: a pool that drops an escaped result reports caught == total and passes a run in which a trust-root bypass survived; caught by tests/factory/test_factory_mutation_budget.py (every defect is evaluated and reported in manifest order) (D-073)."
     },
     {
@@ -1933,9 +1933,9 @@
     {
       "id": "factory-mutations-stop-before-a-green-suite-finishes",
       "file": "harness/factory_mutations/run.py",
-      "find": "        if proc.returncode != 0:\n            return subprocess.CompletedProcess([], 1, \"\\n\".join(outputs), \"\"), durations\n",
-      "replace": "        return subprocess.CompletedProcess(\n            [], proc.returncode, \"\\n\".join(outputs), \"\"), durations\n",
-      "why": "Stopping at the first red is verdict-identical only because a green file does not stop the suite; returning after the first file whatever it said makes a green baseline out of a red one, and an escape out of every defect whose detector is not the first file; caught by tests/factory/test_factory_mutation_budget.py (a green suite still runs every file) (D-073)."
+      "find": "                if status == FAILED:\n                    state, detector = CAUGHT, rel\n                    break\n",
+      "replace": "                state, detector = CAUGHT, rel\n                break\n",
+      "why": "Stopping at the first kill is verdict-identical only because a detector that did not go red does not stop the suite; ending the loop on whatever the first detector said makes a caught mutant out of every defect, including ones no detector can see; caught by tests/factory/test_mutation_execution_outcomes.py (a survivor runs every usable detector) (D-073)."
     },
     {
       "id": "mutation-timing-line-loses-its-outcome",
@@ -2038,7 +2038,7 @@
     {
       "id": "factory-mutation-failures-leave-their-members-unnamed",
       "file": "harness/factory_mutations/run.py",
-      "find": "    for outcome, marker in ((\"escaped\", \"FACTORY_MUTATIONS_ESCAPED\"),\n                            (\"not_injected\", \"FACTORY_MUTATIONS_UNINJECTED\")):\n        ids = [result[\"id\"] for result in results if result[\"outcome\"] == outcome]\n        if ids:\n            print(f\"{marker}={','.join(ids)}\", flush=True)\n",
+      "find": "    for state, marker in ((SURVIVED, \"FACTORY_MUTATIONS_ESCAPED\"),\n                          (INFRA_ERROR, \"FACTORY_MUTATIONS_UNINJECTED\"),\n                          (TIMEOUT, \"FACTORY_MUTATIONS_TIMED_OUT\"),\n                          (NOT_RUN, \"FACTORY_MUTATIONS_MISSING\")):\n        ids = [result.mutant_id for result in results if result.state == state]\n        if ids:\n            print(f\"{marker}={','.join(ids)}\", flush=True)\n",
       "replace": "",
       "why": "A failing family would again reach the refusal artifact as a count, because every consumer of this output keeps only its tail."
     },
@@ -5062,7 +5062,7 @@
     {
       "id": "maintenance-kernel-paths-not-trust-root",
       "file": "factory_kernel/maintenance.py",
-      "find": "    if (path in TRUST_ROOT_FILES or any(path.startswith(p) for p in TRUST_ROOT_PREFIXES)):\n        return \"trust-root-authority\"\n",
+      "find": "    if (path in TRUST_ROOT_FILES or any(path.startswith(p) for p in TRUST_ROOT_PREFIXES)\n            or policy_file(path)):\n        return \"trust-root-authority\"\n",
       "replace": "    if path in TRUST_ROOT_FILES:\n        return \"trust-root-authority\"\n",
       "why": "C12 / FACTORY_RULES 5: the trust-root prefixes (factory_kernel/, harness/, tests/factory/, .github/, ...) are the judge; a classifier that leaves them at product tier lets a maintenance proposal route a judge change through the autonomous lane. Detector: tests/factory/test_maintenance.py"
     },
@@ -5226,6 +5226,48 @@
       "find": "    if context_bound(spec[\"kind\"]):\n        if receipt.get(\"context_identity\") != context.get(\"identity\"):\n            raise ExperimentRefused(\"the receipt does not bind the frozen repository context\")\n",
       "replace": "    if context_bound(spec[\"kind\"]):\n        if \"context_identity\" in receipt and receipt[\"context_identity\"] != context.get(\"identity\"):\n            raise ExperimentRefused(\"the receipt does not bind the frozen repository context\")\n",
       "why": "C08 / WP08 acceptance (a changed context invalidates applicability): the verified receipt must bind the frozen repository context it was measured under; a receipt that omits the binding would later be indistinguishable from a bound one. Detector: tests/factory/test_experiment_runner.py"
+    },
+    {
+      "id": "mutation-timeout-reported-as-a-kill",
+      "file": "harness/factory_mutations/outcomes.py",
+      "find": "    if timed_out:\n        return TIMEOUT\n",
+      "replace": "    if timed_out:\n        return FAILED\n",
+      "why": "A detector that ran out of time observed nothing about the mutant. Counting it as a kill is how a contended runner reports a green family it never measured; this is exactly what the 2026-09-18 main regression would have done had the exception been swallowed. Detector: tests/factory/test_mutation_execution_outcomes.py"
+    },
+    {
+      "id": "mutation-collection-error-reported-as-a-kill",
+      "file": "harness/factory_mutations/outcomes.py",
+      "find": "    if \"Ran \" not in output:\n        return INFRA_ERROR\n",
+      "replace": "",
+      "why": "A detector whose module never imported reported on the tree, not on the defect. Without this line a mutant that merely breaks an import is credited with a behavioural kill by every detector in the suite. Detector: tests/factory/test_mutation_execution_outcomes.py"
+    },
+    {
+      "id": "mutation-signalled-detector-reported-as-a-kill",
+      "file": "harness/factory_mutations/outcomes.py",
+      "find": "    if returncode < 0:\n        return INFRA_ERROR\n",
+      "replace": "",
+      "why": "A detector killed by a signal (OOM, the sandbox, the pool's own cleanup) produced no verdict. Reading its negative returncode as red turns infrastructure pressure into mutation coverage. Detector: tests/factory/test_mutation_execution_outcomes.py"
+    },
+    {
+      "id": "mutation-baseline-red-detector-still-proves-a-kill",
+      "file": "harness/factory_mutations/run.py",
+      "find": "    usable = [rel for rel in detector_order(defect, order, causal)\n              if baseline.get(\"detectors\", {}).get(rel, {}).get(\"status\") == PASSED]\n",
+      "replace": "    usable = list(detector_order(defect, order, causal))\n",
+      "why": "A detector that was already red without the mutant cannot prove anything with it. Skipping the baseline filter lets one broken test file certify all 950 mutants as caught. Detector: tests/factory/test_mutation_execution_outcomes.py"
+    },
+    {
+      "id": "mutation-worker-exception-drops-the-mutant",
+      "file": "harness/factory_mutations/run.py",
+      "find": "        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:\n",
+      "replace": "        except (RuntimeError,) as exc:\n            raise\n        except (OSError, ValueError, subprocess.SubprocessError) as exc:\n",
+      "why": "A worker that raises must leave that mutant's own unobserved record, not unwind the pool and discard every other verdict -- the failure mode that lost 903 results in run 35324653207. Detector: tests/factory/test_mutation_execution_outcomes.py"
+    },
+    {
+      "id": "mutation-aggregate-ignores-unmeasured-mutants",
+      "file": "harness/factory_mutations/outcomes.py",
+      "find": "    if missing:\n        reasons.append(f\"never run: {','.join(missing[:10])}\")\n",
+      "replace": "",
+      "why": "Shards that between them never measured a mutant have not measured the catalogue. Dropping the missing check lets a lost shard aggregate to green. Detector: tests/factory/test_mutation_execution_outcomes.py"
     }
   ]
 }

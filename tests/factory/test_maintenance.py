@@ -53,9 +53,15 @@ class ClassificationTests(unittest.TestCase):
             with self.subTest(path):
                 self.assertEqual(path_tier(path) != "product", guard.protected_path(path), f"{path}: tier {path_tier(path)}")
         self.assertEqual(maintenance.APPLICATION_SECURITY_PATHS, guard.APPLICATION_SECURITY_PATHS)
-        # Two governance files the guard does not yet protect (recorded, not hidden): the policy
-        # this module reads and the lesson policy. Their tier here is what the guard says today.
-        self.assertEqual((path_tier(".factory/maintenance-policy.json"), path_tier(".factory/lesson-policy.json")), ("product", "product"))
+        # The two kernel policy files: the lanes this module may open and the evidence that
+        # admits a learned method. Until 2026-09-18 both were `product`, so an autonomous PR
+        # could have edited its own admission thresholds; both are now trust root on both
+        # sides, and a policy added later inherits the protection from its name.
+        self.assertEqual((path_tier(".factory/maintenance-policy.json"), path_tier(".factory/lesson-policy.json")),
+                         ("trust-root-authority", "trust-root-authority"))
+        self.assertTrue(guard.protected_path(".factory/lesson-policy.json"))
+        self.assertEqual(path_tier(".factory/broker-policy.json"), "trust-root-authority")
+        self.assertEqual(path_tier(".factory/experiment-results.json"), "product", "the rule is the -policy suffix, not every .factory json")
 
     def test_the_tier_is_the_maximum_of_path_and_effect_tiers_and_a_description_cannot_lower_it(self) -> None:
         product = classify_change(["app/backend/rag/chunker.py"], policy=POLICY)

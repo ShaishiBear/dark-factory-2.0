@@ -203,6 +203,11 @@ A failed daily regression files one issue titled `regression: main failed the fu
 - `factory_kernel/**` — dispatch, build, validate, merge authority
 - `.factory/kernel.json`, `.factory/evidence-spine.json`, `.factory/architecture.json`, `.factory/locks/floor.json`
 - `.factory/prompts/**`, `.factory/methods/**`, `.factory/holdout/**`, `.factory/benchmark/**`
+- `.factory/<name>-policy.json` — the kernel policy files that decide the factory's authority over
+  itself: `maintenance-policy.json` (which maintenance lanes may run unattended; the list is empty)
+  and `lesson-policy.json` (what evidence admits a learned method). A PR that could edit its own
+  lanes or its own admission threshold would be granting itself authority. The rule is the filename
+  shape, so a policy file added by a later work package is protected the day it appears.
 - `harness/**` — canonical gate, E2E journey, mutation suites, immunity registry, merge verification
 - `scripts/factory_*`, `scripts/frontier_filter.py`
 - `tests/factory/**` — the factory's own detectors; weakening a detector is weakening the judge
