@@ -1,0 +1,23 @@
+{
+  "schema": "dark-factory/learning-protocol",
+  "schema_version": "1.0",
+  "protocol_id": "dynachat-learning-protocol",
+  "version": "2026-09-18.1",
+  "cohorts": {
+    "development": {
+      "projects": [
+        "citations"
+      ]
+    },
+    "evaluation": {
+      "projects": []
+    }
+  },
+  "grouping": [
+    "project",
+    "task_family",
+    "method_version",
+    "model"
+  ],
+  "note": "Preregistered evaluation configuration, not evidence. The development cohort is the one project whose exploration ledger exists; no held-out project exists yet, so the evaluation cohort is empty by declaration and every coverage observation over it is zero. Assigning a project or session here is a governance change, never something a report or a model does."
+}
