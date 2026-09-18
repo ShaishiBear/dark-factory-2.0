@@ -20,7 +20,7 @@ pointers; nothing here is a claim beyond them.
 | WP09 | Outcome router (`outcome_router.py`): structural classification of an authenticated outcome recorded on every strategy assessment and on rule-less imports. The existing importer, receipt authentication, preregistered rules, independent findings and reconsideration flow are unchanged; no new predicates, no automatic reconsideration, no coordinator wakeup | router | yes | #257 (merged 73d557c) | yes (every strategy assessment and rule-less import on `main` is classified) | no (no hosted outcome has been imported) |
 | WP10 | WP10A: read-only bounded graph endpoint with exact deltas, resnapshot instructions and authorized details over the real Front Door HTTP application (`graph_transport.py`, #258); the pure projection `project_graph.py` existed since #243. WP10B (#262): the static decision-graph UI (`decision-graph.js/.css`): five views, SVG plus list alternative, keyboard selection, details panel, exact delta merges, polling paused while hidden and fast only for a PR-less admitted item, predictions never shown as built, unproven never green; detectors run the script under Node over real projections and reconstruct the graph after a service restart; `harness/frontdoor_journey.py` passed locally in a real browser. Not built: observation-fed animation, a browser render at the 2000-node bound, a browser journey in the canonical ladder | endpoint; UI | yes | #258; #262 | yes (any Front Door built from `main` serves the page) | no (no owner has opened the hosted page) |
 | WP11 | Lesson admission evaluator with a strict protected policy (#246); calibration report (`calibration.py`) joining frozen forecasts to recorded outcomes with strict in-force joins, exact arithmetic, preregistered cohorts (`harness/experiments/learning_protocol.json`, evaluation cohort empty by declaration) and admission observations the evaluator decides on; no benefit evaluation ; experience packets (`experience.py`): role-scoped, bounded, advisory retrieval of admitted lessons at the one worker payload funnel, blind roles empty before any search, no-memory challenger route; no persistent lesson store, no installed policy, so every production packet is empty | evaluator; calibration; experience | yes | #246; calibration #259; experience #260 | yes (every worker stage on `main` passes through the funnel) | no investigation has run in the hosted lane; no held-out cohort exists; no lesson has ever been admitted |
-| WP12 | WP12A: deterministic maintenance classification against the protected path/effect policy (`maintenance.py`, `.factory/maintenance-policy.json`), reviewable maintainer proposals from verified incidents, old-authority shadow plan with disagreement as a blocker, cutover refused under the installed policy (no autonomous lane activated). No patch generation, no workflow, no demonstration; the two governance policy files are not yet in the guard's protected set | classifier and proposals | yes | #261 | yes (module and installed policy on `main`) | no (no proposal has been produced outside tests) |
+| WP12 | WP12A: deterministic maintenance classification against the protected path/effect policy (`maintenance.py`, `.factory/maintenance-policy.json`), reviewable maintainer proposals from verified incidents, old-authority shadow plan with disagreement as a blocker, cutover refused under the installed policy (no autonomous lane activated). No patch generation, no workflow, no demonstration. The two governance policy files (`.factory/maintenance-policy.json` and the still-absent `.factory/lesson-policy.json`) entered the guard's protected set in Revision 4 P0 (#265), by the filename shape `.factory/<name>-policy.json` | classifier and proposals | yes | #261 | yes (module and installed policy on `main`) | no (no proposal has been produced outside tests) |
 | WP13 | This matrix, the FACTORY.md "Blueprint modules" section and the handoff `docs/blueprint-handoff-2026-09-18.md` (every package in the five states with evidence, the escalations that are the owner's, the remaining domain limitations). The integrated new-project demonstration, the task-cohort and metrics registration, the one-operator contract experiment and the coupled multi-file comparison on an unseen task are not built: they need the owner's product outcome and paid cap | documentation only | n/a | #249; handoff PR pending | n/a | n/a |
 
 Conformance: all 68 public vectors of `docs/implementation-blueprint-2026-09-17/conformance/` pass through production
@@ -33,3 +33,33 @@ nothing else.
 Known blockers outside this repository's lane: the Front Door host (owner: the Front Door task) holds the intent store,
 the operational SQLite database and the fence acquisition lane, so the WP07 coordinator, the WP03 transition service and
 any allowance are host work; the hosted worker has no allowance, so every scheduled run is expected to answer idle.
+
+---
+
+# Revision 4 slices, 2026-09-18
+
+`docs/implementation-review-2026-09-18/implementation-contracts/` replaced the blueprint as the
+implementation specification on 2026-09-18. Its P0-P6 sequence is tracked here in the same five
+states, with one addition the package asks for: **installed** is the host revision, and
+`unverified_access` means this session had no host access rather than that nothing is installed.
+
+| Slice | Delivered part | Implemented | Tested | Merged | Installed | Observed |
+|---|---|---|---|---|---|---|
+| P0 mutation outcomes | `harness/factory_mutations/outcomes.py` and the reworked `run.py`: a full unmutated baseline first, per-detector bounds enforced in-process with descendants reaped, one atomic JSON result per mutant plus a manifest of every expected id, a worker exception recorded as that mutant's `infra_error`, named-detector-first ordering that stays a permutation, and deterministic sorted-index-modulo-K shards. A run with a timeout, an infrastructure error or an unmeasured mutant is INCOMPLETE, never green | yes | yes (28 + 45 tests; seven new catalogue defects and eight re-anchored, all kill-checked) | #265, #267 | n/a (CI code) | **no** — the mutation rung is not a required PR check; the first hosted observation is the next daily main regression |
+| P0 policy-path protection | `.factory/<name>-policy.json` protected in `scripts/factory_security.py`, `factory_kernel/maintenance.py`, FACTORY_RULES §5 and CLAUDE.md, through the §12 maintainer route | yes | yes (`test_policy_path_protection.py`, plus cases in `test_factory_security.py` and `test_maintenance.py`) | #265 | n/a (judged from `main`) | no hosted PR has been judged against it yet |
+| P0 sharding | `FACTORY_MUTATION_SHARDS` / `FACTORY_MUTATION_SHARD` and `outcomes.py --aggregate`, which refuses unless the shards share a baseline and between them measured every expected mutant exactly once | yes | yes | #265 | **K stays 1** — the package says to raise it only after the need is observed on the hosted runner | no |
+| P1a operational storage | `factory_kernel/migrations/002_operational_work.sql`, `operational_state.py`, and `lease_store._acquire_locked` / `apply_migration` so a reservation and its lease bundle commit in one transaction on one connection | yes | yes (51 tests, real SQLite, no mocks) | #266 | `unverified_access` | no |
+| P1a real caller | — | **no** | — | — | — | — |
+
+The last row is the honest one: by the package's own completion rule a schema with no caller is
+not a delivered capability. `coordinator.py` and `executor.py` are P2 and are not built.
+
+Not started: the P1 broker (`broker_protocol.py`, `broker_client.py`, `broker_service.py`,
+`executor_auth.py`), all of P2 (coordinator, executor, pipeline extraction, worker view,
+container runtime, transition service), P3 (harness events, continuation records, context
+selection, delegation, lesson store), P4 (decision contracts, records, providers, the Jev HTTP
+adapter, search, studies, release), P5 (decision UI and API) and P6 (CI, installation, rollback).
+
+Issue #238's hosted mutation failure is diagnosed as far as the evidence allows: the
+`TimeoutExpired` propagating out of the worker pool is established and fixed; the reason that one
+file exceeded 120 seconds on that runner is **not** established, and no claim is made that it is.
