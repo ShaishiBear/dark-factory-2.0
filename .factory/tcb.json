@@ -182,6 +182,10 @@
       "class": "privilege-enforcement",
       "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
     },
+    "experience": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
     "experiments": {
       "class": "proof-policy",
       "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
@@ -594,7 +598,7 @@
       "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
     }
   ],
-  "graph_sha256": "4424e208fc6752fd3d7d1d9fd4783f020b3f07feb605fbd304966a4f05ec6199",
+  "graph_sha256": "263bfe1ba6f2477844690abe1a1eec1d258cf2912fd8f1425d1522abbd7f2c45",
   "closure_bounds": {
     "authority": {
       "files": [

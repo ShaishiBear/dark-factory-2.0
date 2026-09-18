@@ -4988,6 +4988,69 @@
       "find": "    for (project, session), name in seen_sessions.items():\n        if project in seen_projects and seen_projects[project] != name:\n",
       "replace": "    for (project, session), name in seen_sessions.items():\n        if False:\n",
       "why": "SPEC 11.1: cohorts are preregistered and must not overlap. A session written into one cohort while its project sits in another is a split that cannot separate development from evaluation, whichever cohort the protocol lists first. Detector: tests/factory/test_calibration.py"
+    },
+    {
+      "id": "experience-blind-role-searches-records",
+      "file": "factory_kernel/experience.py",
+      "find": "    if role not in RETRIEVAL_ROLES:\n        return _empty(role, \"blind\", task, scope, limitations=(\"role receives no learned material; no record was examined\",))\n",
+      "replace": "    if False:\n        return _empty(role, \"blind\", task, scope, limitations=(\"role receives no learned material; no record was examined\",))\n",
+      "why": "SPEC 11.1 / C10: blind judge, holdout and certifier roles get an empty packet before any search; a role outside the allowlist that reads the records is a blinded judge no longer blinded. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "experience-unbound-proposal-retrieved",
+      "file": "factory_kernel/experience.py",
+      "find": "        if admission.get(\"proposal_sha256\") != sha256_value(dict(proposal)):\n            skipped[\"unbound\"] += 1\n            continue\n",
+      "replace": "        if False:\n            skipped[\"unbound\"] += 1\n            continue\n",
+      "why": "C10: a packet item is the admitted lesson exactly; a proposal edited after admission is not what the policy admitted and must not be retrieved under its record. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "experience-ineligible-lesson-retrieved",
+      "file": "factory_kernel/experience.py",
+      "find": "        if not retrieval_eligible(admission, role=role, policy=policy, current=current):\n            skipped[\"ineligible\"] += 1\n            continue\n",
+      "replace": "        if False:\n            skipped[\"ineligible\"] += 1\n            continue\n",
+      "why": "C10: retrieval eligibility is admitted status AND current applicability AND the role under the protected policy; a proposed, dormant or policy-less lesson is never retrieved. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "experience-inapplicable-lesson-retrieved",
+      "file": "factory_kernel/experience.py",
+      "find": "        if not _applicable(proposal, plan, task):\n            skipped[\"inapplicable\"] += 1\n            continue\n",
+      "replace": "        if False:\n            skipped[\"inapplicable\"] += 1\n            continue\n",
+      "why": "LINE_LEVEL_CLAIMS 6: lessons are contextual; one learned on another contract with no declared family match does not apply to this task. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "experience-packet-unbounded",
+      "file": "factory_kernel/experience.py",
+      "find": "        if len(items) >= bounds[\"max_items\"] or len(canonical_bytes(items + [item])) > bounds[\"max_bytes\"]:\n",
+      "replace": "        if False:\n",
+      "why": "C10: bound packet count and bytes; an unbounded packet is unbounded generation context. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "runtime-blind-role-context-not-screened",
+      "file": "factory_kernel/runtime.py",
+      "find": "        if role not in RETRIEVAL_ROLES and carries_learned_material(context):\n            raise NeedsHuman(f\"role {role!r} is blind to learned material; its context carried an experience packet\")\n",
+      "replace": "        if False:\n            raise NeedsHuman(f\"role {role!r} is blind to learned material; its context carried an experience packet\")\n",
+      "why": "R10: judge roles are filtered before retrieval and file delivery at payload construction; a caller that hands a blind role learned material inside its context must be refused before any model runs. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "runtime-base-agent-bypasses-experience-funnel",
+      "file": "factory_kernel/runtime.py",
+      "find": "        self.check_stop()\n        context = self._experience_context(role, paths, context)\n        prompt = prompt_text(\n",
+      "replace": "        self.check_stop()\n        prompt = prompt_text(\n",
+      "why": "R10: retrieval packets enter only at permitted role construction sites through the one funnel; a base-path stage that skips it delivers no packet to a permitted role and records nothing for a blind one. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "worker-runtime-agent-bypasses-experience-funnel",
+      "file": "factory_kernel/worker_runtime.py",
+      "find": "        context = self._experience_context(role, paths, context)\n        prompt = render_prompt(\n",
+      "replace": "        prompt = render_prompt(\n",
+      "why": "R10: the worker-controlled path is the second `_agent` path; it must pass through the same funnel so a permitted role's packet arrives and a blind role's context is screened. Detector: tests/factory/test_experience.py"
+    },
+    {
+      "id": "runtime-experience-record-carries-lesson-text",
+      "file": "factory_kernel/runtime.py",
+      "find": "            self._write_json(artifacts / f\"experience-{role}.json\", packet.record())\n",
+      "replace": "            self._write_json(artifacts / f\"experience-{role}.json\", packet.to_dict())\n",
+      "why": "SPEC 11.1: blinding is enforced at sandbox visibility, not only in prompts. The run's artifacts directory is readable by the tool-bearing blind roles test_author and conformance; a stage record that carries lesson text puts learned material where they can read it. Detector: tests/factory/test_experience.py"
     }
   ]
 }

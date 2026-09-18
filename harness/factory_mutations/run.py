@@ -346,6 +346,8 @@ COPY_FILES = (
     # WP11 calibration: the strict join and the preregistered protocol it reads.
     "tests/factory/test_calibration.py",
     "harness/experiments/learning_protocol.json",
+    # WP11 experience packets: role-scoped retrieval at the one payload funnel.
+    "tests/factory/test_experience.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python
