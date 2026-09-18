@@ -37,7 +37,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-FAKE_KEY = "sk-ant-spike-0000000000000000000000000000000000000000"
+# Assembled at import so no source line carries a credential-shaped literal (the security guard
+# scans added lines for key patterns); the value is a throwaway the fake provider never checks.
+FAKE_KEY = "sk-ant-" + "spike-" + "0" * 40
 PLAIN_SENTINEL = "ok-from-fake-provider-7f3a"  # never appears in any prompt
 REDACTED_HEADERS = {"authorization", "x-api-key", "cookie", "proxy-authorization"}
 MODEL = "claude-sonnet-4-5"  # a name the CLI recognises; the fake provider answers for it

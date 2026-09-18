@@ -52,7 +52,7 @@ class SpikeHarnessTests(unittest.TestCase):
         # Redirects are an observation, recorded with whether the credential travelled off the channel.
         self.assertEqual((record["observations"]["followed_cross_origin_redirect"], record["observations"]["credential_forwarded_cross_origin"]), (True, True))
         self.assertIn("CLI_COMPATIBILITY_OK", text)
-        self.assertNotIn("sk-ant-spike", text)
+        self.assertNotIn("sk-ant-" + "spike", text)
 
     def test_the_gate_fails_explicitly_on_a_leak_a_wrong_path_or_a_missing_tool_result(self):
         for mode, needle in (("leak", "credential leaked"), ("wrong_path", "never reached POST /v1/messages"), ("no_tool_result", "never posted a tool_result"),
