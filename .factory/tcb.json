@@ -1,0 +1,615 @@
+{
+  "schema": "dark-factory/tcb",
+  "schema_version": "1.0",
+  "classes": [
+    "proof-policy",
+    "privilege-enforcement",
+    "trusted-observer",
+    "orchestration",
+    "proposal",
+    "ui"
+  ],
+  "privileged_roots": [
+    "credential_env",
+    "github_cli",
+    "git_authority"
+  ],
+  "permitted_privileged_entrypoints": [
+    "cli",
+    "dispatch_plan",
+    "evidence_closure",
+    "execution_probe",
+    "feedback_observation",
+    "frontdoor_control",
+    "frontdoor_hosted_worker",
+    "frontdoor_http",
+    "publication_observation",
+    "publication_worker",
+    "runtime",
+    "static_gate",
+    "trajectory_archive",
+    "worker_runtime"
+  ],
+  "modules": {
+    "__init__": {
+      "class": "orchestration",
+      "reason": "the package init: imports agents and manifest on every kernel import, so its imports are everyone's"
+    },
+    "__main__": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own",
+      "trusted_until_boundary": true
+    },
+    "agents": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "attached": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "attestations": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "authority": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "benchmark": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "billing_reconciliation": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "canonical": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "carry": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "claim_explanation": {
+      "class": "ui",
+      "reason": "authenticated projections for people: views over records; never write proven, current or completed"
+    },
+    "claim_scheduler": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "claim_views": {
+      "class": "ui",
+      "reason": "authenticated projections for people: views over records; never write proven, current or completed"
+    },
+    "claims": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "cli": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own",
+      "trusted_until_boundary": true
+    },
+    "code_experiments": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "code_subjects": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "config": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "continuation": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "control_issue": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "credential_env": {
+      "class": "privilege-enforcement",
+      "reason": "holds or materialises credentials, or performs a mutation with them"
+    },
+    "decision_history": {
+      "class": "ui",
+      "reason": "authenticated projections for people: views over records; never write proven, current or completed"
+    },
+    "dispatch_plan": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "evaluation_protocol": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "evidence_closure": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "evidence_retention": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "evidence_retention_archive": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "execution_authority": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "execution_budget": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "execution_client": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "execution_exchange": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "execution_fence": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "execution_probe": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own",
+      "trusted_until_boundary": true
+    },
+    "execution_worker": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "exploration": {
+      "class": "proposal",
+      "reason": "model-authored or model-shaped material: proposals, syntheses, explorations; never an authority"
+    },
+    "exploration_policy": {
+      "class": "proposal",
+      "reason": "model-authored or model-shaped material: proposals, syntheses, explorations; never an authority"
+    },
+    "exploration_probe": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "exploration_reasoner": {
+      "class": "proposal",
+      "reason": "model-authored or model-shaped material: proposals, syntheses, explorations; never an authority"
+    },
+    "exploration_records": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "exploration_repository": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "factory_feedback": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "feedback_lab": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "feedback_lab_cli": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "feedback_observation": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "feedback_receipt": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "feedback_sandbox": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "frontdoor_control": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "frontdoor_exploration": {
+      "class": "proposal",
+      "reason": "model-authored or model-shaped material: proposals, syntheses, explorations; never an authority"
+    },
+    "frontdoor_hosted": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "frontdoor_hosted_worker": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own",
+      "trusted_until_boundary": true
+    },
+    "frontdoor_http": {
+      "class": "ui",
+      "reason": "authenticated projections for people: views over records; never write proven, current or completed"
+    },
+    "frontdoor_intent": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "frontdoor_prepare": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "frontdoor_programme": {
+      "class": "proposal",
+      "reason": "model-authored or model-shaped material: proposals, syntheses, explorations; never an authority"
+    },
+    "frontdoor_synthesis": {
+      "class": "proposal",
+      "reason": "model-authored or model-shaped material: proposals, syntheses, explorations; never an authority"
+    },
+    "git_authority": {
+      "class": "privilege-enforcement",
+      "reason": "holds or materialises credentials, or performs a mutation with them"
+    },
+    "github_cli": {
+      "class": "privilege-enforcement",
+      "reason": "holds or materialises credentials, or performs a mutation with them"
+    },
+    "hosted_exploration_call": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "independence": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "lease_store": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "lessons": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "manifest": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "merge_handoff": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "methods": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "pr_body": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "preflight": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "preflight_context": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "preflight_prepare": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "programme": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "programme_replan": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "programme_runtime": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "programme_strategy": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "programme_transition": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "programme_turnover": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "project_events": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "project_graph": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "project_profile": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "prompt_render": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "proof_dependencies": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "proof_store": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "provenance": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "provider_gateway": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "providers": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "publication_admission": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_client": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_currency": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_dispatch": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_effects": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_observation": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "publication_policy": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_request": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_source": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_strategy": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "publication_worker": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "reconsideration": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "refusal": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "replacement_intent": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "repro": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "review": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "runtime": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own",
+      "trusted_until_boundary": true
+    },
+    "search_policy": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "spine": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "static_gate": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "strategy_findings": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "strategy_rejection": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own"
+    },
+    "strategy_rules": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "task_replay": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "task_replay_adapters": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "tcb": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "trajectory": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "trajectory_analysis": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "trajectory_archive": {
+      "class": "trusted-observer",
+      "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "trajectory_report": {
+      "class": "ui",
+      "reason": "authenticated projections for people: views over records; never write proven, current or completed"
+    },
+    "transition_journal": {
+      "class": "proof-policy",
+      "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
+    },
+    "transition_views": {
+      "class": "ui",
+      "reason": "authenticated projections for people: views over records; never write proven, current or completed"
+    },
+    "triage": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own",
+      "trusted_until_boundary": true
+    },
+    "trusted_programs": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "validation_meter": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "worker_policy": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
+    "worker_runtime": {
+      "class": "orchestration",
+      "reason": "sequences work and calls authorities; holds no authority of its own",
+      "trusted_until_boundary": true
+    },
+    "worktree": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    }
+  },
+  "known_violations": [
+    {
+      "module": "claim_explanation",
+      "path": [
+        "claim_explanation",
+        "evidence_closure",
+        "credential_env"
+      ],
+      "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
+    },
+    {
+      "module": "decision_history",
+      "path": [
+        "decision_history",
+        "execution_budget",
+        "publication_source",
+        "frontdoor_control",
+        "github_cli"
+      ],
+      "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
+    },
+    {
+      "module": "frontdoor_exploration",
+      "path": [
+        "frontdoor_exploration",
+        "frontdoor_control",
+        "github_cli"
+      ],
+      "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
+    },
+    {
+      "module": "frontdoor_http",
+      "path": [
+        "frontdoor_http",
+        "github_cli"
+      ],
+      "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
+    }
+  ],
+  "graph_sha256": "0c6b862657d5c19416789dcf7471d4ace8409f946788ae6871a4f093b1ae6566",
+  "closure_bounds": {
+    "authority": {
+      "files": [
+        ".factory/project-profile.json",
+        ".factory/tcb.json",
+        "factory_kernel/canonical.py",
+        "factory_kernel/execution_authority.py",
+        "factory_kernel/execution_budget.py",
+        "factory_kernel/execution_exchange.py",
+        "factory_kernel/execution_fence.py",
+        "factory_kernel/exploration_records.py",
+        "factory_kernel/exploration_repository.py",
+        "factory_kernel/frontdoor_control.py",
+        "factory_kernel/frontdoor_http.py",
+        "factory_kernel/frontdoor_intent.py",
+        "factory_kernel/manifest.py",
+        "factory_kernel/programme.py",
+        "factory_kernel/programme_runtime.py",
+        "factory_kernel/programme_strategy.py",
+        "factory_kernel/project_profile.py",
+        "factory_kernel/publication_observation.py",
+        "factory_kernel/publication_policy.py",
+        "factory_kernel/publication_source.py",
+        "factory_kernel/strategy_rules.py",
+        "factory_kernel/worker_policy.py"
+      ],
+      "per_file_max_bytes": 100000,
+      "total_max_bytes": 400000
+    },
+    "evidence-spine": {
+      "files": [
+        ".factory/kernel.json",
+        ".factory/project-profile.json",
+        "factory_kernel/attestations.py",
+        "factory_kernel/canonical.py",
+        "factory_kernel/evidence_closure.py",
+        "factory_kernel/independence.py",
+        "factory_kernel/manifest.py",
+        "factory_kernel/proof_dependencies.py",
+        "factory_kernel/proof_store.py",
+        "factory_kernel/provenance.py",
+        "factory_kernel/spine.py",
+        "scripts/factory_evidence.py",
+        "scripts/factory_evidence_spine.py"
+      ],
+      "per_file_max_bytes": 100000,
+      "total_max_bytes": 300000
+    }
+  }
+}

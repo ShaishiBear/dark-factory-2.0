@@ -19,7 +19,7 @@ PROGRAMS = ("execution_authority.py", "execution_exchange.py", "execution_budget
 # Protected non-code inputs of the closure, repository-relative. The project profile decides
 # which repository, owner, App and project every constant in publication_policy names; a
 # host whose profile drifted from protected main must refuse exactly as drifted code does.
-POLICY_FILES = (".factory/project-profile.json",)
+POLICY_FILES = (".factory/project-profile.json", ".factory/tcb.json")
 
 
 def _normalised(raw):
