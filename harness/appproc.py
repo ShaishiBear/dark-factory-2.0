@@ -25,6 +25,7 @@ The universal parts, kept in one place because getting them wrong is subtle:
 """
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
@@ -133,19 +134,26 @@ class HttpApp:
         if not cmd:
             raise AppDidNotStart("driver=http but http.start is empty in harness.config.json")
         self.app_log = app_log_path(self.port)
-        self.proc = subprocess.Popen(_argv(cmd), cwd=ROOT, stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT, text=True,
-                                     encoding="utf-8", errors="replace")
-        # Drain BEFORE waiting on health. The first version read the pipe only when health
-        # never came; after APP_STARTED nothing read it, so the bootstrap marker, uvicorn's
-        # streaming tracebacks and Vite's output were lost, and a full pipe would have
-        # blocked the child (run 33960088633).
-        self._drain = threading.Thread(
-            target=_pump, args=(self.proc.stdout, self.app_log),
-            name=f"app-log-{self.port}", daemon=True,
-        )
-        self._drain.start()
-        self._await_health()
+        env = self._gateway_environment()
+        try:
+            self.proc = subprocess.Popen(_argv(cmd), cwd=ROOT, stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, text=True,
+                                         encoding="utf-8", errors="replace", env=env)
+            # Drain BEFORE waiting on health. The first version read the pipe only when health
+            # never came; after APP_STARTED nothing read it, so the bootstrap marker, uvicorn's
+            # streaming tracebacks and Vite's output were lost, and a full pipe would have
+            # blocked the child (run 33960088633).
+            self._drain = threading.Thread(
+                target=_pump, args=(self.proc.stdout, self.app_log),
+                name=f"app-log-{self.port}", daemon=True,
+            )
+            self._drain.start()
+            self._await_health()
+        except BaseException:
+            # A gateway opened for a process that never became healthy still closes its
+            # channels and writes its records; nothing waits on a dead child.
+            self.__exit__(None, None, None)
+            raise
         print(f"APP_STARTED port={self.port} app_log={self.app_log}", flush=True)
         return self
 
@@ -158,6 +166,64 @@ class HttpApp:
                 self.proc.kill()
         if self._drain is not None:
             self._drain.join(timeout=5)
+        self._close_gateway()
+
+    # ---- the metered provider gateway (SPECIFICATION 6.2, WP02) -----------------------------
+    # Off unless FACTORY_VALIDATION_GATEWAY=1. When on, the process under validation is started
+    # with OPENROUTER_BASE_URL pointing at a loopback gateway and OPENROUTER_API_KEY holding a
+    # shared channel token; the real credential stays in this process, every provider call goes
+    # through the owner's preregistered routes and ceilings (`validation.gateway` in
+    # .factory/kernel.json), and the meter records land beside the app log. Asking for the
+    # gateway without a policy or without a credential refuses the run: it never falls back to
+    # handing the process the credential.
+    gateway = None
+    _gateway_channels = None
+
+    def _gateway_environment(self) -> dict | None:
+        if os.environ.get("FACTORY_VALIDATION_GATEWAY", "").strip() != "1":
+            return None
+        if str(ROOT) not in sys.path:  # the harness scripts run with harness/ as sys.path[0]
+            sys.path.insert(0, str(ROOT))
+        from factory_kernel.gateway_server import (GatewayServer, RecordingLedger, load_gateway_policy,
+                                                   open_validation_channels)
+
+        policy = load_gateway_policy(ROOT / ".factory" / "kernel.json")
+        if policy is None:
+            raise AppDidNotStart("FACTORY_VALIDATION_GATEWAY=1 but .factory/kernel.json has no validation.gateway policy "
+                                 "(the owner's preregistered upstream origin, routes and ceilings)")
+        credential = os.environ.get("OPENROUTER_API_KEY", "")
+        if not credential:
+            raise AppDidNotStart("FACTORY_VALIDATION_GATEWAY=1 but no OPENROUTER_API_KEY is available to the gateway")
+        from factory_kernel.canonical import sha256_file
+
+        # The bundle identity the meter records: the run, and the policy file the routes came from.
+        binding = {"run_id": os.environ.get("GITHUB_RUN_ID", "local"), "run_attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "1") or 1),
+                   "source_sha": os.environ.get("GITHUB_SHA", "unknown"),
+                   "programme_sha256": sha256_file(ROOT / ".factory" / "kernel.json")}
+        record_dir = self.app_log.parent if self.app_log is not None else None
+        self._gateway_channels = open_validation_channels(
+            policy, credential=lambda: {"authorization": f"Bearer {credential}"}, ledger=RecordingLedger(), binding=binding,
+            execution_id=f"validation-app-{self.port}", attempt=binding["run_attempt"], record_dir=record_dir)
+        self.gateway = GatewayServer(self._gateway_channels).start()
+        env = dict(os.environ)
+        env.update(self.gateway.process_environment(base_url_variable="OPENROUTER_BASE_URL", key_variable="OPENROUTER_API_KEY"))
+        print(f"VALIDATION_GATEWAY_STARTED base={self.gateway.base_url} routes={len(self._gateway_channels.channels)} "
+              f"bundles={len(self._gateway_channels.scopes)} ledger=recording-only", flush=True)
+        return env
+
+    def _close_gateway(self) -> None:
+        if self.gateway is None:
+            return
+        from factory_kernel.gateway_server import close_validation_channels
+
+        summary = close_validation_channels(self._gateway_channels)
+        self.gateway.stop()
+        if self.app_log is not None:
+            path = self.app_log.parent / f"validation-gateway-{self.port}.json"
+            path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+            print(f"VALIDATION_GATEWAY_CLOSED summary={path} calls="
+                  f"{sum(s['calls'] for s in summary['sessions'].values())}", flush=True)
+        self.gateway = None
 
     def log_tail(self, lines: int = 60) -> str:
         """The last `lines` lines the child printed so far."""
