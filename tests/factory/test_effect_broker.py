@@ -46,6 +46,56 @@ class FakeGitHub:
     def _boom(self, number, *, holdout_safe=False):
         raise RuntimeError("gh pr view failed rc=1: 502")
 
+    # ---- publication ----
+    push_effect = "ok"
+    create_effect = "ok"
+
+    def push_branch(self, branch, *, force_with_lease=None):
+        self.calls.append(("push_branch", branch, force_with_lease))
+        if self.push_effect == "timeout":
+            raise subprocess.TimeoutExpired(["git", "push"], 180)
+        if self.push_effect == "error":
+            raise RuntimeError("git push failed: remote rejected")
+
+    def create_pr(self, *, head, base, title, body_file):
+        self.calls.append(("create_pr", head, base, title, str(body_file)))
+        if self.create_effect == "timeout":
+            raise subprocess.TimeoutExpired(["gh", "pr", "create"], 120)
+        if self.create_effect == "error":
+            raise RuntimeError("gh pr create failed rc=1")
+        if self.create_effect == "no_number":
+            return {"url": "https://example.invalid/pr/?"}
+        if self.create_effect == "other_head":
+            return {"number": 91, "headRefOid": "9" * 40, "baseRefOid": BASE, "state": "OPEN", "url": "u"}
+        return {"number": 91, "headRefOid": self.head, "baseRefOid": BASE, "state": "OPEN", "url": "https://example.invalid/pr/91"}
+
+
+class FakeGit:
+    """Answers the four identity questions the broker asks a worktree."""
+
+    def __init__(self, *, head=HEAD, tree=TREE, branch="factory/issue-7", status=""):
+        self.answers = {("rev-parse", "HEAD"): head, ("rev-parse", "HEAD^{tree}"): tree,
+                        ("branch", "--show-current"): branch, ("status", "--porcelain"): status}
+        self.asked: list[tuple] = []
+
+    def __call__(self, *args, cwd=None):
+        self.asked.append((args, cwd))
+        return self.answers[args]
+
+
+def candidate_grant(**overrides) -> Grant:
+    subject = {"repository": "octo/dynachat", "branch": "factory/issue-7", "head_sha": HEAD, "base_sha": BASE, "head_tree_sha": TREE,
+               "evidence_sha256": EVIDENCE}
+    subject.update(overrides.pop("subject", {}))
+    request = {"operation": "publish_candidate", "caller_role": "build-executor", "caller_instance": "kernel:run-1",
+               "request_id": "publish-factory/issue-7-aaaaaaaaaaaa", "source_sha": BASE}
+    request.update(overrides.pop("request", {}))
+    evidence = {"head_sha": subject["head_sha"], "base_sha": subject["base_sha"], "head_tree_sha": subject["head_tree_sha"],
+                "evidence_sha256": subject["evidence_sha256"]}
+    grant = authorize(request, subject, DEFAULT_POLICY, evidence, None, None, now=overrides.pop("now", 1000))
+    assert isinstance(grant, Grant), grant
+    return grant
+
 
 def grant_for(**overrides) -> Grant:
     subject = {"repository": "octo/dynachat", "pr_number": 134, "head_sha": HEAD, "base_sha": BASE, "head_tree_sha": TREE,
@@ -135,7 +185,7 @@ class BrokerTests(unittest.TestCase):
             self.broker(gh).merge_exact_head(observer, expected_head=HEAD)
         self.assertIn("operation_mismatch", ctx.exception.reason_codes)
         self.assertEqual(gh.calls, [])
-        reserved = grant_for(request={"operation": "publish_candidate", "caller_role": "build-executor"})
+        reserved = grant_for(request={"operation": "publish_transition_data", "caller_role": "transition-service"})
         with self.assertRaises(EffectRefused) as ctx:
             self.broker(gh).merge_exact_head(reserved, expected_head=HEAD)
         self.assertIn("operation_mismatch", ctx.exception.reason_codes)
@@ -223,10 +273,100 @@ class BrokerTests(unittest.TestCase):
         self.assertIn("grant_uses_exhausted", ctx.exception.reason_codes)
 
     def test_reserved_operations_refuse_as_not_served(self) -> None:
-        grant = grant_for(request={"operation": "publish_candidate", "caller_role": "build-executor"})
+        grant = grant_for(request={"operation": "publish_transition_data", "caller_role": "transition-service"})
         with self.assertRaises(EffectRefused) as ctx:
-            self.broker(FakeGitHub())._gate(grant, "publish_candidate", expected_head=None)
+            self.broker(FakeGitHub())._gate(grant, "publish_transition_data", expected_head=None)
         self.assertIn("operation_not_served", ctx.exception.reason_codes)
+
+    # ---- publish_candidate ----
+
+    def publisher(self, github, git, **kw) -> EffectBroker:
+        return EffectBroker(github, self.journal, stop_check=self.stop_check, epoch=kw.get("epoch", EPOCH), clock=lambda: self.now, git=git)
+
+    def test_a_candidate_is_rederived_from_the_worktree_then_pushed_and_opened_once(self) -> None:
+        gh, git = FakeGitHub(), FakeGit()
+        result = self.publisher(gh, git).publish_candidate(candidate_grant(), cwd="wt", base_branch="main", title="factory: t", body_file="body.md")
+        self.assertEqual((result.state, result.observation["pr_number"], result.observation["headRefOid"]), ("observed_success", 91, HEAD))
+        self.assertEqual([c[0] for c in gh.calls], ["push_branch", "create_pr"])
+        self.assertEqual(gh.calls[0], ("push_branch", "factory/issue-7", None))
+        self.assertEqual(gh.calls[1][1:3], ("factory/issue-7", "main"))
+        self.assertEqual({a for a, _ in git.asked}, set(FakeGit().answers))
+        self.assertTrue(all(cwd == "wt" for _, cwd in git.asked))
+        self.assertEqual(self.states(), ["started", "observed_success"])
+        self.assertEqual(self.journal.rows()[-1]["remote_state"], "published")
+        self.assertEqual(self.stops, 1)
+        again = self.publisher(gh, git).publish_candidate(candidate_grant(), cwd="wt", base_branch="main", title="factory: t", body_file="body.md")
+        self.assertTrue(again.replayed)
+        self.assertEqual([c[0] for c in gh.calls].count("push_branch"), 1)
+
+    def test_a_candidate_whose_worktree_disagrees_with_the_grant_is_refused_before_any_push(self) -> None:
+        cases = {
+            "candidate_head_differs": FakeGit(head="c" * 40),
+            "candidate_tree_differs": FakeGit(tree="c" * 40),
+            "candidate_branch_differs": FakeGit(branch="factory/other"),
+            "candidate_worktree_dirty": FakeGit(status=" M app/backend/main.py"),
+        }
+        for code, git in cases.items():
+            with self.subTest(code):
+                gh = FakeGitHub()
+                with self.assertRaises(EffectRefused) as ctx:
+                    self.publisher(gh, git).publish_candidate(candidate_grant(), cwd="wt", base_branch="main", title="t", body_file="b")
+                self.assertIn(code, ctx.exception.reason_codes)
+                self.assertEqual(gh.calls, [])
+                self.assertEqual(self.journal.rows()[-1]["state"], "refused")
+        gh = FakeGitHub()
+        with self.assertRaises(EffectRefused) as ctx:
+            EffectBroker(gh, self.journal, stop_check=self.stop_check, epoch=EPOCH, clock=lambda: self.now).publish_candidate(
+                candidate_grant(), cwd="wt", base_branch="main", title="t", body_file="b")
+        self.assertIn("candidate_unobservable", ctx.exception.reason_codes)  # no git reader: nothing is pushed
+        self.assertEqual(gh.calls, [])
+        with self.assertRaises(EffectRefused) as ctx:
+            self.publisher(gh, FakeGit()).publish_candidate(candidate_grant(), cwd="wt", base_branch="-x", title="t", body_file="b")
+        self.assertIn("base_branch_invalid", ctx.exception.reason_codes)
+        self.assertNotIn("started", self.states())
+
+    def test_a_merge_grant_cannot_publish_and_a_publish_grant_cannot_merge(self) -> None:
+        gh = FakeGitHub()
+        with self.assertRaises(EffectRefused) as ctx:
+            self.publisher(gh, FakeGit()).publish_candidate(grant_for(), cwd="wt", base_branch="main", title="t", body_file="b")
+        self.assertIn("operation_mismatch", ctx.exception.reason_codes)
+        with self.assertRaises(EffectRefused) as ctx:
+            self.publisher(gh, FakeGit()).merge_exact_head(candidate_grant(), expected_head=HEAD)
+        self.assertIn("operation_mismatch", ctx.exception.reason_codes)
+        self.assertEqual(gh.calls, [])
+
+    def test_a_stop_immediately_before_the_push_means_no_push(self) -> None:
+        gh = FakeGitHub()
+        self.stop_raises = RuntimeError("FACTORY_STOPPED")
+        with self.assertRaises(RuntimeError):
+            self.publisher(gh, FakeGit()).publish_candidate(candidate_grant(), cwd="wt", base_branch="main", title="t", body_file="b")
+        self.assertEqual(gh.calls, [])
+        self.assertEqual(self.states(), ["started", "observed_failure"])
+        self.assertEqual(self.journal.rows()[-1]["remote_state"], "not_called")
+
+    def test_push_and_pr_failures_are_observed_failures_and_timeouts_uncertain(self) -> None:
+        cases = {
+            ("error", "ok"): (RuntimeError, "observed_failure", "push_unverified"),
+            ("timeout", "ok"): (EffectUncertain, "uncertain", "push_unknown"),
+            ("ok", "error"): (RuntimeError, "observed_failure", "pushed_pr_unverified"),
+            ("ok", "timeout"): (EffectUncertain, "uncertain", "pushed_pr_unknown"),
+            ("ok", "no_number"): (EffectUncertain, "uncertain", "pushed_pr_unobserved"),
+            ("ok", "other_head"): (EffectRefused, "observed_failure", "pr_at_other_head"),
+        }
+        for (push, create), (exc_type, state, remote_state) in cases.items():
+            with self.subTest(push=push, create=create):
+                gh = FakeGitHub()
+                gh.push_effect, gh.create_effect = push, create
+                grant = candidate_grant(now=self.now - 1)
+                with self.assertRaises(exc_type):
+                    self.publisher(gh, FakeGit()).publish_candidate(grant, cwd="wt", base_branch="main", title="t", body_file="b")
+                last = self.journal.rows()[-1]
+                self.assertEqual((last["state"], last["remote_state"], last["remote_call"]), (state, remote_state, True))
+                # Nothing replays: the same grant refuses reissue from now on.
+                with self.assertRaises(EffectRefused):
+                    self.publisher(gh, FakeGit()).publish_candidate(grant, cwd="wt", base_branch="main", title="t", body_file="b")
+                self.assertEqual([c[0] for c in gh.calls].count("push_branch"), 1)
+                self.now += 1
 
     def test_the_journal_is_durable_json_lines_no_credential(self) -> None:
         gh = FakeGitHub()

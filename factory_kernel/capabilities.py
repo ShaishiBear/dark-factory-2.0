@@ -34,6 +34,14 @@ OID = re.compile(r"[0-9a-f]{40,64}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 IDENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}")
 SUBJECT_FIELDS = ("repository", "pr_number", "head_sha", "base_sha", "head_tree_sha", "evidence_sha256")
+# A candidate is a branch that has no PR yet: its identity is the branch name and the exact commit,
+# tree and base it carries, plus the digest of the run's publication artifacts.
+CANDIDATE_FIELDS = ("repository", "branch", "head_sha", "base_sha", "head_tree_sha", "evidence_sha256")
+SUBJECT_KINDS = {"pull-request": SUBJECT_FIELDS, "candidate": CANDIDATE_FIELDS}
+OPERATION_SUBJECT_KIND = {"merge_exact_head": "pull-request", "observe": "pull-request", "publish_candidate": "candidate",
+                          "commit_acceptance": "candidate", "commit_implementation": "candidate",
+                          "publish_transition_data": "pull-request"}
+BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
 
 # The preregistered policy. `legacy_serial_route` says a grant may be issued without a lease
 # bundle while the coordinator (WP07) does not exist; the grant records that it rode the legacy
@@ -104,31 +112,48 @@ def policy_digest(policy: Mapping[str, Any]) -> str:
     return sha256_value({k: (dict(v) if isinstance(v, Mapping) else v) for k, v in policy.items()})
 
 
+def subject_kind(value: Any) -> str | None:
+    """Which exact subject a mapping is, by its field set, or None."""
+    if not isinstance(value, Mapping):
+        return None
+    for kind, fields in SUBJECT_KINDS.items():
+        if set(value) == set(fields):
+            return kind
+    return None
+
+
 def _subject(value: Any) -> dict | None:
-    if not isinstance(value, Mapping) or set(value) != set(SUBJECT_FIELDS):
+    kind = subject_kind(value)
+    if kind is None:
         return None
     if not isinstance(value["repository"], str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value["repository"]):
         return None
-    if type(value["pr_number"]) is not int or value["pr_number"] <= 0:
+    if kind == "pull-request" and (type(value["pr_number"]) is not int or value["pr_number"] <= 0):
+        return None
+    if kind == "candidate" and (not isinstance(value["branch"], str) or not BRANCH.fullmatch(value["branch"])
+                                or value["branch"].endswith("/") or ".." in value["branch"]):
         return None
     for key in ("head_sha", "base_sha", "head_tree_sha"):
         if not isinstance(value[key], str) or not OID.fullmatch(value[key]):
             return None
     if not isinstance(value["evidence_sha256"], str) or not SHA256.fullmatch(value["evidence_sha256"]):
         return None
-    return {k: value[k] for k in SUBJECT_FIELDS}
+    return {k: value[k] for k in SUBJECT_KINDS[kind]}
 
 
 def resources_for(operation: str, subject: Mapping[str, Any]) -> tuple[str, ...]:
     """The resources a fixed operation touches, derived from the subject, never supplied."""
-    pr = f"pr:{subject['repository']}#{subject['pr_number']}"
     base = f"branch:{subject['repository']}:base:{subject['base_sha']}"
-    if operation == "merge_exact_head":
-        return (pr, base)
+    if "pr_number" in subject:
+        pr = f"pr:{subject['repository']}#{subject['pr_number']}"
+        if operation == "merge_exact_head":
+            return (pr, base)
+        if operation == "publish_transition_data":
+            return (base,)
+        return ()
+    candidate = f"branch:{subject['repository']}:{subject['branch']}"
     if operation in ("publish_candidate", "commit_acceptance", "commit_implementation"):
-        return (pr,)
-    if operation == "publish_transition_data":
-        return (base,)
+        return (candidate,)
     return ()
 
 
@@ -166,6 +191,8 @@ def authorize(request: Mapping[str, Any], subject: Mapping[str, Any], policy: Ma
     exact = _subject(subject)
     if exact is None:
         reasons.append("subject_inexact")
+    elif operation in FIXED_OPERATIONS and OPERATION_SUBJECT_KIND[operation] != subject_kind(exact):
+        reasons.append("subject_kind_mismatch")
     else:
         if not isinstance(verified_evidence, Mapping):
             reasons.append("evidence_missing")
@@ -270,5 +297,5 @@ def grant_from_dict(value: Mapping[str, Any]) -> Grant:
         raise CapabilityRefused(f"malformed grant record: {exc}") from exc
 
 
-__all__ = ["DEFAULT_POLICY", "FIXED_OPERATIONS", "ROLES", "CapabilityRefused", "Grant", "Refusal", "authorize", "grant_from_dict",
-           "narrow_grant", "policy_digest", "resources_for", "validate_grant"]
+__all__ = ["CANDIDATE_FIELDS", "DEFAULT_POLICY", "FIXED_OPERATIONS", "OPERATION_SUBJECT_KIND", "ROLES", "SUBJECT_FIELDS", "SUBJECT_KINDS", "CapabilityRefused", "Grant", "Refusal", "authorize", "grant_from_dict",
+           "narrow_grant", "policy_digest", "resources_for", "subject_kind", "validate_grant"]

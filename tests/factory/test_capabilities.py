@@ -96,12 +96,37 @@ class AuthorizeTests(unittest.TestCase):
         without = authorize(request(), subject(), DEFAULT_POLICY, evidence(), None, None, now=5)
         self.assertNotEqual(grant.grant_id, without.grant_id)
 
+    def test_a_candidate_subject_is_a_branch_with_an_exact_commit(self) -> None:
+        candidate = {"repository": "octo/dynachat", "branch": "factory/issue-7", "head_sha": HEAD, "base_sha": BASE, "head_tree_sha": TREE,
+                     "evidence_sha256": EVIDENCE}
+        grant = authorize(request(operation="publish_candidate", caller_role="build-executor"), candidate, DEFAULT_POLICY, evidence(), None, None, now=1)
+        self.assertIsInstance(grant, Grant)
+        self.assertEqual(grant.resources, ("branch:octo/dynachat:factory/issue-7",))
+        self.assertEqual(grant_from_dict(grant.to_dict()), grant)
+        # The kinds do not cross: a merge needs a pull request, a publication needs a candidate.
+        crossed = authorize(request(), candidate, DEFAULT_POLICY, evidence(), None, None, now=1)
+        self.assertEqual(crossed.reason_codes, ("subject_kind_mismatch",))
+        crossed = authorize(request(operation="publish_candidate", caller_role="build-executor"), subject(), DEFAULT_POLICY, evidence(), None, None, now=1)
+        self.assertEqual(crossed.reason_codes, ("subject_kind_mismatch",))
+        for bad in ("", "-x", "a/../b", "trailing/", "with space", "x" * 201):
+            with self.subTest(bad):
+                result = authorize(request(operation="publish_candidate", caller_role="build-executor"), {**candidate, "branch": bad},
+                                   DEFAULT_POLICY, evidence(), None, None, now=1)
+                self.assertIn("subject_inexact", result.reason_codes)
+        mixed = {**candidate, "pr_number": 3}
+        self.assertIn("subject_inexact", authorize(request(operation="publish_candidate", caller_role="build-executor"), mixed,
+                                                   DEFAULT_POLICY, evidence(), None, None, now=1).reason_codes)
+
     def test_resources_are_derived_never_supplied(self) -> None:
         for operation in FIXED_OPERATIONS:
             with self.subTest(operation):
                 self.assertIsInstance(resources_for(operation, subject()), tuple)
         self.assertEqual(resources_for("observe", subject()), ())
         self.assertEqual(resources_for("publish_transition_data", subject()), (f"branch:octo/dynachat:base:{BASE}",))
+        candidate = {"repository": "octo/dynachat", "branch": "factory/issue-7", "head_sha": HEAD, "base_sha": BASE, "head_tree_sha": TREE,
+                     "evidence_sha256": EVIDENCE}
+        self.assertEqual(resources_for("commit_implementation", candidate), ("branch:octo/dynachat:factory/issue-7",))
+        self.assertEqual(resources_for("observe", candidate), ())
 
 
 class ValidateAndNarrowTests(unittest.TestCase):

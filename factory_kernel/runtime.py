@@ -812,7 +812,6 @@ class KernelRuntime:
         issue_number = int(issue["number"])
         self.github.cwd = str(cwd)
         self.check_stop()
-        self.github.push_branch(branch)
 
         body = paths.root / "pr-body.md"
         body.write_text(
@@ -821,13 +820,16 @@ class KernelRuntime:
             ),
             encoding="utf-8",
         )
-        pr = self.github.create_pr(
-            head=branch,
-            base=self.config.default_branch,
-            title=f"factory: {str(issue.get('title') or '').strip()}",
-            body_file=body,
+        # Push and PR creation are one brokered effect (SPECIFICATION 5): the grant binds the
+        # branch, head, tree, base and the digest of this run's publication artifacts; the broker
+        # re-derives head, tree, branch and a clean status from the worktree before pushing (the
+        # base is bound, not re-derived), and the created PR is re-observed at the granted head.
+        # In-process, as for the merge; no TCB reduction is claimed.
+        pr = self._publish_candidate_through_broker(
+            paths, cwd, branch=branch,
+            title=f"factory: {str(issue.get('title') or '').strip()}", body_file=body,
         )
-        pr_number = int(pr["number"])
+        pr_number = int(pr["pr_number"])
         self._attach_and_publish(paths, cwd, env, pr_number)
         self._lease_heartbeat(
             "finish", issue_number, "pr-handoff", paths, cwd=cwd, pr=pr_number
@@ -2234,6 +2236,48 @@ class KernelRuntime:
             self._carry_drop(paths, cwd, env, issue_number=linked_issue)
         print(f"FACTORY_MERGED_VERIFIED pr=#{pr_number} evidenced_head={head}")
         return paths.artifacts / "merge-verification.json"
+
+    def _publish_candidate_through_broker(self, paths: RunPaths, cwd: Path, *, branch: str, title: str,
+                                          body_file: Path) -> dict:
+        """The branch push and PR creation as one brokered effect (SPECIFICATION 5, WP06)."""
+        from .capabilities import DEFAULT_POLICY, Refusal, authorize
+        from .effect_broker import EffectBroker, EffectJournal
+
+        head = self._git("rev-parse", "HEAD", cwd=cwd)
+        tree = self._git("rev-parse", "HEAD^{tree}", cwd=cwd)
+        base_sha = self._git("rev-parse", f"origin/{self.config.default_branch}")
+        evidence_sha256 = self._json_sha(self._publication_artifacts(paths.artifacts))
+        subject = {
+            "repository": self.config.repository, "branch": branch, "head_sha": head, "base_sha": base_sha,
+            "head_tree_sha": tree, "evidence_sha256": evidence_sha256,
+        }
+        request = {
+            "operation": "publish_candidate", "caller_role": "build-executor",
+            "caller_instance": f"kernel:{paths.root.name}", "request_id": f"publish-{branch}-{head[:12]}",
+            "source_sha": self._git("rev-parse", "HEAD"),
+        }
+        evidence = {"head_sha": head, "base_sha": base_sha, "head_tree_sha": tree, "evidence_sha256": evidence_sha256}
+        grant = authorize(request, subject, DEFAULT_POLICY, evidence, None, None, now=int(time.time()))
+        if isinstance(grant, Refusal):
+            raise NeedsHuman(f"publication of {branch} was not granted: {','.join(grant.reason_codes)}")
+        (paths.artifacts / "publish-grant.json").write_text(
+            json.dumps(grant.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        broker = EffectBroker(
+            self.github, EffectJournal(paths.artifacts / "effect-journal.jsonl"),
+            stop_check=self.check_stop, epoch=str(DEFAULT_POLICY["revocation_epoch"]), git=self._git,
+        )
+        result = broker.publish_candidate(
+            grant, cwd=cwd, base_branch=self.config.default_branch, title=title, body_file=body_file,
+        )
+        if result.state != "observed_success":
+            raise NeedsHuman(f"publication of {branch} was not observed: broker state {result.state}")
+        print(
+            f"FACTORY_EFFECT operation=publish_candidate branch={branch} grant={grant.grant_id} "
+            f"pr=#{result.observation.get('pr_number')} state={result.state} "
+            f"replayed={'yes' if result.replayed else 'no'}",
+            flush=True,
+        )
+        return result.to_dict()["observation"]
 
     def _merge_squash_through_broker(self, pr_number: int, *, head: str, authorization: Path, paths: RunPaths) -> dict:
         """The exact-head merge as a brokered effect (SPECIFICATION 5, WP06).
