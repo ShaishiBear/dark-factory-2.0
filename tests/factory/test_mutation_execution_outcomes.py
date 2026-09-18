@@ -199,9 +199,11 @@ class EvaluationTests(unittest.TestCase):
         red = self.detector("test_red.py", FAILING)
         green = self.detector("test_green.py", PASSING)
         result = self.evaluate(self.baseline({red: outcomes.FAILED, green: outcomes.PASSED}))
-        self.assertEqual(result.state, outcomes.SURVIVED,
-                         "a detector red without the mutant proves nothing with it")
+        self.assertNotEqual(result.state, outcomes.CAUGHT,
+                            "a detector red without the mutant proves nothing with it")
         self.assertEqual(result.detector, "")
+        self.assertEqual(result.state, outcomes.INFRA_ERROR,
+                         "and with part of the suite unusable it is not a survivor either")
 
     def test_an_assertion_failure_in_a_baseline_green_detector_is_a_kill(self):
         green = self.detector("test_green.py", PASSING)
@@ -223,7 +225,7 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(result.state, outcomes.TIMEOUT)
         self.assertNotIn(result.state, (outcomes.CAUGHT, outcomes.SURVIVED))
 
-    def test_a_survivor_runs_every_usable_detector_before_saying_so(self):
+    def test_the_fallback_runs_every_usable_detector_and_only_those(self):
         names = [self.detector(f"test_p{n}.py", PASSING) for n in range(4)]
         skipped = self.detector("test_skipped.py", FAILING)
         statuses = {name: outcomes.PASSED for name in names}
@@ -237,9 +239,24 @@ class EvaluationTests(unittest.TestCase):
 
         with mock.patch.object(runner, "run_detector", watched):
             result = self.evaluate(self.baseline(statuses))
-        self.assertEqual(result.state, outcomes.SURVIVED)
         self.assertEqual(sorted(seen), sorted(names),
-                         "a survivor must exhaust the usable suite, and only the usable suite")
+                         "the fallback must exhaust the usable suite, and only the usable suite")
+        self.assertEqual(result.state, outcomes.INFRA_ERROR,
+                         "one unusable detector is enough to make a no-kill result unobserved")
+
+    def test_a_survivor_exhausts_a_complete_suite(self):
+        names = [self.detector(f"test_p{n}.py", PASSING) for n in range(4)]
+        seen: list[str] = []
+        real = outcomes.run_detector
+
+        def watched(argv, **kwargs):
+            seen.append(argv[-1])
+            return real(argv, **kwargs)
+
+        with mock.patch.object(runner, "run_detector", watched):
+            result = self.evaluate(self.baseline({name: outcomes.PASSED for name in names}))
+        self.assertEqual(result.state, outcomes.SURVIVED)
+        self.assertEqual(sorted(seen), sorted(names))
 
     def test_the_order_is_a_permutation_so_no_detector_is_dropped_from_the_fallback(self):
         names = [self.detector(f"test_p{n}.py", PASSING) for n in range(5)]
@@ -266,6 +283,36 @@ class EvaluationTests(unittest.TestCase):
             result = runner.evaluate(defect, tuple(self.files), self.baseline(statuses), None, None)
         self.assertEqual(result.state, outcomes.INFRA_ERROR)
         self.assertNotEqual(result.state, outcomes.SURVIVED)
+
+    def test_a_survivor_needs_a_complete_suite_even_when_its_why_names_nobody(self):
+        """The gap the named-detector rule left, found by an actual run.
+
+        Not every defect's `why` names a detector. On 2026-09-18 a local family run reported
+        `worker-scheduler-persists-checkout-token` as a surviving trust-root bypass: it ran all
+        151 usable detectors and none went red. Its real detector,
+        `tests/factory/test_factory_worker_authority.py`, was red on that host's baseline for
+        environment reasons, and injected against that detector alone the mutant is caught by
+        an assertion. A survivor claims the whole suite looked and saw nothing, so it needs the
+        whole suite.
+        """
+        others = [self.detector(f"test_p{n}.py", PASSING) for n in range(3)]
+        broken = self.detector("test_broken_elsewhere.py", PASSING)
+        statuses = {name: outcomes.PASSED for name in others}
+        statuses[broken] = outcomes.FAILED
+        unnamed = self.defect(why="a property with no detector reference at all")
+        with mock.patch.object(runner, "TEST_FILES", tuple(self.files)):
+            result = runner.evaluate(unnamed, tuple(self.files), self.baseline(statuses), None, None)
+        self.assertEqual(result.state, outcomes.INFRA_ERROR)
+        self.assertNotEqual(result.state, outcomes.SURVIVED)
+
+    def test_a_survivor_on_a_fully_usable_suite_is_still_a_survivor(self):
+        names = [self.detector(f"test_p{n}.py", PASSING) for n in range(3)]
+        statuses = {name: outcomes.PASSED for name in names}
+        unnamed = self.defect(why="a property with no detector reference at all")
+        with mock.patch.object(runner, "TEST_FILES", tuple(self.files)):
+            result = runner.evaluate(unnamed, tuple(self.files), self.baseline(statuses), None, None)
+        self.assertEqual(result.state, outcomes.SURVIVED,
+                         "a complete suite that saw nothing is exactly what a bypass looks like")
 
     def test_a_mutant_with_one_usable_named_detector_is_still_measured(self):
         blind = self.detector("test_blind.py", PASSING)
