@@ -9,10 +9,15 @@ increments and one bundle is written. Leases are released or expire into tombsto
 never reset. A heartbeat extends expiry only for a matching live bundle; a stale heartbeat cannot
 recreate ownership. A release cannot clear an ambiguous in-flight operation.
 
-Grants: `issued -> started -> observed_success | observed_failure | uncertain`, or `issued ->
-revoked | expired`; terminal states never return. Operation ids are unique under (project,
-semantic operation, request id); the same id with different request bytes is a conflict; an
-identical replay of an observed operation returns the recorded result and never executes again.
+Grants in this store: `started -> observed_success | observed_failure` (final, never reopened)
+or `started -> uncertain`, which is reconciled at most once by an explicit independent
+observation to `observed_success | observed_failure` and blocks its resources until then. C05's
+`issued`, `revoked` and `expired` states are named in GRANT_STATES for the coordinator that will
+issue grants ahead of consumption, but nothing here produces them yet: `consume_grant` records a
+grant as `started` in the same transaction that issues it. Operation ids are unique under
+(project, semantic operation, request id); the same id with different request bytes is a
+conflict; an identical replay of an observed operation returns the recorded result and never
+executes again (the replay answer comes from the record, before the lease guard runs).
 
 Time is supplied by a trusted clock observer (`now`, integer seconds); expiry is `now >=
 expires_at`; a clock that moves backwards blocks time-dependent authority. Network calls never
@@ -39,7 +44,8 @@ MAX_RESOURCES = 64
 SHA256 = re.compile(r"[0-9a-f]{64}")
 IDENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}")
 GRANT_STATES = ("issued", "started", "observed_success", "observed_failure", "uncertain", "revoked", "expired")
-TERMINAL = frozenset({"observed_success", "observed_failure", "uncertain", "revoked", "expired"})
+# Final: never reopened. `uncertain` is NOT final; it is unresolved until an explicit observation.
+TERMINAL = frozenset({"observed_success", "observed_failure", "revoked", "expired"})
 UNRESOLVED = frozenset({"issued", "started", "uncertain"})
 
 

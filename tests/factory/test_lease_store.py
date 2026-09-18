@@ -144,27 +144,38 @@ class StoreTests(unittest.TestCase):
         path = self.tmp / "race.sqlite"
         LeaseStore(path).close()
         script = textwrap.dedent(f"""
-            import json, sys, time
+            import json, pathlib, sys, time
             sys.path.insert(0, {str(ROOT)!r})
             from factory_kernel.lease_store import LeaseRefused, LeaseStore
             store = LeaseStore({str(path)!r})
             owner = sys.argv[1]
-            # Both processes wake at the same wall-clock instant and hit BEGIN IMMEDIATE together.
-            target = float(sys.argv[2])
-            while time.time() < target:
-                pass
+            # A file barrier: each process announces it is ready, then both spin until both are, so
+            # interpreter start-up skew cannot serialise them. The pre/post acquire clocks are
+            # reported so the test can check the two attempts really overlapped in time.
+            barrier = pathlib.Path(sys.argv[2])
+            (barrier / owner).write_text("ready")
+            deadline = time.time() + 30
+            while len(list(barrier.iterdir())) < 2:
+                if time.time() > deadline:
+                    raise SystemExit("barrier timeout")
+            pre = time.perf_counter_ns(); wall_pre = time.time()
             try:
                 bundle = store.acquire_many(owner=owner, role="builder", resources=["pr:5"], request_sha256={REQ!r},
                                             subject_sha256={SUBJ!r}, ttl_seconds=30, now=100)
-                print(json.dumps({{"owner": owner, "won": True, "generation": bundle.generations["pr:5"]}}))
+                out = {{"owner": owner, "won": True, "generation": bundle.generations["pr:5"]}}
             except LeaseRefused as exc:
-                print(json.dumps({{"owner": owner, "won": False, "reason": str(exc)}}))
+                out = {{"owner": owner, "won": False, "reason": str(exc)}}
+            out["pre"] = wall_pre; out["post"] = time.time()
+            print(json.dumps(out))
         """)
-        import time
-        target = str(time.time() + 1.5)
-        procs = [subprocess.Popen([sys.executable, "-c", script, owner, target], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        barrier = self.tmp / "barrier"; barrier.mkdir()
+        procs = [subprocess.Popen([sys.executable, "-c", script, owner, str(barrier)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                  for owner in ("runA", "runB")]
-        results = [json.loads(p.communicate(timeout=60)[0].strip().splitlines()[-1]) for p in procs]
+        outputs = [p.communicate(timeout=60) for p in procs]
+        results = [json.loads(o[0].strip().splitlines()[-1]) for o in outputs]
+        # Both attempts were in flight at once: each started before the other finished.
+        a, b = results
+        self.assertLess(a["pre"], b["post"], (results, outputs)); self.assertLess(b["pre"], a["post"], (results, outputs))
         winners = [r for r in results if r["won"]]
         self.assertEqual(len(winners), 1, results)
         self.assertEqual(winners[0]["generation"], 1)
