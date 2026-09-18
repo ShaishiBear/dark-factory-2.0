@@ -55,6 +55,16 @@ let raw = ""; process.stdin.on("data", (c) => raw += c); process.stdin.on("end",
   out.intent_ids = model.views.intent.rows.map((r) => r.id);
   out.reconsider = { changed: model.views.reconsider.changed, ids: model.views.reconsider.rows.map((r) => r.id) };
   out.active = model.active;
+  out.active_with_run_only = g.graphViews({nodes: input.snapshot.nodes.filter((n) => n.kind !== "programme-item"), edges: []}).active;
+  out.active_with_pr = g.graphViews({nodes: [{id: "item:i1", kind: "programme-item", label: "i1", currentness: "recorded", gaps: [], issue: 7, pr: 9}], edges: []}).active;
+  out.active_without_pr = g.graphViews({nodes: [{id: "item:i1", kind: "programme-item", label: "i1", currentness: "recorded", gaps: [], issue: 7, pr: null}], edges: []}).active;
+  const big = { nodes: Array.from({length: 2000}, (_, i) => ({id: "claim:c" + i, kind: "requirement", label: "r" + i, currentness: "unobserved", gaps: ["no-attestation"], source_refs: []})),
+                edges: Array.from({length: 1999}, (_, i) => ({relation: "depends_on", source: "claim:c" + (i + 1), target: "claim:c" + i, currentness: "derived", gaps: [], source_refs: []})) };
+  const started = Date.now();
+  const bigModel = g.graphViews(big);
+  const bigLayout = g.layout(bigModel.views.prove.rows, g.GRAPH_VIEWS.prove.kinds);
+  out.big = { ms: Date.now() - started, rows: bigModel.views.prove.rows.length, placed: bigLayout.positions.size, hidden: bigLayout.hidden,
+              blockers: bigModel.views.prove.blockers.length, table_bound: g.MAX_TABLE_ROWS };
   out.states = { predicted: g.proofState({currentness: "predicted", gaps: ["prediction-not-observed"]}).state,
                  unknown: g.proofState({currentness: "unknown", gaps: []}).state,
                  gap: g.proofState({currentness: "current", gaps: ["subject-unlinked"]}).state,
@@ -169,7 +179,18 @@ class DecisionGraphAssetTests(unittest.TestCase):
         self.assertEqual(sorted(result["reconsider"]["ids"]), ["candidate:s:index", "exploration:a1", "recommendation:s:0"])  # propagation along dependencies
         self.assertEqual(result["states"], {"predicted": "insufficient", "unknown": "unknown", "gap": "insufficient", "current": "current",
                                             "stale": "stale", "unverified": "insufficient"})
-        self.assertTrue(result["active"])  # a recorded run without gaps means work is active: the fast poll
+        # The fast poll needs an in-progress signal: a programme item whose issue is observed but whose PR
+        # is not. A retained run alone, or an item that already has a PR, is history and polls at idle.
+        self.assertFalse(result["active"])
+        self.assertFalse(result["active_with_run_only"])
+        self.assertFalse(result["active_with_pr"])
+        self.assertTrue(result["active_without_pr"])
+        # The projection's own maximum (2000 nodes, MAX_NODES) is projected into views, laid out and bounded
+        # without stalling; the table alternative is bounded to MAX_TABLE_ROWS and counts the rest.
+        self.assertEqual((result["big"]["rows"], result["big"]["placed"], result["big"]["hidden"], result["big"]["blockers"]), (2000, 60, 1940, 2000))
+        self.assertLess(result["big"]["ms"], 5000, result["big"])
+        self.assertEqual(result["big"]["table_bound"], 400)
+        self.assertIn("view.rows.slice(0, MAX_TABLE_ROWS)", SCRIPT.read_text(encoding="utf-8"))
         self.assertEqual(result["poll"], {"active": 5000, "idle": 30000})
         self.assertTrue(result["layout_deterministic"])
         self.assertEqual(result["layout_bounded"], {"placed": 60, "hidden": 140})

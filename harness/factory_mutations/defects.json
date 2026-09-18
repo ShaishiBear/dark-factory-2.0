@@ -5163,6 +5163,13 @@
       "find": "async function refresh() { snapshot = await api(\"/api/snapshot\"); render(); await refreshExploration(); if (typeof refreshDecisionGraph === \"function\") await refreshDecisionGraph(); }\n",
       "replace": "async function refresh() { snapshot = await api(\"/api/snapshot\"); render(); await refreshExploration(); }\n",
       "why": "WP10B: the graph is refreshed with the workspace after every snapshot; a page whose refresh never reaches the graph shows a stale view after each owner action. Detector: tests/factory/test_decision_graph_ui.py"
+    },
+    {
+      "id": "decision-graph-fast-poll-on-retained-run",
+      "file": "factory_kernel/frontdoor_static/decision-graph.js",
+      "find": "  const active = nodes.some((n) => n.kind === \"programme-item\" && n.currentness === \"recorded\" && n.issue != null && n.pr == null);\n",
+      "replace": "  const active = nodes.some((n) => (n.kind === \"run\" || n.kind === \"programme-item\") && n.currentness === \"recorded\" && (n.gaps || []).length === 0);\n",
+      "why": "SPEC 10 transport: 5 s polling only while work is active. A retained run or a linked item that already has a PR is history; treating their presence as activity keeps every visible tab at the fast rate forever. Detector: tests/factory/test_decision_graph_ui.py"
     }
   ]
 }

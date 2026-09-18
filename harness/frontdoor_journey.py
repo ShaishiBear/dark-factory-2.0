@@ -3,11 +3,14 @@
 
 Serves `FrontDoorApplication` on a loopback port over a disposable intent store that already
 holds one approved scope, drives a real browser with agent-browser (the same tool the canonical
-E2E journey uses): unlock with the owner token, wait for the decision graph's list alternative
-to show the recorded decision, read the Prove view's blocker line, then stop the service, start
-a fresh one over the same directory, reload and read the same rows again. The journey passes
-only when the graph after the restart is the graph before it, reconstructed from the store
-alone, and no green state was shown for an unproven claim.
+E2E journey uses): unlock with the owner token, wait for the decision graph (its SVG node
+buttons and its table cells, as the accessibility tree reports them) to show the recorded
+decision, open the Prove view and read its blocker line, then stop the service, start a fresh
+one over the same directory, unlock again and read the same rows. The journey passes only when
+the graph after the restart is the graph before it, reconstructed from the store alone, and the
+Prove view rendered its blocker line. This fixture has no programme, so no requirement node
+exists and no "unproven shown green" case can arise here; that property is covered by the Node
+detectors over projections that carry one.
 
 This is a local maintainer fixture, not a rung of the canonical ladder: it needs agent-browser
 on PATH and a browser, makes no paid call, touches no remote system, and prints one
@@ -118,8 +121,28 @@ def _unlock(session: str, snapshot: str, token_ref: str, token: str) -> None:
     _browser(session, "click", f"@{button}")
 
 
+def _prove_blockers(session: str, snapshot: str) -> str:
+    """Open the Prove view and return its blocker line as the page renders it."""
+    tab = next((m.group(1) for m in re.finditer(r'tab "Prove"[^\n]*?\bref=([^\]\s,]+)', snapshot)), None)
+    if tab is None:
+        raise JourneyFailure("no Prove tab found: " + snapshot[-800:])
+    _browser(session, "click", f"@{tab}")
+    # The blocker line is static text, absent from the interactive snapshot: read the full tree.
+    deadline = time.time() + 20
+    shown = ""
+    while time.time() < deadline and "blocker" not in shown:
+        shown = _browser(session, "snapshot")
+        if "blocker" not in shown:
+            time.sleep(0.5)
+    line = next((l.strip() for l in shown.splitlines() if "blocker" in l), "")
+    if not line:
+        raise JourneyFailure("the Prove view rendered no blocker line: " + shown[-800:])
+    return line
+
+
 def _graph_rows(snapshot: str) -> list[str]:
-    """The rows of the graph's list alternative as the browser reports them (cells joined)."""
+    """The graph's node lines as the accessibility tree reports them: the SVG node buttons (named by
+    their title, state included) and the table cells."""
     rows = []
     for line in snapshot.splitlines():
         if re.search(r'\b(owner-decision|specification|proposal|requirement)\b', line):
@@ -146,9 +169,8 @@ def run(port: int, keep_session: bool = False) -> dict:
             before = _wait_for(session, lambda s: "owner-decision" in s, 30)
             rows_before = _graph_rows(before)
             if not any("approve-spec" in row for row in rows_before):
-                raise JourneyFailure("the recorded decision did not appear in the graph list: " + before[-1500:])
-            if any("current" in row and "requirement" in row for row in rows_before):
-                raise JourneyFailure("a requirement was shown current without proof")
+                raise JourneyFailure("the recorded decision did not appear in the graph: " + before[-1500:])
+            blockers = _prove_blockers(session, before)
         finally:
             server.shutdown()
             thread.join(timeout=5)
@@ -174,7 +196,7 @@ def run(port: int, keep_session: bool = False) -> dict:
                     pass
     if rows_before != rows_after:
         raise JourneyFailure(f"graph rows differ after restart: {rows_before} != {rows_after}")
-    return {"rows": rows_before, "restarted_equal": True, "port": port}
+    return {"rows": rows_before, "prove_blockers": blockers, "restarted_equal": True, "port": port}
 
 
 def main(argv: list[str] | None = None) -> int:

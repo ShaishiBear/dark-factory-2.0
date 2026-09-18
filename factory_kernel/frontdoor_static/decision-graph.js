@@ -16,7 +16,10 @@ const GRAPH_VIEWS = Object.freeze({
 });
 const POLL_ACTIVE_MS = 5000;   // only while work is active
 const POLL_IDLE_MS = 30000;    // while visible and idle
-const ACTIVE_KINDS = new Set(["run", "programme-item"]);
+const MAX_TABLE_ROWS = 400;    // the list alternative is bounded; the rest is counted, not rendered
+// Work is "active" only on an in-progress signal the projection carries: a programme item whose
+// issue is observed but whose pull request is not yet (admitted work with nothing published).
+// A retained run or a linked item with a PR is history, not activity, and polls at the idle rate.
 // A node is green only when it is current and has no gap. Predicted, proposed, unverified,
 // stale and unknown are never green: the view says why, it never rounds up.
 const GREEN = new Set(["current", "recorded", "supported", "observed", "derived"]);
@@ -63,7 +66,7 @@ function graphViews(graph) {
   const blockers = nodes.filter((n) => proofState(n).state !== "current" && ["requirement", "proof-obligation", "implementation-claim", "attestation"].includes(n.kind))
     .map((n) => ({ id: n.id, kind: n.kind, label: n.label, ...proofState(n) }));
   views.prove.blockers = blockers;
-  const active = nodes.some((n) => ACTIVE_KINDS.has(n.kind) && (n.gaps || []).length === 0 && n.currentness === "recorded");
+  const active = nodes.some((n) => n.kind === "programme-item" && n.currentness === "recorded" && n.issue != null && n.pr == null);
   return { views, byId, active, truncated: Boolean(graph?.truncated), counts: graph?.counts || {} };
 
   function row(node, role) {
@@ -111,7 +114,7 @@ function applyDelta(graph, delta) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { GRAPH_VIEWS, POLL_ACTIVE_MS, POLL_IDLE_MS, proofState, graphViews, layout, applyDelta };
+  module.exports = { GRAPH_VIEWS, POLL_ACTIVE_MS, POLL_IDLE_MS, MAX_TABLE_ROWS, proofState, graphViews, layout, applyDelta };
 }
 
 // ---- DOM (browser only) ----------------------------------------------------------------------
@@ -228,7 +231,7 @@ if (typeof document !== "undefined" && typeof $ === "function") {
   function renderGraphTable(view) {
     const body = $("graph-rows");
     body.replaceChildren();
-    for (const row of view.rows) {
+    for (const row of view.rows.slice(0, MAX_TABLE_ROWS)) {
       const tr = document.createElement("tr");
       tr.className = `state-${row.state}` + (row.predicted ? " predicted" : "");
       for (const value of [row.kind, row.label, row.role === "changed" ? "changed" : row.state, row.reasons.join(", ") || "none"]) tr.append(text("td", value));
@@ -237,6 +240,13 @@ if (typeof document !== "undefined" && typeof $ === "function") {
       button.type = "button";
       button.addEventListener("click", () => selectGraphNode(row.id));
       cell.append(button);
+      tr.append(cell);
+      body.append(tr);
+    }
+    if (view.rows.length > MAX_TABLE_ROWS) {
+      const tr = document.createElement("tr");
+      const cell = text("td", `${view.rows.length - MAX_TABLE_ROWS} more node(s) in this view are not listed; use the views or the projection's own bound`, "muted");
+      cell.colSpan = 5;
       tr.append(cell);
       body.append(tr);
     }
