@@ -97,6 +97,7 @@ class ProjectGraphHTTPTests(unittest.TestCase):
         self.assertEqual(self.call("/api/project-graph", query="after_version=²", HTTP_AUTHORIZATION="")["status"], "400 Bad Request")
         self.assertEqual(self.call("/api/project-graph/details")["status"], "400 Bad Request")  # no id
         self.assertEqual(self.call("/api/project-graph/details", query="id=../../etc")["status"], "400 Bad Request")
+        self.assertEqual(self.call("/api/project-graph/details", query="id=decision%3Avé")["status"], "400 Bad Request")  # ASCII only
 
     def test_a_snapshot_then_an_exact_delta_then_a_stale_cursor_resnapshot(self) -> None:
         version = self.decide()

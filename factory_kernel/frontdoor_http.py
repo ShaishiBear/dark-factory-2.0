@@ -61,7 +61,7 @@ def _graph_query(path, raw):
     if path == "/api/project-graph" and key == "after_version" and value.isascii() and value.isdigit() and len(value) <= 12:
         return {"after_version": int(value)}
     if path == "/api/project-graph/details" and key == "id" and 1 <= len(value) <= 200 and all(
-            c.isalnum() or c in "-_:.%" for c in value):
+            (c.isascii() and c.isalnum()) or c in "-_:.%" for c in value):
         from urllib.parse import unquote
         return {"id": unquote(value)}
     return None
