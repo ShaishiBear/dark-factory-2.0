@@ -35,21 +35,23 @@ def synthetic_kernel(tmp: Path, sources: dict[str, str]) -> Path:
     return tmp
 
 
-def record_for(root: Path, *, classes: dict[str, str], roots: list[str], permitted: list[str], violations=(), bounds=None) -> dict:
+def record_for(root: Path, *, classes: dict[str, str], roots: list[str], permitted: list[str], violations=(), bounds=None,
+               include_init: bool = True) -> dict:
     graph = import_graph(root / "factory_kernel")
+    modules = {name: {"class": cls, "reason": "test"} for name, cls in classes.items()}
+    if include_init and "__init__" not in modules:
+        modules["__init__"] = {"class": "orchestration", "reason": "package init"}
     return {
         "schema": "dark-factory/tcb", "schema_version": "1.0", "classes": list(CLASSES),
         "privileged_roots": roots, "permitted_privileged_entrypoints": permitted,
-        "modules": {name: {"class": cls, "reason": "test"} for name, cls in classes.items()},
+        "modules": modules,
         "known_violations": list(violations), "graph_sha256": sha256_value(graph),
         "closure_bounds": bounds or {"kernel": {"files": ["factory_kernel/__init__.py"], "per_file_max_bytes": 1000, "total_max_bytes": 1000}},
     }
 
 
-# The mutation harness runs detectors in a minimal copy that carries neither the record nor the
-# whole kernel; the record tests need the real checkout, the synthetic-kernel tests below are the
-# detectors that run everywhere.
-@unittest.skipUnless((ROOT / TCB_PATH).is_file(), "the repository TCB record is only present in a full checkout")
+# The record tests run everywhere: the mutation copy carries the whole kernel, the record and every
+# closure file (COPY_FILES), so a missing record fails here instead of skipping.
 class RepositoryRecordTests(unittest.TestCase):
     def test_the_committed_record_matches_the_kernel_source(self):
         result = verify_repository(ROOT)
@@ -137,6 +139,28 @@ class SyntheticKernelTests(unittest.TestCase):
                            violations=[{"module": "view", "path": ["view", "broker", "creds"], "reason": "known"}])
         with self.assertRaisesRegex(TcbRefused, "no longer exist"):
             verify(stale, root)
+
+    def test_the_package_init_is_pinned_and_its_imports_belong_to_every_module(self):
+        root = synthetic_kernel(self.tmp, {"creds": "TOKEN = 1\n", "view": "X = 1\n", "canon": "Y = 2\n"})
+        classes = {"__init__": "orchestration", "creds": "privilege-enforcement", "view": "ui", "canon": "proof-policy"}
+        record = record_for(root, classes=classes, roots=["creds"], permitted=[])
+        self.assertEqual(verify(record, root)["violations"], [])
+        self.assertIn("__init__", record["modules"])
+        # A root imported by __init__ is imported by everything: the digest moves and the ui module reaches it.
+        (root / "factory_kernel" / "__init__.py").write_text("from . import creds\n", encoding="utf-8")
+        with self.assertRaisesRegex(TcbRefused, "import graph changed"):
+            verify(record, root)
+        graph = import_graph(root / "factory_kernel")
+        self.assertEqual((graph["__init__"], graph["view"], graph["canon"]), (["creds"], ["creds"], ["creds"]))
+        refreshed = record_for(root, classes=classes, roots=["creds"], permitted=[])
+        with self.assertRaisesRegex(TcbRefused, "without being a permitted entrypoint"):
+            verify(refreshed, root)
+        # An unclassified __init__ is an unclassified module like any other.
+        (root / "factory_kernel" / "__init__.py").write_text("", encoding="utf-8")
+        partial = record_for(root, classes={k: v for k, v in classes.items() if k != "__init__"}, roots=["creds"], permitted=[],
+                             include_init=False)
+        with self.assertRaisesRegex(TcbRefused, "unclassified"):
+            verify(partial, root)
 
     def test_closure_bounds_are_measured_on_normalised_bytes(self):
         root = synthetic_kernel(self.tmp, {"a": "X = 1\n"})

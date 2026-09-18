@@ -14,6 +14,14 @@ NOT establish process isolation: an import test supplements the OS/network bound
 broker (SPEC 5), it never replaces it. Until that boundary exists, orchestration modules that
 hold credentials are classified `orchestration` with `trusted_until_boundary: true`, and no
 TCB reduction is claimed (SPEC 5, last sentence of the process-boundary paragraph).
+
+Scope of the record. Granularity is the module (WORK_PACKAGES WP06 speaks of "actual
+functions"; a function-level record is future work). `permitted_privileged_entrypoints` is
+DESCRIPTIVE: the set of modules that import a root today, so that a new importer is a reviewed
+change; it is not a statement that those modules should hold credentials (frontdoor_http, for
+one, is both permitted and a recorded violation for exactly that reason). Known violations are
+keyed by module and shortest path; a second, longer path of an already-violating module is
+caught only by the graph digest. Per-path accounting belongs to the day a reduction is claimed.
 """
 from __future__ import annotations
 
@@ -37,29 +45,41 @@ class TcbRefused(ValueError):
     """The record is malformed or the source no longer matches it."""
 
 
+def _module_deps(path: Path, known: set[str]) -> set[str]:
+    tree = ast.parse(path.read_bytes().decode("utf-8", errors="replace"))
+    deps: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level == 1:
+                if node.module:
+                    deps.add(node.module.split(".")[0])
+                else:
+                    deps.update(alias.name for alias in node.names)
+            elif node.module and node.module.startswith("factory_kernel."):
+                deps.add(node.module.split(".")[1])
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("factory_kernel."):
+                    deps.add(alias.name.split(".")[1])
+    return {dep for dep in deps if dep in known}
+
+
 def import_graph(kernel_root: str | Path) -> dict[str, list[str]]:
-    """Intra-package imports of every module in factory_kernel, from the AST (no execution)."""
+    """Intra-package imports of every module in factory_kernel, from the AST (no execution).
+
+    The package `__init__` is a node of its own AND its imports are imports of every other
+    module: importing any kernel module executes `__init__` first, so a root imported there is
+    reached by everything. Granularity is the module, not the function (WORK_PACKAGES WP06 says
+    "actual functions"; this record classifies modules and says so)."""
     root = Path(kernel_root)
     modules = sorted(p.stem for p in root.glob("*.py") if p.stem != "__init__")
     known = set(modules)
-    graph: dict[str, list[str]] = {}
+    init_path = root / "__init__.py"
+    init_deps = _module_deps(init_path, known) if init_path.is_file() else set()
+    graph: dict[str, list[str]] = {"__init__": sorted(init_deps)}
     for name in modules:
-        tree = ast.parse((root / f"{name}.py").read_bytes().decode("utf-8", errors="replace"))
-        deps: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                if node.level == 1:
-                    if node.module:
-                        deps.add(node.module.split(".")[0])
-                    else:
-                        deps.update(alias.name for alias in node.names)
-                elif node.module and node.module.startswith("factory_kernel."):
-                    deps.add(node.module.split(".")[1])
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.startswith("factory_kernel."):
-                        deps.add(alias.name.split(".")[1])
-        graph[name] = sorted(dep for dep in deps if dep in known and dep != name)
+        deps = _module_deps(root / f"{name}.py", known) | init_deps
+        graph[name] = sorted(dep for dep in deps if dep != name)
     return graph
 
 

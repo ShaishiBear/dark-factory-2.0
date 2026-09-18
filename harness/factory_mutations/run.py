@@ -55,6 +55,7 @@ COPY_FILES = (
     # the planner's detector reads the script, so the copy must carry it.
     "scripts/factory-stop.sh",
     ".factory/architecture.json",
+    ".factory/tcb.json",
     ".factory/prompts/holdout.md",
     ".factory/prompts/investigate.md",
     ".factory/prompts/contract.md",
