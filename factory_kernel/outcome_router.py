@@ -35,10 +35,13 @@ AUTHENTICATED_PROVENANCE = "canonical-worker-artifact-and-kernel-receipt"
 # The reason codes of factory_kernel.refusal, partitioned by what refused. An authority that judged
 # the candidate (guard, holdouts, certifiers, spine, merge pre-authorisation, provenance, attached
 # evidence) reports a defect in what was built. The identity broker, a base that moved, and the
-# early trust-root currency check (a base-move pre-check that can only refuse sooner, never judge
-# the build: its residue after the stale-base texts is not a verdict on the candidate) report the
-# environment; `unknown` reports nothing. `reconsideration.py` uses the same unjudged set, so the
-# two modules cannot disagree about which refusals judged the candidate.
+# early trust-root currency check report the environment: the currency check is a base-move
+# pre-check that runs after the security guard has already spoken on trust-root touches, so what
+# reaches its code (after every stale-base text is classified `stale_base`) is a stale validator
+# worktree, a gh/git failure, or the guard-duplicate check that the guard's own verdict already
+# covers; routing that residue as unjudged withholds a repair licence rather than granting one.
+# `unknown` reports nothing. `reconsideration.py` uses the same unjudged set, so the two modules
+# cannot disagree about which refusals judged the candidate.
 IMPLEMENTATION_CODES = frozenset({"security_guard", "attached_evidence", "code_holdout", "provenance",
                                   "architecture_holdout", "certifier:contract", "certifier:design", "certifier:governor",
                                   "evidence_spine", "merge_preauth"})
