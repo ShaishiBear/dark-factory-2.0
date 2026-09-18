@@ -4575,6 +4575,48 @@
       "find": "        print(f\"FACTORY_TRANSITION_REFUSED reason={str(exc)[:300]!r}\", flush=True)\n        return 1",
       "replace": "        print(f\"FACTORY_TRANSITION_REFUSED reason={str(exc)[:300]!r}\", flush=True)\n        _write(args.output, {\"schema\": \"dark-factory/transition-status\", \"refused\": str(exc)[:300]})\n        return 1",
       "why": "A refused projection writes no record: a partial status file could be read as a phase or release decision. Detector: tests/factory/test_transition_views.py"
+    },
+    {
+      "id": "tcb-unclassified-module-ignored",
+      "file": "factory_kernel/tcb.py",
+      "find": "    if unclassified:\n        raise TcbRefused(f\"unclassified kernel modules: {unclassified}\")\n",
+      "replace": "",
+      "why": "WP06: every kernel module is classified in .factory/tcb.json; a new module outside the record would carry no TCB class. Detector: tests/factory/test_tcb.py"
+    },
+    {
+      "id": "tcb-graph-drift-ignored",
+      "file": "factory_kernel/tcb.py",
+      "find": "    if graph_sha != record[\"graph_sha256\"]:\n",
+      "replace": "    if False:\n",
+      "why": "WP06/SPEC 15.1: the import closure is pinned; a new import edge must be described by a reviewed record change. Detector: tests/factory/test_tcb.py"
+    },
+    {
+      "id": "tcb-unpermitted-root-import",
+      "file": "factory_kernel/tcb.py",
+      "find": "        if roots & set(deps) and name not in permitted:\n",
+      "replace": "        if False:\n",
+      "why": "WP06: privileged roots (credentials, mutation) are imported only by permitted entrypoints. Detector: tests/factory/test_tcb.py"
+    },
+    {
+      "id": "tcb-unrecorded-violation-accepted",
+      "file": "factory_kernel/tcb.py",
+      "find": "    unknown = sorted(found - known)\n    if unknown:\n",
+      "replace": "    unknown = sorted(found - known)\n    if False:\n",
+      "why": "WP06: a proposal or ui module reaching a credential-bearing root by import is refused unless recorded as a known violation. Detector: tests/factory/test_tcb.py"
+    },
+    {
+      "id": "tcb-stale-violation-kept",
+      "file": "factory_kernel/tcb.py",
+      "find": "    stale = sorted(known - found)\n    if stale:\n",
+      "replace": "    stale = sorted(known - found)\n    if False:\n",
+      "why": "WP06: the violation allowance only shrinks; a recorded violation that no longer exists must be removed, or the record silently permits its return. Detector: tests/factory/test_tcb.py"
+    },
+    {
+      "id": "tcb-closure-bound-ignored",
+      "file": "factory_kernel/tcb.py",
+      "find": "        if total > bounds[\"total_max_bytes\"]:\n",
+      "replace": "        if False:\n",
+      "why": "SPEC 15.1: the authority closure the host reads is bounded in total bytes; exceeding it becomes a host refusal, not a silent pass. Detector: tests/factory/test_tcb.py"
     }
   ]
 }

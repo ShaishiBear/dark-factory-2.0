@@ -126,7 +126,7 @@ class ProfileTests(unittest.TestCase):
         from factory_kernel.exploration_repository import SELECTION_BOUND
 
         self.assertIn("project_profile.py", PROGRAMS)
-        self.assertEqual(POLICY_FILES, (".factory/project-profile.json",))
+        self.assertEqual(POLICY_FILES, (".factory/project-profile.json", ".factory/tcb.json"))
         size = sum((ROOT / "factory_kernel" / name).stat().st_size for name in PROGRAMS)
         size += sum((ROOT / path).stat().st_size for path in POLICY_FILES)
         self.assertLessEqual(size, SELECTION_BOUND - 50000, f"closure is {size} bytes; leave 50 KB of headroom")

@@ -192,7 +192,7 @@ def protected_path(path: str) -> bool:
             "FACTORY_RULES.md", "MISSION.md", "CLAUDE.md", "PROGRAMME.md",
             ".factory/kernel.json", ".factory/evidence-spine.json",
             ".factory/architecture.json", ".factory/locks/floor.json",
-            ".factory/project-profile.json", ".factory/authority-profiles.json",
+            ".factory/project-profile.json", ".factory/authority-profiles.json", ".factory/tcb.json",
             "scripts/frontier_filter.py",
         }
         or path.startswith("factory_kernel/")
