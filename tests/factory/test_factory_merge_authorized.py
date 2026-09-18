@@ -66,6 +66,7 @@ def runtime_with(tmp: Path, github: FakeGitHub) -> KernelRuntime:
     rt.config = mock.MagicMock()
     rt.config.runtime.work_root = tmp / "work"
     rt.config.default_branch = "main"
+    rt.config.repository = "octo/dynachat"  # the broker binds the grant to the exact subject, repository included
     return rt
 
 

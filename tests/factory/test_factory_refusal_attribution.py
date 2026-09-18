@@ -101,7 +101,7 @@ class TheCursorIsClosedByTheAuthorityThatReturns(unittest.TestCase):
         authority executing, so nothing there can borrow a name."""
         source = (ROOT / "factory_kernel" / "runtime.py").read_text(encoding="utf-8")
         after_merge_pre = source.split('self._authority_cursor = stage_context = "merge_preauth"', 1)[1]
-        merge_call = after_merge_pre.index("self.github.merge_squash(")
+        merge_call = after_merge_pre.index("self._merge_squash_through_broker(")
         opened = after_merge_pre.find("self._authority_cursor = ", 0, merge_call)
         self.assertEqual(opened, -1, "no cursor may be opened between merge-pre and the merge")
 

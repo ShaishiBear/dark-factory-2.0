@@ -332,6 +332,10 @@ COPY_FILES = (
     "factory_kernel/gateway_server.py",
     "tests/factory/test_gateway_server.py",
     "tests/factory/gateway_stub_app.py",
+    # WP06 capabilities and the in-process effect broker on the merge path, with the merge detector.
+    "tests/factory/test_capabilities.py",
+    "tests/factory/test_effect_broker.py",
+    "tests/factory/test_factory_merge_authorized.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

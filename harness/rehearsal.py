@@ -371,6 +371,7 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
                   git_state: dict[str, str] | None = None,
                   red_passes_after_rebase: bool = False,
                   pack_checkpoints: Sequence[Mapping[str, Any]] | None = None,
+                  pr_head: str = HEAD,
                   ) -> Callable[..., str]:
     """Stand in for the deterministic tools, materializing what each is contracted to write.
 
@@ -402,6 +403,14 @@ def exec_recorder(trace: Trace, *, fail: str | None = None,
             target = Path(out)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps({"version": "1.0", "tool": name}), encoding="utf-8")
+        if name == "merge_verify.py:pre":
+            # The contract of the pre phase: the exact subject the merge is authorised for. The
+            # broker derives its grant from these four fields, so the stand-in must write them.
+            for out in outputs:
+                Path(out).write_text(json.dumps({
+                    "version": "1.0", "tool": name, "base_ref": "main", "base_sha": BASE,
+                    "head_sha": pr_head, "head_tree_sha": "3" * 40, "evidence_sha256": "4" * 64,
+                }), encoding="utf-8")
         if tool == "factory_proof.py" and "red" in argv[:3]:
             # RED binds `test_commit` to the commit the worktree is at; a checkpoint that passes
             # after a rebase is the real program's refusal, reproduced here.
@@ -552,7 +561,7 @@ def rehearse(scenario: Scenario) -> Trace:
             trace, fail=scenario.fail, fail_detail=scenario.fail_detail,
             red_files=scenario.red_files, pack_base=scenario.pack_base,
             git_state=git_state, red_passes_after_rebase=scenario.red_passes_after_rebase,
-            pack_checkpoints=scenario.pack_checkpoints)
+            pack_checkpoints=scenario.pack_checkpoints, pr_head=scenario.head)
         runtime._prepare_worktree = lambda cwd, paths: trace.record("control", "prepare_worktree")  # type: ignore[method-assign]
         runtime.check_stop = lambda: trace.record("control", "check_stop")  # type: ignore[method-assign]
 

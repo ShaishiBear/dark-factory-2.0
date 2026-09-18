@@ -68,6 +68,10 @@
       "class": "proof-policy",
       "reason": "decides what evidence means: spine policy, independence, closure, attestations, retention, refusal vocabulary"
     },
+    "capabilities": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
+    },
     "carry": {
       "class": "trusted-observer",
       "reason": "independently observes a source, platform or run and reports without deciding"
@@ -124,6 +128,10 @@
     "dispatch_plan": {
       "class": "trusted-observer",
       "reason": "independently observes a source, platform or run and reports without deciding"
+    },
+    "effect_broker": {
+      "class": "privilege-enforcement",
+      "reason": "deterministic authority over execution: exchange, budget, reservation, fence and policy"
     },
     "evaluation_protocol": {
       "class": "proof-policy",
@@ -566,7 +574,7 @@
       "reason": "reaches a credential-bearing root by import; to be cut by the WP06 broker extraction (recorded, not permitted)"
     }
   ],
-  "graph_sha256": "3b8792426a26a67f3f4a1acdc1a82d4b6bc4e599a78ec81e11037e96317e1a41",
+  "graph_sha256": "01f56e265c1952a9a1d6f4e67c5e4c79233d06b9c5dab7759bb7fd00dc2af0ec",
   "closure_bounds": {
     "authority": {
       "files": [
