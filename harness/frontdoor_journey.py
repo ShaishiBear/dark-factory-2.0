@@ -5,12 +5,13 @@ Serves `FrontDoorApplication` on a loopback port over a disposable intent store 
 holds one approved scope, drives a real browser with agent-browser (the same tool the canonical
 E2E journey uses): unlock with the owner token, wait for the decision graph (its SVG node
 buttons and its table cells, as the accessibility tree reports them) to show the recorded
-decision, open the Prove view and read its blocker line, then stop the service, start a fresh
-one over the same directory, unlock again and read the same rows. The journey passes only when
-the graph after the restart is the graph before it, reconstructed from the store alone, and the
-Prove view rendered its blocker line. This fixture has no programme, so no requirement node
-exists and no "unproven shown green" case can arise here; that property is covered by the Node
-detectors over projections that carry one.
+decision, open the Prove view (the tab must become selected and the SVG must be named for it;
+the blocker line is rendered in every view, so it is read but is not what shows Prove opened),
+then stop the service, start a fresh one over the same directory, unlock again and read the
+same rows. The journey passes only when the graph after the restart is the graph before it,
+reconstructed from the store alone, and the Prove view was shown. This fixture has no
+programme, so no requirement node exists and no "unproven shown green" case can arise here;
+that property is covered by the Node detectors over projections that carry one.
 
 This is a local maintainer fixture, not a rung of the canonical ladder: it needs agent-browser
 on PATH and a browser, makes no paid call, touches no remote system, and prints one
@@ -121,23 +122,32 @@ def _unlock(session: str, snapshot: str, token_ref: str, token: str) -> None:
     _browser(session, "click", f"@{button}")
 
 
-def _prove_blockers(session: str, snapshot: str) -> str:
-    """Open the Prove view and return its blocker line as the page renders it."""
+def _prove_blockers(session: str, snapshot: str) -> dict:
+    """Open the Prove view and return what the page shows for it: the tab must be selected and
+    the SVG must be named for the Prove view after the click (the blocker line itself is rendered
+    in every view, so it alone would not show that Prove was opened)."""
     tab = next((m.group(1) for m in re.finditer(r'tab "Prove"[^\n]*?\bref=([^\]\s,]+)', snapshot)), None)
     if tab is None:
         raise JourneyFailure("no Prove tab found: " + snapshot[-800:])
+    if re.search(r'tab "Prove" \[selected', snapshot):
+        raise JourneyFailure("the Prove tab was already selected before the click; the default view should be Intent")
     _browser(session, "click", f"@{tab}")
-    # The blocker line is static text, absent from the interactive snapshot: read the full tree.
+    # Static text is absent from the interactive snapshot: read the full accessibility tree.
     deadline = time.time() + 20
     shown = ""
-    while time.time() < deadline and "blocker" not in shown:
+    while time.time() < deadline and not (re.search(r'tab "Prove" \[selected', shown) and "Prove view" in shown):
         shown = _browser(session, "snapshot")
-        if "blocker" not in shown:
+        if not (re.search(r'tab "Prove" \[selected', shown) and "Prove view" in shown):
             time.sleep(0.5)
+    if not re.search(r'tab "Prove" \[selected', shown):
+        raise JourneyFailure("the Prove tab did not become selected: " + shown[-800:])
+    svg_label = next((l.strip() for l in shown.splitlines() if "Prove view" in l), "")
+    if not svg_label:
+        raise JourneyFailure("the SVG was not named for the Prove view: " + shown[-800:])
     line = next((l.strip() for l in shown.splitlines() if "blocker" in l), "")
     if not line:
-        raise JourneyFailure("the Prove view rendered no blocker line: " + shown[-800:])
-    return line
+        raise JourneyFailure("no blocker line rendered: " + shown[-800:])
+    return {"tab_selected": True, "svg_label": svg_label, "blocker_line": line}
 
 
 def _graph_rows(snapshot: str) -> list[str]:
@@ -196,7 +206,7 @@ def run(port: int, keep_session: bool = False) -> dict:
                     pass
     if rows_before != rows_after:
         raise JourneyFailure(f"graph rows differ after restart: {rows_before} != {rows_after}")
-    return {"rows": rows_before, "prove_blockers": blockers, "restarted_equal": True, "port": port}
+    return {"rows": rows_before, "prove": blockers, "restarted_equal": True, "port": port}
 
 
 def main(argv: list[str] | None = None) -> int:
