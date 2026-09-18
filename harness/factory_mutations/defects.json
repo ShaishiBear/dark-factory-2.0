@@ -5170,6 +5170,55 @@
       "find": "  const active = nodes.some((n) => n.kind === \"programme-item\" && n.currentness === \"recorded\" && n.issue != null && n.pr == null);\n",
       "replace": "  const active = nodes.some((n) => (n.kind === \"run\" || n.kind === \"programme-item\") && n.currentness === \"recorded\" && (n.gaps || []).length === 0);\n",
       "why": "SPEC 10 transport: 5 s polling only while work is active. A retained run or a linked item that already has a PR is history; treating their presence as activity keeps every visible tab at the fast rate forever. Detector: tests/factory/test_decision_graph_ui.py"
+    },
+    {
+      "id": "experiment-runner-credentials-reach-the-child",
+      "file": "factory_kernel/experiment_runner.py",
+      "find": "    env = child_environment()\n",
+      "replace": "    env = {**os.environ, **child_environment()}\n",
+      "why": "SPEC 8 / WP08 acceptance: a probe cannot access production credentials; the experiment child's environment is an allowlist, never the service's own environment. Detector: tests/factory/test_experiment_runner.py"
+    },
+    {
+      "id": "experiment-runner-forged-family-accepted",
+      "file": "factory_kernel/experiment_runner.py",
+      "find": "    if not isinstance(receipt, Mapping) or receipt.get(\"runner\") != spec[\"kind\"] or receipt.get(\"kind\") != \"measured\":\n",
+      "replace": "    if not isinstance(receipt, Mapping) or receipt.get(\"kind\") != \"measured\":\n",
+      "why": "C08 execute_registered: the parent re-validates that the receipt is the requested family's; a receipt of another runner is not this experiment's measurement. Detector: tests/factory/test_experiment_runner.py"
+    },
+    {
+      "id": "experiment-runner-foreign-spec-receipt-accepted",
+      "file": "factory_kernel/experiment_runner.py",
+      "find": "    if receipt.get(\"input_sha256\") != sha256_value(dict(spec)):\n        raise ExperimentRefused(\"the receipt names another spec\")\n",
+      "replace": "    if False:\n        raise ExperimentRefused(\"the receipt names another spec\")\n",
+      "why": "C08: the receipt must bind the exact spec that was reserved; a receipt of another spec would let a child substitute a measurement. Detector: tests/factory/test_experiment_runner.py"
+    },
+    {
+      "id": "experiment-runner-timeout-recorded-as-failure",
+      "file": "factory_kernel/experiment_runner.py",
+      "find": "        except subprocess.TimeoutExpired as exc:\n            attempt.update(status=\"timeout\", detail=\"the bounded workload did not finish within the stated environment and limit\")\n            raise ExperimentTimeout(attempt[\"detail\"]) from exc\n",
+      "replace": "        except subprocess.TimeoutExpired as exc:\n            attempt.update(status=\"failed\", detail=\"child failed\")\n            raise ExperimentFailed(attempt[\"detail\"]) from exc\n",
+      "why": "SPEC 8: a timeout proves only that the bounded workload did not finish within the stated environment and limit; it is recorded as a timeout naming its limit, not as a generic failure. Detector: tests/factory/test_experiment_runner.py"
+    },
+    {
+      "id": "experiment-runner-lease-not-released-on-failure",
+      "file": "factory_kernel/experiment_runner.py",
+      "find": "        if bundle is not None:\n            attempt[\"lease_release\"] = leases.release(bundle, now=int(time.time()) if now is None else now).to_dict()\n",
+      "replace": "        if bundle is not None and attempt.get(\"status\") == \"complete\":\n            attempt[\"lease_release\"] = leases.release(bundle, now=int(time.time()) if now is None else now).to_dict()\n",
+      "why": "C08 / WP07 leases: the runner slot is released whatever happened to the attempt; a failed or timed-out experiment that keeps its lease blocks every later experiment of the session. Detector: tests/factory/test_experiment_runner.py"
+    },
+    {
+      "id": "experiment-runner-child-failure-becomes-measurement",
+      "file": "factory_kernel/experiment_runner.py",
+      "find": "        if not isinstance(result, Mapping) or result.get(\"status\") != \"complete\":\n",
+      "replace": "        if not isinstance(result, Mapping):\n",
+      "why": "SPEC 8: failure to start or a failed child is not a measurement; a child that reported failure must not have its (absent) receipt verified as a result. Detector: tests/factory/test_experiment_runner.py"
+    },
+    {
+      "id": "exploration-experiment-runs-in-process",
+      "file": "factory_kernel/exploration.py",
+      "find": "            receipt = execute_registered(request[\"probe\"], context=state[\"sessions\"][command[\"session_id\"]][\"context\"],\n                                         check_stop=self.check_stop, leases=self.leases(), session_id=command[\"session_id\"],\n                                         reservation_id=reservation[\"id\"])\n",
+      "replace": "            from .experiments import run_experiment as _run\n            receipt = _run(request[\"probe\"], context=state[\"sessions\"][command[\"session_id\"]][\"context\"], check_stop=self.check_stop)\n",
+      "why": "SPEC 8 / WP08: the exploration service runs registered experiments through the contained runner under a lease, never in its own process; an in-process run records no attempt and holds no lease. Detector: tests/factory/test_experiment_runner.py"
     }
   ]
 }

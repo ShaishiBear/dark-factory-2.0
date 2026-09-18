@@ -8,7 +8,9 @@ from .frontdoor_intent import IntentRefused, _shape, _text, _texts
 from .frontdoor_programme import prepare_programme
 from .programme import compile_programme
 from .exploration_policy import comparison, validate_addition, validate_policy, validate_predictions
-from .experiments import metrics_for, run_experiment, strategy_of, validate_experiment
+from .experiments import metrics_for, strategy_of, validate_experiment
+from .experiment_runner import execute_registered
+from .lease_store import LeaseStore
 from .predictions import outcomes_for
 from .exploration_records import ExplorationRecords
 
@@ -17,6 +19,13 @@ class Exploration:
     def __init__(self, store, context, *, check_stop, app_login):
         self.records = ExplorationRecords(store)
         self.context, self.check_stop, self.app_login = context, check_stop, app_login
+        self._leases = None
+
+    def leases(self):
+        """The lease store for contained experiments, beside the intent store's history files."""
+        if self._leases is None:
+            self._leases = LeaseStore(self.records.store.directory / "experiments.sqlite")
+        return self._leases
 
     def _context(self):
         value = deepcopy(self.context())
@@ -156,13 +165,19 @@ class Exploration:
             return state
         reservation = event["data"]
         # No model-supplied runner or callback is accepted: the registry dispatches the spec's
-        # family to its reviewed runner, over this session's frozen repository context.
+        # family to its reviewed runner, over this session's frozen repository context, in a
+        # contained child under a lease (experiment_runner). A timeout, a child failure or a
+        # refused receipt is a failed attempt, never a measurement; the attempt is recorded.
+        attempt = None
         try:
-            receipt = run_experiment(request["probe"], context=state["sessions"][command["session_id"]]["context"],
-                                     check_stop=self.check_stop)
+            receipt = execute_registered(request["probe"], context=state["sessions"][command["session_id"]]["context"],
+                                         check_stop=self.check_stop, leases=self.leases(), session_id=command["session_id"],
+                                         reservation_id=reservation["id"])
+            attempt = receipt.pop("attempt", None) if isinstance(receipt, dict) else None
             status, failure = "complete", None
         except Exception as exc:
             receipt, status, failure = None, "failed", type(exc).__name__
+            attempt = getattr(exc, "attempt", None)
         completion = {"idempotency_key": "probe-result-" + reservation["id"],
                       "expected_project_version": state["project_version"],
                       "session_id": command["session_id"], "request": {"reservation": reservation["id"]}}
@@ -195,7 +210,8 @@ class Exploration:
             return "observed", {"reservation_id": reservation["id"], "round": session["round"],
                 "context_identity": session["context"]["identity"], "status": status, "failure": failure,
                 "receipt": receipt, "receipt_sha256": sha256_value(receipt), "measurements": measurements,
-                "claim_observations": claim_observations, "prediction_outcomes": prediction_outcomes}
+                "claim_observations": claim_observations, "prediction_outcomes": prediction_outcomes,
+                "attempt": attempt}
 
         # A stopped/stale/concurrent completion remains pending and charged. Never rerun it.
         return self._append(project, principal, completion, "experiment-result", finish)[0]
