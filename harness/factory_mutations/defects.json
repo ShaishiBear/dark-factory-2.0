@@ -4645,6 +4645,13 @@
       "find": "        print(f\"CLI_COMPATIBILITY_FAILED reason=binary_missing binary={args.binary}\")\n        return 1\n",
       "replace": "        print(f\"CLI_COMPATIBILITY_FAILED reason=binary_missing binary={args.binary}\")\n        return 0\n",
       "why": "SPEC 5: the gate fails explicitly; a missing CLI cannot pass it. Detector: tests/factory/test_cli_compatibility_spike.py"
+    },
+    {
+      "id": "cli-spike-retry-counts-probe",
+      "file": "harness/cli_compatibility_spike.py",
+      "find": "    if not retry or sum(1 for q in retry[\"requests\"] if q[\"on_channel\"]) < 2 or retry[\"exit_code\"] != 0:\n",
+      "replace": "    if not retry or len(retry[\"requests\"]) < 2 or retry[\"exit_code\"] != 0:\n",
+      "why": "SPEC 5: the retry check counts model requests on the channel; counting every recorded request lets a CLI that probes once and never retries a 529 pass. Detector: tests/factory/test_cli_compatibility_spike.py"
     }
   ]
 }

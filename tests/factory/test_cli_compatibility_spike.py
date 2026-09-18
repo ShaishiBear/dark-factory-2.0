@@ -56,7 +56,8 @@ class SpikeHarnessTests(unittest.TestCase):
 
     def test_the_gate_fails_explicitly_on_a_leak_a_wrong_path_or_a_missing_tool_result(self):
         for mode, needle in (("leak", "credential leaked"), ("wrong_path", "never reached POST /v1/messages"), ("no_tool_result", "never posted a tool_result"),
-                             ("header_leak", "travelled in a header"), ("echo_prompt", "return the provider's answer")):
+                             ("header_leak", "travelled in a header"), ("echo_prompt", "return the provider's answer"),
+                             ("probe_no_retry", "did not retry once after a 529")):
             with self.subTest(mode=mode):
                 code, record, text = run_spike(self.tmp, mode=mode)
                 self.assertEqual((code, record["status"]), (1, "incompatible"), text)
@@ -67,6 +68,9 @@ class SpikeHarnessTests(unittest.TestCase):
         code, record, text = run_spike(self.tmp, mode="get_probe")
         self.assertEqual((code, record["status"]), (0, "compatible"), text)
         self.assertEqual(record["observations"]["off_channel_attempts"], ["GET /v1/models"])
+        # Observation fields count model requests only, never the probe.
+        self.assertTrue(record["observations"]["first_request_streams"])
+        self.assertEqual(record["observations"]["redirect_scenario_requests_on_channel"], 2)
         self.assertTrue(record["observations"]["credential_on_off_channel_attempt"])
         probe = [q for q in record["scenarios"][0]["requests"] if not q["on_channel"]][0]
         self.assertEqual((probe["method"], probe["headers"]["x-api-key"]), ("GET", "<redacted>"))

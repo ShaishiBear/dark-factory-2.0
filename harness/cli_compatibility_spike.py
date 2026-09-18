@@ -290,7 +290,7 @@ def judge(results: list[dict]) -> list[str]:
     if not tool or not any(q["tool_result"] for q in tool["requests"]):
         problems.append("tool: the CLI never posted a tool_result after the fake tool_use (tool exchange not observed)")
     retry = by.get("retry")
-    if not retry or len(retry["requests"]) < 2 or retry["exit_code"] != 0:
+    if not retry or sum(1 for q in retry["requests"] if q["on_channel"]) < 2 or retry["exit_code"] != 0:
         problems.append("retry: the CLI did not retry once after a 529 overloaded envelope and then succeed")
     error = by.get("error")
     if not error or error["exit_code"] == 0 or error["timed_out"]:
@@ -315,14 +315,14 @@ def observations(results: list[dict], foreign_hits: list[dict]) -> dict:
         "off_channel_attempts": sorted({f"{q['method']} {q['path']}" for r in results for q in r["requests"] if not q["on_channel"]}),
         "credential_on_off_channel_attempt": any(q["headers"].get("x-api-key") == "<redacted>" or q["headers"].get("authorization") == "<redacted>"
                                                  for r in results for q in r["requests"] if not q["on_channel"]),
-        "first_request_streams": bool(by.get("plain", {}).get("requests")) and by["plain"]["requests"][0]["stream"],
+        "first_request_streams": next((q["stream"] for q in by.get("plain", {}).get("requests", []) if q["on_channel"]), False),
         "followed_cross_origin_redirect": bool(foreign_hits),
         "credential_forwarded_cross_origin": any(h["credential_forwarded"] for h in foreign_hits),
         "foreign_origin_hits": foreign_hits,
-        "redirect_scenario_requests_on_channel": len(redirect["requests"]),
+        "redirect_scenario_requests_on_channel": sum(1 for q in redirect["requests"] if q["on_channel"]),
         # Non-streaming is observed, not gated: the CLI decides when to stream, and the only
         # non-streaming exchange seen so far is its fallback after the foreign 404.
-        "nonstreaming_request_completed": any(not q["stream"] and r["exit_code"] == 0 for r in results for q in r["requests"]),
+        "nonstreaming_request_completed": any(q["on_channel"] and not q["stream"] and r["exit_code"] == 0 for r in results for q in r["requests"]),
     }
 
 

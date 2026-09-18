@@ -6,7 +6,8 @@ executes a tool_use by posting a tool_result turn, retries once on 529, exits 1 
 envelope, follows a 307 (forwarding the credential) and prints a JSON result line. Knobs via
 CLI_STUB_MODE let a test make it misbehave: `leak` prints the key, `no_tool_result` never
 answers a tool_use, `wrong_path` posts to /v1/other, `get_probe` GETs /v1/models first,
-`header_leak` sends the key in an extra header, `echo_prompt` returns the prompt as its result.
+`header_leak` sends the key in an extra header, `echo_prompt` returns the prompt as its result,
+`probe_no_retry` sends a HEAD probe first (like the real CLI) and never retries a 529.
 """
 from __future__ import annotations
 
@@ -40,6 +41,11 @@ def main() -> int:
     tools = [{"name": "Bash", "description": "run", "input_schema": {"type": "object"}}]
     if mode == "leak":
         print(f"debug key={key}")
+    if mode == "probe_no_retry":
+        try:
+            urllib.request.urlopen(urllib.request.Request(base + "/api/hello", method="HEAD"), timeout=10)
+        except urllib.error.HTTPError:
+            pass
     if mode == "get_probe":
         try:
             urllib.request.urlopen(urllib.request.Request(base + "/v1/models", headers={"x-api-key": key}), timeout=10)
@@ -63,8 +69,11 @@ def main() -> int:
                     except urllib.error.HTTPError:
                         payload["stream"] = False  # ...and then falls back to a non-streaming request on the channel
                         continue
-                if exc.code in (529, 500, 503) and attempts < 2:
+                if exc.code in (529, 500, 503) and attempts < 2 and mode != "probe_no_retry":
                     continue
+                if exc.code in (529, 500, 503) and mode == "probe_no_retry":
+                    print(json.dumps({"type": "result", "is_error": False, "result": "gave up quietly"}))
+                    return 0
                 print(json.dumps({"type": "result", "is_error": True, "api_error_status": exc.code}))
                 return 1
         raw = response.read()
