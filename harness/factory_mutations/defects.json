@@ -2038,7 +2038,7 @@
     {
       "id": "factory-mutation-failures-leave-their-members-unnamed",
       "file": "harness/factory_mutations/run.py",
-      "find": "    for state, marker in ((SURVIVED, \"FACTORY_MUTATIONS_ESCAPED\"),\n                          (INFRA_ERROR, \"FACTORY_MUTATIONS_UNINJECTED\"),\n                          (TIMEOUT, \"FACTORY_MUTATIONS_TIMED_OUT\"),\n                          (NOT_RUN, \"FACTORY_MUTATIONS_MISSING\")):\n        ids = [result.mutant_id for result in results if result.state == state]\n        if ids:\n            print(f\"{marker}={','.join(ids)}\", flush=True)\n",
+      "find": "    for state, marker in ((SURVIVED, \"FACTORY_MUTATIONS_ESCAPED\"),\n                          (INFRA_ERROR, \"FACTORY_MUTATIONS_UNINJECTED\"),\n                          (TIMEOUT, \"FACTORY_MUTATIONS_TIMED_OUT\"),\n                          (NOT_RUN, \"FACTORY_MUTATIONS_MISSING\")):\n        ids = [result.mutant_id for result in results\n               if result.state == state and not (state == NOT_RUN and shard_count > 1)]\n        if ids:\n            print(f\"{marker}={','.join(ids)}\", flush=True)\n",
       "replace": "",
       "why": "A failing family would again reach the refusal artifact as a count, because every consumer of this output keeps only its tail."
     },
@@ -5251,7 +5251,7 @@
     {
       "id": "mutation-baseline-red-detector-still-proves-a-kill",
       "file": "harness/factory_mutations/run.py",
-      "find": "    usable = [rel for rel in detector_order(defect, order, causal)\n              if baseline.get(\"detectors\", {}).get(rel, {}).get(\"status\") == PASSED]\n",
+      "find": "    usable = [rel for rel in detector_order(defect, order, causal)\n              if statuses.get(rel, {}).get(\"status\") == PASSED]\n",
       "replace": "    usable = list(detector_order(defect, order, causal))\n",
       "why": "A detector that was already red without the mutant cannot prove anything with it. Skipping the baseline filter lets one broken test file certify all 950 mutants as caught. Detector: tests/factory/test_mutation_execution_outcomes.py"
     },
@@ -5268,6 +5268,13 @@
       "find": "    if missing:\n        reasons.append(f\"never run: {','.join(missing[:10])}\")\n",
       "replace": "",
       "why": "Shards that between them never measured a mutant have not measured the catalogue. Dropping the missing check lets a lost shard aggregate to green. Detector: tests/factory/test_mutation_execution_outcomes.py"
+    },
+    {
+      "id": "mutation-blinded-mutant-reported-as-a-bypass",
+      "file": "harness/factory_mutations/run.py",
+      "find": "        if state != INFRA_ERROR and named and len(blinded) == len(named):\n            state, diagnostic[\"reason\"] = INFRA_ERROR, (\n                \"every detector this defect names was red on the baseline: \" + \",\".join(blinded))\n",
+      "replace": "        if False:\n            pass\n",
+      "why": "A defect whose named detector was red on the baseline had nothing looking for it; the rest of the suite passing says only that those files were not looking either. Dropping this branch reports that absence of observation as a surviving trust-root bypass, which is the one word this runner exists to make honest. Detector: tests/factory/test_mutation_execution_outcomes.py"
     }
   ]
 }
