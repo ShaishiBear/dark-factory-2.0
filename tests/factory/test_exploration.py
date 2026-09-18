@@ -143,10 +143,30 @@ class ExplorationTests(unittest.TestCase):
         self.assertEqual(values, {"clean": 0, "loop": 1})
         outcomes = {row["claim_id"]: row["outcome"] for row in observation["claim_observations"]}
         self.assertEqual(outcomes, {"clean-assumption": "supported-in-probe", "loop-assumption": "contradicted"})
+        forecasts = {row["subject"]["candidate_id"]: row["outcome"] for row in observation["prediction_outcomes"]}
+        self.assertEqual(forecasts, {"clean": "within", "loop": "within"})  # 0 in [0,0]; 1 in [0,1]
         self.assertEqual(observation["receipt"]["qualification_status"], "UNPROVEN")
         # The claim observation carries the family's admissible claim scope, not the lookup probe's.
         self.assertEqual({row["scope"] for row in observation["claim_observations"]}, {"selected-committed-source-only"})
         self.assertEqual(self.inspect("layers")["comparison"]["preferred"], "clean")
+
+    def test_a_measurement_is_matched_against_the_forecast_frozen_before_it(self):
+        self.add()
+        result = self.engine.experiment("citations", self.command(self.experiment_request()), principal=OWNER)
+        observation = result["sessions"]["lookup"]["observations"][-1]
+        outcomes = {row["subject"]["candidate_id"]: row for row in observation["prediction_outcomes"]}
+        # scan predicted 10-20 comparisons and measured 20 queries over 100 keys; index predicted 40-60.
+        self.assertEqual({key: row["outcome"] for key, row in outcomes.items()}, {"scan": "outside", "index": "outside"})
+        self.assertEqual(outcomes["scan"]["actual"]["value"], observation["measurements"][0]["value"])
+        self.assertEqual(outcomes["scan"]["actual"]["receipt_sha256"], observation["receipt_sha256"])
+        self.assertTrue(all(row["prediction_identity"] for row in outcomes.values()))
+        # A revised forecast for the NEXT observation must be made before it; after the fact, the
+        # recorded outcome stays what it was.
+        self.engine.assess("citations", self.command({"candidates": {"scan": {"lookup": {"low": 1900, "high": 2100, "basis": "After seeing the number."}},
+                                                                     "index": {"lookup": {"low": 15, "high": 25, "basis": "After seeing the number."}}},
+                                                      "basis": "post hoc"}), principal=OWNER)
+        again = self.inspect()["session"]["observations"][-1]
+        self.assertEqual({row["subject"]["candidate_id"]: row["outcome"] for row in again["prediction_outcomes"]}, {"scan": "outside", "index": "outside"})
 
     def test_a_boundary_target_binds_candidates_by_id_and_units_by_family(self):
         # A criterion whose unit is a lookup metric cannot be measured by a boundary spec, even though
