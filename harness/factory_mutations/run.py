@@ -348,6 +348,9 @@ COPY_FILES = (
     "harness/experiments/learning_protocol.json",
     # WP11 experience packets: role-scoped retrieval at the one payload funnel.
     "tests/factory/test_experience.py",
+    # WP12 governed maintenance: deterministic classification, proposals only.
+    "tests/factory/test_maintenance.py",
+    ".factory/maintenance-policy.json",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python

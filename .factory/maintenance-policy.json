@@ -1,0 +1,37 @@
+{
+  "schema": "dark-factory/maintenance-policy",
+  "schema_version": "1.0",
+  "policy_id": "dynachat-maintenance-policy",
+  "version": "2026-09-18.1",
+  "tiers": {
+    "trust-root-authority": {
+      "minimum_lane": "maintainer-lane",
+      "acp_required": true
+    },
+    "protected-deploy": {
+      "minimum_lane": "human-maintenance-lane",
+      "acp_required": true
+    },
+    "application-security": {
+      "minimum_lane": "maintainer-lane",
+      "acp_required": false
+    },
+    "product": {
+      "minimum_lane": "autonomous-factory-lane",
+      "acp_required": false
+    }
+  },
+  "effects": {
+    "product": "product",
+    "security": "application-security",
+    "deploy": "protected-deploy",
+    "judge": "trust-root-authority",
+    "floor": "trust-root-authority",
+    "capability": "trust-root-authority",
+    "evidence": "trust-root-authority",
+    "policy": "trust-root-authority",
+    "prompt": "trust-root-authority"
+  },
+  "autonomous_lanes": [],
+  "note": "Governed maintenance is proposals only. No autonomous maintenance lane is activated: every cutover request is refused and every trust change stays an Architecture Change Proposal for the maintainer lane, judged by the old authority. Activating a lane is its own governance decision and cannot be made by editing this file from a factory run."
+}
