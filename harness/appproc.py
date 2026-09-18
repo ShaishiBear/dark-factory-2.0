@@ -184,8 +184,8 @@ class HttpApp:
             return None
         if str(ROOT) not in sys.path:  # the harness scripts run with harness/ as sys.path[0]
             sys.path.insert(0, str(ROOT))
-        from factory_kernel.gateway_server import (GatewayServer, RecordingLedger, load_gateway_policy,
-                                                   open_validation_channels)
+        from factory_kernel.gateway_server import (GatewayServer, RecordingLedger, close_validation_channels,
+                                                   load_gateway_policy, open_validation_channels)
 
         policy = load_gateway_policy(ROOT / ".factory" / "kernel.json")
         if policy is None:
@@ -204,7 +204,11 @@ class HttpApp:
         self._gateway_channels = open_validation_channels(
             policy, credential=lambda: {"authorization": f"Bearer {credential}"}, ledger=RecordingLedger(), binding=binding,
             execution_id=f"validation-app-{self.port}", attempt=binding["run_attempt"], record_dir=record_dir)
-        self.gateway = GatewayServer(self._gateway_channels).start()
+        try:
+            self.gateway = GatewayServer(self._gateway_channels).start()
+        except BaseException:
+            close_validation_channels(self._gateway_channels)
+            raise
         env = dict(os.environ)
         env.update(self.gateway.process_environment(base_url_variable="OPENROUTER_BASE_URL", key_variable="OPENROUTER_API_KEY"))
         print(f"VALIDATION_GATEWAY_STARTED base={self.gateway.base_url} routes={len(self._gateway_channels.channels)} "

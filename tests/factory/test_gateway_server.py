@@ -406,7 +406,10 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(summary["sessions"]["POST /v1/chat/completions"]["calls"], 1)
         self.assertEqual(summary["bundles"]["validation-llm"]["reported_microusd"], 12300)
         self.assertEqual(summary["ledger"]["allowance"], None)
-        self.assertEqual(len(list(self.artifacts.glob("meter-*.json"))), 2)
+        meters = list(self.artifacts.glob("meter-*.json"))
+        self.assertEqual(len(meters), 2)
+        for meter in meters:
+            self.assertNotIn(REAL_KEY, meter.read_text(encoding="utf-8"))
         printed = out.getvalue()
         self.assertIn("VALIDATION_GATEWAY_STARTED", printed)
         self.assertIn("ledger=recording-only", printed)
