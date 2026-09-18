@@ -7,8 +7,9 @@ from .exploration_records import affected_claims
 from .factory_feedback import recorded_handoff
 from .feedback_observation import observe_feedback
 from .frontdoor_intent import IntentRefused, _shape
+from .outcome_router import route_outcome
 from .programme import compile_programme
-from .strategy_findings import establish
+from .strategy_findings import POLICY, establish
 
 
 class StrategyRejection:
@@ -54,6 +55,14 @@ class StrategyRejection:
                                if row["status"] == "contradicted"}) if report else []
         decision = "not-applicable" if not rules else "reconsider" if contradicted else "unresolved" if report is None or any(
             row["status"] == "unresolved" for row in report["findings"]) else "no-contradiction-established"
+        # What the outcome is evidence of, from structure only: the kernel's reason code, the
+        # recorded handoff, the rules registered under the session's frozen policy, and the
+        # independent findings. The refusal's prose is never read. The decision above is the
+        # rule-based verdict; the classification names the cause class and what it licenses.
+        registered_policy = session["context"]["policies"].get(POLICY, {}).get("sha256")
+        classification = route_outcome(outcome["observation"],
+                                       {"sha256": outcome["handoff_sha256"], "policy_sha256": registered_policy},
+                                       rules, report)
 
         def transition(current, current_approval):
             engine._session(current, current_approval, session["id"], allow_stale=True)
@@ -76,13 +85,14 @@ class StrategyRejection:
                 "independent_findings": report, "invalidated_claim_ids": contradicted,
                 "affected_claim_ids": sorted(affected), "frontier": frontier,
                 "supersedes": previous[-1]["id"] if previous else None,
+                "classification": deepcopy(classification),
                 "failure_cause": "unresolved", "qualification_status": "UNPROVEN", "proof_reuse_allowed": False}
             return "strategy-assessed", {**data, "id": sha256_value(data)}
 
         def replay_guard(current, current_approval, payload):
             engine._session(current, current_approval, session["id"], allow_stale=True)
             if (current_approval["spec"] != programme.spec or payload["data"]["independent_findings"] != report
-                    or payload["data"]["decision"] != decision):
+                    or payload["data"]["decision"] != decision or payload["data"]["classification"] != classification):
                 raise IntentRefused("strategy finding changed since recorded assessment")
 
         state, payload, _ = engine.records.append(project, principal, command, transition, replay_guard)
@@ -100,7 +110,10 @@ def after_import(engine, github, project, result, *, principal):
     if previous:
         return {**result, "assessment": deepcopy(previous[-1])}
     if not state["sessions"][outcome["session_id"]]["rejection_rules"]:
-        return result
+        # No strategy rule was registered: the outcome cannot judge the strategy, but it can
+        # still be classified from the kernel's refusal code (a defect the authorities judged,
+        # an environment failure, or nothing attributable).
+        return {**result, "classification": route_outcome(outcome["observation"], outcome["handoff_sha256"], [], None)}
     try:
         assessed = StrategyRejection(engine, github).assess(project, {
             "idempotency_key": "strategy-assess-" + outcome["id"],

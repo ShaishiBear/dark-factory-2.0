@@ -135,6 +135,18 @@ class FeedbackTests(unittest.TestCase):
                    observe_feedback(github, request, download=self.download, now=NOW)):
             return self.service.import_outcome("citations", command or self.fixture.command(self.request), principal=principal)
 
+    def test_an_import_without_registered_rules_is_classified_from_the_refusal_code_alone(self):
+        # The fixture's refusal was reported by the blinded code holdout (a judging authority) and no
+        # strategy rule is registered: the outcome is an implementation defect to repair within the
+        # frozen acceptance; the strategy is not judged and nothing is invalidated.
+        result = self.import_outcome()
+        classification = result["classification"]
+        self.assertEqual((classification["classification"], classification["invalidated_claim_ids"],
+                          classification["repair_within_frozen_acceptance"], classification["basis"]["reason_code"]),
+                         ("implementation-defect", [], True, "code_holdout"))
+        self.assertFalse(classification["basis"]["refusal_text_consulted"])
+        self.assertEqual(result["outcome"]["observation"]["cause"], "unresolved")  # the receipt's own stance is unchanged
+
     def test_real_producer_retention_archive_and_import_preserve_claims_and_spend(self):
         before = self.engine.records.read("citations", OWNER)[0]
         result = self.import_outcome()

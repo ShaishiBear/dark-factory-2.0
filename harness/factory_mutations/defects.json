@@ -4862,6 +4862,41 @@
       "find": "            prediction_outcomes = outcomes_for(session, measurements=measurements,\n                                               context_identity=session[\"context\"][\"identity\"],\n                                               receipt_sha256=sha256_value(receipt))\n",
       "replace": "            prediction_outcomes = []\n",
       "why": "SPEC 8.3 / WP11: every measured actual is matched against the forecast frozen before it and both are retained side by side; an observation that records measurements without their forecast outcomes loses the calibration record the learning layer needs. Detector: tests/factory/test_exploration.py"
+    },
+    {
+      "id": "outcome-router-unauthenticated-receipt-classified",
+      "file": "factory_kernel/outcome_router.py",
+      "find": "    if not isinstance(authenticated_receipt, Mapping) or authenticated_receipt.get(\"provenance\") != AUTHENTICATED_PROVENANCE:\n        gaps.append(\"receipt_not_authenticated\")\n",
+      "replace": "    if False:\n        gaps.append(\"receipt_not_authenticated\")\n",
+      "why": "SPEC 9: only an authenticated outcome may be classified; a hand-written observation carrying a reason code would otherwise become an implementation defect or a contradiction with no platform provenance. Detector: tests/factory/test_outcome_router.py"
+    },
+    {
+      "id": "outcome-router-environment-code-judges-strategy",
+      "file": "factory_kernel/outcome_router.py",
+      "find": "    if code in ENVIRONMENT_CODES:\n        return record(\"environment-provider-failure\", detail=f\"the refusal was reported by {AUTHORITY[code]}; the strategy is unjudged\")\n",
+      "replace": "    if False:\n        return record(\"environment-provider-failure\", detail=f\"the refusal was reported by {AUTHORITY[code]}; the strategy is unjudged\")\n",
+      "why": "WP09 acceptance: a provider or identity failure leaves the strategy unjudged; treating it as unknown or as a defect attributes a cause no authority reported. Detector: tests/factory/test_outcome_router.py"
+    },
+    {
+      "id": "outcome-router-unresolved-finding-is-a-defect",
+      "file": "factory_kernel/outcome_router.py",
+      "find": "        if any(row.get(\"status\") != \"supported\" for row in findings):\n            return record(\"evidence-gap\", detail=\"a registered predicate is unresolved; the strategy question stays open\")\n",
+      "replace": "        if False:\n            return record(\"evidence-gap\", detail=\"a registered predicate is unresolved; the strategy question stays open\")\n",
+      "why": "SPEC 9: unknown stays unknown; an unresolved predicate is an evidence gap, and falling through to the refusal code would classify the strategy question as an implementation defect the facts never decided. Detector: tests/factory/test_outcome_router.py"
+    },
+    {
+      "id": "outcome-router-policy-change-ignored",
+      "file": "factory_kernel/outcome_router.py",
+      "find": "        if registered_policy is not None and facts.get(\"policy_sha256\") not in (None, registered_policy):\n",
+      "replace": "        if False:\n",
+      "why": "SPEC 9: a rule registered under one protected policy cannot be judged by facts observed under another; a changed rule or policy after the outcome refuses a verdict. Detector: tests/factory/test_outcome_router.py"
+    },
+    {
+      "id": "strategy-rejection-classification-not-recorded",
+      "file": "factory_kernel/strategy_rejection.py",
+      "find": "                \"classification\": deepcopy(classification),\n",
+      "replace": "                \"classification\": None,\n",
+      "why": "SPEC 9: the assessment records what the outcome is evidence of, from structure; an assessment without its classification leaves the reconsideration and the retained alternatives with a verdict but no cause class. Detector: tests/factory/test_strategy_rejection.py"
     }
   ]
 }
