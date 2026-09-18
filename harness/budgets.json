@@ -261,9 +261,9 @@
           "count": 1
         }
       ],
-      "bounded_seconds": 780,
+      "bounded_seconds": 990,
       "unbudgeted_seconds": 910,
-      "margin_source": "bounded: the CLI compatibility spike step runs under `timeout 780` (harness/cli_compatibility_spike.py bounds itself at 6 x 90 s plus 180 s for cancellation; 8 s observed locally). unbudgeted: 510 s is the p100 of the three answered preflight probes over nine worker runs (275-510 s, D-070); 400 s is projected for checkout, the four toolchain setups, the pinned CLI installs, the disposable validation database and the locked dependency installs, which the job caches."
+      "margin_source": "bounded: the CLI compatibility spike step runs under `timeout 990`, the harness's own worst case (six scenarios at 90 s plus a 30 s post-kill wait each, cancellation at 90 + 90 + 30 s, a 60 s version call; 8 s observed locally). unbudgeted: 510 s is the p100 of the three answered preflight probes over nine worker runs (275-510 s, D-070); 400 s is projected for checkout, the four toolchain setups, the pinned CLI installs, the disposable validation database and the locked dependency installs, which the job caches."
     },
     "trust-root-currency": {
       "what": "One `python scripts/factory_evidence.py --currency-only`: one `gh pr view`, one `git rev-parse` and two `git diff --name-only` over the trust-root paths. The three cheap questions the Evidence Bundle opens with, asked before a judge is paid.",
@@ -426,8 +426,8 @@
       "scope": "main-regression-job",
       "kind": "projected",
       "environment": "ubuntu-24.04 GitHub-hosted runner, 4 vCPU",
-      "total_seconds": 8120,
-      "source": "The ladder's 10020 s budget, the CLI compatibility spike's 780 s deadline and 1365 s of preflight and setup (with headroom) is a 12165 s floor; 8120 s is the smallest recorded total whose derived budget (12180 s, exactly 203 minutes) clears it.",
+      "total_seconds": 8280,
+      "source": "The ladder's 10020 s budget, the CLI compatibility spike's 990 s deadline and 1365 s of preflight and setup (with headroom) is a 12375 s floor; 8280 s is a recorded total whose derived budget (12420 s, exactly 207 minutes) clears it.",
       "note": "Adds the spike step (blueprint SPECIFICATION 5) to the job the 2026-09-07 projection bounded; nothing measured changed."
     },
     {

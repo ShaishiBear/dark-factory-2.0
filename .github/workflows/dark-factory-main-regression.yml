@@ -32,13 +32,13 @@ jobs:
     runs-on: ubuntu-24.04
     # NOT A GUESS, AND NOT A LITERAL EITHER. This job is the outermost wrapper of the full
     # ladder, so it is the `main-regression-job` scope in harness/budgets.json: the ladder's
-    # own 10020 s budget, the CLI compatibility spike's 780 s deadline (bounded_seconds) and
+    # own 10020 s budget, the CLI compatibility spike's 990 s deadline (bounded_seconds) and
     # 1365 s for the preflight probes (275-510 s over nine worker runs, D-070) and the
-    # toolchain setup, which is 12180 s -- exactly 203 minutes.
+    # toolchain setup, which is 12420 s -- exactly 207 minutes.
     # tests/factory/test_factory_ladder_budget.py fails if this number drops below the budget
     # the record derives, so an inner budget can no longer outgrow this one in silence. The
     # previous 150 was already below the 8460 s the mutation rung alone had been given (D-075).
-    timeout-minutes: 203
+    timeout-minutes: 207
     env:
       # Identical to dark-factory-worker.yml, and for the same reason: the Anthropic SDK inside
       # Claude Code appends `/v1/messages` to this value, so it must be the API root. The probes
@@ -119,14 +119,15 @@ jobs:
         # cannot use the channel). The Windows run of 2026-09-18 against 2.1.259 is in
         # docs/atlas/reviews/local/2026-09-18T0500Z-cli-compatibility-spike/ (local); this step is
         # the first record for the pinned 2.1.245 on the hosted runner.
-        # Bounded, and in the budget record: the harness's own worst case is 6 x 90 s plus 180 s
-        # for the cancellation scenario (720 s); the 780 s `timeout` here is the deadline
+        # Bounded, and in the budget record: the harness's own worst case is 990 s (six
+        # scenarios at 90 s plus a 30 s post-kill wait each, the cancellation scenario at
+        # 90 + 90 + 30 s, and a 60 s version call); the 990 s `timeout` here is the deadline
         # harness/budgets.json carries for this job as `bounded_seconds`, so the job's
         # timeout-minutes still wraps everything it runs (D-075).
         continue-on-error: true
         shell: bash
         run: |
-          timeout 780 python harness/cli_compatibility_spike.py --output "$RUNNER_TEMP/cli-compatibility-spike.json" --timeout 90 --workdir "$RUNNER_TEMP"
+          timeout 990 python harness/cli_compatibility_spike.py --output "$RUNNER_TEMP/cli-compatibility-spike.json" --timeout 90 --workdir "$RUNNER_TEMP"
 
       - name: Retain the CLI compatibility record
         if: always()
