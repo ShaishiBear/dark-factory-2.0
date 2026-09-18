@@ -351,6 +351,8 @@ COPY_FILES = (
     # WP12 governed maintenance: deterministic classification, proposals only.
     "tests/factory/test_maintenance.py",
     ".factory/maintenance-policy.json",
+    # WP10B decision graph UI: the static assets are inside factory_kernel/ (copied as a directory).
+    "tests/factory/test_decision_graph_ui.py",
 )
 # A test file, not every file the copy needs. `startswith("tests/")` also selected the recorded
 # JSON and text fixtures the tests read, and `run_tests` executed each of them as a Python
