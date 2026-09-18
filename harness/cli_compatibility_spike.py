@@ -3,10 +3,19 @@
 SPECIFICATION 5 (provider gateway): before the gateway migration, run an offline spike with the
 installed CLI and a local fake provider covering request routing, streaming and non-streaming
 responses, cancellation, tool exchanges, retries, error envelopes and authentication redaction.
-No upstream key and no paid call: the fake provider is a local HTTP server that speaks the
-Anthropic Messages API shape the CLI expects, and the CLI is pointed at it with a throwaway key.
-The gate FAILS EXPLICITLY (exit 1, `CLI_COMPATIBILITY_FAILED`) when the CLI cannot use the
-channel; it establishes transport compatibility only, never provider accounting (SPEC 5).
+No upstream key and no paid call BY CONSTRUCTION: the CLI's environment is rebuilt with only a
+throwaway key and a loopback base URL (the record says whether the parent process held an
+upstream key), and the fake provider is a local HTTP server that speaks the Anthropic Messages
+API shape the CLI expects. The gate FAILS EXPLICITLY (exit 1, `CLI_COMPATIBILITY_FAILED`) when
+the CLI cannot use the channel; it establishes transport compatibility only, never provider
+accounting (SPEC 5). Gated: routing (every method and path is recorded), the plain exchange,
+streaming, the tool exchange, retry after 529, the 400 envelope, cancellation (a caller-side
+process-tree kill that the provider must see as a disconnect; the CLI's own interrupt path is
+not exercised), credential redaction (output, bodies, any header). Observed, not gated:
+redirects (the gateway never emits one), non-streaming responses (the CLI decides when to
+stream; only its fallback has been seen non-streaming) and off-channel attempts (every method
+and path is recorded; the channel refuses anything but POST /v1/messages and the gated
+scenarios show the CLI tolerates that refusal; 2.1.259 sends HEAD /api/hello before a session).
 
 Run:  python harness/cli_compatibility_spike.py --output <record.json> [--binary claude] [--timeout 90]
 
@@ -29,6 +38,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 FAKE_KEY = "sk-ant-spike-0000000000000000000000000000000000000000"
+PLAIN_SENTINEL = "ok-from-fake-provider-7f3a"  # never appears in any prompt
 REDACTED_HEADERS = {"authorization", "x-api-key", "cookie", "proxy-authorization"}
 MODEL = "claude-sonnet-4-5"  # a name the CLI recognises; the fake provider answers for it
 
@@ -41,6 +51,7 @@ class Scenario:
         self.kill_after_first_chunk = kill_after_first_chunk
         self.requests: list[dict] = []
         self.first_chunk_sent = threading.Event()
+        self.upstream_key_present_in_parent = False
 
 
 class ForeignOrigin(BaseHTTPRequestHandler):
@@ -70,9 +81,16 @@ class FakeProvider(BaseHTTPRequestHandler):
         pass
 
     def _record(self, body: bytes) -> dict:
-        headers = {}
+        headers = {"<method>": self.command}
+        credential_in_other_header = False
         for key, value in self.headers.items():
-            headers[key.lower()] = "<redacted>" if key.lower() in REDACTED_HEADERS else value
+            if key.lower() in REDACTED_HEADERS:
+                headers[key.lower()] = "<redacted>"
+            elif FAKE_KEY in value:
+                headers[key.lower()] = "<redacted: credential in an unexpected header>"
+                credential_in_other_header = True
+            else:
+                headers[key.lower()] = value
         parsed = None
         try:
             parsed = json.loads(body.decode("utf-8")) if body else None
@@ -87,20 +105,31 @@ class FakeProvider(BaseHTTPRequestHandler):
                 for m in parsed.get("messages", []))),
             "tools_offered": len(parsed.get("tools", [])) if isinstance(parsed, dict) else 0,
             "credential_in_body": FAKE_KEY in body.decode("utf-8", errors="replace"),
+            "credential_in_other_header": credential_in_other_header,
         }
         return entry
 
-    def do_POST(self):  # noqa: N802 (http.server API)
+    def _any(self):
+        """Every method and path is recorded; only POST /v1/messages is answered from the plan."""
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else b""
         scenario = FakeProvider.scenario
+        on_channel = self.command == "POST" and self.path.split("?", 1)[0].rstrip("/") == "/v1/messages"
         with FakeProvider.lock:
             entry = self._record(body)
+            entry["on_channel"] = on_channel
             scenario.requests.append(entry)
-            index = len(scenario.requests) - 1
-        if self.path.split("?", 1)[0].rstrip("/") != "/v1/messages":
-            self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "spike: only /v1/messages is routed"}})
+            # Plan steps are consumed by model requests only; a connectivity probe or any other
+            # path is recorded, refused, and does not advance the script.
+            index = sum(1 for q in scenario.requests if q["on_channel"]) - 1
+        if not on_channel:
+            self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "spike: only POST /v1/messages is routed"}})
             return
+        self._answer(scenario, entry, index)
+
+    do_POST = do_GET = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _any  # noqa: N815
+
+    def _answer(self, scenario, entry, index):
         step = scenario.plan[min(index, len(scenario.plan) - 1)]
         kind = step["kind"]
         if kind == "error":
@@ -190,6 +219,8 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 def run_scenario(server_port: int, scenario: Scenario, *, binary: str, timeout: int, workdir: Path) -> dict:
     FakeProvider.scenario = scenario
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ANTHROPIC_", "CLAUDE_CODE_USE_"))}
+    upstream_key_present = any(k in os.environ and os.environ[k] for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"))
+    scenario.upstream_key_present_in_parent = upstream_key_present
     env.update({
         "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server_port}",
         "ANTHROPIC_API_KEY": FAKE_KEY,
@@ -215,7 +246,18 @@ def run_scenario(server_port: int, scenario: Scenario, *, binary: str, timeout: 
     except subprocess.TimeoutExpired:
         proc.kill(); out, err = proc.communicate(); timed_out = True
     combined = (out or "") + (err or "")
+    result_text = None
+    for line in (out or "").splitlines():
+        line = line.strip()
+        if line.startswith("{") and '"result"' in line:
+            try:
+                parsed = json.loads(line)
+                if isinstance(parsed, dict) and parsed.get("type") == "result":
+                    result_text = parsed.get("result")
+            except ValueError:
+                pass
     return {
+        "result_text": result_text,
         "name": scenario.name, "expect": scenario.expect, "argv": [a if a != scenario.prompt else "<prompt>" for a in argv],
         "exit_code": proc.returncode, "killed": killed, "timed_out": timed_out, "seconds": round(time.time() - started, 2),
         "requests": scenario.requests, "stdout_head": (out or "")[:4000], "stderr_head": (err or "")[:2000],
@@ -234,13 +276,13 @@ def judge(results: list[dict]) -> list[str]:
     for r in results:
         if r["credential_in_output"] or any(q["credential_in_body"] for q in r["requests"]):
             problems.append(f"{r['name']}: the credential leaked into output or a request body")
-        if any(q["path"].split("?", 1)[0].rstrip("/") != "/v1/messages" for q in r["requests"]):
-            problems.append(f"{r['name']}: the CLI called a path other than /v1/messages: {paths(r)}")
-        if any("authorization" in q["headers"] and q["headers"]["authorization"] != "<redacted>" for q in r["requests"]):
-            problems.append(f"{r['name']}: an unredacted authorization header was recorded")
+        if not any(q["on_channel"] for q in r["requests"]):
+            problems.append(f"{r['name']}: the CLI never reached POST /v1/messages on the channel (observed: {paths(r)})")
+        if any(q["credential_in_other_header"] for q in r["requests"]):
+            problems.append(f"{r['name']}: the credential travelled in a header other than the two the channel strips")
     plain = by.get("plain")
-    if not plain or not plain["requests"] or plain["exit_code"] != 0 or "ok-from-fake-provider" not in plain["stdout_head"]:
-        problems.append("plain: the CLI did not complete a request through the restricted channel and echo the fake answer")
+    if not plain or not plain["requests"] or plain["exit_code"] != 0 or plain.get("result_text") != PLAIN_SENTINEL:
+        problems.append("plain: the CLI did not complete a request through the restricted channel and return the provider's answer as its result")
     stream = by.get("stream")
     if not stream or not any(q["stream"] for q in stream["requests"]):
         problems.append("stream: no streaming request was observed")
@@ -251,8 +293,8 @@ def judge(results: list[dict]) -> list[str]:
     if not retry or len(retry["requests"]) < 2 or retry["exit_code"] != 0:
         problems.append("retry: the CLI did not retry once after a 529 overloaded envelope and then succeed")
     error = by.get("error")
-    if not error or error["exit_code"] == 0:
-        problems.append("error: a 400 invalid_request_error envelope did not produce a nonzero exit")
+    if not error or error["exit_code"] == 0 or error["timed_out"]:
+        problems.append("error: a 400 invalid_request_error envelope did not produce a prompt nonzero exit")
     cancel = by.get("cancel")
     if not cancel or not cancel["killed"] or not any(q.get("client_disconnected_mid_stream") for q in cancel["requests"]):
         problems.append("cancel: the provider did not observe the client disconnect after a mid-stream cancellation")
@@ -267,12 +309,20 @@ def observations(results: list[dict], foreign_hits: list[dict]) -> dict:
     by = {r["name"]: r for r in results}
     redirect = by.get("redirect", {"requests": []})
     return {
-        "cli_posts_to": sorted({q["path"] for r in results for q in r["requests"]}),
+        "cli_posts_to": sorted({q["path"] for r in results for q in r["requests"] if q["on_channel"]}),
+        # Off-channel attempts are refused by the channel (404) and recorded: the gateway's route
+        # policy must expect them and the CLI must tolerate the refusal, which the gated scenarios show.
+        "off_channel_attempts": sorted({f"{q['method']} {q['path']}" for r in results for q in r["requests"] if not q["on_channel"]}),
+        "credential_on_off_channel_attempt": any(q["headers"].get("x-api-key") == "<redacted>" or q["headers"].get("authorization") == "<redacted>"
+                                                 for r in results for q in r["requests"] if not q["on_channel"]),
         "first_request_streams": bool(by.get("plain", {}).get("requests")) and by["plain"]["requests"][0]["stream"],
         "followed_cross_origin_redirect": bool(foreign_hits),
         "credential_forwarded_cross_origin": any(h["credential_forwarded"] for h in foreign_hits),
         "foreign_origin_hits": foreign_hits,
         "redirect_scenario_requests_on_channel": len(redirect["requests"]),
+        # Non-streaming is observed, not gated: the CLI decides when to stream, and the only
+        # non-streaming exchange seen so far is its fallback after the foreign 404.
+        "nonstreaming_request_completed": any(not q["stream"] and r["exit_code"] == 0 for r in results for q in r["requests"]),
     }
 
 
@@ -300,7 +350,7 @@ def main() -> int:
     threading.Thread(target=foreign.serve_forever, daemon=True).start()
     workdir = args.workdir or Path.cwd()
     scenarios = [
-        Scenario("plain", [{"kind": "text", "text": "ok-from-fake-provider"}], prompt="Reply with exactly ok-from-fake-provider", expect="one request, exit 0, answer echoed"),
+        Scenario("plain", [{"kind": "text", "text": PLAIN_SENTINEL}], prompt="Reply with one word", expect="one request, exit 0, the provider's answer in the JSON result field"),
         Scenario("stream", [{"kind": "text", "text": "streamed ok from fake provider"}], prompt="Say hello", expect="a streaming request observed", args=("--output-format", "stream-json", "--verbose")),
         Scenario("tool", [{"kind": "tool_use", "tool": "Bash", "input": {"command": "echo spike-tool-ran"}}, {"kind": "text", "text": "tool done"}],
                  prompt="Run echo", expect="a second request carrying tool_result", args=("--allowedTools", "Bash")),
@@ -319,8 +369,13 @@ def main() -> int:
     observed = observations(results, list(ForeignOrigin.hits))
     record = {"schema": "dark-factory/cli-compatibility-spike", "schema_version": "1.0", "binary": binary, "cli_version": version,
               "fake_provider": f"http://127.0.0.1:{port}", "model": MODEL, "status": "compatible" if not problems else "incompatible",
-              "problems": problems, "observations": observed, "scenarios": results, "paid_calls": 0,
-              "establishes": "transport compatibility through a restricted local channel only; not provider accounting, not containment"}
+              "problems": problems, "observations": observed, "scenarios": results,
+              # Measured, not asserted: the CLI's environment carried only the throwaway key and a loopback base
+              # URL; whether the parent process held an upstream key is recorded so a leak is visible.
+              "cli_environment": {"base_url": f"http://127.0.0.1:{port}", "api_key": "throwaway (never an upstream key)",
+                                  "upstream_key_present_in_parent_environment": any(s.upstream_key_present_in_parent for s in scenarios),
+                                  "model": MODEL},
+              "establishes": "transport compatibility through a restricted local channel only; not provider accounting, not containment; non-streaming responses are observed (a fallback), not gated"}
     args.output.write_text(json.dumps(record, indent=2), encoding="utf-8")
     for r in results:
         print(f"CLI_SPIKE scenario={r['name']} requests={len(r['requests'])} exit={r['exit_code']} killed={r['killed']} timed_out={r['timed_out']} seconds={r['seconds']}")
@@ -330,7 +385,7 @@ def main() -> int:
             print(f"CLI_SPIKE_PROBLEM {p}")
         print(f"CLI_COMPATIBILITY_FAILED problems={len(problems)} version={version!r}")
         return 1
-    print(f"CLI_COMPATIBILITY_OK version={version!r} scenarios={len(results)} paid_calls=0")
+    print(f"CLI_COMPATIBILITY_OK version={version!r} scenarios={len(results)} upstream_key_in_parent={record['cli_environment']['upstream_key_present_in_parent_environment']}")
     return 0
 
 

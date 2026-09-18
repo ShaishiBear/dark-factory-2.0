@@ -33,9 +33,15 @@ class SpikeHarnessTests(unittest.TestCase):
 
     def test_a_channel_conformant_cli_passes_and_every_request_is_recorded_with_the_credential_redacted(self):
         code, record, text = run_spike(self.tmp)
-        self.assertEqual((code, record["status"], record["problems"], record["paid_calls"]), (0, "compatible", [], 0), text)
+        self.assertEqual((code, record["status"], record["problems"]), (0, "compatible", []), text)
+        self.assertEqual(record["cli_environment"]["api_key"], "throwaway (never an upstream key)")
+        self.assertIn("upstream_key_present_in_parent_environment", record["cli_environment"])
         by = {s["name"]: s for s in record["scenarios"]}
-        self.assertEqual([q["path"] for q in by["plain"]["requests"]], ["/v1/messages?beta=true"])
+        self.assertEqual([q["path"] for q in by["plain"]["requests"] if q["on_channel"]], ["/v1/messages?beta=true"])
+        self.assertEqual(record["observations"]["off_channel_attempts"], [])
+        self.assertEqual(by["plain"]["result_text"], "ok-from-fake-provider-7f3a", "the provider's answer, parsed from the result line, not echoed prompt text")
+        self.assertTrue(all(not q["credential_in_other_header"] for s in record["scenarios"] for q in s["requests"]))
+        self.assertIn("nonstreaming_request_completed", record["observations"])
         self.assertTrue(by["plain"]["requests"][0]["stream"], "the first request streams")
         self.assertEqual(by["plain"]["requests"][0]["headers"]["x-api-key"], "<redacted>")
         self.assertTrue(all(not q["credential_in_body"] for s in record["scenarios"] for q in s["requests"]))
@@ -49,12 +55,21 @@ class SpikeHarnessTests(unittest.TestCase):
         self.assertNotIn("sk-ant-spike", text)
 
     def test_the_gate_fails_explicitly_on_a_leak_a_wrong_path_or_a_missing_tool_result(self):
-        for mode, needle in (("leak", "credential leaked"), ("wrong_path", "a path other than /v1/messages"), ("no_tool_result", "never posted a tool_result")):
+        for mode, needle in (("leak", "credential leaked"), ("wrong_path", "never reached POST /v1/messages"), ("no_tool_result", "never posted a tool_result"),
+                             ("header_leak", "travelled in a header"), ("echo_prompt", "return the provider's answer")):
             with self.subTest(mode=mode):
                 code, record, text = run_spike(self.tmp, mode=mode)
                 self.assertEqual((code, record["status"]), (1, "incompatible"), text)
                 self.assertTrue(any(needle in p for p in record["problems"]), record["problems"])
                 self.assertIn("CLI_COMPATIBILITY_FAILED", text)
+
+    def test_an_off_channel_probe_is_refused_recorded_and_tolerated(self):
+        code, record, text = run_spike(self.tmp, mode="get_probe")
+        self.assertEqual((code, record["status"]), (0, "compatible"), text)
+        self.assertEqual(record["observations"]["off_channel_attempts"], ["GET /v1/models"])
+        self.assertTrue(record["observations"]["credential_on_off_channel_attempt"])
+        probe = [q for q in record["scenarios"][0]["requests"] if not q["on_channel"]][0]
+        self.assertEqual((probe["method"], probe["headers"]["x-api-key"]), ("GET", "<redacted>"))
 
     def test_a_missing_binary_is_an_explicit_failure_not_a_pass(self):
         output = self.tmp / "record.json"

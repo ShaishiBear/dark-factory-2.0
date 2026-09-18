@@ -4626,11 +4626,11 @@
       "why": "SPEC 5: the spike checks authentication redaction; a CLI that prints or posts the credential must fail the gate. Detector: tests/factory/test_cli_compatibility_spike.py"
     },
     {
-      "id": "cli-spike-off-channel-path-ignored",
+      "id": "cli-spike-echoed-prompt-accepted",
       "file": "harness/cli_compatibility_spike.py",
-      "find": "        if any(q[\"path\"].split(\"?\", 1)[0].rstrip(\"/\") != \"/v1/messages\" for q in r[\"requests\"]):\n",
-      "replace": "        if False:\n",
-      "why": "SPEC 5: the channel permits only the configured model API operation; a request to another route must fail the gate. Detector: tests/factory/test_cli_compatibility_spike.py"
+      "find": "    if not plain or not plain[\"requests\"] or plain[\"exit_code\"] != 0 or plain.get(\"result_text\") != PLAIN_SENTINEL:\n",
+      "replace": "    if not plain or not plain[\"requests\"] or plain[\"exit_code\"] != 0:\n",
+      "why": "SPEC 5: the plain exchange proves the CLI returned the provider's answer through the channel; accepting any exit 0 (an echoed prompt, an unrelated answer) passes a CLI that never used the channel. Detector: tests/factory/test_cli_compatibility_spike.py"
     },
     {
       "id": "cli-spike-tool-exchange-not-required",

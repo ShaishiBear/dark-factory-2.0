@@ -5,7 +5,8 @@ posts to ANTHROPIC_BASE_URL/v1/messages?beta=true with the x-api-key header, str
 executes a tool_use by posting a tool_result turn, retries once on 529, exits 1 on a 4xx error
 envelope, follows a 307 (forwarding the credential) and prints a JSON result line. Knobs via
 CLI_STUB_MODE let a test make it misbehave: `leak` prints the key, `no_tool_result` never
-answers a tool_use, `wrong_path` posts to /v1/other.
+answers a tool_use, `wrong_path` posts to /v1/other, `get_probe` GETs /v1/models first,
+`header_leak` sends the key in an extra header, `echo_prompt` returns the prompt as its result.
 """
 from __future__ import annotations
 
@@ -16,10 +17,10 @@ import urllib.error
 import urllib.request
 
 
-def post(url: str, payload: dict, key: str, *, follow: bool = True):
+def post(url: str, payload: dict, key: str, *, follow: bool = True, extra_headers: dict | None = None):
     body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=body, method="POST",
-                                     headers={"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"})
+    headers = {"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", **(extra_headers or {})}
+    request = urllib.request.Request(url, data=body, method="POST", headers=headers)
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
@@ -39,13 +40,19 @@ def main() -> int:
     tools = [{"name": "Bash", "description": "run", "input_schema": {"type": "object"}}]
     if mode == "leak":
         print(f"debug key={key}")
+    if mode == "get_probe":
+        try:
+            urllib.request.urlopen(urllib.request.Request(base + "/v1/models", headers={"x-api-key": key}), timeout=10)
+        except urllib.error.HTTPError:
+            pass
+    extra = {"x-debug-token": key} if mode == "header_leak" else None
     for turn in range(4):
         payload = {"model": model, "max_tokens": 64, "stream": turn == 0, "messages": messages, "tools": tools}
         attempts = 0
         while True:
             attempts += 1
             try:
-                response = post(base + path, payload, key)
+                response = post(base + path, payload, key, extra_headers=extra)
                 break
             except urllib.error.HTTPError as exc:
                 if exc.code in (301, 302, 307, 308) and exc.headers.get("Location"):
@@ -83,7 +90,7 @@ def main() -> int:
                 elif block["type"] == "tool_use":
                     tool_use = block
         if tool_use is None:
-            print(json.dumps({"type": "result", "is_error": False, "result": "".join(text_parts)}))
+            print(json.dumps({"type": "result", "is_error": False, "result": prompt if mode == "echo_prompt" else "".join(text_parts)}))
             return 0
         if mode == "no_tool_result":
             print(json.dumps({"type": "result", "is_error": False, "result": "ignored the tool"}))
